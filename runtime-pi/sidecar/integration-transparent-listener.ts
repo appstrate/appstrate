@@ -50,14 +50,17 @@
 import { createServer as netCreateServer } from "node:net";
 import type { Socket } from "node:net";
 
-import { isBlockedHost, resolveAndCheckHost, type HostResolver } from "./helpers.ts";
+import {
+  isBlockedHost,
+  peerAddress,
+  resolveAndCheckHost,
+  PREAMBLE_TIMEOUT_MS,
+  type AuthorityPolicy,
+  type HostResolver,
+} from "./helpers.ts";
 import { netConnectWithTimeout, relaySockets } from "./connect-tunnel.ts";
 import { extractSni, collectUntilSniParses } from "./integration-mitm-listener.ts";
-import {
-  peerAddress,
-  type AuthorityPolicy,
-  type EgressListenerEvent,
-} from "./integration-egress-listener.ts";
+import type { EgressListenerEvent } from "./integration-egress-listener.ts";
 
 interface CreateTransparentListenerOptions {
   /** Bind host — 0.0.0.0 on the per-run bridge network. */
@@ -91,15 +94,6 @@ export interface TransparentListenerHandle {
 
 /** Cap on plain-HTTP head accumulation while hunting for the Host header. */
 const MAX_HTTP_HEAD_BYTES = 16 * 1024;
-
-/**
- * Read timeout for the preamble phase (ClientHello / HTTP head). A client
- * that connects and stalls — or sends a complete SNI-less ClientHello we
- * can never route — is torn down instead of holding the socket open.
- * Once the splice starts, {@link relaySockets} replaces this with its own
- * idle timeout.
- */
-const PREAMBLE_TIMEOUT_MS = 10_000;
 
 /**
  * Pull the hostname out of a plain-HTTP request head. Accepts both the

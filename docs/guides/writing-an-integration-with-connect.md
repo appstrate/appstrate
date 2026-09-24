@@ -674,8 +674,10 @@ hops (per-hop allowlist check, per-hop SSRF blocklist, hybrid credential-strip o
 cross-host hops). For a `source.kind: "local"` integration run in Docker, the same list is also the
 runner's whole network egress: a destination it does not grant is refused, and an
 auth that declares neither `authorized_uris` nor `allow_all_uris` gives its runner no
-way out at all. Only patterns with a `scheme://` count for raw TCP traffic (a pattern
-without a port grants the scheme's default port).
+way out at all. Only patterns with a `scheme://` count for raw TCP traffic: a pattern
+without a port grants only the scheme's default port (443 for https/wss, 80 for
+http/ws, 22 for ssh/sftp, none for any other scheme), and a bare `scheme://**` grants
+any host on any port.
 
 When the target depends on what the user enters (a self-hosted server), reference a
 connection field with `{$credential.<field>}`:

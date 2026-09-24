@@ -2014,6 +2014,10 @@ const EGRESS_DEFAULT_PORTS: Readonly<Record<string, number>> = {
 // could smuggle an allowlisted-looking suffix past a `[^/]*` wildcard.
 const EGRESS_HOST_RE = /^[a-z0-9_.-]+$/;
 
+// A normalised authority names its port explicitly only with a trailing
+// `:<digits>` or a `:*` / `:**` wildcard port (WHATWG elides default ports).
+const EGRESS_EXPLICIT_PORT_RE = /:(?:\d+|\*\*?)$/;
+
 export function compileEgressPolicy(input: {
   authorizedUris: readonly string[];
   allowAllUris: boolean;
@@ -2023,7 +2027,11 @@ export function compileEgressPolicy(input: {
     (p) => new RegExp("^" + compileAuthorizedUriPattern(p) + "$"),
   );
   let anyAuthority = false;
-  const authorityRules: { regex: RegExp; defaultPort: number | undefined }[] = [];
+  const authorityRules: {
+    regex: RegExp;
+    explicitPort: boolean;
+    defaultPort: number | undefined;
+  }[] = [];
   for (const pattern of input.authorizedUris) {
     const parts = splitAuthorizedUriPattern(pattern);
     // Scheme-less patterns name no transport: they grant nothing at TCP level.
@@ -2034,6 +2042,7 @@ export function compileEgressPolicy(input: {
     }
     authorityRules.push({
       regex: new RegExp("^" + compileUriComponent(parts.authority, false) + "$", "i"),
+      explicitPort: EGRESS_EXPLICIT_PORT_RE.test(parts.authority),
       defaultPort: EGRESS_DEFAULT_PORTS[parts.scheme.slice(0, -3).toLowerCase()],
     });
   }
@@ -2048,12 +2057,13 @@ export function compileEgressPolicy(input: {
         return false;
       }
       if (anyAuthority) return true;
-      // A pattern without an explicit port stands for its scheme's default
+      // A pattern without an explicit port grants ONLY its scheme's default
       // (WHATWG already elided `:443` from `https://h:443`, so both spellings
-      // compile to `h`); a scheme with no default only matches explicit ports.
-      const withPort = `${h}:${port}`;
-      return authorityRules.some(
-        (r) => r.regex.test(withPort) || (r.defaultPort === port && r.regex.test(h)),
+      // compile to `h`), and its host wildcard is matched against the bare host
+      // so `[^/]*` cannot span a `:port`. A scheme with no default only
+      // matches explicit ports.
+      return authorityRules.some((r) =>
+        r.explicitPort ? r.regex.test(`${h}:${port}`) : r.defaultPort === port && r.regex.test(h),
       );
     },
   };

@@ -63,10 +63,13 @@ import { createServer as netCreateServer, connect as netConnect, type Socket } f
 import {
   isBlockedHost,
   isBlockedUrl,
+  peerAddress,
+  peerAdmitted,
   readRequestBodyBounded,
   resolveAndCheckHost,
   OUTBOUND_TIMEOUT_MS,
   type HostResolver,
+  type PeerCheck,
 } from "./helpers.ts";
 import type {
   HttpDeliveryPlan,
@@ -85,7 +88,6 @@ import {
 } from "@appstrate/connect/proxy-primitives";
 import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
 import type { CertMinter } from "./integration-cert-minter.ts";
-import { peerAddress, peerAdmitted, type PeerCheck } from "./integration-egress-listener.ts";
 
 // ─────────────────────────────────────────────
 // Public types

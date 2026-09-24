@@ -29,20 +29,31 @@ function fakeInspect(initial: Record<string, string>) {
 const NETWORK = "appstrate-exec-run";
 
 describe("createRunnerPeers", () => {
-  it("attributes a registered runner, the agent, and a stranger", async () => {
+  it("attributes a registered runner; the agent and a stranger are not runners", async () => {
     const { inspect } = fakeInspect({ "runner-a": "172.18.0.3", agent: "172.18.0.2" });
     const peers = createRunnerPeers({ network: NETWORK, inspect });
     peers.register("runner-a", "@tractr/a");
     expect(await peers.integrationOf("172.18.0.3")).toBe("@tractr/a");
     expect(await peers.integrationOf("172.18.0.2")).toBeNull();
-    expect(await peers.integrationOf("172.18.0.99")).toBeUndefined();
+    expect(await peers.integrationOf("172.18.0.99")).toBeNull();
   });
 
-  it("unwraps an IPv4-mapped IPv6 peer address", async () => {
-    const { inspect } = fakeInspect({ "runner-a": "172.18.0.3" });
+  it("answers null without an inspect while no runner is registered", async () => {
+    const { state, inspect } = fakeInspect({ agent: "172.18.0.2" });
+    state.fail = true;
+    const peers = createRunnerPeers({ network: NETWORK, inspect });
+    expect(await peers.integrationOf("172.18.0.2")).toBeNull();
+    expect(state.calls).toBe(0);
+  });
+
+  it("admits an agent that joined the network after the table was cached", async () => {
+    const { state, inspect } = fakeInspect({ "runner-a": "172.18.0.3" });
     const peers = createRunnerPeers({ network: NETWORK, inspect });
     peers.register("runner-a", "@tractr/a");
-    expect(await peers.integrationOf("::ffff:172.18.0.3")).toBe("@tractr/a");
+    expect(await peers.integrationOf("172.18.0.3")).toBe("@tractr/a");
+    state.members = { "runner-a": "172.18.0.3", agent: "172.18.0.2" };
+    expect(await peers.integrationOf("172.18.0.2")).toBeNull();
+    expect(state.calls).toBe(1);
   });
 
   it("caches the member table and single-flights concurrent lookups", async () => {
@@ -59,48 +70,57 @@ describe("createRunnerPeers", () => {
   });
 
   it("re-reads the network after a register", async () => {
-    const { state, inspect } = fakeInspect({ agent: "172.18.0.2" });
+    const { state, inspect } = fakeInspect({ agent: "172.18.0.2", "runner-a": "172.18.0.3" });
     const peers = createRunnerPeers({ network: NETWORK, inspect });
+    peers.register("runner-a", "@tractr/a");
     expect(await peers.integrationOf("172.18.0.2")).toBeNull();
     // The register drops the cached table: the next lookup sees the new runner.
-    state.members = { agent: "172.18.0.2", "runner-b": "172.18.0.4" };
+    state.members = { ...state.members, "runner-b": "172.18.0.4" };
     peers.register("runner-b", "@tractr/b");
     expect(await peers.integrationOf("172.18.0.4")).toBe("@tractr/b");
     expect(state.calls).toBe(2);
   });
 
-  it("re-reads on a miss while a registered runner has no address yet", async () => {
+  it("re-reads on a miss while a registered runner was never seen", async () => {
     const { state, inspect } = fakeInspect({ agent: "172.18.0.2" });
     const peers = createRunnerPeers({ network: NETWORK, inspect });
     peers.register("runner-c", "@tractr/c");
     // Registered before `docker start`: not a member yet, so each miss re-reads.
-    expect(await peers.integrationOf("172.18.0.5")).toBeUndefined();
-    expect(await peers.integrationOf("172.18.0.5")).toBeUndefined();
+    expect(await peers.integrationOf("172.18.0.5")).toBeNull();
+    expect(await peers.integrationOf("172.18.0.5")).toBeNull();
     expect(state.calls).toBe(2);
     state.members = { agent: "172.18.0.2", "runner-c": "172.18.0.5" };
     expect(await peers.integrationOf("172.18.0.5")).toBe("@tractr/c");
     expect(state.calls).toBe(3);
-    // Every runner started: the next miss is a stranger, no re-read.
-    expect(await peers.integrationOf("172.18.0.9")).toBeUndefined();
+    // Every runner seen: the next miss is answered from the cache.
+    expect(await peers.integrationOf("172.18.0.9")).toBeNull();
     expect(state.calls).toBe(3);
   });
 
-  it("answers a stranger from the cache once every registered runner has an address", async () => {
+  it("does not re-read for strangers once a seen runner has exited", async () => {
     const { state, inspect } = fakeInspect({ "runner-a": "172.18.0.3", agent: "172.18.0.2" });
     const peers = createRunnerPeers({ network: NETWORK, inspect });
     peers.register("runner-a", "@tractr/a");
+    peers.register("runner-b", "@tractr/b");
+    state.members = { "runner-b": "172.18.0.4", agent: "172.18.0.2" };
+    expect(await peers.integrationOf("172.18.0.4")).toBe("@tractr/b");
+    // runner-a was never seen: a miss re-reads, and now sees it.
+    state.members = { "runner-a": "172.18.0.3", "runner-b": "172.18.0.4" };
     expect(await peers.integrationOf("172.18.0.3")).toBe("@tractr/a");
-    // e.g. another run's sidecar on the shared egress network, connection after connection.
-    for (let i = 0; i < 5; i++) expect(await peers.integrationOf("10.9.9.9")).toBeUndefined();
-    expect(state.calls).toBe(1);
+    expect(state.calls).toBe(2);
+    // runner-a exits: it was seen, so strangers no longer trigger re-reads.
+    state.members = { "runner-b": "172.18.0.4" };
+    for (let i = 0; i < 5; i++) expect(await peers.integrationOf("10.9.9.9")).toBeNull();
+    expect(state.calls).toBe(2);
   });
 
   it("fails closed when the inspect fails, and retries on the next lookup", async () => {
-    const { state, inspect } = fakeInspect({ "runner-a": "172.18.0.3" });
+    const { state, inspect } = fakeInspect({ "runner-a": "172.18.0.3", agent: "172.18.0.2" });
     const peers = createRunnerPeers({ network: NETWORK, inspect });
     peers.register("runner-a", "@tractr/a");
     state.fail = true;
     expect(await peers.integrationOf("172.18.0.3")).toBeUndefined();
+    expect(await peers.integrationOf("172.18.0.2")).toBeUndefined();
     state.fail = false;
     expect(await peers.integrationOf("172.18.0.3")).toBe("@tractr/a");
   });

@@ -13,7 +13,9 @@ import {
   resolveAndCheckHost,
   OUTBOUND_TIMEOUT_MS,
   HOP_BY_HOP_HEADERS,
+  peerAdmitted,
   type HostResolver,
+  type PeerCheck,
   type SidecarConfig,
 } from "./helpers.ts";
 import {
@@ -23,7 +25,6 @@ import {
   TUNNEL_IDLE_TIMEOUT_MS,
 } from "./connect-tunnel.ts";
 import { logger } from "./logger.ts";
-import { peerAdmitted, type PeerCheck } from "./integration-egress-listener.ts";
 
 interface ForwardProxyDeps {
   config: SidecarConfig;

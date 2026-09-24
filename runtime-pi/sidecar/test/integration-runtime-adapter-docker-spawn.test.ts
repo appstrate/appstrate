@@ -496,7 +496,7 @@ describe("docker adapter — runner peer attribution (#1458)", () => {
         const attribute = adapter.peerAttribution()!;
         expect(await attribute("172.18.0.3")).toBe("@tractr/gmail");
         expect(await attribute("172.18.0.2")).toBeNull();
-        expect(await attribute("172.18.0.9")).toBeUndefined();
+        expect(await attribute("172.18.0.9")).toBeNull();
         expect(calls.find((c) => c.args[0] === "network")!.args).toEqual([
           "network",
           "inspect",

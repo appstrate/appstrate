@@ -8,18 +8,17 @@
  *
  * IPs are read lazily from `docker network inspect`: a runner only gets its
  * endpoint when `docker start` runs, after it was registered. The member table
- * is cached and dropped on `register`. An IP missing from it triggers one
- * re-read only while a registered runner is missing too (not started at the
- * last read); otherwise it is a stranger, answered from the cache.
+ * is cached and dropped on `register`. A miss re-reads it (once) only while a
+ * registered runner has never been seen in a table: a runner that connects has
+ * started, so the re-read shows it. Otherwise the peer is not a runner.
  */
 
 import { logger } from "./logger.ts";
 
 /**
- * Resolves to the integration id of the runner at `remoteAddress`, `null` for
- * any other member of the run network (the agent), `undefined` when the peer
- * cannot be attributed (not a member, or the inspect failed). Callers refuse
- * on `undefined`.
+ * Resolves to the integration id of the runner at `remoteAddress` (already
+ * normalised by `peerAddress`), `null` for any other peer (the agent), and
+ * `undefined` when the lookup failed. Callers refuse on `undefined`.
  */
 export type PeerAttribution = (remoteAddress: string) => Promise<string | null | undefined>;
 
@@ -49,19 +48,18 @@ export function createRunnerPeers(options: {
   inspect: (network: string) => Promise<string>;
 }): RunnerPeers {
   const runners = new Map<string, string>();
+  const seen = new Set<string>();
   let members: Promise<Map<string, string> | null> | null = null;
-
-  function hasUnstartedRunner(snapshot: Map<string, string>): boolean {
-    const started = new Set(snapshot.values());
-    for (const name of runners.keys()) if (!started.has(name)) return true;
-    return false;
-  }
 
   function load(): Promise<Map<string, string> | null> {
     if (members) return members;
     const pending = options
       .inspect(options.network)
-      .then(parseMembers)
+      .then((stdout) => {
+        const snapshot = parseMembers(stdout);
+        for (const name of snapshot.values()) if (runners.has(name)) seen.add(name);
+        return snapshot;
+      })
       .catch((err: unknown) => {
         // Not cached: the next lookup retries. Every peer check refuses meanwhile.
         if (members === pending) members = null;
@@ -80,18 +78,18 @@ export function createRunnerPeers(options: {
       runners.set(containerName, integrationId);
       members = null;
     },
-    async integrationOf(remoteAddress) {
-      const ip = remoteAddress.replace(/^::ffff:/i, "");
+    async integrationOf(ip) {
+      if (runners.size === 0) return null;
       const wasCached = members !== null;
       const current = load();
       let snapshot = await current;
-      if (wasCached && snapshot && !snapshot.has(ip) && hasUnstartedRunner(snapshot)) {
+      if (wasCached && snapshot && !snapshot.has(ip) && seen.size < runners.size) {
         if (members === current) members = null;
         snapshot = await load();
       }
-      const name = snapshot?.get(ip);
-      if (name === undefined) return undefined;
-      return runners.get(name) ?? null;
+      if (!snapshot) return undefined;
+      const name = snapshot.get(ip);
+      return (name !== undefined && runners.get(name)) || null;
     },
   };
 }

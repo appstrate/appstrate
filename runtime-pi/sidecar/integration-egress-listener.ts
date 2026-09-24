@@ -14,6 +14,9 @@
  *   - terminates the `CONNECT host:port` preamble,
  *   - applies the SSRF floor and the egress allowlist at CONNECT (internal /
  *     cloud-metadata / unauthorized targets are refused before any tunnel opens),
+ *   - vets the tunnel's first bytes: a TLS ClientHello whose SNI names a host
+ *     the allowlist does not grant is refused (a CDN front routes on SNI, so an
+ *     allowed CONNECT target must not carry another tenant's name),
  *   - blind-relays raw TCP both directions (NO TLS termination, NO per-SNI
  *     cert mint, NO header injection).
  *
@@ -26,41 +29,71 @@
  * Egress is a hard allowlist (#1458): only the owning runner may connect
  * (`isPeerAllowed`), and a CONNECT target is tunnelled only when the
  * connection's rendered `authorized_uris` grant its `host:port`
- * (`egressPolicy`). Everything else is a 403.
+ * (`egressPolicy`). Everything else is refused (403 at CONNECT, a reset once tunnelled).
  */
 
 import { createServer as netCreateServer } from "node:net";
 import type { Socket } from "node:net";
 
-import { isBlockedHost, resolveAndCheckHost, type HostResolver } from "./helpers.ts";
+import {
+  isBlockedHost,
+  peerAddress,
+  peerAdmitted,
+  resolveAndCheckHost,
+  PREAMBLE_TIMEOUT_MS,
+  type AuthorityPolicy,
+  type HostResolver,
+  type PeerCheck,
+} from "./helpers.ts";
 import { parseConnectTarget, netConnectWithTimeout, relaySockets } from "./connect-tunnel.ts";
-import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
-import type { MitmListenerHandle } from "./integration-mitm-listener.ts";
+import { extractSni, type MitmListenerHandle } from "./integration-mitm-listener.ts";
 
-/** Peer gate (#1458): may the socket whose peer IP is `remoteAddress` use this listener? */
-export type PeerCheck = (remoteAddress: string) => Promise<boolean>;
+/** TLS plaintext record cap (RFC 8446 §5.1). */
+const MAX_TLS_RECORD = 16_384;
 
-/** TCP-level half of the egress policy — all a blind tunnel can check. */
-export type AuthorityPolicy = Pick<EgressPolicy, "allowsAuthority">;
-
-/** The socket's peer IP (IPv4-mapped `::ffff:a.b.c.d` unwrapped), or undefined once detached. */
-export function peerAddress(socket: Socket): string | undefined {
-  const address = socket.remoteAddress;
-  if (!address) return undefined;
-  return /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address)?.[1] ?? address;
+/**
+ * Collect the tunnel's first bytes: the whole first record when the stream
+ * opens as TLS (0x16), else the first chunk. Arms the preamble timeout.
+ */
+function collectTunnelHead(socket: Socket, timeoutMs: number): Promise<Buffer> {
+  socket.setTimeout(timeoutMs, () => socket.destroy());
+  return new Promise((resolve, reject) => {
+    let buf = Buffer.alloc(0);
+    const onClose = () => reject(new Error("socket closed before tunnel bytes"));
+    const onData = (chunk: Buffer) => {
+      buf = Buffer.concat([buf, chunk]);
+      if (buf[0] === 0x16) {
+        if (buf.length < 5) return;
+        const recordLen = buf.readUInt16BE(3);
+        if (recordLen <= MAX_TLS_RECORD && buf.length < 5 + recordLen) return;
+      }
+      socket.off("data", onData);
+      socket.off("close", onClose);
+      socket.pause(); // buffer until relaySockets' pipe() resumes
+      resolve(buf);
+    };
+    socket.on("data", onData);
+    socket.once("close", onClose);
+  });
 }
 
-/** Resolve the peer gate for `socket`; an unknown address or a failing check refuses. */
-export async function peerAdmitted(socket: Socket, isPeerAllowed: PeerCheck): Promise<boolean> {
-  const address = peerAddress(socket);
-  return address !== undefined && (await isPeerAllowed(address).catch(() => false));
+/**
+ * The SNI of a first TLS record: the host, null for a ClientHello carrying
+ * none, undefined when the record is not a self-contained ClientHello (a
+ * fragmented one could hide its SNI in a later record — fail closed).
+ */
+function clientHelloSni(head: Buffer): string | null | undefined {
+  const recordLen = head.readUInt16BE(3);
+  if (recordLen > MAX_TLS_RECORD || recordLen < 4 || head[5] !== 0x01) return undefined;
+  if (4 + head.readUIntBE(6, 3) > recordLen) return undefined;
+  return extractSni(head.subarray(0, 5 + recordLen));
 }
 
 export interface EgressListenerEvent {
   kind: "tunnel-opened" | "tunnel-refused" | "tunnel-error";
-  /** `host:port` target of the CONNECT (never carries a path / query). */
+  /** `host:port` target of the CONNECT, or of the refused SNI (never a path / query). */
   target: string;
-  /** Populated for `tunnel-refused` (SSRF / allowlist / peer) and `tunnel-error`. */
+  /** Populated for `tunnel-refused` (SSRF / allowlist / SNI / peer) and `tunnel-error`. */
   reason?: string;
   /** Refused peer IP (`peer-not-allowed` only). */
   peer?: string;
@@ -82,6 +115,8 @@ interface CreateEgressListenerOptions {
   egressPolicy: AuthorityPolicy;
   /** Only the owning runner may tunnel through this listener. */
   isPeerAllowed: PeerCheck;
+  /** Deadline for the tunnel's first bytes after the 200 (tests shorten it). */
+  preambleTimeoutMs?: number;
 }
 
 /**
@@ -97,6 +132,7 @@ export function createIntegrationEgressListener(
   const resolveHostFn = options.resolveHostFn;
   const emit = options.onEvent ?? (() => {});
   const { egressPolicy } = options;
+  const preambleTimeoutMs = options.preambleTimeoutMs ?? PREAMBLE_TIMEOUT_MS;
 
   const server = netCreateServer();
 
@@ -176,16 +212,31 @@ export function createIntegrationEgressListener(
             check.reason === "resolution-failed" ? "dns-resolution-failed" : "ssrf",
           );
         }
+        // The client sends its ClientHello only after the 200, so the upstream
+        // is dialed first but receives nothing until the first bytes are vetted.
         const upstream = netConnectWithTimeout(port, check.pinnedAddress, () => {
           clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-          emit({ kind: "tunnel-opened", target });
-          relaySockets(clientSocket, upstream);
+          collectTunnelHead(clientSocket, preambleTimeoutMs)
+            .then((head) => {
+              const sni = head[0] === 0x16 ? clientHelloSni(head) : null;
+              if (sni === undefined || (sni !== null && !egressPolicy.allowsAuthority(sni, port))) {
+                const reason = sni === undefined ? "malformed-client-hello" : "not-authorized";
+                emit({ kind: "tunnel-refused", target: sni ? `${sni}:${port}` : target, reason });
+                clientSocket.destroy();
+                return;
+              }
+              upstream.write(head); // replay the vetted bytes before splicing
+              emit({ kind: "tunnel-opened", target });
+              relaySockets(clientSocket, upstream);
+            })
+            .catch(() => clientSocket.destroy());
         });
         upstream.on("error", (err: Error) => {
           emit({ kind: "tunnel-error", target, reason: err.message });
           clientSocket.destroy();
         });
         clientSocket.on("error", () => upstream.destroy());
+        clientSocket.once("close", () => upstream.destroy());
       })();
     };
     clientSocket.on("data", onData);

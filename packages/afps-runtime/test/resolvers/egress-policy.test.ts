@@ -43,6 +43,30 @@ describe("compileEgressPolicy — allowsAuthority", () => {
     expect(p.allowsAuthority("h.example.com", 22)).toBe(false);
   });
 
+  it("keeps a host wildcard in a port-less pattern on the scheme's default port", () => {
+    const any = policy("https://*/**");
+    expect(any.allowsAuthority("evil.com", 443)).toBe(true);
+    expect(any.allowsAuthority("evil.com", 25)).toBe(false);
+    const api = policy("https://api.*/**");
+    expect(api.allowsAuthority("api.x.com", 443)).toBe(true);
+    expect(api.allowsAuthority("api.x.com", 8443)).toBe(false);
+  });
+
+  it("matches an explicit non-default port only on that port", () => {
+    const p = policy("https://h.example.com:8443/**");
+    expect(p.allowsAuthority("h.example.com", 8443)).toBe(true);
+    expect(p.allowsAuthority("h.example.com", 443)).toBe(false);
+    const wild = policy("https://*.x.com:8443/**");
+    expect(wild.allowsAuthority("a.x.com", 8443)).toBe(true);
+    expect(wild.allowsAuthority("a.x.com", 443)).toBe(false);
+  });
+
+  it("lets an explicit `:*` port grant any port on that host", () => {
+    const p = policy("https://h.example.com:*/**");
+    expect(p.allowsAuthority("h.example.com", 25)).toBe(true);
+    expect(p.allowsAuthority("evil.com", 25)).toBe(false);
+  });
+
   it("matches a subdomain wildcard across dots", () => {
     const p = policy("https://*.x.com/**");
     expect(p.allowsAuthority("a.b.x.com", 443)).toBe(true);

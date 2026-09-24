@@ -328,6 +328,10 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
 
     async prepare(runId: string): Promise<RuntimeAdapterRunContext> {
       logger.info("process integration adapter ready", { runId });
+      logger.warn(
+        "runner egress allowlist is not enforced by the process backend: runners share loopback and have direct egress (#1458)",
+        { runId },
+      );
       // Subprocess inherits the parent's NS — loopback reaches the
       // listener directly.
       return {

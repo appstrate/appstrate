@@ -212,18 +212,15 @@ if (connectLoginJson) {
 
 const cookieJar = new Map<string, string[]>();
 
-// #1458 — the agent's proxy refuses integration runners: each has its own
-// policed listener. Bound once the integration adapter is prepared; before
-// that no runner exists, and `null` from the adapter means it cannot
-// attribute peers (process backend).
+// #1458 — the agent's proxy admits only non-runner peers (`null`): each runner
+// has its own policed listener, and a failed lookup (`undefined`) refuses.
+// Bound once the integration adapter is prepared; before that no runner
+// exists, and a `null` attribution means the backend cannot attribute peers.
 let peerAttribution: PeerAttribution | null = null;
 const proxy = createForwardProxy({
   config,
   listenPort: env.port + 1,
-  isPeerAllowed: async (ip) => {
-    const attribute = peerAttribution;
-    return attribute === null || (await attribute(ip)) === null;
-  },
+  isPeerAllowed: async (ip) => peerAttribution === null || (await peerAttribution(ip)) === null,
 });
 // One cache per sidecar process — a sidecar serves a single run, so
 // cross-run pollution is impossible.

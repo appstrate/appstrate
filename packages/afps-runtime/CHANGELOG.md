@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pattern; `allowsAuthority(host, port)` projects `scheme://` patterns onto
   host + port (explicit port, else the scheme default: https/wss 443,
   http/ws 80, ssh/sftp 22). Scheme-less patterns, unknown schemes without a
-  port, IPv6 hosts and invalid ports grant nothing.
+  port, IPv6 hosts and invalid ports grant nothing. A host wildcard never
+  spans the port: `https://*/**` grants port 443 only; any other port must be
+  written (`:8443`, or `:*` for any).
 
 ### Changed — tool-result cap is a parameter, not an env read (BREAKING)
 
