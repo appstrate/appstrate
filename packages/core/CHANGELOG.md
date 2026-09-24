@@ -77,10 +77,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manifest JSONPath outside the subset of `@appstrate/afps-shared/jsonpath`
   (`$`, `.name`, `['name']`, `[0]`, `[-1]`): an `auths.{key}.identity_claims`
   value, a `connect.login.outputs.{name}` selector of `type: "jsonpath"` and a
-  `connect.login.success_criteria[i]` condition of `type: "jsonpath"`. The last
-  two used to import (at most with a warning) and fail at credential
-  acquisition. A bare claim name (`"sub"`) is no longer read as `"$.sub"`:
-  write the `$`.
+  `connect.login.success_criteria[i]` condition of `type: "jsonpath"`. Before,
+  the last two were evaluated by the login engine's own lenient tokenizer and
+  `identity_claims` by a dot-split walk, so forms outside the subset worked:
+  `$.x-auth-token`, `$.data.0`, `$.data[00]`, and a bare claim name (`"sub"`,
+  read as `"$.sub"`). They are now refused, and the schema also runs when the
+  platform reads a stored manifest, so a stored one fails there with
+  `invalid_manifest`. Write `$['x-auth-token']`, `$.data[0]`, `$.sub`. A login
+  selector's `[-1]` now selects the last element; the previous engine
+  selected nothing.
 - **`ConnectionCandidate.accountId`** (`@appstrate/core/integration`) and
   **`ResolutionFieldError.candidate_connections[].account_id`**
   (`@appstrate/core/api-errors`) are `string | null`. `null` means the provider

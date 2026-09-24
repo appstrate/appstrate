@@ -180,11 +180,20 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   before this release cannot author packages on it (its draft save is a `PUT`
   carrying `lock_version`, now a `404`), and this CLI cannot author on an older
   server (it sends `PATCH` + `If-Match`).
-- **BREAKING (integrations): `identity_claims` are strict JSONPath**, in the
-  manifest subset (`$`, `.name`, `['name']`, `[0]`, `[-1]`) the login engine
-  also uses. A bare claim (`"sub"`) or a digit dot segment (`$.data.0`) is
-  `invalid_config` at import and at connect; write `$.sub`, `$.data[0]`.
-  `@appstrate/wrike` 1.0.5 is updated accordingly.
+- **BREAKING (integrations): manifest JSONPaths are strict, on import AND on
+  every read of a stored manifest.** `identity_claims` and the
+  `connect.login` `jsonpath` selectors and success criteria are parsed with one
+  subset (`$`, `.name`, `['name']`, `[0]`, `[-1]`). Forms the previous release
+  evaluated fine are refused: a bare claim (`"sub"`), a member name that is not
+  an identifier (`$.x-auth-token`), a digit dot segment (`$.data.0`), a
+  leading-zero index (`$.data[00]`). Write `$.sub`, `$['x-auth-token']`,
+  `$.data[0]`. Because the schema also runs when a stored draft or published
+  version is read, an organization's integration holding one of these fails
+  every connect and run with `invalid_manifest` from the deploy on, and a
+  published version cannot be rewritten: publish a fixed version.
+  `scripts/migration/0024-verify-integration-jsonpaths.ts` lists every one
+  with its rewrite, and is step 1 of the deploy (see the operators entry
+  below). `@appstrate/wrike` 1.0.5 is updated accordingly.
 - **BREAKING (API): a connection with no provider identity has
   `account_id: null`**, not the magic `"default"` — on connection listings and
   on `candidate_connections[]` of `409 missing_integration_connection`. A real
@@ -199,6 +208,12 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   truncated with an 8-hex FNV-1a suffix instead of `tool_N` (the description
   names the upstream tool). Exposed names of such tools change; manifests keep
   referencing upstream names and are unaffected.
+- **BREAKING (chat): `GET /api/chat/sessions/{id}` is paginated.** It returns
+  the first 100 messages (`?limit=`, at most 500) instead of the whole thread;
+  when `hasMore` is `true`, pass the last message's `seq` as `?since=<seq>` or
+  follow the `Link: rel="next"` header. Each message carries `seq`, and the
+  response carries `message_count` (the session's total). A client that reads
+  `messages` once sees only the first page of a longer session.
 - **BREAKING (chat): `POST /api/chat` validates the new message** with the AI
   SDK's `safeValidateUIMessages` and caps it at 256 KB; a malformed or larger
   message is a `400` on `messages`.
@@ -219,7 +234,10 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   one; `0071` makes `integration_connections.account_id` nullable.
   `@appstrate/module-ee` applies its own `0008` (the `llm_usage` id columns of
   its ledger, cursor and floor, to `bigint`) at init. Scripts, in
-  `scripts/migration/`: `0021` inside the deploy window (old application
+  `scripts/migration/`, in order: **1. `0024` BEFORE the deploy**, read-only —
+  it must exit 0 (every integration draft and published version whose
+  JSONPath the release refuses on read is fixed or superseded, see the
+  integrations entry above); `0021` inside the deploy window (old application
   stopped, new one not started), `0022` and `0023` right after the deploy.
 - **BREAKING (operators): more env values fail boot instead of falling back.**
   A `CHAT_PI_MAX_CONCURRENCY` that is not a positive integer
