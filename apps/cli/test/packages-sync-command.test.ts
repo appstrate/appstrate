@@ -21,7 +21,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { packagesSyncCommand } from "../src/commands/packages-sync.ts";
 import { getDataDir } from "../src/lib/config.ts";
-import { getStatePath } from "../src/lib/skills-sync/state.ts";
+import { getStatePath, readSyncState } from "../src/lib/skills-sync/state.ts";
 import {
   installFakeKeyring,
   seedLoggedInProfile,
@@ -429,6 +429,25 @@ describe("packages sync — guards and dry run", () => {
     expect(stderr()).toContain("Sync state could not be used");
     expect(await exists(join(pluginRoot(), "skills", "pdf-tools"))).toBe(true);
   });
+
+  // A managed key is a directory name, a removal path and a frontmatter `name`.
+  for (const slug of ["../../escape", "x\ny: z"]) {
+    it(`claims nothing from a ledger whose key is ${JSON.stringify(slug)}`, async () => {
+      createSkillServer(ONE_SKILL).install();
+      await packagesSyncCommand({}, createMemoryIO().io);
+      const raw = JSON.parse(await readText(getStatePath())) as {
+        targets: Record<string, { managed: Record<string, unknown> }>;
+      };
+      const managed = raw.targets["claude-plugin"]!.managed;
+      managed[slug] = managed["pdf-tools"];
+      await writeFile(getStatePath(), JSON.stringify(raw));
+
+      expect(await readSyncState()).toEqual({
+        state: { version: expect.any(Number), targets: {} },
+        corrupt: true,
+      });
+    });
+  }
 });
 
 describe("packages sync — unmanaged destinations", () => {
