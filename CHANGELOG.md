@@ -36,6 +36,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (integrations): a local integration runner can reach only what its
+  connection's `authorized_uris` grant** (#1458). Every sidecar listener
+  enforces it: the CONNECT listener and the transparent plane by `host:port`,
+  the MITM listener per URL (403 instead of forwarding un-injected). Each
+  listener checks which runner is connecting, and the agent's forward proxy
+  refuses runners. `mtls` runners now get the bounded CONNECT route. A pattern
+  may carry `{$credential.<field>}`, rendered per connection: the field must be
+  required, templates are refused on `connect`, `api_call` and `oauth2` auths,
+  a value outside host/port characters drops the pattern, and an empty result
+  denies everything. `@appstrate/ssh` 1.0.1 uses
+  `ssh://{$credential.host}:{$credential.port}` (`port` required, IPv4-only
+  host). A runner that reached hosts outside its declared list now fails. Not
+  enforced on the process/Firecracker backend, where runners egress directly.
+  **Operators**: run `scripts/migration/0024-verify-egress-allowlist.ts` before
+  the deploy (expected 0); tag `afps-shared@0.9.1` at merge.
 - **BREAKING (API keys): keys use a checksummed `apst_` format, and every
   existing `ask_` key stops authenticating.** A key is now `apst_` + 30 base62
   characters + a 6-character base62 CRC32 of those 30, so a secret scanner can
@@ -156,8 +171,7 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   400s for provisioning on a non-system package are gone and a copy of the SSH
   manifest is an ordinary custom auth whose `private_key` the user supplies.
   `POST …/connect/fields` still refuses a caller-supplied key for
-  `@appstrate/ssh`. The published `@appstrate/ssh` 1.0.0 still carries the
-  now-ignored key until its next version.
+  `@appstrate/ssh`. `@appstrate/ssh` 1.0.1 drops the now-ignored key.
 - **BREAKING (operators): `deploy/docker-compose.yml` declares
   `- MODULES=${MODULES:?}` instead of pinning a default list** (#1528). Set
   `MODULES` on the Coolify resource, or in `.env` for a raw `docker compose`,

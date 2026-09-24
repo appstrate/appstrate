@@ -8,8 +8,9 @@
  *
  * IPs are read lazily from `docker network inspect`: a runner only gets its
  * endpoint when `docker start` runs, after it was registered. The member table
- * is cached, dropped on `register`, and re-read once when an IP is missing
- * from it (a runner started since the last read).
+ * is cached and dropped on `register`. An IP missing from it triggers one
+ * re-read only while a registered runner is missing too (not started at the
+ * last read); otherwise it is a stranger, answered from the cache.
  */
 
 import { logger } from "./logger.ts";
@@ -37,7 +38,7 @@ function parseMembers(stdout: string): Map<string, string> {
   const members = new Map<string, string>();
   for (const { Name, IPv4Address } of Object.values(network?.Containers ?? {})) {
     const ip = IPv4Address?.split("/")[0];
-    if (ip && Name) members.set(ip, Name.replace(/^\//, ""));
+    if (ip && Name) members.set(ip, Name);
   }
   return members;
 }
@@ -49,6 +50,12 @@ export function createRunnerPeers(options: {
 }): RunnerPeers {
   const runners = new Map<string, string>();
   let members: Promise<Map<string, string> | null> | null = null;
+
+  function hasUnstartedRunner(snapshot: Map<string, string>): boolean {
+    const started = new Set(snapshot.values());
+    for (const name of runners.keys()) if (!started.has(name)) return true;
+    return false;
+  }
 
   function load(): Promise<Map<string, string> | null> {
     if (members) return members;
@@ -78,7 +85,7 @@ export function createRunnerPeers(options: {
       const wasCached = members !== null;
       const current = load();
       let snapshot = await current;
-      if (wasCached && snapshot && !snapshot.has(ip)) {
+      if (wasCached && snapshot && !snapshot.has(ip) && hasUnstartedRunner(snapshot)) {
         if (members === current) members = null;
         snapshot = await load();
       }
