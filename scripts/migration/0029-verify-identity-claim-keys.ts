@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * 0028 — READ-ONLY pre-flight, run BEFORE deploying #1545:
+ * 0029 — READ-ONLY pre-flight, run BEFORE deploying #1545:
  *
- *   DATABASE_URL=<platform> bun scripts/migration/0028-verify-identity-claim-keys.ts
+ *   DATABASE_URL=<platform> bun scripts/migration/0029-verify-identity-claim-keys.ts
  *
  * `extractIdentity` now keys a connection on the `account_id` identity claim
  * only. An org integration whose draft (what every connect reads) or `latest`

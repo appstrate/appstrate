@@ -1,4 +1,4 @@
--- 0026 — rename the `package_id` / `agent_id` / `run_id` keys to `packageId` /
+-- 0027 — rename the `package_id` / `agent_id` / `run_id` keys to `packageId` /
 -- `packageId` / `runId` in `notifications.payload` (#1545 D8 + R4,
 -- CASING_CONVENTIONS 4b). The payload is returned verbatim by
 -- `GET /api/notifications`; its other keys (`status`, `package_type`,

@@ -1,4 +1,4 @@
--- 0024 — rename the `reasoningLevel` key to `reasoning_level` in every stored
+-- 0025 — rename the `reasoningLevel` key to `reasoning_level` in every stored
 -- `ModelGenerationSettings` object (#1545 D1): `runs.generation_config`,
 -- `runs.generation_config_override`, `space_packages.generation_config` and
 -- `package_schedules.generation_config_override`. `temperature` is unchanged.

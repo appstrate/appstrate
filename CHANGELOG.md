@@ -244,14 +244,14 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   one.
   `@appstrate/module-ee` applies its own `0008` (the `llm_usage` id columns of
   its ledger, cursor and floor, to `bigint`) at init. Scripts, in
-  `scripts/migration/`, in order: **1. `0023` and `0028` BEFORE the
+  `scripts/migration/`, in order: **1. `0023`, `0024` and `0029` BEFORE the
   deploy**, read-only — each must exit 0 (`0023`: every integration draft and
   published version whose JSONPath the release refuses on read is fixed or
-  superseded, see the integrations entry above; `0028`: every org integration
+  superseded, see the integrations entry above; `0024`: see the egress entry above; `0029`: every org integration
   whose draft or `latest` version declares a camelCase identity claim key is
   fixed, see the identity-claims entry below); inside the deploy window (old
-  application stopped, new one not started), `0021`, `0024`, `0026` and
-  `0027`; right after the deploy, `0022` and `0025`.
+  application stopped, new one not started), `0021`, `0025`, `0027` and
+  `0028`; right after the deploy, `0022` and `0026`.
 - **BREAKING (operators): more env values fail boot instead of falling back.**
   A `CHAT_PI_MAX_CONCURRENCY` that is not a positive integer
   (`@appstrate/module-chat`), `MODEL_RETRY_ENABLED` / `MODEL_COMPACTION_ENABLED`
@@ -268,7 +268,7 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   is now `generation_config`. Model capabilities (`OrgModel.generation`, the
   provider registry's models) carry `reasoning.temperature_compatible` and
   `reasoning.native_levels`. The old names are refused with a `400`. Stored
-  settings are rewritten by `scripts/migration/0024` (operators entry above).
+  settings are rewritten by `scripts/migration/0025` (operators entry above).
   The chat's saved generation preference (`localStorage`
   `appstrate.chat.generation`, `{ reasoningLevel }`) no longer parses and
   resets once to the defaults. A CLI published before this release runs
@@ -321,11 +321,11 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `?run_id=`); the MCP `list_files` tool mirrors it — its `runId` argument
   (was `run_id`) and output — and refuses an unknown argument instead of
   ignoring it. Stored notification payloads are rewritten by
-  `scripts/migration/0026`.
+  `scripts/migration/0027`.
 - **BREAKING (API): platform-written keys in returned JSONB are snake_case**
   (#1545). `spaces.settings.branding` is `logo_url`, `primary_color`,
   `accent_color`, `support_email`, `from_name` (rewritten by
-  `scripts/migration/0027`; the OIDC branding reader is strict, so a space
+  `scripts/migration/0028`; the OIDC branding reader is strict, so a space
   still holding the camelCase keys renders the default branding). The
   runner's `file.published` event carries `fileId`; the runtime image must
   be the one of this release for published files to be logged.
@@ -338,9 +338,9 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   fallback. The 37 system integrations that declared camelCase keys
   (`accountId`, `avatarUrl`, `teamName`, …) get a patch release (e.g.
   `@appstrate/gmail` 1.1.6, `@appstrate/github` 1.0.5).
-  `scripts/migration/0025` rewrites the stored `identity_claims` keys of
+  `scripts/migration/0026` rewrites the stored `identity_claims` keys of
   existing connections; their account keys do not change. **Operators: run
-  `scripts/migration/0028` BEFORE the deploy** and fix every org integration
+  `scripts/migration/0029` BEFORE the deploy** and fix every org integration
   it lists (edit the draft, publish a fixed version): an unfixed one keys new
   connects on the fallback, so reconnecting or upgrading the scopes of a
   connection made before the deploy fails 409 `identity_mismatch`.

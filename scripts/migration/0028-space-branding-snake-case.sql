@@ -1,4 +1,4 @@
--- 0027 — rename the camelCase keys of `spaces.settings.branding` to snake_case
+-- 0028 — rename the camelCase keys of `spaces.settings.branding` to snake_case
 -- (#1545, CASING_CONVENTIONS 4g boundary): `logoUrl` → `logo_url`,
 -- `primaryColor` → `primary_color`, `accentColor` → `accent_color`,
 -- `supportEmail` → `support_email`, `fromName` → `from_name`. `name` and any

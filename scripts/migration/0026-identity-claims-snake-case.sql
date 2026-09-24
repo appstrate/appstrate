@@ -1,4 +1,4 @@
--- 0025 — rename every camelCase top-level key of
+-- 0026 — rename every camelCase top-level key of
 -- `integration_connections.identity_claims` to its snake_case form (#1545 D10):
 -- `accountId` → `account_id`, `avatarUrl` → `avatar_url`, `teamName` →
 -- `team_name`, … Generic, not a name list: a key is rewritten iff it holds a
