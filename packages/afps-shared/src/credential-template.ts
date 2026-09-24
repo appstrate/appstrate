@@ -72,9 +72,10 @@ export function renderAuthorizedUris(
 ): string[] {
   return patterns.flatMap((pattern) => {
     const refs = credentialTemplateRefs(pattern);
-    const renderable = refs.every(
-      (ref) => Object.hasOwn(fields, ref) && AUTHORITY_VALUE.test(fields[ref]!),
-    );
+    const renderable = refs.every((ref) => {
+      const value = fields[ref];
+      return typeof value === "string" && AUTHORITY_VALUE.test(value);
+    });
     return renderable ? [renderCredentialTemplate(pattern, fields)] : [];
   });
 }
