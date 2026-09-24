@@ -74,6 +74,30 @@ interface ResolvedRunAgent {
 }
 
 /**
+ * The prompt of a published agent version, or `422 version_artifact_unavailable`.
+ *
+ * `getVersionDetail` swallows a storage or unzip failure and answers
+ * `prompt: null`, as it does for an archive without `prompt.md` — so null is
+ * a broken artifact, never an empty prompt. Every run door refuses it here
+ * rather than letting a `""` reach the readiness gate, where it would read as
+ * the author's `empty_prompt` (#1533).
+ */
+export function requireVersionPrompt(
+  packageId: string,
+  detail: { version: string; prompt: string | null },
+): string {
+  if (detail.prompt === null) {
+    throw new ApiError({
+      status: 422,
+      code: "version_artifact_unavailable",
+      title: "Version Artifact Unavailable",
+      detail: `Published agent '${packageId}@${detail.version}' has no readable prompt archive`,
+    });
+  }
+  return detail.prompt;
+}
+
+/**
  * Build the effective LoadedPackage for a resolved published version.
  *
  * A `LoadedPackage` carries only what the definition SAYS (manifest + prompt),
@@ -84,20 +108,12 @@ function substituteVersion(
   agent: LoadedPackage,
   detail: { version: string; manifest: Record<string, unknown>; prompt: string | null },
 ): ResolvedRunAgent {
-  if (detail.prompt === null) {
-    throw new ApiError({
-      status: 422,
-      code: "version_artifact_unavailable",
-      title: "Version Artifact Unavailable",
-      detail: `Published agent '${agent.id}@${detail.version}' has no readable prompt archive`,
-    });
-  }
   return {
     agent: {
       ...agent,
       // Version manifest replaces the draft manifest entirely.
       manifest: detail.manifest as unknown as AgentManifest,
-      prompt: detail.prompt,
+      prompt: requireVersionPrompt(agent.id, detail),
     },
     overrideVersionLabel: detail.version,
   };
