@@ -2,6 +2,8 @@
 -- `ModelGenerationSettings` object (#1545 D1): `runs.generation_config`,
 -- `runs.generation_config_override`, `space_packages.generation_config` and
 -- `package_schedules.generation_config_override`. `temperature` is unchanged.
+-- A row holding both spellings keeps its existing `reasoning_level` (the
+-- right operand of `||` wins) and loses `reasoningLevel`.
 -- Run INSIDE the deploy window (old app stopped, new one not started): each
 -- build reads only its own spelling, so a row in the other one loses its
 -- reasoning level. Cost: UPDATEs only the rows still holding `reasoningLevel`;
@@ -21,20 +23,20 @@ BEGIN
     (SELECT count(*) FROM package_schedules WHERE generation_config_override ? 'reasoningLevel');
 END $$;
 
-UPDATE runs SET generation_config = (generation_config - 'reasoningLevel')
-    || jsonb_build_object('reasoning_level', generation_config -> 'reasoningLevel')
+UPDATE runs SET generation_config = jsonb_build_object('reasoning_level', generation_config -> 'reasoningLevel')
+    || (generation_config - 'reasoningLevel')
 WHERE generation_config ? 'reasoningLevel';
 
-UPDATE runs SET generation_config_override = (generation_config_override - 'reasoningLevel')
-    || jsonb_build_object('reasoning_level', generation_config_override -> 'reasoningLevel')
+UPDATE runs SET generation_config_override = jsonb_build_object('reasoning_level', generation_config_override -> 'reasoningLevel')
+    || (generation_config_override - 'reasoningLevel')
 WHERE generation_config_override ? 'reasoningLevel';
 
-UPDATE space_packages SET generation_config = (generation_config - 'reasoningLevel')
-    || jsonb_build_object('reasoning_level', generation_config -> 'reasoningLevel')
+UPDATE space_packages SET generation_config = jsonb_build_object('reasoning_level', generation_config -> 'reasoningLevel')
+    || (generation_config - 'reasoningLevel')
 WHERE generation_config ? 'reasoningLevel';
 
-UPDATE package_schedules SET generation_config_override = (generation_config_override - 'reasoningLevel')
-    || jsonb_build_object('reasoning_level', generation_config_override -> 'reasoningLevel')
+UPDATE package_schedules SET generation_config_override = jsonb_build_object('reasoning_level', generation_config_override -> 'reasoningLevel')
+    || (generation_config_override - 'reasoningLevel')
 WHERE generation_config_override ? 'reasoningLevel';
 
 -- ═══ After — re-derived from the tables ═════════════════════════════════════

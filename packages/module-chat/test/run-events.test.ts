@@ -101,8 +101,7 @@ describe("run-events helpers", () => {
 
     expect(extractRunPackageId({ body: { packageId: "@acme/writer" } })).toBe("@acme/writer");
     expect(extractRunPackageId({ packageId: "@acme/writer" })).toBe("@acme/writer");
-    expect(extractRunPackageId({ body: { package_id: "@acme/snake" } })).toBe("@acme/snake");
-    expect(extractRunPackageId({ package_id: "@acme/top-snake" })).toBe("@acme/top-snake");
+    expect(extractRunPackageId({ body: { package_id: "@acme/snake" } })).toBeUndefined();
     expect(buildRunPageHref("@acme/writer", "run_42")).toBe("/agents/@acme/writer/runs/run_42");
     expect(buildRunPageHref(undefined, "run_42")).toBeUndefined();
   });

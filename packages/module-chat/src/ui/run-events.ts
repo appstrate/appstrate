@@ -635,12 +635,7 @@ export function extractRunPackageId(result: unknown): string | undefined {
   const unwrapped = asRecord(unwrapResult(result));
   if (!unwrapped) return undefined;
   const body = asRecord(unwrapped.body);
-  return (
-    nonEmptyString(body?.packageId) ??
-    nonEmptyString(body?.package_id) ??
-    nonEmptyString(unwrapped.packageId) ??
-    nonEmptyString(unwrapped.package_id)
-  );
+  return nonEmptyString(body?.packageId) ?? nonEmptyString(unwrapped.packageId);
 }
 
 /**

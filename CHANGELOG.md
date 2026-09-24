@@ -223,12 +223,14 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   one.
   `@appstrate/module-ee` applies its own `0008` (the `llm_usage` id columns of
   its ledger, cursor and floor, to `bigint`) at init. Scripts, in
-  `scripts/migration/`, in order: **1. `0023` BEFORE the deploy**, read-only —
-  it must exit 0 (every integration draft and published version whose
-  JSONPath the release refuses on read is fixed or superseded, see the
-  integrations entry above); inside the deploy window (old application
-  stopped, new one not started), `0021`, `0024`, `0026` and `0027`; right
-  after the deploy, `0022`, `0025` and `0028`.
+  `scripts/migration/`, in order: **1. `0023` and `0028` BEFORE the
+  deploy**, read-only — each must exit 0 (`0023`: every integration draft and
+  published version whose JSONPath the release refuses on read is fixed or
+  superseded, see the integrations entry above; `0028`: every org integration
+  whose draft or `latest` version declares a camelCase identity claim key is
+  fixed, see the identity-claims entry below); inside the deploy window (old
+  application stopped, new one not started), `0021`, `0024`, `0026` and
+  `0027`; right after the deploy, `0022` and `0025`.
 - **BREAKING (operators): more env values fail boot instead of falling back.**
   A `CHAT_PI_MAX_CONCURRENCY` that is not a positive integer
   (`@appstrate/module-chat`), `MODEL_RETRY_ENABLED` / `MODEL_COMPACTION_ENABLED`
@@ -303,10 +305,8 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   (#1545). `spaces.settings.branding` is `logo_url`, `primary_color`,
   `accent_color`, `support_email`, `from_name` (rewritten by
   `scripts/migration/0027`; the OIDC branding reader is strict, so a space
-  still holding the camelCase keys renders the default branding). Run-log
-  data: the `integration_dropped` marker carries `integration_id` (rewritten
-  by `scripts/migration/0028`), the Firecracker console excerpt `exit_code`.
-  The runner's `file.published` event carries `fileId`; the runtime image must
+  still holding the camelCase keys renders the default branding). The
+  runner's `file.published` event carries `fileId`; the runtime image must
   be the one of this release for published files to be logged.
 - **BREAKING (integrations): identity claim keys are snake_case** (#1545).
   Every integration write (create, save, publish, import) refuses an
@@ -318,7 +318,11 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   (`accountId`, `avatarUrl`, `teamName`, …) get a patch release (e.g.
   `@appstrate/gmail` 1.1.6, `@appstrate/github` 1.0.5).
   `scripts/migration/0025` rewrites the stored `identity_claims` keys of
-  existing connections; their account keys do not change.
+  existing connections; their account keys do not change. **Operators: run
+  `scripts/migration/0028` BEFORE the deploy** and fix every org integration
+  it lists (edit the draft, publish a fixed version): an unfixed one keys new
+  connects on the fallback, so reconnecting or upgrading the scopes of a
+  connection made before the deploy fails 409 `identity_mismatch`.
 - **BREAKING (audit): four more audit payloads use camelCase keys** (#1545):
   `org.settings_updated`, `space.updated`, `oauth_client.updated` (signup
   space assignments) and the bundle import (`fileId`). Rows written before

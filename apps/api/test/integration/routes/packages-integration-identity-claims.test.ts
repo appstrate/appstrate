@@ -17,9 +17,15 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { packages, packageVersions } from "@appstrate/db/schema";
-import { seedPackage } from "../../helpers/seed.ts";
+import * as storage from "@appstrate/db/storage";
+import { computeIntegrity } from "@appstrate/core/integrity";
+import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { apiIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
+import {
+  AGENT_PACKAGES_BUCKET,
+  versionZipKey,
+} from "../../../src/services/package-storage-keys.ts";
 
 const app = getTestApp();
 
@@ -71,6 +77,20 @@ async function seedLegacyDraft() {
   });
   await uploadPackageFiles("integrations", ctx.orgId, ID, {
     "manifest.json": enc(JSON.stringify(CAMEL, null, 2)),
+  });
+}
+
+/** A version published before the rule: its archive and its row. */
+async function seedLegacyVersion(version: string) {
+  const m = { ...CAMEL, version };
+  const afps = zipSync({ "manifest.json": enc(JSON.stringify(m, null, 2)) });
+  await storage.uploadFile(AGENT_PACKAGES_BUCKET, versionZipKey(ID, version), afps);
+  await seedPackageVersion({
+    packageId: ID,
+    version,
+    integrity: computeIntegrity(afps),
+    artifactSize: afps.length,
+    manifest: m,
   });
 }
 
@@ -130,6 +150,23 @@ describe("writing a camelCase identity claim key", () => {
     });
     await expectRefused(res);
     expect(await db.select().from(packageVersions)).toEqual([]);
+  });
+
+  it("restoring a published legacy version refuses it and leaves the draft untouched", async () => {
+    expect((await create(SNAKE)).status).toBe(201);
+    await seedLegacyVersion("2.0.0");
+    const res = await app.request(`/api/packages/integrations/${ID}/versions/2.0.0/restore`, {
+      method: "POST",
+      headers: authHeaders(ctx),
+    });
+    await expectRefused(res);
+    const [row] = await db
+      .select({ draftManifest: packages.draftManifest })
+      .from(packages)
+      .where(eq(packages.id, ID));
+    expect(row?.draftManifest).toMatchObject({
+      auths: { api: { identity_claims: { account_id: "$.id" } } },
+    });
   });
 
   it("the AFPS import refuses it", async () => {
