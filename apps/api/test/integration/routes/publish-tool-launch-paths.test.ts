@@ -32,7 +32,12 @@ import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion, seedSpacePackage } from "../../helpers/seed.ts";
+import {
+  seedPackage,
+  seedPackageVersion,
+  seedPublishedVersion,
+  seedSpacePackage,
+} from "../../helpers/seed.ts";
 import { seedDefaultOrgModel } from "../../helpers/run-connection-fixtures.ts";
 import { resolveRegistryAgent } from "../../../src/services/registry-run-resolver.ts";
 import { resolveAgentRunVersion } from "../../../src/services/agent-version-resolver.ts";
@@ -89,9 +94,7 @@ describe("publish_file across every launch path", () => {
     // A PUBLISHED version is immutable by construction — it cannot be repaired
     // in place, so this is the strictest case for the read direction: a hard
     // enum rejection here would make the agent permanently unrunnable.
-    await seedPackageVersion({
-      packageId: "@compatorg/published",
-      version: "1.0.0",
+    await seedPublishedVersion("@compatorg/published", "1.0.0", {
       manifest: {
         name: "@compatorg/published",
         version: "1.0.0",
@@ -101,6 +104,7 @@ describe("publish_file across every launch path", () => {
         description: "Carries an id the platform no longer builds",
         runtime_tools: ["log", "publish_document"],
       },
+      content: "Do the thing.",
     });
 
     const resolved = await resolveRegistryAgent({
