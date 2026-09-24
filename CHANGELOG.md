@@ -62,10 +62,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Bundle export, the file explorer, version download and fork answer
   `422 version_artifact_unavailable` when a published version's archive is
   missing from storage** (#1533). They answered 404 — fork `400` "no published
-  version" — which read as an unknown package or version. A storage outage
-  while reading a published archive now answers 5xx instead of that 422, and a
-  signature-policy rejection answers its own coded 422 (`bundle_invalid`,
-  `bundle_signature_invalid`).
+  version" — which read as an unknown package or version.
 
 ### Removed
 
@@ -135,13 +132,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (SQLSTATE class 22 or `23514`) is recorded as a `system`/`event_dropped` log
   row instead, so the stream moves on.
 - **A published version with a broken archive is refused, not half-served**
-  (#1533). `POST /api/runs/remote` (`registry`, published) answers `422
-version_artifact_unavailable`, not `400 empty_prompt` or `412
-missing_integration_connection`; restore refuses instead of writing an empty
-  draft (200); `GET …/versions/{v}` refuses, not 200 with `content: null`.
-  `appstrate run` names the broken archive, not "package not found", and the
-  version page shows an error instead of silently redirecting to the live page.
-  The refusal is built in one place (`versionArtifactUnavailable`).
+  (#1533). `POST /api/runs/remote` answers `422 version_artifact_unavailable`,
+  not `400 empty_prompt`/`412 missing_integration_connection`; restore refuses
+  instead of writing an empty draft; `GET …/versions/{v}` refuses, not 200
+  `content: null`; `appstrate run` no longer says "package not found"; the
+  version page shows an error, not the live page. On runs, remote runs,
+  schedules, input-settings, package/version reads and restore, a storage outage
+  is now 5xx and a signature-policy refusal its coded 422, not that 422.
 
 ## [1.0.0-beta.61] - 2026-09-23
 
