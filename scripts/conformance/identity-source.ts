@@ -21,6 +21,7 @@
  * token response) or declare where to fetch it.
  */
 
+import { findNonSnakeCaseIdentityClaimKeys } from "@appstrate/core/integration";
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 import type { Finding } from "./types.ts";
 
@@ -58,4 +59,18 @@ export function checkIdentitySource(entry: SystemPackageEntry): Finding[] {
       },
     ];
   });
+}
+
+/**
+ * The identity-claim key casing the API enforces on every package write
+ * (`CONFIG_BY_TYPE.checkManifest`), applied to system manifests — which reach
+ * the platform through the build, not through a write route. FAIL.
+ */
+export function checkIdentityClaimKeys(entry: SystemPackageEntry): Finding[] {
+  return findNonSnakeCaseIdentityClaimKeys(entry.manifest).map((v) => ({
+    packageId: entry.packageId,
+    check: "identity-claim-keys",
+    severity: "fail" as const,
+    message: `${v.path.join(".")}: ${v.message}`,
+  }));
 }

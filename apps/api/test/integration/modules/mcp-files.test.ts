@@ -5,7 +5,7 @@
  * `/api/mcp/o/:org` HTTP endpoint + in-process dispatch:
  *
  *  - `list_files` returns the caller-visible files (agent outputs +
- *    the caller's own chat uploads), respects `run_id` / `purpose` filters, and
+ *    the caller's own chat uploads), respects `runId` / `purpose` filters, and
  *    does NOT leak another member's private chat-session files.
  *  - `resources/read` on an `appfile://` URI: a small textual doc inlines its
  *    bytes, a binary doc returns metadata only, and a foreign (cross-org) doc is
@@ -152,7 +152,7 @@ describe("mcp list_files", () => {
     headers = await apiKeyHeaders(ctx);
   });
 
-  it("returns the run's published files and respects run_id + purpose filters", async () => {
+  it("returns the run's published files and respects runId + purpose filters", async () => {
     const runA = await seedRun(scope);
     const runB = await seedRun(scope);
     const docA = await publishDoc(scope, runA, "a.txt", "text/plain", "alpha");
@@ -162,7 +162,7 @@ describe("mcp list_files", () => {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "list_files", arguments: { run_id: runA } },
+      params: { name: "list_files", arguments: { runId: runA } },
     });
     const { data } = toolData(envelope);
     const docs = data.files as Array<Record<string, unknown>>;
@@ -192,6 +192,15 @@ describe("mcp list_files", () => {
       params: { name: "list_files", arguments: { purpose: "user_upload" } },
     });
     expect((toolData(uploads.envelope).data.files as unknown[]).length).toBe(0);
+
+    // The retired `run_id` spelling fails loudly instead of listing unfiltered.
+    const retired = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "list_files", arguments: { run_id: runA } },
+    });
+    expect(retired.envelope.error?.message).toContain("Unknown argument(s): run_id");
   });
 
   it("scopes to the caller's org — a foreign org's files are not listed", async () => {

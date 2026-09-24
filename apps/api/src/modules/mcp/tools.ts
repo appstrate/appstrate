@@ -1237,7 +1237,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
     description:
       "List the files visible to you — files you attached to this conversation " +
       "(`user_upload`) and deliverables agents published from runs (`agent_output`). Filter by " +
-      "`run_id`, `chat_session_id`, or `purpose`. Each row carries an `appfile://` URI you can " +
+      "`runId`, `chat_session_id`, or `purpose`. Each row carries an `appfile://` URI you can " +
       "pass verbatim into a run_and_wait input file field (to feed a file to another agent) " +
       "or read with read_file. Returns `{ files: [...], hasMore }`.",
     annotations: {
@@ -1248,8 +1248,9 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
-        run_id: {
+        runId: {
           type: "string",
           description: "Only files produced by / attached to this run.",
         },
@@ -1274,8 +1275,14 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
+    // The SDK does not enforce `inputSchema`: an unknown filter (the retired
+    // `run_id`) would otherwise be dropped and widen the listing in silence.
+    const unknown = Object.keys(args).filter((k) => !(k in descriptor.inputSchema.properties!));
+    if (unknown.length > 0) {
+      throw new McpError(ErrorCode.InvalidParams, `Unknown argument(s): ${unknown.join(", ")}.`);
+    }
     const query: Record<string, unknown> = {};
-    const runId = asString(args.run_id);
+    const runId = asString(args.runId);
     if (runId) query.runId = runId;
     const chatSessionId = asString(args.chat_session_id);
     if (chatSessionId) query.chat_session_id = chatSessionId;

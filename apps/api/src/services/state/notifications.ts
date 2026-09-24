@@ -86,7 +86,7 @@ export async function createRunNotifications(scope: SpaceScope, runId: string): 
   // bell entry is suppressed.
   if (run.packageEphemeral === true) return 0;
 
-  const payload = { agent_id: run.packageId, status: run.status };
+  const payload = { packageId: run.packageId, status: run.status };
   const base = {
     orgId: scope.orgId,
     spaceId: scope.spaceId,
@@ -143,7 +143,7 @@ export async function createRunNotifications(scope: SpaceScope, runId: string): 
  * and the bell reads notifications of the space the recipient is in.
  *
  * No `runId` — the entity is the package, carried in the payload the way
- * `agent_id` is for a run, so the bell renders without a join. The SHARER's
+ * it is for a run, so the bell renders without a join. The SHARER's
  * name is in there for the same reason: "X shared Y with you" is the whole
  * content of this notification, and the bell has no query that would resolve a
  * user id. Best-effort like the run fan-out: the caller wraps it, because a
@@ -264,7 +264,7 @@ export async function getUnreadCountsByAgent(
   scope: SpaceScope,
   actor: Actor,
 ): Promise<Record<string, number>> {
-  const agentId = sql<string | null>`${notifications.payload}->>'agent_id'`;
+  const agentId = sql<string | null>`${notifications.payload}->>'packageId'`;
   const rows = await db
     .select({ agentId, count: count() })
     .from(notifications)
@@ -272,7 +272,13 @@ export async function getUnreadCountsByAgent(
       scopedWhere(notifications, {
         orgId: scope.orgId,
         spaceId: scope.spaceId,
-        extra: [recipientFilter(actor), isNull(notifications.readAt), sql`${agentId} IS NOT NULL`],
+        extra: [
+          recipientFilter(actor),
+          isNull(notifications.readAt),
+          // `package_shared` carries `packageId` too, but is not a run notification.
+          eq(notifications.type, "run_completed"),
+          sql`${agentId} IS NOT NULL`,
+        ],
       }),
     )
     .groupBy(agentId);

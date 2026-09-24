@@ -16,7 +16,7 @@ const notificationObject = {
       type: ["object", "null"],
       additionalProperties: true,
       description:
-        "Render-without-join data. `run_completed`: `agent_id`, `status`. `package_shared`: `packageId`, `package_type`, `shared_by_name`.",
+        "Render-without-join data. `run_completed`: `packageId`, `status`. `package_shared`: `packageId`, `package_type`, `shared_by_name`.",
     },
     read_at: {
       type: ["string", "null"],
@@ -88,7 +88,7 @@ export const notificationsPaths = {
                     id: "550e8400-e29b-41d4-a716-446655440000",
                     type: "run_completed",
                     runId: "run_cm4jkl012",
-                    payload: { agent_id: "@acme/email-sorter", status: "success" },
+                    payload: { packageId: "@acme/email-sorter", status: "success" },
                     read_at: null,
                     createdAt: "2026-01-15T10:31:12Z",
                   },

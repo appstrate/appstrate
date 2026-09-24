@@ -88,7 +88,6 @@ export function NotificationContent({
       ) : (
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
           {notifications.map((notification) => {
-            const agentId = payloadString(notification.payload, "agent_id");
             const packageId = payloadString(notification.payload, "packageId");
             // A SHARE names the sharer and the package and has no run behind
             // it, so it carries no status to badge — reading every row as a
@@ -101,15 +100,15 @@ export function NotificationContent({
                   name: payloadString(notification.payload, "shared_by_name") ?? "",
                   package: packageId ?? "",
                 })
-              : agentId
-                ? (agentNameMap.get(agentId) ?? agentId)
+              : packageId
+                ? (agentNameMap.get(packageId) ?? packageId)
                 : t("runs.deletedAgent", { ns: "agents" });
             // Source agent gone → fall back to the run-scoped route. Marking
             // it read still flows through `onItemClick`.
             const linkTarget = shared
               ? "/space/packages"
-              : agentId && notification.runId
-                ? `/agents/${agentId}/runs/${notification.runId}`
+              : packageId && notification.runId
+                ? `/agents/${packageId}/runs/${notification.runId}`
                 : notification.runId
                   ? `/runs/${notification.runId}`
                   : "/runs";

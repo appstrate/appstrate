@@ -125,13 +125,60 @@ function walkForNonFragmentRefs(
   }
 }
 
-/**
- * Spelling of every key that lands in a connection's `identity_claims` bag —
- * the keys of `identity_claims` and the promoted `identity_outputs`.
- * `extractIdentity` reads `account_id` only, so a camelCase `accountId` would
- * validate and silently fall back to email/sub.
- */
+/** Spelling of a key that lands in a connection's `identity_claims` bag. */
 const IDENTITY_CLAIM_KEY = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+
+/** One identity claim key that is not snake_case, located in the manifest. */
+export interface IdentityClaimKeyViolation {
+  key: string;
+  /** Manifest path of the key, e.g. `["auths", "oauth", "identity_claims", "accountId"]`. */
+  path: (string | number)[];
+  message: string;
+}
+
+/**
+ * List the keys of `auths.<k>.identity_claims` and the names in
+ * `auths.<k>.connect.login.identity_outputs` that are not snake_case.
+ * The platform's `extractIdentity` reads `account_id` only, so a camelCase
+ * `accountId` would silently fall back to email/sub.
+ *
+ * A WRITE-path policy, deliberately not part of {@link integrationManifestSchema}:
+ * that schema also parses stored manifests, and a published version declaring
+ * `accountId` is immutable — it must stay readable (its connections key on the
+ * email/sub fallback), while no new content may declare it.
+ */
+export function findNonSnakeCaseIdentityClaimKeys(manifest: unknown): IdentityClaimKeyViolation[] {
+  if (typeof manifest !== "object" || manifest === null) return [];
+  const auths = (manifest as { auths?: unknown }).auths;
+  if (typeof auths !== "object" || auths === null) return [];
+  const found: IdentityClaimKeyViolation[] = [];
+  const check = (key: unknown, path: (string | number)[]) => {
+    if (typeof key !== "string" || IDENTITY_CLAIM_KEY.test(key)) return;
+    found.push({
+      key,
+      path,
+      message: `identity claim key '${key}' must be snake_case (e.g. account_id)`,
+    });
+  };
+  for (const [authKey, auth] of Object.entries(auths)) {
+    const { identity_claims, connect } = (auth ?? {}) as {
+      identity_claims?: unknown;
+      connect?: { login?: { identity_outputs?: unknown } };
+    };
+    if (typeof identity_claims === "object" && identity_claims !== null) {
+      for (const claim of Object.keys(identity_claims)) {
+        check(claim, ["auths", authKey, "identity_claims", claim]);
+      }
+    }
+    const outputs = connect?.login?.identity_outputs;
+    if (Array.isArray(outputs)) {
+      outputs.forEach((name, index) => {
+        check(name, ["auths", authKey, "connect", "login", "identity_outputs", index]);
+      });
+    }
+  }
+  return found;
+}
 
 export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefine((m, ctx) => {
   const manifest = m as unknown as IntegrationManifest;
@@ -234,23 +281,11 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
         });
       }
     };
-    const checkIdentityKey = (key: string, at: (string | number)[]) => {
-      if (IDENTITY_CLAIM_KEY.test(key)) return;
-      ctx.addIssue({
-        code: "custom",
-        message: `identity claim key '${key}' must be snake_case (e.g. account_id)`,
-        path: ["auths", authKey, ...at],
-      });
-    };
     const identityClaims = (auth as { identity_claims?: Record<string, string> }).identity_claims;
     for (const [claim, path] of Object.entries(identityClaims ?? {})) {
-      checkIdentityKey(claim, ["identity_claims", claim]);
       checkJsonPath(path, ["identity_claims", claim]);
     }
     const login = auth.connect?.login;
-    (login?.identity_outputs ?? []).forEach((name, index) => {
-      checkIdentityKey(name, ["connect", "login", "identity_outputs", index]);
-    });
     for (const [name, output] of Object.entries(login?.outputs ?? {})) {
       const selector = output as { type?: unknown; selector?: unknown };
       if (selector.type === "jsonpath" && typeof selector.selector === "string") {

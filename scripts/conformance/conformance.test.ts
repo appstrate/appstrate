@@ -8,7 +8,7 @@ import { resolveToken, resolveAccessToken, credentialedCount, _resetCredsCache }
 import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
 import { applyAuth, checkAuthLiveness, requiredCredentialFields } from "./auth-live.ts";
 import { checkAuthRejection } from "./auth-reject.ts";
-import { checkIdentitySource } from "./identity-source.ts";
+import { checkIdentityClaimKeys, checkIdentitySource } from "./identity-source.ts";
 import { checkScopeEcho } from "./scope-echo.ts";
 import { metadataCandidates, compareAuth } from "./oauth-metadata.ts";
 import {
@@ -559,6 +559,33 @@ describe("checkIdentitySource", () => {
     });
     expect(checkIdentitySource(apiKey)).toEqual([]);
     expect(checkIdentitySource(oauth({ identity_claims: {} }))).toHaveLength(1);
+  });
+});
+
+describe("checkIdentityClaimKeys", () => {
+  const withAuth = (auth: Record<string, unknown>) =>
+    entry({ packageId: "@appstrate/x", manifest: { auths: { primary: auth } } });
+
+  it("FAILs a camelCase identity_claims key or login identity_outputs name", () => {
+    const f = [
+      ...checkIdentityClaimKeys(
+        withAuth({ type: "api_key", identity_claims: { account_id: "$.id", avatarUrl: "$.a" } }),
+      ),
+      ...checkIdentityClaimKeys(
+        withAuth({ type: "custom", connect: { login: { identity_outputs: ["userId"] } } }),
+      ),
+    ];
+    expect(f.map((x) => [x.severity, x.message.split(":")[0]])).toEqual([
+      ["fail", "auths.primary.identity_claims.avatarUrl"],
+      ["fail", "auths.primary.connect.login.identity_outputs.0"],
+    ]);
+  });
+
+  it("accepts snake_case keys and auths without claims", () => {
+    expect(
+      checkIdentityClaimKeys(withAuth({ type: "oauth2", identity_claims: { account_id: "$.id" } })),
+    ).toEqual([]);
+    expect(checkIdentityClaimKeys(withAuth({ type: "oauth2" }))).toEqual([]);
   });
 });
 

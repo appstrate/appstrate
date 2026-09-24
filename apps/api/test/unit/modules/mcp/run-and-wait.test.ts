@@ -53,7 +53,7 @@ function makeRunAndWait(opts: {
   permissions?: string[];
   launch?: () => Response;
   getRun?: Response[];
-  /** Rows the stubbed `GET /api/files?run_id=…` returns (published docs). */
+  /** Rows the stubbed `GET /api/files?runId=…` returns (published docs). */
   files?: Array<Record<string, unknown>>;
 }): {
   tool: ReturnType<typeof toolsFor>[number];

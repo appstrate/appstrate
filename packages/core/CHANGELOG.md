@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`findNonSnakeCaseIdentityClaimKeys`** and **`IdentityClaimKeyViolation`**
+  (`@appstrate/core/integration`, #1545) — list the `auths.{key}.identity_claims`
+  keys and `connect.login.identity_outputs` names that are not snake_case, with
+  their manifest path. A write-path policy: the platform refuses such content on
+  save, publish and import, while `integrationManifestSchema` keeps reading a
+  stored manifest that predates it (a published version is immutable).
+
 - **`AFPS_SCHEMA_VERSION`** (`@appstrate/core/validation`) — the AFPS
   `schema_version` every manifest the platform writes declares (`"0.3"`, the
   revision spec Appendix A tells producers to emit). The skill-only import, the
@@ -84,21 +91,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ModelGenerationCapabilitiesOverride` spell `reasoning.temperature_compatible`
   and `reasoning.native_levels` (were `temperatureCompatible` / `nativeLevels`).
   The settings schema is `.strict()`, so the old key is refused, not dropped.
-- **BREAKING: `InlineRunBody.model_id` / `InlineRunBody.proxy_id`**
-  (`@appstrate/core/platform-types`, #1545) — were `modelId` / `proxyId`,
-  matching the snake_case inline-run wire body.
 - **BREAKING: `ProblemDetail` extension members are snake_case**
   (`@appstrate/core/api-errors`, #1545): `ApiError.toProblemDetail()` writes
   `request_id` (was `requestId`) and `retry_after` (was `retryAfter`), and both
   new names are reserved against `extensions`. The RFC 9457 members and the
   `Request-Id` / `Retry-After` headers are unchanged; the `ApiError`
   constructor option and property stay `retryAfter`.
-- **BREAKING: `integrationManifestSchema` rejects a non-snake_case identity
-  claim name** (`@appstrate/core/integration`, #1545): every key of
-  `auths.{key}.identity_claims` and every entry of
-  `auths.{key}.connect.login.identity_outputs` must match
-  `^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`. A camelCase `accountId` used to validate
-  and then never be read, so the connection fell back to `email`/`sub`.
 - **BREAKING: a file's producing run is `runId`** (#1545, `runId` joins the
   universal carve-out): `isFileProducedByRun` (`@appstrate/core/file-uri`) reads
   the File DTO's `runId`, and `runProducedFilesPath`

@@ -5,7 +5,7 @@
  * assuming every row is a finished run.
  *
  * `package_shared` has no run and no status behind it, so a row that reached
- * for `payload.agent_id` fell through to `runs.deletedAgent` and announced a
+ * for the run's package fell through to `runs.deletedAgent` and announced a
  * share as "Agent supprimé", linking to `/runs`. These two cases pin the
  * branch and its control: the share names the sharer and the package and links
  * to the package's detail page, and a run notification is unchanged.
@@ -86,7 +86,7 @@ describe("NotificationContent", () => {
         id: "n3",
         type: "run_completed",
         runId: "run_1",
-        payload: { agent_id: PACKAGE_ID, status: "success" },
+        payload: { packageId: PACKAGE_ID, status: "success" },
         read_at: null,
         createdAt: "2026-09-10T10:00:00.000Z",
       },

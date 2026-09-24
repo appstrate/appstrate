@@ -43,6 +43,7 @@ import {
   CONFIG_BY_TYPE,
   assertContentConforms,
   assertArchiveContentConforms,
+  assertManifestConforms,
   type PackageTypeConfig,
 } from "../services/package-items/config.ts";
 import { validateManifest, type PackageType } from "@appstrate/core/validation";
@@ -241,8 +242,11 @@ async function validateManifestForRoute(
     ]);
   }
 
-  if (direction === "author")
+  if (direction === "author") {
+    // A `"stored"` manifest meets the same policy at its write, via `assertArchiveContentConforms`.
+    assertManifestConforms(expectedType, validated);
     await assertPackageDependenciesAccessible(c, validated, opts.previous);
+  }
   await assertAgentIntegrationScopesValid(validated, c.get("orgId"), opts.requireCallableTools);
   return validated;
 }

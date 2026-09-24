@@ -6,7 +6,8 @@ import {
   decodeSkillMarkdown,
   type CompanionFileViolation,
 } from "@appstrate/afps-shared/companion-files";
-import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
+import { findNonSnakeCaseIdentityClaimKeys } from "@appstrate/core/integration";
+import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import { validationFailed } from "../../lib/errors.ts";
 
 // ─────────────────────────────────────────────
@@ -27,6 +28,11 @@ export interface PackageTypeConfig {
   labelSingular: string;
   /** Producer-side check for this type's authored content, run by every path that WRITES it. */
   validateContent?: (content: string) => CompanionFileViolation | null;
+  /**
+   * Producer-side policy on this type's manifest, run by the same write paths
+   * and never on read: a stored manifest that predates it stays readable.
+   */
+  checkManifest?: (manifest: unknown) => { path: (string | number)[]; message: string }[];
   /**
    * Whether `manifest.json` is a STORED file of this type's archive.
    *
@@ -67,6 +73,7 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
     type: "integration",
     storageFolder: "integrations",
     labelSingular: "Integration",
+    checkManifest: findNonSnakeCaseIdentityClaimKeys,
     manifestIsStoredFile: true,
   },
   // AFPS §3.4 — standalone MCP Bundle (MCPB) packages referenced by an
@@ -98,18 +105,43 @@ export function assertContentConforms(
   ]);
 }
 
-/** The same gate over an archive's content entry, BOM preserved. */
+/** 400 naming each offending manifest field. */
+export function assertManifestConforms(type: PackageType, manifest: unknown, prefix = ""): void {
+  const violations = CONFIG_BY_TYPE[type].checkManifest?.(manifest) ?? [];
+  if (violations.length === 0) return;
+  throw validationFailed(
+    violations.map((v) => ({
+      field: `manifest.${v.path.join(".")}`,
+      code: "invalid_manifest",
+      title: "Invalid Manifest",
+      message: `${prefix}${v.message}`,
+    })),
+  );
+}
+
+/** The same gates over an archive: its `manifest.json`, then its content entry (BOM preserved). */
 export function assertArchiveContentConforms(
   type: PackageType,
   files: Record<string, Uint8Array> | Map<string, Uint8Array>,
   field: "content" | "file",
   prefix = "",
 ): void {
-  if (!CONFIG_BY_TYPE[type].validateContent) return;
-  const path = PACKAGE_CONTENT_ENTRY[type]?.path;
-  const bytes =
+  const entry = (path: string | undefined) =>
     path === undefined ? undefined : files instanceof Map ? files.get(path) : files[path];
+  const manifestBytes = CONFIG_BY_TYPE[type].checkManifest && entry(PACKAGE_MANIFEST_FILE);
+  // Unparseable JSON is not this gate's to report — the manifest schema rejects it.
+  if (manifestBytes) assertManifestConforms(type, parseJsonOrNull(manifestBytes), prefix);
+  if (!CONFIG_BY_TYPE[type].validateContent) return;
+  const bytes = entry(PACKAGE_CONTENT_ENTRY[type]?.path);
   assertContentConforms(type, bytes ? decodeSkillMarkdown(bytes) : "", field, prefix);
+}
+
+function parseJsonOrNull(bytes: Uint8Array): unknown {
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  }
 }
 
 /** Resolve the S3 storage folder for a package type (e.g. "skill" → "skills"). */

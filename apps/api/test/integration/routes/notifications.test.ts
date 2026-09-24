@@ -30,7 +30,7 @@ interface NotificationDto {
   id: string;
   type: string;
   runId: string | null;
-  payload: { agent_id?: string; status?: string } | null;
+  payload: { packageId?: string; status?: string } | null;
   read_at: string | null;
   createdAt: string;
 }
@@ -264,7 +264,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       expect(data).toHaveLength(1);
       expect(data[0]!.runId).toBe(run.id);
       expect(data[0]!.type).toBe("run_completed");
-      expect(data[0]!.payload?.agent_id).toBe("@notiforg/notif-agent");
+      expect(data[0]!.payload?.packageId).toBe("@notiforg/notif-agent");
       expect(data[0]!.payload?.status).toBe("success");
       expect(data[0]!.read_at).toBeNull();
     });
@@ -705,12 +705,12 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     });
   });
 
-  // ─── unread-counts-by-agent: null agent_id ──────────────────
+  // ─── unread-counts-by-agent: null packageId ─────────────────
 
-  describe("GET /api/notifications/unread-counts-by-agent (null agent_id)", () => {
-    it("skips notifications whose payload carries no agent_id", async () => {
+  describe("GET /api/notifications/unread-counts-by-agent (null packageId)", () => {
+    it("skips notifications whose payload carries no packageId", async () => {
       await seedNotifiedRun({ agentName: "has-agent", actor: { userId: ctx.user.id } });
-      // Hand-insert a notification with a payload that lacks agent_id.
+      // Hand-insert a notification with a payload that lacks packageId.
       await db.insert(notifications).values({
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
@@ -726,8 +726,26 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       expect(res.status).toBe(200);
       const counts = ((await res.json()) as { counts: Record<string, number> }).counts;
       expect(counts["@notiforg/has-agent"]).toBe(1);
-      // The null-agent_id row is surfaced under no key at all.
+      // The null-packageId row is surfaced under no key at all.
       expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(1);
+    });
+
+    it("counts run notifications only — a share's `packageId` is not a run", async () => {
+      await seedNotifiedRun({ agentName: "shared", actor: { userId: ctx.user.id } });
+      await db.insert(notifications).values({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        recipientType: "user",
+        recipientId: ctx.user.id,
+        type: "package_shared",
+        payload: { packageId: "@notiforg/shared", package_type: "agent", shared_by_name: "A" },
+      });
+
+      const res = await app.request("/api/notifications/unread-counts-by-agent", {
+        headers: authHeaders(ctx),
+      });
+      const counts = ((await res.json()) as { counts: Record<string, number> }).counts;
+      expect(counts).toEqual({ "@notiforg/shared": 1 });
     });
   });
 
@@ -789,7 +807,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
           recipientType: "user",
           recipientId: ctx.user.id,
           type: "run_completed",
-          payload: { agent_id: "@notiforg/tie", status: "success" },
+          payload: { packageId: "@notiforg/tie", status: "success" },
           createdAt: fixed,
         });
       }

@@ -3,7 +3,7 @@
 /**
  * Casing gate over the whole OpenAPI spec (core + every module), per
  * `docs/CASING_CONVENTIONS.md`. It DISCOVERS leaks instead of checking known
- * names: every property name, query/path parameter name and example key that
+ * names: every property name, query parameter name and example key that
  * holds an uppercase letter must be on `CAMEL_CASE_CARVE_OUTS` — the doc's
  * rule is name-based, a field qualifies only by its literal name. It also
  * fails on the snake_case twin of a 4b name (`created_at`, `run_id`, …),
