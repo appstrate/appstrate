@@ -843,6 +843,45 @@ email / `sub` fallback, and reconnecting a connection made before the deploy
 fails 409 `identity_mismatch`. Fix a draft by editing it; publish a fixed
 version for a published one. Details in the file header.
 
+## Detail — Models Pi's registry does not offer (script `0030`)
+
+From #1549 a named provider's offer is exactly Pi's records of its Pi provider
+on its API shape; the gateways (`openai-compatible`, `anthropic-compatible`) and
+OpenRouter's live search still take any id. `0030` deletes every `org_models`
+row of a named provider whose `model_id` is outside that offer. An org default
+naming one moves to a surviving enabled row of the same credential (the
+provider's first featured model present, else the oldest), else to NULL — each
+such org is printed, since it then falls to the system default (platform-billed
+when that model is). A space pin or schedule override naming one goes to NULL
+(the org default). A row of a provider the loaded `MODULES` does not register
+is left alone and listed — run it with the production `MODULES`. Expected on
+production (measured read-only 2026-09-24): 6 deletions — codex `gpt-5.4`,
+`gpt-5.4-mini`, `gpt-5.4-nano`, deepseek `deepseek-chat`, `deepseek-reasoner`,
+`deepseek-v4-flash`. Rules: the file header.
+
+It runs **inside the deploy window** (the scheduler reloads a schedule's model
+override from the table only at boot), from the release checkout with the
+platform env loaded (`DATABASE_URL`, `MODULES`, `SYSTEM_PROVIDER_KEYS`); it
+needs no running service.
+
+1. **Before the window**, `bun run verify:system-models` with the platform env
+   loaded must print `0` — the new image refuses to boot on a
+   `SYSTEM_PROVIDER_KEYS` model outside the offer, and `--apply` refuses to run.
+   Production declares `deepseek` / `deepseek-v4-flash` (entry id `sys-flash`,
+   aliased, the default): change its `modelId` to `deepseek-flash`, keeping the
+   `id` so the pointers naming it survive (an entry without one derives it as
+   `<key id>:<modelId>` — set it to the old derived value). Confirm DeepSeek
+   serves `deepseek-flash` with the production key (release runbook).
+2. With the platform stopped, dry run:
+   `set -a && . ./.env && set +a && bun scripts/migration/0030-pi-catalog-org-models.ts`.
+   Check the deletions against the expectation above, and read the orgs set to
+   NULL and the `left alone` list.
+3. `--apply`, from a directory you keep: it writes `0030-backup-<timestamp>.json`
+   there (path printed) — the deleted rows in full and every pointer changed,
+   before and after — then commits. One transaction; every write is guarded on
+   the value read, and an after-check aborts unless nothing is left.
+4. Start the new image.
+
 ## Log
 
 | #    | date                | what                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -875,3 +914,4 @@ version for a published one. Details in the file header.
 | 0027 | not applied         | `package_id` / `agent_id` → `packageId`, `run_id` → `runId` inside `notifications.payload` — **run inside the deploy window**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | unmeasured — prints before/after counts, aborts if any row still carries a snake key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 0028 | not applied         | `logoUrl` / `primaryColor` / `accentColor` / `supportEmail` / `fromName` → snake_case inside `spaces.settings.branding` (an existing snake_case twin wins) — **run inside the deploy window**                                                                                                                                                                                                                                                                                                                                                                                                                             | unmeasured — prints before/after counts, aborts if any camelCase branding key survives                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 0029 | not applied         | READ-ONLY pre-flight: org integration drafts and `latest` published versions declaring a non-snake_case `identity_claims` key (`accountId`, …) or `identity_outputs` entry, which `extractIdentity` no longer reads (system packages skipped — fixed by this release) — **run BEFORE deploying; exits non-zero until every one is fixed**                                                                                                                                                                                                                                                                                 |
+| 0030 | not applied         | `org_models` of a named provider outside Pi's offer deleted (backed up to a file), an org default naming one repointed to a surviving row of its credential or NULL, other pointers set to NULL (#1549) — **run inside the deploy window, before the new image boots, after `bun run verify:system-models` passes**; `.ts`, dry-run by default, `--apply` to commit                                                                                                                                                                                                                                                       |

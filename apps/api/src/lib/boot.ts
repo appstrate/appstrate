@@ -11,13 +11,14 @@ import { startStorageDeletionWorker } from "../services/storage-deletion.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
 import {
+  getModuleRegistry,
   loadModules,
   getModules,
   getModuleContributions,
   getModuleModelProviders,
   callAllHooks,
 } from "./modules/module-loader.ts";
-import { getModuleRegistry, buildModuleInitContext } from "./modules/registry.ts";
+import { buildModuleInitContext } from "./modules/registry.ts";
 import { registerEmailOverrides } from "@appstrate/emails";
 import {
   setBeforeSignupHook,
