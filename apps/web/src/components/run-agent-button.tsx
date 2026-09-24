@@ -1,33 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { defaultRunVersion } from "../lib/version-selector";
-import { lazy, Suspense, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
-import { Modal } from "./modal";
-import { LoadingState } from "./page-states";
 import { RunModal } from "./run-modal";
-import type { MissingIntegrationFieldError } from "./missing-connections-modal";
-import { useRunAgent } from "../hooks/use-mutations";
+import { RunLaunchRecovery } from "./run-launch-recovery";
+import { useRunLauncher } from "../hooks/use-mutations";
 import { usePackageDetail } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
-import { ApiError } from "../api/errors";
 import type { AgentDetail } from "@appstrate/shared-types";
-
-/**
- * 409 recovery surface — lazy because it is a modal that only ever opens on a
- * failed run kickoff, while this button sits in the eager entry graph (agent
- * list → card → button). Its subtree reaches `IntegrationConnectionPicker` →
- * `@appstrate/core/integration` → `@afps-spec/schema`, which instantiates AJV
- * at module scope; a static edge shipped AJV + semver (~144 kB raw) to every
- * visitor. Keep this import dynamic.
- */
-const MissingConnectionsModal = lazy(() =>
-  import("./missing-connections-modal").then((m) => ({ default: m.MissingConnectionsModal })),
-);
 
 /**
  * True when there is nothing this caller could launch: the package has no
@@ -79,28 +64,8 @@ export function RunAgentButton({
 }: RunAgentButtonProps) {
   const { t } = useTranslation(["agents"]);
   const { can } = usePermissions();
-  const runAgent = useRunAgent(packageId);
+  const launcher = useRunLauncher(packageId);
   const [inputOpen, setInputOpen] = useState(false);
-  const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
-
-  // Pre-run picks no longer need to be merged into connectionOverrides —
-  // the member-pin layer (cascade 4) reads them straight from the DB via
-  // the resolver. The MissingConnectionsModal still uses connectionOverrides
-  // for per-run one-shot picks (cascade 2).
-
-  // Intercept missing_integration_connection — surface the recovery
-  // modal instead of (or alongside) the generic toast. Set via the
-  // per-call onError so we open the modal in response to a user action
-  // (passes the react-hooks/set-state-in-effect rule) rather than mirroring
-  // the mutation's error state in a useEffect.
-  const onRunError = (err: unknown) => {
-    if (err instanceof ApiError && err.code === "missing_integration_connection") {
-      const errors = Array.isArray(err.details)
-        ? (err.details as MissingIntegrationFieldError[])
-        : [];
-      setMissingErrors(errors);
-    }
-  };
 
   // Skip the fetch when the parent already provided the detail (detail page
   // case). Otherwise the query stays DISABLED — list pages render N of these
@@ -131,10 +96,7 @@ export function RunAgentButton({
       !!agentDetail.input?.schema?.properties &&
       Object.keys(agentDetail.input.schema.properties).length > 0;
     if (!agentHasInput) {
-      runAgent.mutate(
-        { version: version ?? defaultRunVersion(agentDetail.home_writable) },
-        { onError: onRunError },
-      );
+      launcher.launch({ version: version ?? defaultRunVersion(agentDetail.home_writable) });
       return;
     }
     setInputOpen(true);
@@ -160,13 +122,8 @@ export function RunAgentButton({
     });
   };
 
-  const closeMissingModal = () => {
-    setMissingErrors(null);
-    runAgent.reset();
-  };
-
   const neverPublished = isNeverPublishedForReader(detail);
-  const isPending = isFetching || runAgent.isPending;
+  const isPending = isFetching || launcher.isPending;
   const isDisabled = disabled || isPending || neverPublished;
   // Two different reasons the button is dead; the caller's own reason wins
   // only when there is nothing to launch at all to say first.
@@ -222,48 +179,16 @@ export function RunAgentButton({
           open={inputOpen}
           onClose={() => setInputOpen(false)}
           agent={detail}
-          onSubmit={(input) =>
-            runAgent.mutate({ input, version: runVersion }, { onError: onRunError })
-          }
-          isPending={runAgent.isPending}
+          onSubmit={(input) => launcher.launch({ input, version: runVersion })}
+          isPending={launcher.isPending}
         />
       )}
 
-      {missingErrors !== null && (
-        // Mounted only while the 409 modal is open — that mount is what
-        // triggers the dynamic import. The fallback keeps the same modal
-        // frame so the dialog appears immediately and only its body swaps.
-        <Suspense
-          fallback={
-            <Modal open onClose={closeMissingModal} title={t("missingConnections.title")}>
-              <LoadingState />
-            </Modal>
-          }
-        >
-          <MissingConnectionsModal
-            open
-            onClose={closeMissingModal}
-            errors={missingErrors}
-            agentPackageId={packageId}
-            {...(detail?.dependencies.integrations
-              ? { integrationEntries: detail.dependencies.integrations }
-              : {})}
-            retrying={runAgent.isPending}
-            onRetryWithOverrides={(overrides) => {
-              // Re-fire the run with the user's picks. Keep the modal open
-              // until the response lands so the picker stays visible if the
-              // server returns a fresh 409 (e.g. picks disappeared mid-flight).
-              runAgent.mutate(
-                { version: runVersion, connectionOverrides: overrides },
-                {
-                  onSuccess: () => setMissingErrors(null),
-                  onError: onRunError,
-                },
-              );
-            }}
-          />
-        </Suspense>
-      )}
+      <RunLaunchRecovery
+        launcher={launcher}
+        packageId={packageId}
+        integrationEntries={detail?.dependencies.integrations}
+      />
     </>
   );
 }

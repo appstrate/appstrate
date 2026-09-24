@@ -13,13 +13,14 @@ import {
   useDeleteAgent,
   useDeleteAgentRuns,
   useDeleteAllMemories,
-  useRunAgent,
+  useRunLauncher,
 } from "../../hooks/use-mutations";
 import { useSetPackageActive } from "../../hooks/use-library";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { PackageActionsDropdown } from "./package-actions-dropdown";
 import { ConfirmModal } from "../confirm-modal";
 import { RunWithOptionsModal } from "../run-with-options-modal";
+import { RunLaunchRecovery } from "../run-launch-recovery";
 
 export function AgentActions({
   packageId,
@@ -50,7 +51,7 @@ export function AgentActions({
   const deleteRuns = useDeleteAgentRuns(packageId);
   const deleteAllMemories = useDeleteAllMemories(packageId);
   const setActive = useSetPackageActive();
-  const runAgent = useRunAgent(packageId);
+  const launcher = useRunLauncher(packageId);
   const currentSpaceId = useCurrentSpaceId();
 
   const [confirmState, setConfirmState] = useState<{
@@ -178,7 +179,7 @@ export function AgentActions({
         open={runOptionsOpen}
         onClose={() => setRunOptionsOpen(false)}
         agent={detail}
-        isPending={runAgent.isPending}
+        isPending={launcher.isPending}
         onSubmit={({ input, version, overrides, dependencyOverrides }) => {
           // Map the modal payload onto the run API body. `version` rides the
           // `?version=` query and is always an explicit pick here — the modal
@@ -186,7 +187,7 @@ export function AgentActions({
           // overrides panel already emits the server's wire values (a proxy
           // pick of "none" means no proxy), so the value passes through as-is.
           const proxy = overrides.proxy_id_override;
-          runAgent.mutate(
+          launcher.launch(
             {
               ...(Object.keys(input).length > 0 ? { input } : {}),
               version,
@@ -200,9 +201,14 @@ export function AgentActions({
                 : {}),
               ...(Object.keys(dependencyOverrides).length > 0 ? { dependencyOverrides } : {}),
             },
-            { onSuccess: () => setRunOptionsOpen(false) },
+            () => setRunOptionsOpen(false),
           );
         }}
+      />
+      <RunLaunchRecovery
+        launcher={launcher}
+        packageId={packageId}
+        integrationEntries={detail.dependencies.integrations}
       />
       <ConfirmModal
         open={confirmState !== null}
