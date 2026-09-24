@@ -460,7 +460,7 @@
   "files.mediaKindBinary": "Binary",
   "files.mediaKindText": "Text",
   "files.downloadFile": "Download file",
-  "files.errorMissingArtifact": "This version's files are no longer available: the artifact was removed from storage.",
+  "files.errorMissingArtifact": "This version's files are no longer available: its stored archive is missing or unreadable.",
   "files.errorLoad": "Could not load this package's files.",
   "files.tabLabel": "Files",
   "files.newFile": "New file",
