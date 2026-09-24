@@ -28,7 +28,7 @@ await i18n.changeLanguage("fr");
 const RUN_ID = "run_1";
 
 function file(name: string): FileDto {
-  return fileFixture({ name, run_id: RUN_ID });
+  return fileFixture({ name, runId: RUN_ID });
 }
 
 function filesTab(files: FileDto[], extra: { hasMore?: boolean } = {}): string {

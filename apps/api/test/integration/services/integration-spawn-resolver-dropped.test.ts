@@ -289,7 +289,7 @@ describe("recordDroppedIntegrations — run_logs marker", () => {
       expect(row.type).toBe("system");
     }
 
-    const first = rows.find((r) => r.data?.integrationId === INTEG);
+    const first = rows.find((r) => r.data?.integration_id === INTEG);
     expect(first).toBeDefined();
     expect(first!.data!.reason).toBe("not_active");
     // The message is what an operator reads on the run page — it must name the
@@ -297,7 +297,7 @@ describe("recordDroppedIntegrations — run_logs marker", () => {
     expect(first!.message).toContain(INTEG);
     expect(first!.message).toContain("not_active");
 
-    const second = rows.find((r) => r.data?.integrationId === "@droporg/other");
+    const second = rows.find((r) => r.data?.integration_id === "@droporg/other");
     expect(second).toBeDefined();
     expect(second!.data!.reason).toBe("resolve_error");
     expect(second!.data!.detail).toBe("boom");

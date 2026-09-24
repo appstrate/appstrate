@@ -26,13 +26,7 @@ await i18n.changeLanguage("fr");
 const PACKAGE_ID = "@acme/worker";
 
 function renderList(
-  notifications: {
-    id: string;
-    type: string;
-    run_id: string | null;
-    payload: Record<string, unknown> | null;
-    createdAt: string;
-  }[],
+  notifications: Parameters<typeof NotificationContent>[0]["notifications"],
 ): string {
   return render(
     <NotificationContent
@@ -52,12 +46,13 @@ describe("NotificationContent", () => {
       {
         id: "n1",
         type: "package_shared",
-        run_id: null,
+        runId: null,
         payload: {
-          package_id: PACKAGE_ID,
+          packageId: PACKAGE_ID,
           package_type: "agent",
           shared_by_name: "Alice Martin",
         },
+        read_at: null,
         createdAt: "2026-09-10T10:00:00.000Z",
       },
     ]);
@@ -75,8 +70,9 @@ describe("NotificationContent", () => {
       {
         id: "n2",
         type: "package_shared",
-        run_id: null,
-        payload: { package_id: "@acme/helper", package_type: "skill", shared_by_name: "Bob" },
+        runId: null,
+        payload: { packageId: "@acme/helper", package_type: "skill", shared_by_name: "Bob" },
+        read_at: null,
         createdAt: "2026-09-10T10:00:00.000Z",
       },
     ]);
@@ -89,8 +85,9 @@ describe("NotificationContent", () => {
       {
         id: "n3",
         type: "run_completed",
-        run_id: "run_1",
+        runId: "run_1",
         payload: { agent_id: PACKAGE_ID, status: "success" },
+        read_at: null,
         createdAt: "2026-09-10T10:00:00.000Z",
       },
     ]);

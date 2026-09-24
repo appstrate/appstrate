@@ -493,7 +493,7 @@ describe("run_and_wait", () => {
           name: "report.html",
           mime: "text/html",
           size: 120,
-          run_id: "run_7",
+          runId: "run_7",
           // `fetchRunFiles` filters every returned row through
           // `isFileProducedByRun`, which needs BOTH halves — the run's file
           // container also holds the files mounted as its INPUT. The real

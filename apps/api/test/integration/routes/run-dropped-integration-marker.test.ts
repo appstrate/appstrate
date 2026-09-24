@@ -88,7 +88,8 @@ describe("run launch — dropped-integration marker in run_logs", () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]!.level).toBe("warn");
-    expect(rows[0]!.data?.integrationId).toBe(INTEGRATION);
+    expect(rows[0]!.data?.integration_id).toBe(INTEGRATION);
+    expect(rows[0]!.data).not.toHaveProperty("integrationId");
     expect(rows[0]!.data?.reason).toBe("mcp_server_unresolved");
     expect(rows[0]!.message).toContain(INTEGRATION);
   });

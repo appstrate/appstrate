@@ -1290,7 +1290,7 @@ export interface paths {
         };
         /**
          * List files
-         * @description List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so a member sees the files of the runs it may read (the whole space with `runs:read-all`, otherwise the runs it launched) plus its own chat and container-less files, and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.
+         * @description List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so a member sees the files of the runs it may read (the whole space with `runs:read-all`, otherwise the runs it launched) plus its own chat and container-less files, and end-users see only their own. Filter by `purpose`, `runId`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.
          */
         get: operations["listFiles"];
         put?: never;
@@ -5984,11 +5984,11 @@ export interface components {
             /** @description Machine-readable error code (snake_case) */
             code: string;
             /** @description Unique request identifier (req_ prefix) */
-            requestId: string;
+            request_id: string;
             /** @description Parameter that caused the error */
             param?: string;
             /** @description Seconds before retry; mirrored in the `Retry-After` header */
-            retryAfter?: number;
+            retry_after?: number;
             /** @description Field-level validation errors */
             errors?: components["schemas"]["ResolutionFieldError"][];
         };
@@ -6552,7 +6552,7 @@ export interface components {
                  *       "status": 401,
                  *       "detail": "Invalid or missing session",
                  *       "code": "unauthorized",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6571,7 +6571,7 @@ export interface components {
                  *       "status": 403,
                  *       "detail": "Insufficient permissions",
                  *       "code": "forbidden",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6590,7 +6590,7 @@ export interface components {
                  *       "status": 404,
                  *       "detail": "Resource not found",
                  *       "code": "not_found",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6611,7 +6611,7 @@ export interface components {
                  *       "status": 412,
                  *       "detail": "The resource changed since you read it: If-Match does not match its current ETag. Re-read it, reapply your change, and send the new ETag.",
                  *       "code": "precondition_failed",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6631,7 +6631,7 @@ export interface components {
                  *       "status": 428,
                  *       "detail": "This write requires an If-Match header carrying the ETag of the representation you read. GET the resource, then send its ETag.",
                  *       "code": "precondition_required",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6659,7 +6659,7 @@ export interface components {
                  *       "status": 415,
                  *       "detail": "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
                  *       "code": "archive_required",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6682,8 +6682,8 @@ export interface components {
                  *       "status": 429,
                  *       "detail": "Too many requests. Please try again shortly.",
                  *       "code": "rate_limited",
-                 *       "requestId": "req_abc123",
-                 *       "retryAfter": 30
+                 *       "request_id": "req_abc123",
+                 *       "retry_after": 30
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6703,7 +6703,7 @@ export interface components {
                  *       "status": 409,
                  *       "detail": "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
                  *       "code": "idempotency_in_progress",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6742,7 +6742,7 @@ export interface components {
                  *       "status": 409,
                  *       "detail": "An organization must keep at least one owner. Promote another member to owner first, or delete the organization.",
                  *       "code": "last_owner",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6761,7 +6761,7 @@ export interface components {
                  *       "status": 500,
                  *       "detail": "An unexpected error occurred. Please try again or contact support.",
                  *       "code": "internal_error",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6781,7 +6781,7 @@ export interface components {
                  *       "status": 422,
                  *       "detail": "The package archive expands past the 50 MB decompression limit and was refused (decompressed-budget-exceeded). Republish the package from bytes that fit the limit.",
                  *       "code": "package_archive_unreadable",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6800,7 +6800,7 @@ export interface components {
                  *       "status": 404,
                  *       "detail": "Agent '@acme/reporter' has no published version",
                  *       "code": "no_published_version",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6829,7 +6829,7 @@ export interface components {
                  *       "status": 422,
                  *       "detail": "This Idempotency-Key was already used with a different method, URL or body. Use a new key for different requests.",
                  *       "code": "idempotency_conflict",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6904,7 +6904,7 @@ export interface components {
         RateLimit: string;
         /** @description IETF RateLimit-Policy header describing the rate limit window (e.g. 20;w=60). */
         RateLimitPolicy: string;
-        /** @description Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retryAfter` (the two always agree), such as the 503 `shutting_down`. */
+        /** @description Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retry_after` (the two always agree), such as the 503 `shutting_down`. */
         RetryAfter: number;
         /** @description RFC 6750 Bearer challenge, present on every 401. `Bearer error="invalid_token"` when a credential was presented but rejected, bare `Bearer` when no credential was presented. Resources registered for RFC 9728 discovery (e.g. MCP) answer with a richer challenge carrying `resource_metadata="…"`. */
         WWWAuthenticate: string;
@@ -8148,7 +8148,7 @@ export interface operations {
                      *       "status": 409,
                      *       "detail": "Cannot delete runs while agent has active runs",
                      *       "code": "conflict",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -10878,7 +10878,7 @@ export interface operations {
                      *       "status": 409,
                      *       "detail": "An end-user with this externalId already exists in the space.",
                      *       "code": "external_id_taken",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -10893,7 +10893,7 @@ export interface operations {
                 /** @description Filter by file purpose. */
                 purpose?: "user_upload" | "agent_output";
                 /** @description Filter to files anchored to this run. */
-                run_id?: string;
+                runId?: string;
                 /** @description Filter to files produced by this agent package. */
                 packageId?: string;
                 /** @description Filter to files anchored to this chat session. */
@@ -10938,7 +10938,7 @@ export interface operations {
                             purpose: "user_upload" | "agent_output";
                             spaceId: string;
                             /** @description Run container, or null. */
-                            run_id: string | null;
+                            runId: string | null;
                             /** @description Chat-session container, or null. */
                             chat_session_id: string | null;
                             /** @description Producing agent package id, or null. */
@@ -11030,7 +11030,7 @@ export interface operations {
                         purpose: "user_upload" | "agent_output";
                         spaceId: string;
                         /** @description Run container, or null. */
-                        run_id: string | null;
+                        runId: string | null;
                         /** @description Chat-session container, or null. */
                         chat_session_id: string | null;
                         /** @description Producing agent package id, or null. */
@@ -11130,7 +11130,7 @@ export interface operations {
                      *       "status": 409,
                      *       "detail": "This file is referenced by one or more runs and cannot be deleted",
                      *       "code": "file_in_use",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -11223,7 +11223,7 @@ export interface operations {
                         purpose: "user_upload" | "agent_output";
                         spaceId: string;
                         /** @description Run container, or null. */
-                        run_id: string | null;
+                        runId: string | null;
                         /** @description Chat-session container, or null. */
                         chat_session_id: string | null;
                         /** @description Producing agent package id, or null. */
@@ -11523,7 +11523,7 @@ export interface operations {
                      *       "status": 503,
                      *       "detail": "This connection method is unavailable on this deployment. Contact your administrator.",
                      *       "code": "connect_unavailable",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -11542,7 +11542,7 @@ export interface operations {
                      *       "status": 504,
                      *       "detail": "The connection attempt timed out after 60000ms — the login did not complete in time. Please try again.",
                      *       "code": "timeout",
-                     *       "requestId": "req_def456"
+                     *       "request_id": "req_def456"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -11795,7 +11795,7 @@ export interface operations {
                      *       "status": 503,
                      *       "detail": "This connection method is unavailable on this deployment. Contact your administrator.",
                      *       "code": "connect_unavailable",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -11814,7 +11814,7 @@ export interface operations {
                      *       "status": 504,
                      *       "detail": "The connection attempt timed out after 60000ms — the login did not complete in time. Please try again.",
                      *       "code": "timeout",
-                     *       "requestId": "req_def456"
+                     *       "request_id": "req_def456"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -14543,7 +14543,7 @@ export interface operations {
                      *       "status": 502,
                      *       "detail": "OpenRouter API returned an unexpected error",
                      *       "code": "provider_error",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -14562,7 +14562,7 @@ export interface operations {
                      *       "status": 504,
                      *       "detail": "OpenRouter did not respond within the allowed time",
                      *       "code": "timeout",
-                     *       "requestId": "req_def456"
+                     *       "request_id": "req_def456"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -14797,11 +14797,12 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "object": "list",
                      *       "data": [
                      *         {
                      *           "id": "550e8400-e29b-41d4-a716-446655440000",
                      *           "type": "run_completed",
-                     *           "run_id": "run_cm4jkl012",
+                     *           "runId": "run_cm4jkl012",
                      *           "payload": {
                      *             "agent_id": "@acme/email-sorter",
                      *             "status": "success"
@@ -14810,10 +14811,12 @@ export interface operations {
                      *           "createdAt": "2026-01-15T10:31:12Z"
                      *         }
                      *       ],
-                     *       "has_more": false
+                     *       "hasMore": false
                      *     }
                      */
                     "application/json": {
+                        /** @enum {string} */
+                        object: "list";
                         data: {
                             /**
                              * Format: uuid
@@ -14823,8 +14826,8 @@ export interface operations {
                             /** @description Notification kind, e.g. run_completed */
                             type: string;
                             /** @description Originating run id, when the notification references one */
-                            run_id: string | null;
-                            /** @description Render-without-join data (agent_id, status) */
+                            runId: string | null;
+                            /** @description Render-without-join data. `run_completed`: `agent_id`, `status`. `package_shared`: `packageId`, `package_type`, `shared_by_name`. */
                             payload: {
                                 [key: string]: unknown;
                             } | null;
@@ -14837,7 +14840,7 @@ export interface operations {
                             createdAt: string;
                         }[];
                         /** @description True when another page follows — page via the Link header cursor */
-                        has_more: boolean;
+                        hasMore: boolean;
                     };
                 };
             };
@@ -18602,7 +18605,7 @@ export interface operations {
                      *       "status": 422,
                      *       "detail": "MCP-server package '@myorg/tools' has no activatable published version.",
                      *       "code": "bundle_invalid",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -18938,7 +18941,7 @@ export interface operations {
                      *       "status": 409,
                      *       "detail": "A password is already set for this account. Use the change password form instead.",
                      *       "code": "password_already_set",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -20163,7 +20166,7 @@ export interface operations {
                      *       "status": 400,
                      *       "detail": "Invalid 'wait' value: expected true, false, or a non-negative integer number of seconds (max 55)",
                      *       "code": "invalid_request",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -20273,7 +20276,7 @@ export interface operations {
                      *       "status": 409,
                      *       "detail": "Run has already completed and cannot be cancelled",
                      *       "code": "conflict",
-                     *       "requestId": "req_def456"
+                     *       "request_id": "req_def456"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -22271,7 +22274,7 @@ export interface operations {
                      *       "status": 422,
                      *       "detail": "MCP-server package '@myorg/tools' has no activatable published version.",
                      *       "code": "bundle_invalid",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -22535,7 +22538,7 @@ export interface operations {
                      *       "status": 403,
                      *       "detail": "Organization staging limit (5368709120 bytes) would be exceeded",
                      *       "code": "storage_limit_exceeded",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -22557,7 +22560,7 @@ export interface operations {
                      *       "status": 429,
                      *       "detail": "Too many active staged uploads (max 20); consume or let existing uploads expire before staging more",
                      *       "code": "upload_staging_limit_exceeded",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -23599,7 +23602,7 @@ export interface operations {
                      *       "status": 403,
                      *       "detail": "This invitation is for newuser@example.com",
                      *       "code": "email_mismatch",
-                     *       "requestId": "req_stu901"
+                     *       "request_id": "req_stu901"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -23618,7 +23621,7 @@ export interface operations {
                      *       "status": 404,
                      *       "detail": "Invitation not found",
                      *       "code": "invitation_not_found",
-                     *       "requestId": "req_mno345"
+                     *       "request_id": "req_mno345"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -23637,7 +23640,7 @@ export interface operations {
                      *       "status": 410,
                      *       "detail": "Invitation has already been accepted",
                      *       "code": "invitation_accepted",
-                     *       "requestId": "req_pqr678"
+                     *       "request_id": "req_pqr678"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -23707,7 +23710,7 @@ export interface operations {
                      *       "status": 404,
                      *       "detail": "Invitation not found",
                      *       "code": "invitation_not_found",
-                     *       "requestId": "req_mno345"
+                     *       "request_id": "req_mno345"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -23726,7 +23729,7 @@ export interface operations {
                      *       "status": 410,
                      *       "detail": "Invitation has already been accepted",
                      *       "code": "invitation_accepted",
-                     *       "requestId": "req_pqr678"
+                     *       "request_id": "req_pqr678"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];

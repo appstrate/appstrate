@@ -404,7 +404,7 @@ describe("files service + routes", () => {
     expect(missing.status).toBe(404);
   });
 
-  it("lists files with run_id filter and hides other end-users' rows", async () => {
+  it("lists files with the runId filter and hides other end-users' rows", async () => {
     const runA = await seedRunRow(scope);
     const runB = await seedRunRow(scope);
     const upA = await stageUpload(scope, ctx.user.id, "a.txt", new TextEncoder().encode("aaa"));
@@ -417,11 +417,13 @@ describe("files service + routes", () => {
     const list = (await all.json()) as { data: { id: string }[] };
     expect(list.data.length).toBe(2);
 
-    const filtered = await app.request(`/api/files?run_id=${runA}`, {
+    const filtered = await app.request(`/api/files?runId=${runA}`, {
       headers: authHeaders(ctx),
     });
-    const flist = (await filtered.json()) as { data: { id: string }[] };
+    const flist = (await filtered.json()) as { data: Record<string, unknown>[] };
     expect(flist.data.map((d) => d.id)).toEqual([docA.id]);
+    expect(flist.data[0]!.runId).toBe(runA);
+    expect(flist.data[0]).not.toHaveProperty("run_id");
   });
 
   it("run_id filter returns produced outputs AND input files referenced in runs.input", async () => {

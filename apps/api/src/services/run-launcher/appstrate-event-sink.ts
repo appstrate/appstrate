@@ -84,7 +84,7 @@ export async function persistRunEvent(
       // which is also what the readers' membership set is built from — writing
       // the literal here is what let a "shared" list have an unshared writer.
       // The set carries no retired spelling: none survives the rename.
-      const fileId = typeof event.file_id === "string" ? event.file_id : null;
+      const fileId = typeof event.fileId === "string" ? event.fileId : null;
       if (fileId) {
         await appendRunLog(
           scope,

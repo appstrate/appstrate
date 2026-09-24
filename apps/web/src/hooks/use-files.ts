@@ -36,7 +36,7 @@ export function useFiles(filters: FileListFilters = {}) {
       params: {
         query: {
           purpose: filters.purpose,
-          run_id: filters.runId,
+          runId: filters.runId,
           context_chat_session_id: filters.contextChatSessionId,
           startingAfter: filters.startingAfter,
           limit: filters.limit,

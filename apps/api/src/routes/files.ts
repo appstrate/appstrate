@@ -77,12 +77,12 @@ function fileLifecycleCeiling(c: Context<AppEnv>): { creatorCanManage: boolean }
 export function createFilesRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/files — gallery list. Filters: purpose, run_id, packageId,
+  // GET /api/files — gallery list. Filters: purpose, runId, packageId,
   // chat_session_id, context_chat_session_id; keyset pagination via
   // startingAfter + limit. Query-param
-  // casing follows the wire DTO (CASING_CONVENTIONS.md carve-out 4b): `packageId`
-  // and the `startingAfter` pagination param are camelCase; `run_id` /
-  // `chat_session_id` are snake_case domain fields.
+  // casing follows the wire DTO (CASING_CONVENTIONS.md carve-out 4b): `runId`,
+  // `packageId` and the `startingAfter` pagination param are camelCase;
+  // `chat_session_id` is a snake_case domain field.
   router.get("/files", rateLimit(120), requirePermission("files", "read"), async (c) => {
     const scope = getSpaceScope(c);
     const actor = getActor(c);
@@ -90,7 +90,7 @@ export function createFilesRouter() {
     const filters: ListFilesFilters = {};
     const purpose = zFilePurposeEnum.safeParse(c.req.query("purpose"));
     if (purpose.success) filters.purpose = purpose.data;
-    const runId = c.req.query("run_id");
+    const runId = c.req.query("runId");
     if (runId) filters.runId = runId;
     const packageId = c.req.query("packageId");
     if (packageId) filters.packageId = packageId;

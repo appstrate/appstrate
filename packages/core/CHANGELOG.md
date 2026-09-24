@@ -99,6 +99,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `auths.{key}.connect.login.identity_outputs` must match
   `^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`. A camelCase `accountId` used to validate
   and then never be read, so the connection fell back to `email`/`sub`.
+- **BREAKING: a file's producing run is `runId`** (#1545, `runId` joins the
+  universal carve-out): `isFileProducedByRun` (`@appstrate/core/file-uri`) reads
+  the File DTO's `runId`, and `runProducedFilesPath`
+  (`@appstrate/core/run-and-wait-client`) filters `GET /api/files` with
+  `?runId=`. The `file.published` run event (`FilePublishedEvent`,
+  `@appstrate/core/runtime-tool-defs`) carries `fileId` (CloudEvents payloads
+  are camelCase, carve-out 4i).
 - **`run_and_wait` inline manifest defaults** (`@appstrate/core/run-and-wait-client`):
   a manifest that omits `schema_version` now gets `"0.3"` (was `"0.2"`), and the
   default `$schema` is read from `AFPS_SCHEMA_URLS.agent` (same URL as before).

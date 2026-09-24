@@ -172,7 +172,7 @@ describe("mcp list_files", () => {
       uri: `appfile://${docA}`,
       name: "a.txt",
       mime: "text/plain",
-      run_id: runA,
+      runId: runA,
       // Each entry carries the same capabilities the REST DTO computes, plus the
       // flat `downloadable` mirror — an agent_output is downloadable by any reader.
       downloadable: true,
@@ -182,7 +182,7 @@ describe("mcp list_files", () => {
       metadata: true,
       download: true,
     });
-    expect(data.has_more).toBe(false);
+    expect(data.hasMore).toBe(false);
 
     // purpose=user_upload excludes agent outputs.
     const uploads = await rpc(headers, {

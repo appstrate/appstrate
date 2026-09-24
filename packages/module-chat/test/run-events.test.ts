@@ -447,7 +447,7 @@ describe("autoPresentFile", () => {
 /**
  * The authoritative produced-file source (issue #1177 follow-up). The log
  * window is capped and ascending, so the end-of-run publication frames of a
- * chatty run fall outside it; `GET /api/files?run_id=…` is the source that
+ * chatty run fall outside it; `GET /api/files?runId=…` is the source that
  * cannot be truncated away, and it is what the run page reads too.
  */
 describe("producedFilesFromFileList", () => {
@@ -457,7 +457,7 @@ describe("producedFilesFromFileList", () => {
     mime: "text/markdown",
     size: 3,
     purpose: "agent_output",
-    run_id: "run_1",
+    runId: "run_1",
     ...over,
   });
 
@@ -481,14 +481,14 @@ describe("producedFilesFromFileList", () => {
   });
 
   it("drops a file the run only CONSUMED, even though it is `agent_output`", () => {
-    // `GET /api/files?run_id=X` answers the run's whole container: a file
+    // `GET /api/files?runId=X` answers the run's whole container: a file
     // chained in from an earlier run via `appfile://` is listed here and still
     // carries `purpose: "agent_output"` — it was produced by that earlier run.
     // Counting it would make a one-file run look like a two-file run and
     // silently switch the auto-present rule off.
     const payload = {
       data: [
-        row({ id: "file_in", run_id: "run_0" }),
+        row({ id: "file_in", runId: "run_0" }),
         row({ id: "file_out" }),
         row({ id: "file_upload", purpose: "user_upload" }),
       ],
@@ -653,13 +653,13 @@ describe("useRunLogStream source guards", () => {
     // longer spells the URL out — it and `fetchRunFiles` share one builder — so
     // the invariant itself is asserted directly on that builder, and only the
     // fact that the hook REACHES it stays a grep: without a DOM harness nothing
-    // can observe the call. Dropping `purpose` (or the `run_id` this list is
+    // can observe the call. Dropping `purpose` (or the `runId` this list is
     // keyed on) would list files the run merely CONSUMED and silently switch
     // the auto-present rule off.
     expect(hook).toContain("runProducedFilesPath(runId)");
     const path = runProducedFilesPath("run_abc");
     expect(path).toContain("purpose=agent_output");
-    expect(path).toContain("run_id=run_abc");
+    expect(path).toContain("runId=run_abc");
   });
 });
 

@@ -1217,9 +1217,9 @@ function projectFileRow(raw: unknown): Record<string, unknown> | null {
     name,
     mime: asString(r?.mime) ?? "application/octet-stream",
     size: typeof r?.size === "number" ? r.size : 0,
-    // Casing mirrors FileDto (CASING_CONVENTIONS.md 4b): `packageId`/`createdAt`
-    // camelCase carve-outs; `run_id` a snake_case domain field.
-    run_id: asString(r?.run_id) ?? null,
+    // Casing mirrors FileDto (CASING_CONVENTIONS.md 4b): `runId`/`packageId`/
+    // `createdAt` are camelCase carve-outs.
+    runId: asString(r?.runId) ?? null,
     packageId: asString(r?.packageId) ?? null,
     createdAt: asString(r?.createdAt) ?? null,
     // Surface the same access capabilities the REST DTO carries (computed by the
@@ -1239,7 +1239,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
       "(`user_upload`) and deliverables agents published from runs (`agent_output`). Filter by " +
       "`run_id`, `chat_session_id`, or `purpose`. Each row carries an `appfile://` URI you can " +
       "pass verbatim into a run_and_wait input file field (to feed a file to another agent) " +
-      "or read with read_file. Returns `{ files: [...], has_more }`.",
+      "or read with read_file. Returns `{ files: [...], hasMore }`.",
     annotations: {
       title: "List files",
       readOnlyHint: true,
@@ -1276,7 +1276,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
     const start = performance.now();
     const query: Record<string, unknown> = {};
     const runId = asString(args.run_id);
-    if (runId) query.run_id = runId;
+    if (runId) query.runId = runId;
     const chatSessionId = asString(args.chat_session_id);
     if (chatSessionId) query.chat_session_id = chatSessionId;
     const purpose = asString(args.purpose);
@@ -1303,7 +1303,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
       durationMs: performance.now() - start,
       shownCount: files.length,
     });
-    return textResult({ files, has_more: body?.hasMore === true });
+    return textResult({ files, hasMore: body?.hasMore === true });
   };
 
   return { descriptor, handler };

@@ -454,7 +454,7 @@ export function publishedFilesFromLogs(logs: readonly RunLogLine[]): ChatRunFile
 }
 
 /**
- * One page of `GET /api/files?run_id=…&purpose=agent_output`, narrowed to what
+ * One page of `GET /api/files?runId=…&purpose=agent_output`, narrowed to what
  * this run PRODUCED.
  */
 interface ProducedFileList {
@@ -475,7 +475,7 @@ interface ProducedFileList {
 }
 
 /**
- * The run's produced files, read from `GET /api/files?run_id=…` — the same
+ * The run's produced files, read from `GET /api/files?runId=…` — the same
  * endpoint (and the same predicate) the run page's Outcome pane uses. This is
  * the AUTHORITATIVE set: the log stream is a truncatable window
  * (`?limit=1000`, ascending, cursor never followed), and the end-of-run

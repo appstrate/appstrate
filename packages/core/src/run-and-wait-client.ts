@@ -815,10 +815,10 @@ const RUN_PRODUCED_FILES_PAGE_LIMIT = 100;
  *
  * `purpose=agent_output` narrows but does not decide: the route answers the
  * run's whole CONTAINER, so a file chained in from an earlier run arrives
- * carrying that purpose. Both callers filter on `run_id` themselves.
+ * carrying that purpose. Both callers filter on `runId` themselves.
  */
 export function runProducedFilesPath(runId: string): string {
-  return `/api/files?run_id=${encodeURIComponent(runId)}&purpose=agent_output&limit=${RUN_PRODUCED_FILES_PAGE_LIMIT}`;
+  return `/api/files?runId=${encodeURIComponent(runId)}&purpose=agent_output&limit=${RUN_PRODUCED_FILES_PAGE_LIMIT}`;
 }
 
 /**
@@ -827,7 +827,7 @@ export function runProducedFilesPath(runId: string): string {
  * (network, non-2xx, malformed body) yields an empty list — a missing file
  * list must never turn a successful run into a tool error.
  *
- * `GET /api/files?run_id=…` answers the run's whole file CONTAINER — the files
+ * `GET /api/files?runId=…` answers the run's whole file CONTAINER — the files
  * it produced PLUS the ones mounted as its input. Which rows are this run's
  * OUTPUT is {@link isFileProducedByRun}, the same predicate the run page and
  * the chat's run card read.

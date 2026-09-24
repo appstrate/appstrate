@@ -228,7 +228,7 @@ export const schemas = {
   ProblemDetail: {
     type: "object",
     description: "RFC 9457 Problem Details for HTTP APIs",
-    required: ["type", "title", "status", "detail", "code", "requestId"],
+    required: ["type", "title", "status", "detail", "code", "request_id"],
     properties: {
       type: { type: "string", format: "uri", description: "URI reference to error documentation" },
       title: { type: "string", description: "Short summary of the error type" },
@@ -239,9 +239,9 @@ export const schemas = {
         description: "URI reference identifying this specific occurrence",
       },
       code: { type: "string", description: "Machine-readable error code (snake_case)" },
-      requestId: { type: "string", description: "Unique request identifier (req_ prefix)" },
+      request_id: { type: "string", description: "Unique request identifier (req_ prefix)" },
       param: { type: "string", description: "Parameter that caused the error" },
-      retryAfter: {
+      retry_after: {
         type: "integer",
         description: "Seconds before retry; mirrored in the `Retry-After` header",
       },

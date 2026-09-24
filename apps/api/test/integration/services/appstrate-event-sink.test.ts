@@ -97,7 +97,7 @@ describe("persistRunEvent", () => {
     expect(await loadLogs()).toHaveLength(0);
   });
 
-  // `file.published` / `file_id` is the ONE published-file spelling. The
+  // `file.published` / `fileId` is the ONE published-file spelling. The
   // pre-#1177 `document.published` / `document_id` twin is gone from the sink.
   //
   // The "producer and acceptor are the same build, so there is no version
@@ -123,7 +123,7 @@ describe("persistRunEvent", () => {
   it("ingests file.published and drops the retired document.published", async () => {
     await persist(
       event("file.published", {
-        file_id: "file_canonical",
+        fileId: "file_canonical",
         name: "a.md",
         mime: "text/markdown",
         size: 3,

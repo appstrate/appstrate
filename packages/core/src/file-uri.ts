@@ -83,15 +83,15 @@ export const AGENT_OUTPUT_FILE_PURPOSE = "agent_output";
  * by it?
  *
  * Both halves are load-bearing and NEITHER alone is enough. A file row carries
- * two independent facts: `purpose` says who created it, `run_id` says which
+ * two independent facts: `purpose` says who created it, `runId` says which
  * run it is anchored to.
  *
- * - `purpose` alone is wrong because `GET /api/files?run_id=X` deliberately
+ * - `purpose` alone is wrong because `GET /api/files?runId=X` deliberately
  *   answers the run's whole CONTAINER: it ORs `files.run_id = X` with the ids
  *   extracted from `runs.input`, so a file chained in from an earlier run via
  *   `appfile://` is listed there while still carrying `purpose: "agent_output"`
  *   — it was produced by that earlier run, and is an INPUT to this one.
- * - `run_id` alone is wrong because an upload made FOR this run is committed
+ * - `runId` alone is wrong because an upload made FOR this run is committed
  *   with `purpose: "user_upload"` AND that run's id
  *   (`apps/api/src/services/files.ts`), so matching the id alone would call the
  *   run's own input an output.
@@ -103,10 +103,10 @@ export const AGENT_OUTPUT_FILE_PURPOSE = "agent_output";
  * as `unknown` so a raw JSON row can be tested without being narrowed first.
  */
 export function isFileProducedByRun(
-  file: { purpose?: unknown; run_id?: unknown },
+  file: { purpose?: unknown; runId?: unknown },
   runId: string,
 ): boolean {
-  return file.purpose === AGENT_OUTPUT_FILE_PURPOSE && file.run_id === runId;
+  return file.purpose === AGENT_OUTPUT_FILE_PURPOSE && file.runId === runId;
 }
 
 /** `upload://upl_xxx` — the ephemeral URI form of a staged (not-yet-materialized) upload. */

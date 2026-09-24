@@ -66,7 +66,7 @@ function handleConnectionUpdate(qc: QueryClient) {
  *    whose path id is this session.
  *  - the typed file list, `["get","/api/files",init]` with
  *    `init.params.query.context_chat_session_id` — only the page filtered on
- *    this session. A run's file tab (`run_id` filter), the gallery (no
+ *    this session. A run's file tab (`runId` filter), the gallery (no
  *    filter) or another conversation's sidebar must not refetch on every
  *    frame of a turn that is not theirs (≥5 frames per turn).
  *

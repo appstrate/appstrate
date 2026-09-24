@@ -29,7 +29,7 @@ const app = getTestApp();
 interface NotificationDto {
   id: string;
   type: string;
-  run_id: string | null;
+  runId: string | null;
   payload: { agent_id?: string; status?: string } | null;
   read_at: string | null;
   createdAt: string;
@@ -138,7 +138,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
 
       const data = await listNotifications(authHeaders(ctx));
       expect(data).toHaveLength(1);
-      expect(data[0]!.run_id).toBe(run.id);
+      expect(data[0]!.runId).toBe(run.id);
       expect(data[0]!.payload?.status).toBe("failed");
     });
 
@@ -216,7 +216,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       // Exactly one notification, carrying the run's status, for the actor.
       const data = await listNotifications(authHeaders(ctx));
       expect(data).toHaveLength(1);
-      expect(data[0]!.run_id).toBe(run.id);
+      expect(data[0]!.runId).toBe(run.id);
       expect(data[0]!.payload?.status).toBe("success");
     });
 
@@ -262,7 +262,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
 
       const data = await listNotifications(authHeaders(ctx));
       expect(data).toHaveLength(1);
-      expect(data[0]!.run_id).toBe(run.id);
+      expect(data[0]!.runId).toBe(run.id);
       expect(data[0]!.type).toBe("run_completed");
       expect(data[0]!.payload?.agent_id).toBe("@notiforg/notif-agent");
       expect(data[0]!.payload?.status).toBe("success");
@@ -282,10 +282,15 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       expect(await listNotifications(authHeaders(ctx))).toHaveLength(0);
       // …but still present without the filter.
       const all = await app.request("/api/notifications", { headers: authHeaders(ctx) });
-      const allBody = (await all.json()) as { data: NotificationDto[]; has_more: boolean };
+      const allBody = (await all.json()) as {
+        object: string;
+        data: NotificationDto[];
+        hasMore: boolean;
+      };
+      expect(allBody.object).toBe("list");
       expect(allBody.data).toHaveLength(1);
-      expect(allBody.has_more).toBe(false);
-      expect(allBody.data[0]!.run_id).toBe(run.id);
+      expect(allBody.hasMore).toBe(false);
+      expect(allBody.data[0]!.runId).toBe(run.id);
     });
 
     it("returns 401 without authentication", async () => {
@@ -743,9 +748,9 @@ describe("Notifications API (per-recipient, issue #667)", () => {
 
       const res = await app.request("/api/notifications?limit=2", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
+      const body = (await res.json()) as { data: NotificationDto[]; hasMore: boolean };
       expect(body.data).toHaveLength(2);
-      expect(body.has_more).toBe(true);
+      expect(body.hasMore).toBe(true);
       // created_at descending (newest first).
       expect(new Date(body.data[0]!.createdAt).getTime()).toBeGreaterThanOrEqual(
         new Date(body.data[1]!.createdAt).getTime(),
@@ -754,18 +759,18 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       expect(nextCursor(res.headers.get("Link"))).toBe(body.data[1]!.id);
     });
 
-    it("walks every page with no skip or duplicate, has_more flips false at the end", async () => {
+    it("walks every page with no skip or duplicate, hasMore flips false at the end", async () => {
       // 5 notifications, paged 2 at a time → pages of [2, 2, 1].
       for (let i = 0; i < 5; i++) {
         await seedNotifiedRun({ agentName: `walk-${i}`, actor: { userId: ctx.user.id } });
       }
 
-      const pages = await walkLinkPages<{ data: NotificationDto[]; has_more: boolean }>(
+      const pages = await walkLinkPages<{ data: NotificationDto[]; hasMore: boolean }>(
         app,
         "/api/notifications?limit=2",
         authHeaders(ctx),
       );
-      expect(pages.map((p) => p.has_more)).toEqual([true, true, false]);
+      expect(pages.map((p) => p.hasMore)).toEqual([true, true, false]);
       const seen = pages.flatMap((p) => p.data.map((n) => n.id));
       expect(seen).toHaveLength(5);
       expect(new Set(seen).size).toBe(5);
@@ -806,21 +811,21 @@ describe("Notifications API (per-recipient, issue #667)", () => {
         { headers: authHeaders(ctx) },
       );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
+      const body = (await res.json()) as { data: NotificationDto[]; hasMore: boolean };
       expect(body.data).toHaveLength(0);
-      expect(body.has_more).toBe(false);
+      expect(body.hasMore).toBe(false);
     });
 
-    it("has_more is false on a final page that holds exactly `limit` rows", async () => {
+    it("hasMore is false on a final page that holds exactly `limit` rows", async () => {
       // 4 rows, limit 2 → pages of [2, 2]; the second page is full yet last.
       // Exercises the limit+1 fetch probe at its boundary (fetch 3, get ≤2).
       for (let i = 0; i < 4; i++) {
         await seedNotifiedRun({ agentName: `bound-${i}`, actor: { userId: ctx.user.id } });
       }
       const r1 = await app.request("/api/notifications?limit=2", { headers: authHeaders(ctx) });
-      const b1 = (await r1.json()) as { data: NotificationDto[]; has_more: boolean };
+      const b1 = (await r1.json()) as { data: NotificationDto[]; hasMore: boolean };
       expect(b1.data).toHaveLength(2);
-      expect(b1.has_more).toBe(true);
+      expect(b1.hasMore).toBe(true);
 
       const r2 = await app.request(
         `/api/notifications?limit=2&startingAfter=${b1.data.at(-1)!.id}`,
@@ -828,9 +833,9 @@ describe("Notifications API (per-recipient, issue #667)", () => {
           headers: authHeaders(ctx),
         },
       );
-      const b2 = (await r2.json()) as { data: NotificationDto[]; has_more: boolean };
+      const b2 = (await r2.json()) as { data: NotificationDto[]; hasMore: boolean };
       expect(b2.data).toHaveLength(2);
-      expect(b2.has_more).toBe(false);
+      expect(b2.hasMore).toBe(false);
       // Cross-page ordering: page 2's first row is older-or-equal to page 1's last.
       expect(new Date(b1.data.at(-1)!.createdAt).getTime()).toBeGreaterThanOrEqual(
         new Date(b2.data[0]!.createdAt).getTime(),
@@ -851,10 +856,10 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       const res = await app.request("/api/notifications?unread=true&limit=2", {
         headers: authHeaders(ctx),
       });
-      const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
+      const body = (await res.json()) as { data: NotificationDto[]; hasMore: boolean };
       // 2 unread remain → exactly one page, no more.
       expect(body.data).toHaveLength(2);
-      expect(body.has_more).toBe(false);
+      expect(body.hasMore).toBe(false);
       expect(body.data.some((n) => n.id === firstId)).toBe(false);
     });
   });

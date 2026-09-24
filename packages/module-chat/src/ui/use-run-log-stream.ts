@@ -10,7 +10,7 @@
  *     finished) still shows everything.
  *  2. `GET /api/realtime/runs/:id?verbose=true` (EventSource) — the live tail
  *     while the run is in flight. Closed as soon as the run goes terminal.
- *  3. `GET /api/files?run_id=…&purpose=agent_output` — the AUTHORITATIVE list of
+ *  3. `GET /api/files?runId=…&purpose=agent_output` — the AUTHORITATIVE list of
  *     what the run produced, read once the run is terminal. The log window is
  *     capped (`?limit=1000`, ascending) and the end-of-run publication frames
  *     are the last rows a run writes, so a chatty run pushes exactly those

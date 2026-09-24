@@ -6,6 +6,8 @@ import { runs, notifications, organizationMembers, packages } from "@appstrate/d
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
+import { listResponse } from "../../lib/list-response.ts";
+import type { ListEnvelope } from "@appstrate/shared-types";
 
 // --- Notifications ---
 //
@@ -29,16 +31,10 @@ function recipientFilter(actor: Actor): SQL {
 interface NotificationDto {
   id: string;
   type: string;
-  run_id: string | null;
+  runId: string | null;
   payload: Record<string, unknown> | null;
   read_at: string | null;
   createdAt: string;
-}
-
-interface NotificationListResult {
-  data: NotificationDto[];
-  /** True when another page follows (keyset pagination — see listNotifications). */
-  has_more: boolean;
 }
 
 /**
@@ -169,7 +165,7 @@ export async function createPackageShareNotification(params: {
     recipientId: params.recipientUserId,
     type: "package_shared",
     payload: {
-      package_id: params.packageId,
+      packageId: params.packageId,
       package_type: params.packageType,
       shared_by_name: params.sharedByName,
     },
@@ -304,10 +300,10 @@ export async function listNotifications(
   scope: SpaceScope,
   actor: Actor,
   options: { unread?: boolean; limit?: number; startingAfter?: string } = {},
-): Promise<NotificationListResult> {
+): Promise<ListEnvelope<NotificationDto>> {
   const { unread = false, startingAfter } = options;
   const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
-  const fetchLimit = limit + 1; // one extra row to detect has_more
+  const fetchLimit = limit + 1; // one extra row to detect hasMore
 
   const extra: SQL[] = [recipientFilter(actor)];
   if (unread) extra.push(isNull(notifications.readAt));
@@ -347,15 +343,15 @@ export async function listNotifications(
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
 
-  return {
-    data: page.map((r) => ({
+  return listResponse(
+    page.map((r) => ({
       id: r.id,
       type: r.type,
-      run_id: r.runId,
+      runId: r.runId,
       payload: r.payload ?? null,
       read_at: r.readAt?.toISOString() ?? null,
       createdAt: r.createdAt.toISOString(),
     })),
-    has_more: hasMore,
-  };
+    { hasMore },
+  );
 }

@@ -4,10 +4,10 @@ import { filePurposeValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
 // Shared File object schema (mirrors FileDto in services/files.ts).
-// Field casing follows CASING_CONVENTIONS.md carve-out 4b: `spaceId`,
+// Field casing follows CASING_CONVENTIONS.md carve-out 4b: `spaceId`, `runId`,
 // `packageId`, `createdAt`, `expiresAt` are on the universal DB-convention list
-// (camelCase everywhere); `run_id` / `chat_session_id` are NOT on it, so they
-// stay snake_case domain fields (matching the `notification` DTO's `run_id`).
+// (camelCase everywhere); `chat_session_id` is NOT on it, so it stays a
+// snake_case domain field.
 const fileSchema = {
   type: "object",
   required: [
@@ -16,7 +16,7 @@ const fileSchema = {
     "uri",
     "purpose",
     "spaceId",
-    "run_id",
+    "runId",
     "chat_session_id",
     "packageId",
     "name",
@@ -38,7 +38,7 @@ const fileSchema = {
     },
     purpose: { type: "string", enum: [...filePurposeValues] },
     spaceId: { type: "string" },
-    run_id: { type: ["string", "null"], description: "Run container, or null." },
+    runId: { type: ["string", "null"], description: "Run container, or null." },
     chat_session_id: { type: ["string", "null"], description: "Chat-session container, or null." },
     packageId: { type: ["string", "null"], description: "Producing agent package id, or null." },
     name: {
@@ -178,7 +178,7 @@ export const filesPaths = {
         "runs it may read (the whole space with `runs:read-all`, otherwise the runs it " +
         "launched) plus its own chat and container-less files, and end-users see only " +
         "their own. Filter by `purpose`, " +
-        "`run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; " +
+        "`runId`, `packageId`, `chat_session_id`, or a chat session's complete context; " +
         "paginate with `startingAfter` + `limit`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -191,7 +191,7 @@ export const filesPaths = {
           description: "Filter by file purpose.",
         },
         {
-          name: "run_id",
+          name: "runId",
           in: "query",
           required: false,
           schema: { type: "string" },
@@ -318,7 +318,7 @@ export const filesPaths = {
                 status: 409,
                 detail: "This file is referenced by one or more runs and cannot be deleted",
                 code: "file_in_use",
-                requestId: "req_abc123",
+                request_id: "req_abc123",
               },
             },
           },

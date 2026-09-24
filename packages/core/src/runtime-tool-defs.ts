@@ -401,7 +401,7 @@ export interface PublishedFile extends RunAndWaitFile {
 /** The canonical `file.published` run event for a stored file. */
 export interface FilePublishedEvent extends RuntimeToolEvent {
   type: "file.published";
-  file_id: string;
+  fileId: string;
   uri: string;
   name: string;
   mime: string;
@@ -419,7 +419,7 @@ export interface FilePublishedEvent extends RuntimeToolEvent {
 export function filePublishedEvent(file: PublishedFile): FilePublishedEvent {
   return {
     type: "file.published",
-    file_id: file.id,
+    fileId: file.id,
     uri: file.uri,
     name: file.name,
     mime: file.mime,

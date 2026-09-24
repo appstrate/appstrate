@@ -339,7 +339,7 @@ export async function buildRunContext(params: {
 /**
  * Run-log `event` name for a declared-but-not-spawned integration. Stable
  * (an operator/API consumer can filter on it) and singular — one row per
- * dropped integration, so `data.integrationId` is never a list.
+ * dropped integration, so `data.integration_id` is never a list.
  */
 export const INTEGRATION_DROPPED_EVENT = "integration_dropped";
 
@@ -376,7 +376,7 @@ export async function recordDroppedIntegrations(
           " — its tools are unavailable to this run",
         {
           platform: true,
-          integrationId: entry.integrationId,
+          integration_id: entry.integrationId,
           reason: entry.reason,
           ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
         },
