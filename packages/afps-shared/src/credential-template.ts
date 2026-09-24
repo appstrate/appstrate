@@ -4,10 +4,7 @@
 /**
  * Canonical `{$credential.<field>}` value-template renderer — the SINGLE
  * source of truth. Consumers import this module directly; core no longer
- * publishes a `./credential-template` subpath (removed in core 6.0.0). The
- * only importer today is `apps/api/src/services/integration-manifest-helpers.ts`,
- * which re-exports it pre-bound to `emptyAs: "null"` for
- * `integration-spawn-resolver.ts`.
+ * publishes a `./credential-template` subpath (removed in core 6.0.0).
  *
  * AFPS `delivery.http` / `delivery.env` / `delivery.files` value templates
  * reference an auth's decrypted credential bag via the `{$credential.<field>}`
@@ -53,4 +50,31 @@ export function renderCredentialTemplate(
   const rendered = template.replace(CREDENTIAL_REF, (_m, field: string) => credential[field] ?? "");
   if (opts.emptyAs === "null") return rendered.length === 0 ? null : rendered;
   return rendered;
+}
+
+/** Field names referenced by `{$credential.<name>}` placeholders, in order, deduplicated. */
+export function credentialTemplateRefs(template: string): string[] {
+  return [...new Set(Array.from(template.matchAll(CREDENTIAL_REF), (m) => m[1]!))];
+}
+
+/** A rendered value may only be a literal host label run or port digits. */
+const AUTHORITY_VALUE = /^[A-Za-z0-9.-]+$/;
+
+/**
+ * Render `authorized_uris` for one connection. A pattern with no placeholder passes unchanged.
+ * A templated pattern is DROPPED when any referenced field is missing, empty, or not matching
+ * {@link AUTHORITY_VALUE}, so a value can never introduce `*`, `/`, `:`, `@`, `?`, `#` or
+ * whitespace. An empty result means deny-all.
+ */
+export function renderAuthorizedUris(
+  patterns: readonly string[],
+  fields: Readonly<Record<string, string>>,
+): string[] {
+  return patterns.flatMap((pattern) => {
+    const refs = credentialTemplateRefs(pattern);
+    const renderable = refs.every(
+      (ref) => Object.hasOwn(fields, ref) && AUTHORITY_VALUE.test(fields[ref]!),
+    );
+    return renderable ? [renderCredentialTemplate(pattern, fields)] : [];
+  });
 }

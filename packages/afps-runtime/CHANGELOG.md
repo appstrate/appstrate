@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — runner egress policy
+
+- `compileEgressPolicy({ authorizedUris, allowAllUris })` and the
+  `EgressPolicy` type, exported from `@appstrate/afps-runtime/resolvers`.
+  `allowsUrl(url)` applies the `matchesAuthorizedUriSpec` grammar to every
+  pattern; `allowsAuthority(host, port)` projects `scheme://` patterns onto
+  host + port (explicit port, else the scheme default: https/wss 443,
+  http/ws 80, ssh/sftp 22). Scheme-less patterns, unknown schemes without a
+  port, IPv6 hosts and invalid ports grant nothing.
+
 ### Changed — tool-result cap is a parameter, not an env read (BREAKING)
 
 - `truncateToolResult(result, limitBytes)` no longer reads

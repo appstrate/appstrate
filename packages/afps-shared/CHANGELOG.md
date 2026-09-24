@@ -12,12 +12,22 @@ consumer that raises its range — `scripts/verify-package-resolves.ts` installs
 the real tarball outside the monorepo, so an unpublished leaf fails the
 consumer's publish rather than the first user's `npm install`.
 
-## [0.9.0] — unreleased
+## [0.9.1] — unreleased
 
-Not yet on npm. `@appstrate/core` declares `^0.9.0` at HEAD, so **this version
-must be published (`git tag afps-shared@0.9.0`) before the next
-`@appstrate/core` release**, and `bun scripts/verify-package-resolves.ts
-packages/core` stays red until it is.
+Additive only. `@appstrate/core` declares `^0.9.1`, so tag `afps-shared@0.9.1`
+on the squash commit right after merge (`docs/deployment/RELEASING_CORE.md` §1).
+
+### Added
+
+- **`credentialTemplateRefs`** and **`renderAuthorizedUris`**
+  (`./credential-template`) — the field names a `{$credential.<field>}`
+  template references (in order, deduplicated), and the per-connection render
+  of `authorized_uris`: an untemplated pattern passes unchanged; a templated
+  one is dropped when any referenced field is missing, empty or outside
+  `[A-Za-z0-9.-]`, so a value can never widen the pattern. An empty result
+  means deny-all.
+
+## [0.9.0]
 
 Not additive: `normaliseMcpToolBody` changes behaviour (see Changed), which the
 0.x convention makes a minor bump.
