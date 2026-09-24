@@ -24,7 +24,7 @@ import { describe, it, expect } from "bun:test";
 import type { SchemaWrapper } from "@appstrate/core/form";
 import i18n, { i18nReady } from "../../i18n.ts";
 import agentsFr from "../../locales/fr/agents.json";
-import type { AgentInputSettings } from "../../lib/agent-input.ts";
+import type { AgentInputSettings } from "@appstrate/core/input-resolution";
 import { render } from "../../test/render.tsx";
 import { AgentInputForm } from "../agent-input-form.tsx";
 

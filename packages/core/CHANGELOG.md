@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`partitionInputFields`**, **`resolvedInputDefaults`**, **`AgentInputSettings`**
+  and **`InputFieldPartition`** (`@appstrate/core/input-resolution`, #1268) — an
+  agent's launch contract: split its input fields into `locked` (never sent, 400
+  `locked_input_field`), `prefilled` (author `default` or a stored per-space value)
+  and `prompted`, from the per-space `{ values, locked_fields }` wire shape. Moved
+  from the web app so the CLI's generated commands and the launch form apply the
+  same rule.
+
 - **`findNonSnakeCaseIdentityClaimKeys`** and **`IdentityClaimKeyViolation`**
   (`@appstrate/core/integration`, #1545) — list the `auths.{key}.identity_claims`
   keys and `connect.login.identity_outputs` names that are not snake_case, with
