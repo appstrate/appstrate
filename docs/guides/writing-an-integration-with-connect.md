@@ -692,11 +692,12 @@ connection field with `{$credential.<field>}`:
 "authorized_uris": ["ssh://{$credential.host}:{$credential.port}"]
 ```
 
-The field must be declared and listed in `credentials.schema.required`. Templates are
-refused on an `oauth2` auth, on an auth that declares `connect`, and on one exposing
-`api_call`. At run time a value
-containing anything but letters, digits, `.` and `-` drops the pattern, so a user can
-never widen it into a wildcard.
+The field must be declared and listed in `credentials.schema.required`, and the entry
+must start with `scheme://` with its placeholders in the host and port only (never in
+the path or query). Templates are refused on an `oauth2` auth, on an auth that declares
+`connect`, and on one exposing `api_call`. At run time a value containing anything but
+letters, digits, `.` and `-`, or made only of dots, drops the pattern, so a user cannot
+add a wildcard, a separator or another host.
 
 ---
 

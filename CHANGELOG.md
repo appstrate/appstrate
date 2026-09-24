@@ -46,10 +46,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   default (443, 80, 22 for ssh); `scheme://**` stays any host, any port. Each
   listener checks which runner is connecting, and the agent's forward proxy
   refuses runners. `mtls` runners now get the bounded CONNECT route. A pattern
-  may carry `{$credential.<field>}`, rendered per connection: the field must be
-  required, templates are refused on `connect`, `api_call` and `oauth2` auths,
-  a value outside host/port characters drops the pattern, and an empty result
-  denies everything. `@appstrate/ssh` 1.0.1 uses
+  may carry `{$credential.<field>}` in its host and port, rendered per
+  connection: the field must be required, templates are refused on `connect`,
+  `api_call` and `oauth2` auths, a value outside host/port characters (or only
+  dots) drops the pattern, and an empty result denies everything. `@appstrate/ssh` 1.0.1 uses
   `ssh://{$credential.host}:{$credential.port}` (`port` required, IPv4-only
   host). A runner that reached hosts outside its declared list now fails; a
   `uv` runner fetches its dependencies at startup through that egress, so its

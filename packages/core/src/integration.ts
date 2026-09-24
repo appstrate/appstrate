@@ -41,6 +41,9 @@ import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
 
+/** RFC 3986 `scheme://` prefix a templated authorized_uris entry must start with. */
+const TEMPLATE_SCHEME_PREFIX = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
+
 // ─────────────────────────────────────────────
 // Appstrate vendor extension: api_call (`_meta["dev.appstrate/api"]`)
 // ─────────────────────────────────────────────
@@ -252,7 +255,7 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     });
 
     // (1g) Templated authorized_uris entries (#1458) reference declared, required
-    // fields. Forbidden with `connect` and api_call (their hosts are pinned past
+    // fields, in the authority only. Forbidden with `connect` and api_call (their hosts are pinned past
     // the SSRF gate) and on oauth2 (a refresh keeps only tokens in the bundle).
     const credentialFields = credentialsSchema as
       { properties?: Record<string, unknown>; required?: unknown } | undefined;
@@ -262,6 +265,26 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       const refs = credentialTemplateRefs(pattern);
       if (refs.length === 0) return;
       const path = ["auths", authKey, "authorized_uris", index];
+      // Placeholders live in the authority only: a rendered `..` in a path would widen it.
+      const scheme = TEMPLATE_SCHEME_PREFIX.exec(pattern);
+      const afterScheme = scheme ? pattern.slice(scheme[0].length) : "";
+      const authorityEnd = afterScheme.search(/[/?#]/);
+      if (!scheme) {
+        ctx.addIssue({
+          code: "custom",
+          message: `authorized_uris entry "${pattern}" is templated without a scheme:// prefix; placeholders are only allowed in the host and port`,
+          path,
+        });
+      } else if (
+        authorityEnd !== -1 &&
+        credentialTemplateRefs(afterScheme.slice(authorityEnd)).length > 0
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          message: `authorized_uris entry "${pattern}" has a placeholder outside the authority; placeholders are only allowed in the host and port`,
+          path,
+        });
+      }
       if (auth.connect !== undefined) {
         ctx.addIssue({
           code: "custom",

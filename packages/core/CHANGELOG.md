@@ -89,8 +89,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`integrationManifestSchema`** (`@appstrate/core/integration`) validates
   templated `auths.{key}.authorized_uris` entries (`{$credential.<field>}`,
   rendered per connection by `renderAuthorizedUris`): every referenced field
-  must be a `credentials.schema` property listed in its `required`, and a
-  template is refused on an `oauth2` auth, on an auth declaring `connect` and
+  must be a `credentials.schema` property listed in its `required`, the entry
+  must start with `scheme://` and carry placeholders only in the host and
+  port, and a template is refused on an `oauth2` auth, on an auth declaring `connect` and
   on an auth exposing `api_call`.
   The private delivery-reference extractor now uses the shared
   `credentialTemplateRefs`. The `@appstrate/afps-shared` range moves to

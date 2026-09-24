@@ -23,9 +23,10 @@ on the squash commit right after merge (`docs/deployment/RELEASING_CORE.md` §1)
   (`./credential-template`) — the field names a `{$credential.<field>}`
   template references (in order, deduplicated), and the per-connection render
   of `authorized_uris`: an untemplated pattern passes unchanged; a templated
-  one is dropped when any referenced field is missing, empty or outside
-  `[A-Za-z0-9.-]`, so a value can never widen the pattern. An empty result
-  means deny-all.
+  one is dropped when any referenced field is missing, empty, outside
+  `[A-Za-z0-9.-]` or made only of dots, so a value cannot add a wildcard, a
+  separator or another host (`@appstrate/core` confines placeholders to the
+  host and port). An empty result means deny-all.
 
 ## [0.9.0]
 

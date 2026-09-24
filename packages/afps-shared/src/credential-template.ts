@@ -57,12 +57,13 @@ export function credentialTemplateRefs(template: string): string[] {
   return [...new Set(Array.from(template.matchAll(CREDENTIAL_REF), (m) => m[1]!))];
 }
 
-/** A rendered value may only be a literal host label run or port digits. */
-const AUTHORITY_VALUE = /^[A-Za-z0-9.-]+$/;
+/** A rendered value may only be a literal host label run or port digits, never dots alone. */
+const AUTHORITY_VALUE = /^(?!\.+$)[A-Za-z0-9.-]+$/;
 
 /**
  * Render `authorized_uris` for one connection (#1458). A templated pattern is DROPPED when a
- * referenced field fails {@link AUTHORITY_VALUE}, so a value can never widen the pattern.
+ * referenced field fails {@link AUTHORITY_VALUE}, so a value cannot add a wildcard, a separator
+ * or another host. Import validation confines placeholders to the host and port.
  */
 export function renderAuthorizedUris(
   patterns: readonly string[],

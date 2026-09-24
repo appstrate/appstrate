@@ -48,11 +48,28 @@ describe("renderAuthorizedUris", () => {
     expect(renderAuthorizedUris(["ssh://{$credential.constructor}"], {})).toEqual([]);
   });
 
-  for (const bad of ["*", "evil.com/x", "evil.com:1", "user@evil.com", "a b", "a?b", "a#b", "**"]) {
+  for (const bad of [
+    "*",
+    "evil.com/x",
+    "evil.com:1",
+    "user@evil.com",
+    "a b",
+    "a?b",
+    "a#b",
+    "**",
+    ".",
+    "..",
+  ]) {
     it(`drops a pattern whose value is ${JSON.stringify(bad)}`, () => {
       expect(renderAuthorizedUris([ssh], { host: bad, port: "22" })).toEqual([]);
     });
   }
+
+  it("drops a dot-only value that would widen a path", () => {
+    const tenant = "https://api.example.com/tenants/{$credential.t}/**";
+    expect(renderAuthorizedUris([tenant], { t: ".." })).toEqual([]);
+    expect(renderAuthorizedUris([tenant], { t: "." })).toEqual([]);
+  });
 
   it("keeps static entries and drops only the unrenderable templated ones", () => {
     const patterns = [

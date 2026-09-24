@@ -467,6 +467,34 @@ describe("integrationManifestSchema — templated authorized_uris", () => {
     expect(issues).toEqual([expect.stringContaining("forbidden on an auth exposing api_call")]);
   });
 
+  it("rejects a placeholder in the path", () => {
+    const issues = entryIssues(
+      sshLike({ authorized_uris: ["https://api.example.com/tenants/{$credential.host}/**"] }),
+    );
+    expect(issues).toEqual([expect.stringContaining("only allowed in the host and port")]);
+  });
+
+  it("rejects a placeholder in the query", () => {
+    const issues = entryIssues(
+      sshLike({ authorized_uris: ["https://api.example.com?t={$credential.host}"] }),
+    );
+    expect(issues).toEqual([expect.stringContaining("only allowed in the host and port")]);
+  });
+
+  it("rejects a templated entry without a scheme:// prefix", () => {
+    const issues = entryIssues(
+      sshLike({ authorized_uris: ["{$credential.host}:{$credential.port}"] }),
+    );
+    expect(issues).toEqual([expect.stringContaining("without a scheme:// prefix")]);
+  });
+
+  it("accepts placeholders in the host with a static path", () => {
+    const m = sshLike({
+      authorized_uris: ["https://{$credential.host}:{$credential.port}/api/**"],
+    });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+
   it("leaves untemplated entries unaffected on an api_call auth", () => {
     const m = sshLike(
       { authorized_uris: ["https://api.example.com/**"] },
