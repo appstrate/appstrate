@@ -84,18 +84,14 @@ services:
       timeout: 5s
       retries: 5
 
-  # Chainguard, NOT MinIO's own repositories: since 2026-09 an anonymous pull
-  # of quay.io/minio/* or Docker Hub minio/* answers "unauthorized", which
-  # fails the whole `docker compose pull` and therefore the whole deploy.
-  # Pinned by digest (MinIO RELEASE.2026-09-22T19-25-18Z) — Chainguard's free
-  # tier publishes only `latest`. The init container reuses the same image for
-  # its `mc` and `/bin/sh`. Refresh recipe: the `appstrate-minio` comment in
-  # the root docker-compose.yml. postgres and redis are official and stay.
+  # Chainguard, NOT MinIO's own registries: those require authentication, and
+  # a refused pull fails the whole `docker compose pull`, so the whole deploy.
+  # Pinned with the root docker-compose.yml's `appstrate-minio` (refresh
+  # recipe there); the init container reuses it for `mc` and `/bin/sh`. Runs
+  # as uid 65532: `miniodata` must be owned by it (deploy/README.md).
+  # postgres and redis are official and stay.
   appstrate-minio:
     image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
-    # Root, as the previous upstream image ran: the `miniodata` volume holds
-    # root-owned files the image's default uid (65532) cannot write.
-    user: "0:0"
     command: server /data --console-address ":9001"
     restart: unless-stopped
     mem_limit: 512m

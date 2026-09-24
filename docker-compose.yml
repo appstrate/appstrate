@@ -108,22 +108,25 @@ services:
   # setting S3_PUBLIC_ENDPOINT to a public MinIO domain.
   #
   # Image: Chainguard's MinIO build (MinIO RELEASE.2026-09-22T19-25-18Z).
-  # MinIO's own repositories (quay.io/minio/*, Docker Hub minio/*) refuse
-  # anonymous pulls since 2026-09. Chainguard's free tier publishes only
+  # MinIO's own registries (quay.io/minio/*, Docker Hub minio/*) require
+  # authentication; Chainguard serves this build anonymously, and only as
   # `latest`, so the ref pins the multi-arch index digest — `docker compose
   # pull` can never swap the storage engine under running data. The same
   # image serves `appstrate-minio-init`: it ships `mc` and `/bin/sh`, which
-  # `cgr.dev/chainguard/minio-client` (no shell) does not. To refresh, run
+  # `cgr.dev/chainguard/minio-client` (no shell) does not. It runs as uid
+  # 65532, so `/data` must be owned by 65532:65532: on root-owned files the
+  # server exits with "Unable to write to the backend" (the repair is under
+  # "Data Persistence" in examples/self-hosting/README.md).
+  #
+  # Every compose file pins this exact ref (scripts/test/minio-image-ref.test.ts
+  # fails while one differs). To refresh:
   #   docker pull cgr.dev/chainguard/minio:latest
   #   docker image inspect --format '{{index .RepoDigests 0}}' cgr.dev/chainguard/minio:latest
-  # and put the digest in EVERY compose file naming this image
-  # (`rg -l cgr.dev/chainguard/minio`), with the release from
-  # `docker run --rm cgr.dev/chainguard/minio:latest --version`.
+  #   docker run --rm cgr.dev/chainguard/minio:latest --version
+  # then replace the digest everywhere `rg -l cgr.dev/chainguard/minio@`
+  # lists (CHANGELOG entries excepted) and the release in this comment.
   appstrate-minio:
     image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
-    # Root, as the previous upstream image ran: volumes created by it hold
-    # root-owned files the image's default uid (65532) cannot write.
-    user: "0:0"
     networks:
       - appstrate-data
     command: server /data

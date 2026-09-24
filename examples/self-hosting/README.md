@@ -396,6 +396,24 @@ Three named volumes store persistent data:
 - `redisdata` -- Redis AOF/RDB snapshots
 - `miniodata` -- MinIO object storage
 
+MinIO runs as uid 65532, so `miniodata` must be owned by `65532:65532`. On
+root-owned files — a volume written by an image that ran as root, or restored
+as root — MinIO crash-loops with `FATAL Unable to initialize backend: Unable
+to write to the backend`. Re-own the volume once, with the stack stopped
+(`appstrate stop`); its full name is `<project>_miniodata`, listed by
+`docker volume ls --filter name=miniodata`. Snapshot it first if its data
+matters:
+
+```bash
+docker volume create <project>_miniodata_backup
+docker run --rm -v <project>_miniodata:/from:ro -v <project>_miniodata_backup:/to \
+  --user 0 --entrypoint cp cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 -a /from/. /to/
+docker run --rm -v <project>_miniodata:/data --user 0 --entrypoint chown \
+  cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 -R 65532:65532 /data
+```
+
+Then `appstrate start` (or `docker compose up -d`).
+
 To reset all data: `appstrate uninstall --purge` (or, raw:
 `docker compose down -v` from the install directory). Both destroy
 the named volumes — the Appstrate CLI form additionally removes the
