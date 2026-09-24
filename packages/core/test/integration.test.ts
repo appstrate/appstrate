@@ -604,8 +604,8 @@ describe("integrationManifestSchema — identity_claims JSONPath install gate", 
     expect(integrationManifestSchema.safeParse(withClaims({ a: "$.data[0].id" })).success).toBe(
       true,
     );
-    expect(errorPaths(withClaims({ accountId: "$..email" }))).toContain(
-      "auths.key.identity_claims.accountId",
+    expect(errorPaths(withClaims({ account_id: "$..email" }))).toContain(
+      "auths.key.identity_claims.account_id",
     );
   });
 });

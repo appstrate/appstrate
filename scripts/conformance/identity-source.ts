@@ -59,3 +59,43 @@ export function checkIdentitySource(entry: SystemPackageEntry): Finding[] {
     ];
   });
 }
+
+const KEYS_CHECK = "identity-claim-keys";
+const SNAKE_CASE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+
+interface IdentityKeysAuthShape {
+  identity_claims?: unknown;
+  connect?: { login?: { identity_outputs?: unknown } };
+}
+
+/**
+ * Every key that lands in a connection's `identity_claims` bag — the keys of
+ * `identity_claims` and the login engine's `identity_outputs`, promoted
+ * verbatim — is returned on the wire as-is, so it must be snake_case.
+ * `extractIdentity` keys the account on `account_id` only: a camelCase
+ * `accountId` would silently fall back to email/sub. Every auth type, FAIL.
+ */
+export function checkIdentityClaimKeys(entry: SystemPackageEntry): Finding[] {
+  const auths = entry.manifest.auths;
+  if (!auths || typeof auths !== "object") return [];
+  return Object.entries(auths as Record<string, IdentityKeysAuthShape>).flatMap(
+    ([authKey, auth]) => {
+      const claims = auth?.identity_claims;
+      const outputs = auth?.connect?.login?.identity_outputs;
+      const keys = [
+        ...(claims && typeof claims === "object" ? Object.keys(claims) : []),
+        ...(Array.isArray(outputs)
+          ? outputs.filter((o): o is string => typeof o === "string")
+          : []),
+      ];
+      return keys
+        .filter((key) => !SNAKE_CASE.test(key))
+        .map((key) => ({
+          packageId: entry.packageId,
+          check: KEYS_CHECK,
+          severity: "fail" as const,
+          message: `${authKey}: identity claim key '${key}' is not snake_case`,
+        }));
+    },
+  );
+}
