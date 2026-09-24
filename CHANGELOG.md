@@ -33,6 +33,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Their explicit endpoints still win; the issuer lets the conformance monitor
   verify them against Google's published metadata, which it reported as
   UNVERIFIED until now.
+- **`build:system-packages` (and its `--check`, in `bun run check`) fails on a
+  system package whose `schema_version` is not `AFPS_SCHEMA_VERSION`** (#1544).
+  Reading accepts any `0.x` on purpose, so nothing noticed the reference
+  manifests staying at `0.1`; the build lists every offender in one pass and
+  fails before touching `system-packages/`.
 
 ### Changed
 
@@ -396,6 +401,13 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   the upgrade are not rewritten. Module authors: `PlatformServices.audit.record`
   types `before` / `after` as `AuditPayload`, so a snake_case top-level key
   does not compile.
+- **The 69 system packages declare AFPS `schema_version: "0.3"`** (#1544), the
+  value every manifest the platform writes carries since #1542; they said
+  `0.1`, and they are the reference manifests authors copy. Content only, but a
+  published version is immutable, so 29 packages get a patch release (e.g.
+  `@appstrate/hubspot` 1.0.4, `@appstrate/github-git-mcp` 1.0.2) and the 40
+  already bumped in this release keep their version: each republishes once.
+  Dependents pin `^1.0.0`, unchanged.
 
 ### Removed
 

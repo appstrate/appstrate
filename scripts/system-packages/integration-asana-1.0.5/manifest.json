@@ -2,7 +2,7 @@
   "name": "@appstrate/asana",
   "version": "1.0.5",
   "type": "integration",
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "display_name": "Asana (API)",
   "description": "Work management platform for teams to organize and track projects",
   "keywords": ["project-management", "collaboration"],

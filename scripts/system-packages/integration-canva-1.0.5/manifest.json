@@ -2,7 +2,7 @@
   "name": "@appstrate/canva",
   "version": "1.0.5",
   "type": "integration",
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "display_name": "Canva (API)",
   "description": "Online graphic design and visual content platform",
   "keywords": ["design", "marketing"],

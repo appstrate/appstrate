@@ -2,7 +2,7 @@
   "name": "@appstrate/pinterest",
   "version": "1.0.5",
   "type": "integration",
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "display_name": "Pinterest (API)",
   "description": "Visual discovery and bookmarking platform",
   "keywords": ["social-media", "marketing"],

@@ -3,7 +3,7 @@
   "name": "@appstrate/ssh-mcp",
   "version": "1.0.1",
   "type": "mcp-server",
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "manifest_version": "0.3",
   "display_name": "SSH (MCP server)",
   "description": "MCP server backing @appstrate/ssh: shells out to the ssh/sftp clients baked into the bun runner image. The connection's Unix account is the security boundary — this server adds no allowlist of its own. Which of these tools an agent may call is granted per agent by the platform, and that is where 'read-only' lives: an agent without ssh_exec, ssh_write_file and ssh_edit_file cannot change the target.",
