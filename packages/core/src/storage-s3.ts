@@ -416,9 +416,7 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       // structurally identical but nominally distinct declarations. `S3Client`
       // is a valid argument at runtime; the cast bridges that type-identity gap
       // without widening to `any` (the command + options stay type-checked).
-      // The presigner hoists `x-amz-*` headers into the query string by default,
-      // and S3/MinIO do not verify a checksum carried there: a tampered body is
-      // accepted. Keeping it a signed HEADER makes the store check the bytes.
+      // A signed header, not a query param: S3/MinIO ignore a checksum in the query.
       const url = await getSignedUrl(
         presignClient as unknown as Parameters<typeof getSignedUrl>[0],
         cmd as unknown as Parameters<typeof getSignedUrl>[1],
