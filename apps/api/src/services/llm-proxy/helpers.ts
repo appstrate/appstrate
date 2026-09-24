@@ -4,8 +4,8 @@
  * Shared body-manipulation helpers for `/api/llm-proxy/*` adapters.
  *
  * Every protocol family the proxy supports today (OpenAI Chat
- * Completions, Anthropic Messages, Mistral Chat Completions) speaks JSON
- * with a top-level `model` and a `usage` object, and streams via SSE
+ * Completions, OpenAI Responses, Anthropic Messages, Mistral Chat Completions)
+ * speaks JSON with a top-level `model` and a `usage` object, and streams via SSE
  * `data: {…}` frames. The transport-level mechanics — JSON parse,
  * `body.model` rewrite, SSE frame extraction — are identical across
  * adapters. Centralising them here keeps each adapter focused on the
@@ -106,9 +106,8 @@ interface ParsedProxyRequest {
   /**
    * Produce a fresh body byte sequence with `model` swapped for
    * `upstreamModelId`. The optional `mutate` callback receives the parsed body
-   * right before re-encoding — the seam the protocol adapter uses to force
-   * usage reporting on (`LlmProxyAdapter.forceUsageReporting`). The rest of the
-   * payload is preserved.
+   * right before re-encoding — the seam the protocol adapter prepares it through
+   * (`LlmProxyAdapter.prepareRequest`). The rest of the payload is preserved.
    */
   rewriteModel(
     upstreamModelId: string,
@@ -159,6 +158,11 @@ export function extractUsageObject(body: unknown): Record<string, unknown> | nul
   return u as Record<string, unknown>;
 }
 
+/** Narrow an unknown value to a plain JSON object, or null. */
+export function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
 /** Coerce an unknown value into a finite number, or undefined. */
 function numberOrUndefined(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
@@ -191,4 +195,20 @@ export function parseSseDataFrame(chunk: string): unknown | null {
   const { frames } = parseSseFrames(chunk + "\n\n", "");
   const frame = frames[0];
   return frame ? parseSseJsonData(frame.data) : null;
+}
+
+/**
+ * Refuse a request setting any of `fields` (anything but absent, `null` or
+ * `false`): features the vendor bills outside this request's reported usage.
+ */
+export function refuseUnmeteredFields(
+  body: Record<string, unknown>,
+  fields: readonly string[],
+): void {
+  for (const field of fields) {
+    const value = body[field];
+    if (value !== undefined && value !== null && value !== false) {
+      throw invalidRequest(`\`${field}\` is not supported: its cost cannot be metered`, field);
+    }
+  }
 }

@@ -587,6 +587,117 @@ describe("POST /api/llm-proxy/mistral-conversations/v1/chat/completions", () => 
   });
 });
 
+describe("POST /api/llm-proxy/openai-responses/v1/responses", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+  });
+  afterEach(() => restoreFetch());
+
+  it("forwards to /v1/responses and meters the streamed response.completed usage", async () => {
+    const h = await buildHarness({
+      apiShape: "openai-responses",
+      baseUrl: "https://api.openai.test/v1",
+      modelId: "gpt-5.1-2025-11-13",
+    });
+
+    let captured: { url: string; headers: Headers; bodyBytes: Uint8Array } | null = null;
+    const frame = (type: string, rest: Record<string, unknown>) =>
+      `event: ${type}\ndata: ${JSON.stringify({ type, ...rest })}\n\n`;
+    const sseBody =
+      frame("response.created", {
+        response: { id: "resp_1", model: "gpt-5.1-2025-11-13", status: "in_progress", usage: null },
+      }) +
+      frame("response.output_text.delta", { item_id: "msg_1", delta: "ok" }) +
+      frame("response.completed", {
+        response: {
+          id: "resp_1",
+          model: "gpt-5.1-2025-11-13",
+          status: "completed",
+          usage: {
+            input_tokens: 100,
+            input_tokens_details: { cached_tokens: 30 },
+            output_tokens: 42,
+            output_tokens_details: { reasoning_tokens: 12 },
+            total_tokens: 142,
+          },
+        },
+      });
+
+    mockUpstream(async (input, init) => {
+      captured = {
+        url: typeof input === "string" ? input : (input as URL).toString(),
+        headers: new Headers(init?.headers as Record<string, string>),
+        bodyBytes: init?.body as Uint8Array,
+      };
+      return new Response(sseBody, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const res = await app.request("/api/llm-proxy/openai-responses/v1/responses", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, input: "hi", stream: true }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(sseBody);
+    expect(captured).not.toBeNull();
+    expect(captured!.url).toBe("https://api.openai.test/v1/responses");
+    expect(captured!.headers.get("authorization")).toBe("Bearer sk-upstream-42");
+    const forwardedBody = JSON.parse(new TextDecoder().decode(captured!.bodyBytes));
+    // Model substituted, `store` forced off; no chat-completions `stream_options`.
+    expect(forwardedBody).toEqual({
+      model: "gpt-5.1-2025-11-13",
+      input: "hi",
+      stream: true,
+      store: false,
+    });
+
+    const row = await waitForRow(() =>
+      db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId)).limit(1),
+    );
+    expect(row.api).toBe("openai-responses");
+    expect(row.inputTokens).toBe(70);
+    expect(row.outputTokens).toBe(42);
+    expect(row.cacheReadTokens).toBe(30);
+    // cost = 70×5/1M + 42×15/1M = 0.00035 + 0.00063
+    expect(row.costUsd).toBeCloseTo(0.00098, 6);
+  });
+});
+
+describe("POST /api/llm-proxy/openai-responses/v1/responses — unmetered features", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+  });
+  afterEach(() => restoreFetch());
+
+  it("refuses background mode with 400 naming the field, before any upstream call", async () => {
+    const h = await buildHarness({ apiShape: "openai-responses", modelId: "gpt-5.1-2025-11-13" });
+    let upstreamCalls = 0;
+    mockUpstream(async () => {
+      upstreamCalls++;
+      return new Response("{}", { status: 200 });
+    });
+
+    const res = await app.request("/api/llm-proxy/openai-responses/v1/responses", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, input: "hi", background: true }),
+    });
+
+    expect(res.status).toBe(400);
+    const problem = (await res.json()) as { code: string; param?: string };
+    expect(problem.code).toBe("invalid_request");
+    expect(problem.param).toBe("background");
+    expect(upstreamCalls).toBe(0);
+    expect(await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId))).toEqual([]);
+  });
+});
+
 /**
  * Response-level cache — `services/llm-proxy/response-cache.ts`. Opt-in
  * via `LLM_PROXY_CACHE_MODE`. Tests assert the cache contract

@@ -13,9 +13,12 @@
  * subscription wire format end-to-end.
  *
  * Wire format:
- *   - `anthropic-version` and `anthropic-beta` are forwarded verbatim
- *     from the caller so `prompt-caching-2024-07-31`, `extended-thinking`
- *     and similar beta headers pass through untouched.
+ *   - `anthropic-version` is forwarded verbatim. `anthropic-beta` keeps only
+ *     the betas Pi's own client sends (`PI_BETAS`): a beta can switch on a
+ *     feature billed outside the reported tokens, and an allowlist also
+ *     closes the ones Anthropic has not shipped yet. {@link prepareRequest}
+ *     refuses the billable body fields Pi never sends (`fallbacks`,
+ *     server-executed tools, a `service_tier` other than `standard_only`).
  *   - `cache_control` blocks in the request body MUST pass through
  *     unaltered — we only rewrite `body.model`, never touch `messages`,
  *     `system`, or `metadata`.
@@ -28,7 +31,26 @@
  */
 
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
-import { extractUsageObject, parseSseDataFrame, tokenCount } from "./helpers.ts";
+import { invalidRequest } from "../../lib/errors.ts";
+import {
+  asRecord,
+  extractUsageObject,
+  parseSseDataFrame,
+  refuseUnmeteredFields,
+  tokenCount,
+} from "./helpers.ts";
+
+/**
+ * pi-ai `getBetaFeatures` (`api/anthropic-messages.js`) for an API key under
+ * `PLATFORM_MODEL_COMPAT` — never its fallback or OAuth betas.
+ */
+const PI_BETAS: ReadonlySet<string> = new Set([
+  "fine-grained-tool-streaming-2025-05-14",
+  "interleaved-thinking-2025-05-14",
+  "mid-conversation-output-config-2026-07-01",
+  "thinking-binding-controls-2026-08-01",
+  "mid-conversation-tool-changes-2026-07-01",
+]);
 
 function readForwardedHeader(incoming: Headers, name: string): string | null {
   for (const [k, v] of incoming) {
@@ -46,8 +68,11 @@ export const anthropicMessagesAdapter: LlmProxyAdapter = {
       "x-api-key": apiKey,
     };
 
-    const callerBeta = readForwardedHeader(incoming, "anthropic-beta");
-    if (callerBeta) headers["anthropic-beta"] = callerBeta;
+    const betas = (readForwardedHeader(incoming, "anthropic-beta") ?? "")
+      .split(",")
+      .map((beta) => beta.trim())
+      .filter((beta) => PI_BETAS.has(beta));
+    if (betas.length > 0) headers["anthropic-beta"] = betas.join(",");
 
     // Default anthropic-version if the caller omitted one — upstream
     // returns 400 without it.
@@ -55,6 +80,23 @@ export const anthropicMessagesAdapter: LlmProxyAdapter = {
     headers["anthropic-version"] = callerVersion ?? "2023-06-01";
 
     return headers;
+  },
+
+  prepareRequest(body) {
+    refuseUnmeteredFields(body, ["fallbacks"]);
+    // `auto` may serve at priority-tier rates; Pi sends no tier (= standard).
+    const tier = body["service_tier"];
+    if (tier != null && tier !== "standard_only") {
+      throw invalidRequest("`service_tier` must be `standard_only`", "service_tier");
+    }
+    // A typed tool other than `custom` is Anthropic-defined; Pi declares none.
+    const tools = body["tools"];
+    if (
+      Array.isArray(tools) &&
+      tools.some((t) => (asRecord(t)?.["type"] ?? "custom") !== "custom")
+    ) {
+      throw invalidRequest("Only custom tools are supported", "tools");
+    }
   },
 
   parseJsonUsage(body) {

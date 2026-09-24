@@ -13,6 +13,9 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { buildPiModel, listPiModels } from "@appstrate/runner-pi/pi-model";
+import { captureRequest } from "../../../../packages/runner-pi/test/pi-payload.ts";
+import { ApiError } from "../../src/lib/errors.ts";
 import { openaiCompletionsAdapter } from "../../src/services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../../src/services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../../src/services/llm-proxy/mistral.ts";
@@ -214,13 +217,97 @@ describe("anthropicMessagesAdapter", () => {
     const headers = anthropicMessagesAdapter.buildUpstreamHeaders(
       new Headers({
         "anthropic-version": "2024-10-01",
-        "anthropic-beta": "prompt-caching-2024-07-31",
+        "anthropic-beta": "interleaved-thinking-2025-05-14",
       }),
       "sk-anthropic",
     );
     expect(headers["anthropic-version"]).toBe("2024-10-01");
-    expect(headers["anthropic-beta"]).toBe("prompt-caching-2024-07-31");
+    expect(headers["anthropic-beta"]).toBe("interleaved-thinking-2025-05-14");
   });
+
+  // A beta can switch on a feature billed outside the reported tokens (server
+  // fallbacks, MCP, premium context): only the betas Pi sends reach upstream.
+  it("forwards only the betas Pi itself sends", () => {
+    const headers = anthropicMessagesAdapter.buildUpstreamHeaders(
+      new Headers({
+        "anthropic-beta":
+          "server-side-fallback-2026-07-01, fine-grained-tool-streaming-2025-05-14,mcp-client-2025-04-04",
+      }),
+      "sk-anthropic",
+    );
+    expect(headers["anthropic-beta"]).toBe("fine-grained-tool-streaming-2025-05-14");
+    const none = anthropicMessagesAdapter.buildUpstreamHeaders(
+      new Headers({ "anthropic-beta": "context-1m-2025-08-07" }),
+      "sk-anthropic",
+    );
+    expect(none["anthropic-beta"]).toBeUndefined();
+  });
+
+  function refusedParam(body: Record<string, unknown>): string | undefined {
+    try {
+      anthropicMessagesAdapter.prepareRequest!(body);
+    } catch (err) {
+      if (err instanceof ApiError) return err.param ?? "(none)";
+      throw err;
+    }
+    return undefined;
+  }
+
+  it("refuses server-side fallbacks and server-executed tools", () => {
+    const base = { model: "p", max_tokens: 10, messages: [] };
+    expect(refusedParam({ ...base, fallbacks: [{ model: "claude-opus-5" }] })).toBe("fallbacks");
+    expect(
+      refusedParam({ ...base, tools: [{ type: "web_search_20250305", name: "web_search" }] }),
+    ).toBe("tools");
+    expect(
+      refusedParam({
+        ...base,
+        tools: [
+          { name: "search", input_schema: { type: "object" } },
+          { type: "custom", name: "echo", input_schema: { type: "object" } },
+        ],
+      }),
+    ).toBeUndefined();
+  });
+
+  // `auto` may serve (and bill) at priority-tier rates the proxy meters at standard.
+  it("refuses any service_tier but standard_only", () => {
+    const base = { model: "p", max_tokens: 10, messages: [] };
+    expect(refusedParam({ ...base, service_tier: "auto" })).toBe("service_tier");
+    expect(refusedParam({ ...base, service_tier: "priority" })).toBe("service_tier");
+    for (const service_tier of ["standard_only", null, undefined]) {
+      expect(refusedParam({ ...base, service_tier })).toBeUndefined();
+    }
+  });
+
+  // What Pi puts on the wire for every Anthropic record, platform-built (as
+  // chat and llm-proxy presets build it), with a tool and with thinking.
+  it("lets a Pi-built request through unchanged", async () => {
+    const records = listPiModels("anthropic", "anthropic-messages");
+    expect(records.length).toBeGreaterThan(0);
+    const betasSent = new Set<string>();
+    for (const record of records) {
+      const model = buildPiModel({
+        id: "preset",
+        registryModelId: record.id,
+        apiShape: "anthropic-messages",
+        piProvider: "anthropic",
+        baseUrl: "http://127.0.0.1",
+      });
+      for (const reasoning of [undefined, "medium"] as const) {
+        const { headers, body } = await captureRequest(model, reasoning);
+        const prepared = structuredClone(body);
+        anthropicMessagesAdapter.prepareRequest!(prepared);
+        expect(prepared).toEqual(body);
+        const beta = headers.get("anthropic-beta");
+        const forwarded = anthropicMessagesAdapter.buildUpstreamHeaders(headers, "sk-anthropic");
+        expect(forwarded["anthropic-beta"] ?? null).toBe(beta);
+        for (const sent of beta?.split(",") ?? []) betasSent.add(sent);
+      }
+    }
+    // The header comparison above is not vacuous.
+    expect(betasSent.size).toBeGreaterThan(0);
+  }, 30_000);
 
   // Note: the Anthropic OAuth (sk-ant-oat-…) code path that previously
   // injected subscription identity headers + required betas was removed
@@ -230,7 +317,7 @@ describe("anthropicMessagesAdapter", () => {
   // x-api-key treatment, which Anthropic rejects at the API layer.
   it("treats every token form as x-api-key (no Authorization header is ever set)", () => {
     const headers = anthropicMessagesAdapter.buildUpstreamHeaders(
-      new Headers({ "anthropic-beta": "prompt-caching-2024-07-31" }),
+      new Headers({ "anthropic-beta": "interleaved-thinking-2025-05-14" }),
       "sk-ant-api03-AbCd",
     );
     expect(headers["x-api-key"]).toBe("sk-ant-api03-AbCd");
@@ -238,7 +325,7 @@ describe("anthropicMessagesAdapter", () => {
     expect(headers["x-app"]).toBeUndefined();
     expect(headers["user-agent"]).toBeUndefined();
     // Caller's beta forwarded as-is, no OAuth markers.
-    expect(headers["anthropic-beta"]).toBe("prompt-caching-2024-07-31");
+    expect(headers["anthropic-beta"]).toBe("interleaved-thinking-2025-05-14");
   });
 
   it("parses non-streaming JSON usage with cache tokens", () => {
@@ -386,5 +473,31 @@ describe("mistralConversationsAdapter", () => {
         `data: [DONE]`,
       ]),
     ).toBeNull();
+  });
+});
+
+describe("openaiCompletionsAdapter — request guard", () => {
+  function guard(extra: Record<string, unknown>): void {
+    openaiCompletionsAdapter.prepareRequest?.({ model: "m", messages: [], ...extra });
+  }
+
+  it("refuses server-side model fallbacks, which bill a model the proxy does not price", () => {
+    for (const [field, value] of [
+      ["models", ["openai/gpt-5", "anthropic/claude-opus-5"]],
+      ["route", "fallback"],
+    ] as const) {
+      try {
+        guard({ [field]: value });
+        throw new Error(`${field} was not refused`);
+      } catch (err) {
+        const e = err as { status?: number; param?: string };
+        expect(e.status).toBe(400);
+        expect(e.param).toBe(field);
+      }
+    }
+  });
+
+  it("accepts an ordinary chat-completions body", () => {
+    expect(() => guard({ stream: true, tools: [{ type: "function" }] })).not.toThrow();
   });
 });

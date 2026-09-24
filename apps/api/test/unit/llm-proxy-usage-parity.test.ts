@@ -6,11 +6,11 @@
  * The identical provider response is parsed twice in this product:
  *
  *   - by the platform proxy adapter (`llm-proxy/openai.ts`), for remote runs and
- *     chat's proxy-routed turns — the result is priced by `computeTokenCost` and
- *     written to `llm_usage`;
+ *     chat's proxy-routed turns — the result is priced by Pi's `calculateCost`
+ *     (`services/token-cost.ts`) and written to `llm_usage`;
  *   - by `@earendil-works/pi-ai` (`dist/api/openai-completions.js`,
  *     `parseChunkUsage`), for every platform-side Pi run — the result is priced
- *     by the SAME `computeTokenCost` and reaches `llm_usage` through the
+ *     by the SAME `calculateCost` and reaches `llm_usage` through the
  *     `appstrate.metric` side channel.
  *
  * The four buckets are billed at four different rates, so any disagreement means
@@ -23,6 +23,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { openaiCompletionsAdapter } from "../../src/services/llm-proxy/openai.ts";
+import { openaiResponsesAdapter } from "../../src/services/llm-proxy/openai-responses.ts";
 import { computeCostUsd } from "../../src/services/llm-proxy/metering.ts";
 
 /** The four disjoint buckets, in the platform's own vocabulary. */
@@ -208,6 +209,99 @@ describe("openai-compatible usage parity: platform proxy vs pi-ai (runner)", () 
     expect(normalizedSource).toContain("rawUsage.prompt_tokens_details?.cache_write_tokens || 0");
     expect(normalizedSource).toContain(
       "Math.max(0, promptTokens - cacheReadTokens - cacheWriteTokens)",
+    );
+  });
+});
+
+/**
+ * pi-ai's Responses-API normalisation, transcribed from `finalizeResponse` in
+ * `node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js`,
+ * which the `openai-responses` runner path uses:
+ *
+ *   const cachedTokens = inputDetails?.cached_tokens || 0;
+ *   const cacheWriteTokens = inputDetails?.cache_write_tokens || 0;
+ *   input: Math.max(0, (response.usage.input_tokens || 0) - cachedTokens - cacheWriteTokens),
+ *   output: response.usage.output_tokens || 0,
+ */
+function piAiResponsesReference(raw: Record<string, unknown>): Buckets {
+  const details = raw["input_tokens_details"] as Record<string, number | undefined> | undefined;
+  const cachedTokens = details?.cached_tokens || 0;
+  const cacheWriteTokens = details?.cache_write_tokens || 0;
+  return {
+    input: Math.max(
+      0,
+      ((raw["input_tokens"] as number | undefined) || 0) - cachedTokens - cacheWriteTokens,
+    ),
+    output: (raw["output_tokens"] as number | undefined) || 0,
+    cacheRead: cachedTokens,
+    cacheWrite: cacheWriteTokens,
+  };
+}
+
+function platformResponsesBuckets(raw: Record<string, unknown>): Buckets {
+  const usage = openaiResponsesAdapter.parseJsonUsage({ usage: raw });
+  if (!usage) throw new Error("adapter returned no usage for a usage-bearing payload");
+  return {
+    input: usage.inputTokens,
+    output: usage.outputTokens,
+    cacheRead: usage.cacheReadTokens ?? 0,
+    cacheWrite: usage.cacheWriteTokens ?? 0,
+  };
+}
+
+const responsesCases: { name: string; usage: Record<string, unknown> }[] = [
+  { name: "no cache details", usage: { input_tokens: 1_200, output_tokens: 300 } },
+  {
+    name: "cached input + reasoning output",
+    usage: {
+      input_tokens: 1_500,
+      input_tokens_details: { cached_tokens: 1_024 },
+      output_tokens: 320,
+      output_tokens_details: { reasoning_tokens: 128 },
+      total_tokens: 1_820,
+    },
+  },
+  {
+    name: "cache reads and writes",
+    usage: {
+      input_tokens: 10_000,
+      input_tokens_details: { cached_tokens: 6_000, cache_write_tokens: 3_000 },
+      output_tokens: 50,
+    },
+  },
+  {
+    name: "reported zero cached tokens",
+    usage: { input_tokens: 42, input_tokens_details: { cached_tokens: 0 }, output_tokens: 7 },
+  },
+];
+
+describe("openai-responses usage parity: platform proxy vs pi-ai (runner)", () => {
+  for (const { name, usage } of responsesCases) {
+    it(`agrees on all four buckets — ${name}`, () => {
+      expect(platformResponsesBuckets(usage)).toEqual(piAiResponsesReference(usage));
+    });
+  }
+
+  it("library formula unchanged — the transcription above still matches node_modules", async () => {
+    const source = await Bun.file(
+      new URL(
+        "../../../../node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js",
+        import.meta.url,
+      ),
+    ).text();
+    const normalizedSource = source.replace(/\s+/g, " ");
+
+    expect(normalizedSource).toContain("const cachedTokens = inputDetails?.cached_tokens || 0;");
+    expect(normalizedSource).toContain(
+      "const cacheWriteTokens = inputDetails?.cache_write_tokens || 0;",
+    );
+    expect(normalizedSource).toContain(
+      "input: Math.max(0, (response.usage.input_tokens || 0) - cachedTokens - cacheWriteTokens)",
+    );
+    expect(normalizedSource).toContain("output: response.usage.output_tokens || 0,");
+    // The events whose `response.usage` pi-ai finalizes — the adapter meters both.
+    expect(normalizedSource).toContain(
+      'event.type === "response.completed" || event.type === "response.incomplete"',
     );
   });
 });

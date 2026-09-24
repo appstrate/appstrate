@@ -9,8 +9,9 @@
  *     encoding would make the caller re-decode plaintext → ZlibError);
  *   - tap the teed SSE stream to extract usage WITHOUT buffering the whole
  *     response;
- *   - insert a usage row whose cost is Σ(tokens × cost/1e6), handing transient
- *     DB failures to the durable usage-retry queue.
+ *   - insert a usage row priced by Pi's `calculateCost` for this ONE request
+ *     (price tiers honoured), handing transient DB failures to the durable
+ *     usage-retry queue.
  *
  * Accounting invariant: EVERY 2xx upstream reply produces exactly one ledger
  * row. When usage cannot be parsed (interrupted SSE tap, non-JSON body, a
@@ -21,11 +22,12 @@
 
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { computeTokenCost } from "@appstrate/afps-runtime/runner";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
 import { resolvePricingStatus } from "../pricing-provenance.ts";
+import { requestCostUsd } from "../token-cost.ts";
 import type { LlmUsageEntry } from "../llm-usage-ledger.ts";
 import type { ModelCost } from "@appstrate/core/module";
+import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 import {
   swapResponseModelJson,
@@ -41,8 +43,14 @@ import {
 } from "@appstrate/connect/proxy-primitives";
 import type { ResolvedModel } from "../org-models.ts";
 import { storeResponse } from "./response-cache.ts";
-import { LLM_STREAM_IDLE_TIMEOUT_MS } from "./helpers.ts";
+import { asRecord, LLM_STREAM_IDLE_TIMEOUT_MS } from "./helpers.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.ts";
+
+/** A top-level `error` object, not beside generated `choices` (the SSE swap's rule). */
+function isErrorBody(body: unknown): boolean {
+  const o = asRecord(body);
+  return o !== null && asRecord(o["error"]) !== null && !("choices" in o);
+}
 
 /** Clone upstream response headers, dropping hop-by-hop + stale content encoding/length. */
 const cloneResponseHeaders = stripUpstreamResponseHeaders;
@@ -104,16 +112,28 @@ function syntheticAliasErrorResponse(
  */
 const MAX_RETAINED_USAGE_FRAMES = 64;
 
+/** Default of `LLM_PROXY_LIMITS.max_request_bytes`. */
+export const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
+
 /**
- * Upper bound on the partial-frame buffer held by {@link tapSseUsage} between
- * SSE delimiters. A malformed / adversarial upstream that never emits the
- * `\n\n` frame delimiter would otherwise accumulate the whole response into a
- * single unbounded string (memory-exhaustion DoS, one per in-flight stream).
- * Usage frames are a few hundred bytes; 1 MB is orders of magnitude of
- * headroom, so exceeding it means the pending fragment is not a usage frame
- * and can be safely discarded.
+ * Output a terminal frame may add to what the request sent: ≥ 128k output
+ * tokens of text and encrypted reasoning, JSON-escaped. Server tools, which
+ * would inflate it, are refused by the adapters.
  */
-const MAX_TAP_BUFFER_BYTES = 1_000_000;
+const TERMINAL_FRAME_OUTPUT_MARGIN = 4 * 1024 * 1024;
+
+/**
+ * Largest SSE frame {@link tapSseUsage} buffers whole. A terminal frame may
+ * repeat the request (OpenAI Responses echoes instructions and tools) plus the
+ * output, so the bound follows the request limit; above it the frame is
+ * dropped, never guessed at, and the call is metered as unparsed.
+ */
+export function usageFrameBound(maxRequestBytes: number): number {
+  return maxRequestBytes + TERMINAL_FRAME_OUTPUT_MARGIN;
+}
+
+/** Upstream error-body excerpt kept in server logs (chars). */
+export const UPSTREAM_ERROR_LOG_CHARS = 2048;
 
 /**
  * Tap a teed SSE stream and extract usage WITHOUT retaining the full response
@@ -136,11 +156,18 @@ const MAX_TAP_BUFFER_BYTES = 1_000_000;
 export async function tapSseUsage(
   stream: ReadableStream<Uint8Array>,
   adapter: LlmProxyAdapter,
-  idleTimeoutMs: number = LLM_STREAM_IDLE_TIMEOUT_MS,
+  {
+    maxFrameChars = usageFrameBound(DEFAULT_MAX_REQUEST_BYTES),
+    idleTimeoutMs = LLM_STREAM_IDLE_TIMEOUT_MS,
+  }: { maxFrameChars?: number; idleTimeoutMs?: number } = {},
 ): Promise<UpstreamUsage | null> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  /** Where the next delimiter search starts: the buffer before it holds none. */
+  let scanFrom = 0;
+  /** True while discarding a frame above `maxFrameChars`, up to its delimiter. */
+  let dropping = false;
   const usageFrames: string[] = [];
   const considerFrame = (frame: string): void => {
     if (adapter.parseSseUsage([frame]) === null) return;
@@ -170,16 +197,24 @@ export async function tapSseUsage(
       // Split on SSE frame delimiter (blank line). Keep the tail in the
       // buffer until the next chunk — a frame may straddle chunks.
       let idx: number;
-      while ((idx = buffer.indexOf("\n\n")) !== -1) {
-        considerFrame(buffer.slice(0, idx));
+      while ((idx = buffer.indexOf("\n\n", scanFrom)) !== -1) {
+        if (!dropping) considerFrame(buffer.slice(0, idx));
+        dropping = false;
         buffer = buffer.slice(idx + 2);
+        scanFrom = 0;
       }
-      // Bound the pending partial-frame buffer: a stream with no frame
-      // delimiter must not grow the buffer without limit. A usage frame is
-      // tiny, so an over-cap fragment is non-usage data — drop it.
-      if (buffer.length > MAX_TAP_BUFFER_BYTES) buffer = "";
+      scanFrom = Math.max(0, buffer.length - 1);
+      if (buffer.length > maxFrameChars) {
+        logger.warn("llm-proxy: SSE frame above the usage-frame bound — dropped", {
+          maxFrameChars,
+        });
+        // The last char may be the first half of the delimiter.
+        buffer = buffer.slice(-1);
+        scanFrom = 0;
+        dropping = true;
+      }
     }
-    if (buffer.trim().length > 0) considerFrame(buffer);
+    if (!dropping && buffer.trim().length > 0) considerFrame(buffer);
   } catch (err) {
     logger.warn("llm-proxy: stream tap read failed — usage not recorded", {
       error: getErrorMessage(err),
@@ -248,26 +283,17 @@ export async function recordProxyUsage(
   const usage: UpstreamUsage = inputs.usage ?? { inputTokens: 0, outputTokens: 0 };
 
   // Provenance of the cost below, classified from the SAME inputs the cost is
-  // computed from. The `usage-unparsed:` row is classified identically, on
-  // purpose: `pricing_status` answers "did the platform have rates for this
-  // model", which is orthogonal to "could the reply's usage be parsed". The two
-  // failures must stay separable — the parse gap already has its own marker on
-  // `request_id` (see {@link UNPARSED_USAGE_REQUEST_ID_PREFIX}), so folding it
-  // into this column would destroy one signal to restate another. A zero-token
-  // row on an unpriced model is therefore `unpriced`, which is the honest
-  // reading: no rates existed, whatever the token counts turned out to be.
-  const pricingStatus = resolvePricingStatus({
-    orgId: inputs.principal.orgId,
-    model: inputs.presetId,
-    usage: {
-      input_tokens: usage.inputTokens,
-      output_tokens: usage.outputTokens,
-      cache_read_input_tokens: usage.cacheReadTokens ?? 0,
-      cache_creation_input_tokens: usage.cacheWriteTokens ?? 0,
-    },
-    cost: inputs.resolved.cost ?? null,
-    context: { source: "proxy", runId: inputs.runId, realModel: inputs.resolved.modelId },
-  });
+  // computed from. An unparsed row is `unpriced` whatever the rates: its $0
+  // prices nothing the vendor billed.
+  const pricingStatus = unparsed
+    ? "unpriced"
+    : resolvePricingStatus({
+        orgId: inputs.principal.orgId,
+        model: inputs.presetId,
+        usage: toTokenUsage(usage),
+        cost: inputs.resolved.cost ?? null,
+        context: { source: "proxy", runId: inputs.runId, realModel: inputs.resolved.modelId },
+      });
 
   await writeEntry({
     source: "proxy",
@@ -304,19 +330,18 @@ export async function recordProxyUsage(
   });
 }
 
+function toTokenUsage(usage: UpstreamUsage): TokenUsage {
+  return {
+    input_tokens: usage.inputTokens,
+    output_tokens: usage.outputTokens,
+    cache_read_input_tokens: usage.cacheReadTokens ?? 0,
+    cache_creation_input_tokens: usage.cacheWriteTokens ?? 0,
+  };
+}
+
+/** USD cost of ONE upstream request — each proxy row is one, so price tiers apply. */
 export function computeCostUsd(usage: UpstreamUsage, cost: ModelCost | null): number {
-  // Delegate to the shared per-token formula (`@appstrate/afps-runtime/runner`)
-  // so the proxy meter and the codex runner can't drift (D1). `UpstreamUsage`
-  // is camelCase; map it onto the snake_case `TokenUsage` the helper consumes.
-  return computeTokenCost(
-    {
-      input_tokens: usage.inputTokens,
-      output_tokens: usage.outputTokens,
-      cache_read_input_tokens: usage.cacheReadTokens ?? 0,
-      cache_creation_input_tokens: usage.cacheWriteTokens ?? 0,
-    },
-    cost,
-  );
+  return requestCostUsd(toTokenUsage(usage), cost);
 }
 
 /** Per-call metering context for {@link forwardMeteredResponse}. */
@@ -330,6 +355,8 @@ export interface MeteredForwardContext {
   resolved: ResolvedModel;
   /** `Date.now()` captured just before the upstream fetch (for `durationMs`). */
   started: number;
+  /** Platform `Request-Id`, for the upstream-error log. */
+  requestId: string;
 }
 
 /** Per-call knobs of {@link forwardMeteredResponse}. */
@@ -358,6 +385,8 @@ interface MeteredForwardOptions {
    * could not parse usage, which is what makes a paid call impossible to lose.
    */
   recordUsage?: (inputs: RecordUsageInputs) => Promise<void>;
+  /** Largest SSE frame the usage tap buffers ({@link usageFrameBound}). */
+  maxFrameChars?: number;
 }
 
 /** `controller.close()` throws if the stream is already closed/errored (e.g. the
@@ -522,20 +551,25 @@ export async function forwardMeteredResponse(
   // construction); the upstream detail stays in server logs only.
   if (!upstream.ok) {
     const errorBody = await upstream.text();
+    const logFields = {
+      requestId: ctx.requestId,
+      apiShape: adapter.apiShape,
+      status: upstream.status,
+      runId: ctx.runId,
+      orgId: ctx.principal.orgId,
+      presetId: ctx.presetId,
+      bodySample: errorBody.slice(0, UPSTREAM_ERROR_LOG_CHARS),
+    };
     if (swap) {
       return syntheticAliasErrorResponse(
         swap,
         upstream.headers,
         upstream.status,
         "llm-proxy: upstream error on aliased model — synthesized envelope",
-        {
-          status: upstream.status,
-          presetId: ctx.presetId,
-          runId: ctx.runId,
-          bodySample: errorBody.slice(0, 200),
-        },
+        logFields,
       );
     }
+    logger.warn("llm-proxy: upstream error", logFields);
     return new Response(errorBody, {
       status: upstream.status,
       headers: cloneResponseHeaders(upstream.headers),
@@ -545,7 +579,7 @@ export async function forwardMeteredResponse(
   const isSse = (upstream.headers.get("content-type") ?? "").includes("text/event-stream");
   if (isSse && upstream.body) {
     const [clientStream, tapStream] = upstream.body.tee();
-    void tapSseUsage(tapStream, adapter)
+    void tapSseUsage(tapStream, adapter, { maxFrameChars: options.maxFrameChars })
       .then(meter)
       .catch((err: unknown) => {
         // The tap is out-of-band of the client stream. Direct DB failures are
@@ -622,6 +656,23 @@ export async function forwardMeteredResponse(
   // retry enqueue) removes the observable race. Streaming uses `void`
   // deliberately — its bytes are already on the wire.
   await meter(adapter.parseJsonUsage(parsed));
+
+  // A 2xx can still carry an error (OpenAI Responses `status: "failed"`), whose
+  // prose names the backing: under a swap it gets the error envelope too.
+  if (swap && isErrorBody(parsed)) {
+    return syntheticAliasErrorResponse(
+      swap,
+      upstream.headers,
+      502,
+      "llm-proxy: error body in a 2xx on aliased model — synthesized envelope",
+      {
+        status: upstream.status,
+        presetId: ctx.presetId,
+        runId: ctx.runId,
+        bodySample: bodyText.slice(0, UPSTREAM_ERROR_LOG_CHARS),
+      },
+    );
+  }
 
   const headers = buildClientHeaders(upstream.headers, swap);
   // Rewrite the echoed real id back to the alias BEFORE the body leaves the
