@@ -190,7 +190,7 @@ function CredentialFormBody({
           apiShape: testApiShape,
           base_url: testBaseUrl,
           ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
-          ...(credential ? { existing_key_id: credential.id } : {}),
+          ...(credential ? { credentialId: credential.id } : {}),
         },
       },
       {

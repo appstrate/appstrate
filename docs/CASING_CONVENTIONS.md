@@ -216,7 +216,7 @@ The profile/member family stays camelCase as a fixed set of names:
 | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `POST /api/model-provider-credentials` body                    | `providerId` (4e)                                                                                                                                   | `label`, `api_key`, `base_url_override`                                                                                                                            |
 | `PATCH /api/model-provider-credentials/{id}` body              | —                                                                                                                                                   | `label`, `api_key`                                                                                                                                                 |
-| `POST /api/model-provider-credentials/test` body               | `apiShape` (4e)                                                                                                                                     | `base_url`, `api_key`, `existing_key_id`                                                                                                                           |
+| `POST /api/model-provider-credentials/test` body               | `apiShape` (4e), `credentialId` (5c)                                                                                                                | `base_url`, `api_key`                                                                                                                                              |
 | `POST /api/model-provider-credentials/discover` body           | `providerId` (4e), `credentialId` (5c)                                                                                                              | `api_key`, `base_url_override`                                                                                                                                     |
 | `ModelProviderCredential`                                      | `id`, `apiShape`, `authMode`, `providerId`, `createdAt`, `updatedAt`                                                                                | `label`, `base_url`, `source`, `oauth_email`, `needs_reconnection`, `available_model_ids`, `created_by`                                                            |
 | `POST /api/model-provider-credentials/{id}/refresh-models` 200 | —                                                                                                                                                   | `outcome`, `candidate_count`, `available_model_ids`                                                                                                                |
@@ -267,7 +267,7 @@ When adding a JSONB column, decide up front which of the three it is. If a route
 
 **Files**: `apps/api/src/services/realtime.ts` (`snakeToCamel`), `packages/shared-types/src/realtime-events.ts` (the Zod schema of every frame, validated on emit and on receipt).
 
-**Rule**: SSE frames are camelCase at the top level. PG NOTIFY payloads are snake_case (they match the SQL columns); `realtime.ts` camelizes them **shallowly** before broadcast, so nested objects keep their own casing (`tokenUsage: { input_tokens, … }`, and a `run_log` frame's `data` is the `run_logs.data` JSONB with its Zone 1 keys).
+**Rule**: SSE frames are camelCase at the top level. PG NOTIFY payloads are snake_case (they match the SQL columns); `realtime.ts` camelizes them **shallowly** before broadcast, so nested objects keep their own casing (`tokenUsage: { input_tokens, … }`, and a `run_log` frame's `data` is the `run_logs.data` JSONB with its producer's keys (4g)).
 
 **Channels**:
 
@@ -433,11 +433,11 @@ SSE Run payload is camelCase (per Carve-out 4h). REST Run payload mixes snake_ca
 - the space package (`space_package` on `/api/spaces/{spaceId}/packages*`, and its `PATCH` body): `modelId`, `proxyId` — beside the snake_case `generation_config`
 - `ResolvedRunConfig` (`GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`): `modelId`, `proxyId`, beside `generation` and `input`
 - the run-launch bodies (`POST /api/agents/{scope}/{name}/run`, `POST /api/runs/inline` and `/inline/validate`): `modelId`, `proxyId`; the chat body (`POST /api/chat`): `modelId`
-- the model-provider family (4e table): `credentialId` on the discover and pairing bodies, the pairing status and the redeem response
+- the model-provider family (4e table): `credentialId` on the inline-test, discover and pairing bodies, the pairing status and the redeem response
 
 **Same name, different fact**: on `OrgModel`, its create/`PATCH` bodies and the `POST /api/models/test` body, `modelId` is the UPSTREAM provider model id (`gpt-4o`, …) that an org model binds — not the org model id (`OrgModel.id`) that `PUT /api/models/default`, the run-launch and chat bodies, `space_package` and `/api/agents/{scope}/{name}/model` call `modelId`. Only the spelling is shared.
 
-**Other names are Zone 1**: a schedule's overrides are `model_id_override`, `proxy_id_override`, `version_override`; `/api/models/test` takes `existing_model_id` next to its 5c ids. The MCP `run_and_wait` tool takes no model or proxy.
+**Other names are Zone 1**: a schedule's overrides are `model_id_override`, `proxy_id_override`, `version_override`; `/api/models/test` names the org model whose stored key it falls back to `existing_model_id`, because `modelId` in that body already holds the upstream id (above). The MCP `run_and_wait` tool takes no model or proxy.
 
 **Why**: one fact, one spelling. The same id travels from the space package to `run-config` to a launch body; two spellings of it are the drift this document exists to prevent. They are not 4b names because they are not DB-convention columns shared across tables. A new field holding one of these ids uses the same name.
 
@@ -561,7 +561,7 @@ Authority: `afps-spec/packages/schema/src/schemas.ts`; Appstrate extensions are 
 
 **Integration DTO domain fields** (snake_case): `scopes_granted`, `needs_reconnection`, `owner_type`, `owner_name`, `auth_key`, `account_id`, `shared_with_org`, `identity_claims`, `block_user_connections`, `has_oauth_client`, `has_client_secret`, `redirect_uri`, `missing_scopes`, `resolved_missing_scopes`, `resolved_owned_by_actor`, `org_default_enforced`, `can_add_connection`, `tool_catalog`, `required_scopes`, `source_id`, `source_type`, `client_id`, `client_secret`, `client_secret_hash`, `client_type`, `allowed_scopes`, `connected_at`, `force_account_select`, `connection_id`, `integration_id`, `integration_package_id`, `agent_package_id`, `admin_pinned_connection_id`, `member_pinned_connection_id`, `org_default_connection_id`, `resolved_connection_id`, `owner_id`, `owner_user_id`, `owner_end_user_id`, `is_own`, `connections_used[].{integration_id, label, account_id, source}`
 
-**Model-provider family** (4e): the per-object table under Carve-out 4e — `api_key`, `base_url`, `base_url_override`, `existing_key_id`, `provider_name`, `available_model_ids`, `candidate_count`, `model_ids`, `promoted_default`, `existing_model_id`, `oauth_email`, `consumed_at`, `access_token`, `refresh_token`, `account_id`.
+**Model-provider family** (4e): the per-object table under Carve-out 4e — `api_key`, `base_url`, `base_url_override`, `provider_name`, `available_model_ids`, `candidate_count`, `model_ids`, `promoted_default`, `existing_model_id`, `oauth_email`, `consumed_at`, `access_token`, `refresh_token`, `account_id`.
 
 **OIDC management** (snake_case): SMTP `from_address`, `from_name`, `secure_mode`, test-send `message_id`; social provider `client_id`, `client_secret`; bootstrap redeem `bootstrap.org_slug`.
 

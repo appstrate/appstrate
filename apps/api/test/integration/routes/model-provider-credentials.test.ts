@@ -591,7 +591,7 @@ describe("Model Provider Keys API", () => {
       expect(res.status).toBe(401);
     });
 
-    it("returns 400 when neither api_key nor existing_key_id is provided", async () => {
+    it("returns 400 when neither api_key nor credentialId is provided", async () => {
       const res = await app.request("/api/model-provider-credentials/test", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -630,7 +630,7 @@ describe("Model Provider Keys API", () => {
       expect(body.error).toBe("BLOCKED_URL");
     });
 
-    it("resolves the saved key's plaintext when only existing_key_id is provided", async () => {
+    it("resolves the saved key's plaintext when only credentialId is provided", async () => {
       // Regression for the same wiring that broke as bug 2: the inline
       // /test route also goes through `loadInferenceCredentials`.
       // The test verifies the resolution succeeds end-to-end (we hit
@@ -654,15 +654,26 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           apiShape: "openai-responses",
           base_url: "http://10.255.255.9:9",
-          existing_key_id: id,
+          credentialId: id,
         }),
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { ok: boolean; error?: string };
       expect(body.error).toBe("BLOCKED_URL");
+
+      const retired = await app.request("/api/model-provider-credentials/test", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          apiShape: "openai-responses",
+          base_url: "http://10.255.255.9:9",
+          existing_key_id: id,
+        }),
+      });
+      expect(retired.status).toBe(400);
     });
 
-    it("falls through to 'API key is required' (400) when existing_key_id points to a non-existent key", async () => {
+    it("falls through to 'API key is required' (400) when credentialId points to a non-existent key", async () => {
       // loadInferenceCredentials returns null → apiKey stays
       // undefined → route throws invalidRequest. Guards against a future
       // refactor that would silently treat an unresolved key as ok.
@@ -672,7 +683,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           apiShape: "openai-responses",
           base_url: "http://10.255.255.9:9",
-          existing_key_id: "00000000-0000-0000-0000-000000000000",
+          credentialId: "00000000-0000-0000-0000-000000000000",
         }),
       });
       expect(res.status).toBe(400);

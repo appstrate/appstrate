@@ -1290,7 +1290,7 @@ export interface paths {
         };
         /**
          * List files
-         * @description List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so a member sees the files of the runs it may read (the whole space with `runs:read-all`, otherwise the runs it launched) plus its own chat and container-less files, and end-users see only their own. Filter by `purpose`, `runId`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.
+         * @description List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so a member sees the files of the runs it may read (the whole space with `runs:read-all`, otherwise the runs it launched) plus its own chat and container-less files, and end-users see only their own. Filter by `purpose`, `runId`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`. An unknown query parameter or an invalid `purpose` is rejected with 400.
          */
         get: operations["listFiles"];
         put?: never;
@@ -2082,7 +2082,7 @@ export interface paths {
         put?: never;
         /**
          * Test model provider credential configuration inline
-         * @description Test a model provider credential configuration without saving it first. If editing an existing credential, pass `existing_key_id` to fall back to its stored API key when `api_key` is omitted. Rate limited to 5 requests per minute.
+         * @description Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId` to fall back to its stored API key when `api_key` is omitted. Rate limited to 5 requests per minute.
          */
         post: operations["testModelProviderCredentialInline"];
         delete?: never;
@@ -13902,7 +13902,7 @@ export interface operations {
                     /** @description API key (required for new credentials) */
                     api_key?: string;
                     /** @description Existing credential ID to fall back to for stored API key */
-                    existing_key_id?: string;
+                    credentialId?: string;
                 };
             };
         };

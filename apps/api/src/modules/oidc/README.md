@@ -222,20 +222,20 @@ Plugin configuration highlights:
 
 ### Per-space branding
 
-Both pages accept a `branding: ResolvedSpaceBranding` prop, loaded at request time via `services/branding.ts → resolveSpaceBranding(spaceId)`. The helper reads `spaces.settings.branding` (shape defined by the module-owned `SpaceBrandingSchema` Zod schema) and falls back to the space's raw `name` field when the setting is missing or malformed. Fields supported:
+Both pages accept a `branding: ResolvedSpaceBranding` prop, loaded at request time via `services/branding.ts → resolveSpaceBranding(spaceId)`. The helper reads `spaces.settings.branding` and validates it against the module-owned `SpaceBrandingSchema` (a `.strict()` Zod object). `spaces.settings` is returned verbatim by the spaces routes, so the stored keys are wire keys — snake_case (CASING_CONVENTIONS 4g). Stored shape:
 
 ```ts
 {
   name?: string;           // Display name (defaults to spaces.name)
-  logoUrl?: string;        // Header logo URL (escaped)
-  primaryColor?: string;   // Hex #RRGGBB — validated by SpaceBrandingSchema, defaults to #4f46e5
-  accentColor?: string;    // Hex #RRGGBB — validated by SpaceBrandingSchema
-  supportEmail?: string;
-  fromName?: string;       // Email sender display name
+  logo_url?: string;       // Header logo — must be a public https:// URL (SSRF-blocked hosts rejected)
+  primary_color?: string;  // Hex #RRGGBB, defaults to #4f46e5
+  accent_color?: string;   // Hex #RRGGBB, defaults to primary_color, then #4338ca
+  support_email?: string;
+  from_name?: string;      // Email sender display name (defaults to name, then spaces.name)
 }
 ```
 
-Colors are validated by `SpaceBrandingSchema` at resolve time, so a misconfigured branding JSONB is silently replaced with the platform default before reaching the render. The shell header, button colors, and `<title>` tags all reflect the resolved branding.
+Validation happens at resolve time and never throws: a missing, malformed, or unknown-key branding object (e.g. a camelCase `logoUrl`) is rejected as a whole, logged at `warn`, and replaced with the defaults above. The resolved `ResolvedSpaceBranding` passed to the pages is an internal TS type (camelCase, every field populated). The shell header, button colors, and `<title>` tags all reflect it.
 
 ## Enabling OAuth for a space
 

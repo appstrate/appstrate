@@ -179,7 +179,7 @@ export const testInlineSchema = z
     apiShape: z.string().min(1),
     base_url: z.url(),
     api_key: z.string().optional(),
-    existing_key_id: z.string().optional(),
+    credentialId: z.string().optional(),
   })
   .strict();
 
@@ -334,8 +334,8 @@ export function createModelProviderCredentialsRouter() {
       const orgId = c.get("orgId");
       const data = await readJsonBody(c, testInlineSchema);
       let apiKey = data.api_key;
-      if (!apiKey && data.existing_key_id) {
-        const existing = await loadInferenceCredentials(orgId, data.existing_key_id);
+      if (!apiKey && data.credentialId) {
+        const existing = await loadInferenceCredentials(orgId, data.credentialId);
         if (existing) apiKey = existing.apiKey;
       }
       if (!apiKey) {

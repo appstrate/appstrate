@@ -179,7 +179,8 @@ export const filesPaths = {
         "launched) plus its own chat and container-less files, and end-users see only " +
         "their own. Filter by `purpose`, " +
         "`runId`, `packageId`, `chat_session_id`, or a chat session's complete context; " +
-        "paginate with `startingAfter` + `limit`.",
+        "paginate with `startingAfter` + `limit`. An unknown query parameter or an " +
+        "invalid `purpose` is rejected with 400.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

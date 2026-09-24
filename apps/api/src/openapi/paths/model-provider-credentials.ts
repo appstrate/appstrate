@@ -275,7 +275,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Test model provider credential configuration inline",
       description:
-        "Test a model provider credential configuration without saving it first. If editing an existing credential, pass `existing_key_id` to fall back to its stored API key when `api_key` is omitted. Rate limited to 5 requests per minute.",
+        "Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId` to fall back to its stored API key when `api_key` is omitted. Rate limited to 5 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -299,7 +299,7 @@ export const modelProviderCredentialsPaths = {
                   type: "string",
                   description: "API key (required for new credentials)",
                 },
-                existing_key_id: {
+                credentialId: {
                   type: "string",
                   description: "Existing credential ID to fall back to for stored API key",
                 },

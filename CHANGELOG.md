@@ -283,8 +283,9 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   and the org model / proxy / credential ids `modelId`, `proxyId`,
   `credentialId` (camelCase wherever they appear) stay camelCase; every other
   field is snake_case. Credentials: `api_key` and `base_url_override` on
-  create and update (were `apiKey`, `baseUrlOverride`), `base_url`, `api_key`,
-  `existing_key_id` on the inline test, `base_url` on the credential;
+  create and update (were `apiKey`, `baseUrlOverride`), `base_url`, `api_key`
+  on the inline test, which takes the stored credential it falls back to as
+  `credentialId` (was `existingKeyId`), `base_url` on the credential;
   `POST …/discover` takes `credentialId` and `providerId` (were
   `credential_id`, `provider_id`), like the other bodies. Org models:
   `provider_name`, `base_url`; seed `model_ids` and `promoted_default`; test
@@ -301,7 +302,8 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   the API deploy** (#1545). Its companion release posts the snake_case redeem
   body; the published helper sends `accessToken` / `refreshToken` and is
   refused with a `400` by this API, and the new helper is refused by an older
-  one.
+  one. A pairing redeemed by an old helper in between is consumed before its
+  body is rejected: mint a new pairing once the helper is upgraded.
 - **BREAKING (API): OIDC management bodies and views are snake_case**
   (#1545). Per-space SMTP config: `from_address`, `from_name`, `secure_mode`
   (were `fromAddress`, `fromName`, `secureMode`), and the test send returns
@@ -318,7 +320,9 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   and the list envelope (`object: "list"`, `hasMore`) instead of `has_more`.
   A `run_completed` payload carries `packageId` (was `agent_id`). The File
   DTO carries `runId`, and `GET /api/files` filters on `?runId=` (was
-  `?run_id=`); the MCP `list_files` tool mirrors it — its `runId` argument
+  `?run_id=`). Its query is strict: an undeclared parameter (`run_id`,
+  `offset`) or an invalid `purpose` is a 400 instead of a silently wider
+  list. The MCP `list_files` tool mirrors it — its `runId` argument
   (was `run_id`) and output — and refuses an unknown argument instead of
   ignoring it. Stored notification payloads are rewritten by
   `scripts/migration/0027`.

@@ -424,6 +424,15 @@ describe("files service + routes", () => {
     expect(flist.data.map((d) => d.id)).toEqual([docA.id]);
     expect(flist.data[0]!.runId).toBe(runA);
     expect(flist.data[0]).not.toHaveProperty("run_id");
+
+    // A misspelled / retired filter name is a 400 naming it — never a silently
+    // unfiltered listing of every run's files.
+    const retired = await app.request(`/api/files?run_id=${runA}`, {
+      headers: authHeaders(ctx),
+    });
+    expect(retired.status).toBe(400);
+    const problem = (await retired.json()) as { errors: { field: string }[] };
+    expect(problem.errors.map((e) => e.field)).toEqual(["run_id"]);
   });
 
   it("run_id filter returns produced outputs AND input files referenced in runs.input", async () => {
@@ -1515,7 +1524,7 @@ describe("files service + routes", () => {
     expect(cd2).toContain("filename*=UTF-8''h%C3%A9llo%F0%9F%93%84.txt");
   });
 
-  it("DELETE unknown id → 404; list ignores a garbage purpose and clamps limit to the catch default", async () => {
+  it("DELETE unknown id → 404; list rejects a garbage purpose and clamps limit to the catch default", async () => {
     const runId = await seedRunRow(scope);
     const up = await stageUpload(scope, ctx.user.id, "x.txt", new TextEncoder().encode("x"));
     await createFileFromUpload(scope, userActor, up, { runId });
@@ -1526,12 +1535,13 @@ describe("files service + routes", () => {
     });
     expect(del.status).toBe(404);
 
-    // Unknown purpose → safeParse fails → filter dropped → full (unfiltered) list.
+    // Unknown purpose → 400 naming it, not a dropped filter widening the list.
     const garbage = await app.request(`/api/files?purpose=not_a_purpose`, {
       headers: authHeaders(ctx),
     });
-    expect(garbage.status).toBe(200);
-    expect(((await garbage.json()) as { data: unknown[] }).data.length).toBe(1);
+    expect(garbage.status).toBe(400);
+    const problem = (await garbage.json()) as { errors: { field: string }[] };
+    expect(problem.errors.map((e) => e.field)).toEqual(["purpose"]);
 
     // limit out of range → route's `.max(100).catch(20)` yields the 20 default;
     // an in-range value is honored.

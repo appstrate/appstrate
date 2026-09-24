@@ -14,7 +14,9 @@
  * it fails 409 `identity_mismatch`. Prints each non-snake_case key
  * (`findNonSnakeCaseIdentityClaimKeys`, the write-path rule) and exits 1
  * while any remains. Fix a draft by editing it; publish a fixed version for a
- * published one (its ZIP carries an integrity hash).
+ * published one (its ZIP carries an integrity hash). Forking a legacy
+ * published version is not gated (it reads leniently), so the fork's draft
+ * carries the old keys and is flagged here like any other draft.
  *
  * System packages are skipped: connects read them from the boot registry,
  * whose manifests this release fixes (patch-bumped, so the boot sync rewrites
