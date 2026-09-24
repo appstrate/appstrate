@@ -19,9 +19,10 @@
  *   - an Arazzo Selector Object
  *     (`{ context, selector, type: "jsonpath"|"xpath"|"jsonpointer" }`).
  *
- * KNOWN LIMITATIONS (documented for manifest authors, surfaced as import-time
- * warnings — see `apps/api/src/services/integration-import-warnings.ts` — but
- * never blocking, so a spec-valid manifest still imports):
+ * KNOWN LIMITATIONS (documented for manifest authors). The xpath ones are
+ * import-time warnings (`apps/api/src/services/integration-import-warnings.ts`),
+ * never blocking; a jsonpath selector or criterion outside the subset is
+ * refused at import by `integrationManifestSchema` (`@appstrate/core/integration`):
  *   - `success_criteria` evaluation supports `type` omitted/`"simple"`
  *     (runtime-expression equality), `"jsonpath"`, and `"regex"` (AFPS §7.7).
  *     `"xpath"` is parsed but conservatively fails — there is no XML evaluator

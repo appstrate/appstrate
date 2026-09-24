@@ -245,7 +245,7 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `https://www.googleapis.com/auth/userinfo.email`, and no manifest declared the
   equivalence, so readiness kept asking for a reconnect and any agent whose
   integration config uses `tools: "*"` failed to launch with
-  `412 missing_integration_connection`. `@appstrate/gmail` 1.1.5,
+  `missing_integration_connection`. `@appstrate/gmail` 1.1.5,
   `@appstrate/gmail-mcp` 2.3.4 and
   `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.4 add that
   canonical scope to their catalog with `implies: ["email"]`; the OAuth callback

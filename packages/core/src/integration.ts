@@ -211,10 +211,10 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       }
     }
 
-    // (1f) §7.4 install gate — an `identity_claims` path outside the manifest
-    // JSONPath subset would otherwise only fail at connect time.
-    const identityClaims = (auth as { identity_claims?: Record<string, string> }).identity_claims;
-    for (const [claim, path] of Object.entries(identityClaims ?? {})) {
+    // (1f) §7.4 + §7.7 install gate — every manifest JSONPath the shared
+    // evaluator reads later is parsed here, so an unsupported form fails the
+    // import instead of the first connect.
+    const checkJsonPath = (path: string, at: (string | number)[]) => {
       try {
         parseJsonPath(path);
       } catch (err) {
@@ -222,17 +222,38 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
         ctx.addIssue({
           code: "custom",
           message: `${err.message} — supported: $, .name, ['name'], [0], [-1]`,
-          path: ["auths", authKey, "identity_claims", claim],
+          path: ["auths", authKey, ...at],
         });
       }
+    };
+    const identityClaims = (auth as { identity_claims?: Record<string, string> }).identity_claims;
+    for (const [claim, path] of Object.entries(identityClaims ?? {})) {
+      checkJsonPath(path, ["identity_claims", claim]);
     }
+    const login = auth.connect?.login;
+    for (const [name, output] of Object.entries(login?.outputs ?? {})) {
+      const selector = output as { type?: unknown; selector?: unknown };
+      if (selector.type === "jsonpath" && typeof selector.selector === "string") {
+        checkJsonPath(selector.selector, ["connect", "login", "outputs", name, "selector"]);
+      }
+    }
+    (login?.success_criteria ?? []).forEach((criterion, index) => {
+      if (criterion.type === "jsonpath") {
+        checkJsonPath(criterion.condition, [
+          "connect",
+          "login",
+          "success_criteria",
+          index,
+          "condition",
+        ]);
+      }
+    });
 
     // connect.login output gating (§7.7): a delivery.* value template may
     // only reference declared connect outputs. We only enforce the gating
     // when a declarative `login` is present (the AFPS `tool` mode declares
     // its outputs out-of-band via `produces`, which the loose schema doesn't
     // surface here).
-    const login = auth.connect?.login;
     if (login) {
       const declaredOutputs = new Set(Object.keys(login.outputs ?? {}));
       if (declaredOutputs.size === 0) {

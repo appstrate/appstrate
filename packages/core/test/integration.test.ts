@@ -771,6 +771,42 @@ describe("integrationManifestSchema — connect.login", () => {
     ).toContain("auths.session.connect.login.expires_in_output");
   });
 
+  it.each(["$.items.*", "$.items[*].token", "$..token", "$['a','b']", "$.arr[01]"])(
+    "rejects the jsonpath output selector %p at import",
+    (selector) => {
+      expect(
+        errorPaths(
+          customWithConnect({
+            login: {
+              request: { method: "POST", url: "https://x" },
+              outputs: { token: { context: "$response.body", selector, type: "jsonpath" } },
+            },
+          }),
+        ),
+      ).toContain("auths.session.connect.login.outputs.token.selector");
+    },
+  );
+
+  it("rejects a jsonpath success criterion outside the subset, and leaves other types alone", () => {
+    const paths = errorPaths(
+      customWithConnect({
+        login: {
+          request: { method: "POST", url: "https://x" },
+          success_criteria: [
+            { condition: "$statusCode == 200" },
+            { condition: "$[?(@.ok)]", type: "jsonpath" },
+            { condition: "[a-z]+", type: "regex" },
+          ],
+          outputs: {
+            token: { context: "$response.body", selector: "$.session['id']", type: "jsonpath" },
+            raw: { context: "$response.body", selector: "/token", type: "jsonpointer" },
+          },
+        },
+      }),
+    );
+    expect(paths).toEqual(["auths.session.connect.login.success_criteria.1.condition"]);
+  });
+
   it("rejects identity_outputs that are not declared outputs", () => {
     expect(
       errorPaths(

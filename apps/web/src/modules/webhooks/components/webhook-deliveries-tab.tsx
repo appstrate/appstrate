@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Send } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -37,27 +37,21 @@ function deliveryStatusLabel(d: WebhookDelivery): string {
 }
 
 export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
-  // Remount per webhook so the cursor + accumulated pages reset.
-  return <DeliveryPages key={webhookId} webhookId={webhookId} />;
-}
-
-function DeliveryPages({ webhookId }: { webhookId: string }) {
   const { t } = useTranslation(["settings", "common"]);
-  const [cursor, setCursor] = useState<string | undefined>(undefined);
-  const [loadedPages, setLoadedPages] = useState<WebhookDelivery[]>([]);
-  const { data, isLoading, error } = useWebhookDeliveries(webhookId, cursor);
+  const {
+    data,
+    isLoading,
+    error,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+  } = useWebhookDeliveries(webhookId);
+  const deliveries = useMemo(() => data?.pages.flatMap((p) => p.data) ?? [], [data]);
 
-  const currentPage = useMemo(() => data?.data ?? [], [data?.data]);
-  const hasMore = data?.hasMore ?? false;
-
-  // Dedup by id: the current page briefly overlaps the accumulated ones.
-  const deliveries = useMemo(() => {
-    const seen = new Set<string>();
-    return [...loadedPages, ...currentPage].filter((d) => !seen.has(d.id) && seen.add(d.id));
-  }, [loadedPages, currentPage]);
-
-  if (isLoading && deliveries.length === 0) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (isLoading) return <LoadingState />;
+  // Once rows are on screen, a failed page (next or refetch) must not hide them.
+  if (error && !data) return <ErrorState message={getErrorMessage(error)} />;
 
   if (deliveries.length === 0) {
     return <EmptyState message={t("settings:webhooks.noDeliveries")} icon={Send} compact />;
@@ -83,19 +77,19 @@ function DeliveryPages({ webhookId }: { webhookId: string }) {
           </div>
         );
       })}
-      {hasMore && (
+      {error && (
+        <p className="text-destructive mt-2 text-sm">
+          {t("common:error.generic")} {getErrorMessage(error)}
+        </p>
+      )}
+      {hasNextPage && (
         <Button
           variant="outline"
           className="mt-2"
-          onClick={() => {
-            const last = currentPage[currentPage.length - 1];
-            if (last) {
-              setLoadedPages((prev) => [...prev, ...currentPage]);
-              setCursor(last.id);
-            }
-          }}
+          disabled={isFetchingNextPage}
+          onClick={() => void fetchNextPage()}
         >
-          {t("settings:webhooks.loadMoreDeliveries")}
+          {isFetchNextPageError ? t("common:btn.retry") : t("settings:webhooks.loadMoreDeliveries")}
         </Button>
       )}
     </div>

@@ -28,17 +28,22 @@ Not additive: `normaliseMcpToolBody` changes behaviour (see Changed), which the
   `JsonPathSyntaxError`: the one JSONPath dialect of integration manifests,
   moved out of `@appstrate/connect`'s login engine so `identity_claims` reads
   paths with the same evaluator. The single-value RFC 9535 subset `$`,
-  `.name`, `['name']` / `["name"]`, `[0]` / `[-1]` (negative counts from the
-  end). A path outside it throws — including a `.name` starting with a digit
-  (write `[0]`); a valid path that selects nothing returns `undefined`. A member
-  selects only an object's own property, an index only an array element.
+  `.name` (member-name-shorthand: a letter, `_` or non-ASCII character, then
+  also digits), `['name']` / `["name"]` (RFC 9535 string literals and escapes),
+  `[0]` / `[-1]` (RFC 9535 `int`: no leading zero, no `-0`; negative counts
+  from the end). A path outside it throws `JsonPathSyntaxError` with the
+  offset — including a union (`['a','b']`), a wildcard, a filter, a slice and a
+  `.name` starting with a digit (write `[0]`); a valid path that selects nothing
+  returns `undefined`. A member selects only an object's own property, an index
+  only an array element.
 
 - **`isValidMcpToolName`**, **`allocateMcpToolName`** and **`fnv1a64Hex`**
   (`./mcp-naming`) — the exposed-name grammar (`{namespace}__{body}`, body in
   `[A-Za-z0-9_-]+`, at most `MCP_TOOL_NAME_MAX_LENGTH`), the allocator that
   truncates and hash-suffixes a name that is too long or taken (one salted
   re-hash when the hashed name is taken too, then it throws), and the digest
-  it uses.
+  it uses. When two upstream names normalise to the same body, the first one
+  registered keeps the plain name.
 
 ### Changed
 

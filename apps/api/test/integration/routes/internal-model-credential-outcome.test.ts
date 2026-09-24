@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getEnv } from "@appstrate/env";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedOrgModelProviderKey, seedRun } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import {
@@ -74,6 +74,22 @@ describe("POST /internal/model-credential/outcome", () => {
 
     for (let i = 0; i < max - 1; i++) await report(token, "rejected");
     expect(await flagged()).toBe(true);
+  });
+
+  it("does not 412 the If-Match rotation of a key a run keeps reporting", async () => {
+    const patch = (body: object, ifMatch?: string) =>
+      app.request(`/api/model-provider-credentials/${credentialId}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...(ifMatch ? { "If-Match": ifMatch } : {}),
+        }),
+        body: JSON.stringify(body),
+      });
+    const etag = (await patch({ label: "BYOK" })).headers.get("ETag")!;
+    await Bun.sleep(5);
+    expect((await report(await runToken(credentialId), "rejected")).status).toBe(204);
+    expect((await patch({ apiKey: "sk-rotated" }, etag)).status).toBe(200);
   });
 
   it("drops rejections of a key the user has since rotated", async () => {

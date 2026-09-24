@@ -45,8 +45,10 @@ const MCP_TOOL_HASH_LENGTH = 8;
 /**
  * Exposed name for an untrusted upstream tool: `{namespace}__{body}` when it
  * fits and is free, else the body cut to fit plus a hash of the ORIGINAL
- * upstream name (stable regardless of registration order). One salted re-hash
- * on collision, then it throws.
+ * upstream name, so two names that normalise to the same body (`a.b`, `a_b`)
+ * still get distinct names. Which of them keeps the plain form depends on
+ * registration order: the first one registered. One salted re-hash on
+ * collision, then it throws.
  */
 export function allocateMcpToolName(
   namespace: string,

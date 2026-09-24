@@ -286,7 +286,7 @@ function ConversationInfo({
     [t("context.info.id"), session.id],
     [t("context.info.created"), formatDateField(session.createdAt)],
     [t("context.info.updated"), formatDateField(session.updatedAt)],
-    [t("context.info.messages"), String(session.messages.length)],
+    [t("context.info.messages"), String(session.message_count)],
     [
       t("context.info.status"),
       session.generating ? t("context.info.generating") : t("context.info.idle"),

@@ -303,6 +303,7 @@ describe("bundle-assembly — signature policy placement", () => {
     display_name: "A",
     author: "tester",
   };
+  const savedPolicy = process.env.AFPS_SIGNATURE_POLICY;
 
   beforeEach(async () => {
     await truncateAll();
@@ -319,7 +320,8 @@ describe("bundle-assembly — signature policy placement", () => {
   });
 
   afterEach(() => {
-    delete process.env.AFPS_SIGNATURE_POLICY;
+    if (savedPolicy === undefined) delete process.env.AFPS_SIGNATURE_POLICY;
+    else process.env.AFPS_SIGNATURE_POLICY = savedPolicy;
     resetEnvCache();
   });
 

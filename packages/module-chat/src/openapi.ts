@@ -183,8 +183,13 @@ export const chatPaths = {
                   { $ref: "#/components/schemas/ChatSession" },
                   {
                     type: "object",
-                    required: ["messages", "hasMore"],
+                    required: ["message_count", "messages", "hasMore"],
                     properties: {
+                      message_count: {
+                        type: "integer",
+                        minimum: 0,
+                        description: "Total messages in the session, across all pages.",
+                      },
                       messages: {
                         type: "array",
                         items: { $ref: "#/components/schemas/ChatMessage" },

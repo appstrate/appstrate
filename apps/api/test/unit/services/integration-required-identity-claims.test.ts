@@ -70,8 +70,8 @@ describe("assertRequiredIdentityClaims (AFPS §7.4)", () => {
   });
 
   it("throws when a required claim is present but empty-string (extractor miss)", () => {
-    // readPath collapses missing JSONPath hits to "" — must be treated the
-    // same as absent, otherwise a misconfigured extractor silently passes.
+    // A missing JSONPath hit is dropped from the bag, but an upstream can still
+    // answer the claim as "" — that must count as absent, not as an identity.
     const m = manifestWithRequired(["sub"]);
     expect(() => assertRequiredIdentityClaims(m, "session", { sub: "" })).toThrow(/'sub'/);
   });

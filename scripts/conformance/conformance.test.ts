@@ -543,7 +543,7 @@ describe("checkIdentitySource", () => {
     const f = checkIdentitySource(oauth({}));
     expect(f).toHaveLength(1);
     expect(f[0]!.severity).toBe("warn");
-    expect(f[0]!.message).toContain('"default"');
+    expect(f[0]!.message).toContain("NULL accountId");
   });
 
   it("accepts identity_claims, userinfo_endpoint or issuer", () => {
@@ -1050,12 +1050,12 @@ describe("identity-endpoint — probe classification", () => {
   });
 
   // The failure this check exists for: a renamed or retired path degrades every
-  // connection to accountId "default" without raising anything.
+  // connection to a NULL accountId without raising anything.
   it("fails a status that means the path is wrong", () => {
     for (const status of [404, 405, 410]) {
       const finding = probe(status);
       expect(finding.severity).toBe("fail");
-      expect(finding.message).toContain("default");
+      expect(finding.message).toContain("NULL accountId");
     }
   });
 

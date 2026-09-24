@@ -236,7 +236,13 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     const since = Number(c.req.query("since") || Number.NaN);
     const sinceSeq = Number.isSafeInteger(since) && since >= 0 ? since : undefined;
     const limit = pageLimit(c, MESSAGES_DEFAULT_LIMIT, MESSAGES_MAX_LIMIT);
-    const rows = await loadMessages(session.id, sinceSeq, limit + 1);
+    const [rows, [total]] = await Promise.all([
+      loadMessages(session.id, sinceSeq, limit + 1),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(chatMessages)
+        .where(eq(chatMessages.sessionId, session.id)),
+    ]);
     const hasMore = rows.length > limit;
     const messages = hasMore ? rows.slice(0, limit) : rows;
     setSinceLinkHeader({
@@ -245,7 +251,12 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       hasMore,
       lastId: messages.at(-1)?.seq,
     });
-    return c.json({ ...toSessionDto(session), messages: messages.map(toMessageDto), hasMore });
+    return c.json({
+      ...toSessionDto(session),
+      message_count: total?.count ?? 0,
+      messages: messages.map(toMessageDto),
+      hasMore,
+    });
   });
 
   // PATCH /api/chat/sessions/:id — rename

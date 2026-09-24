@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`@appstrate/core/log-line`, new import-free subpath) — one pino-compatible
   JSON log line (numeric `level`, epoch-ms `time`, `msg`, fields) for the
   processes that must not carry pino: the Pi runner, the agent entrypoint and
-  the sidecar. Moved from `@appstrate/runner-pi/log-line`, which is removed.
+  the sidecar.
 
 - **`runStatusValues`**, **`terminalRunStatusValues`**, **`activeRunStatusValues`**,
   **`RunStatus`** and **`TerminalRunStatus`** (`@appstrate/core/run-status`, new
@@ -73,10 +73,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `^0.8.0`): core imports its new `./jsonpath` subpath and
   `allocateMcpToolName`. **Requires `@appstrate/afps-shared@0.9.0` on npm before
   this release is published.**
-- **`integrationManifestSchema`** (`@appstrate/core/integration`) refuses an
-  `auths.{key}.identity_claims` value outside the manifest JSONPath subset of
-  `@appstrate/afps-shared/jsonpath` (`$`, `.name`, `['name']`, `[0]`, `[-1]`).
-  A bare claim name (`"sub"`) is no longer read as `"$.sub"`: write the `$`.
+- **`integrationManifestSchema`** (`@appstrate/core/integration`) refuses every
+  manifest JSONPath outside the subset of `@appstrate/afps-shared/jsonpath`
+  (`$`, `.name`, `['name']`, `[0]`, `[-1]`): an `auths.{key}.identity_claims`
+  value, a `connect.login.outputs.{name}` selector of `type: "jsonpath"` and a
+  `connect.login.success_criteria[i]` condition of `type: "jsonpath"`. The last
+  two used to import (at most with a warning) and fail at credential
+  acquisition. A bare claim name (`"sub"`) is no longer read as `"$.sub"`:
+  write the `$`.
 - **`ConnectionCandidate.accountId`** (`@appstrate/core/integration`) and
   **`ResolutionFieldError.candidate_connections[].account_id`**
   (`@appstrate/core/api-errors`) are `string | null`. `null` means the provider

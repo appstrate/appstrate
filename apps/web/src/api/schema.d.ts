@@ -10031,6 +10031,8 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChatSession"] & {
+                        /** @description Total messages in the session, across all pages. */
+                        message_count: number;
                         messages: components["schemas"]["ChatMessage"][];
                         /** @description True when later messages follow this page. */
                         hasMore: boolean;

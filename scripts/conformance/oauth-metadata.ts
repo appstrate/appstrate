@@ -245,7 +245,7 @@ export function compareAuth(
       packageId,
       check: CHECK,
       severity: "warn",
-      message: `${where}: provider publishes userinfo_endpoint '${publishedUserinfo}' and the manifest declares no identity mechanism — connections fall back to accountId "default" and are labelled "Connexion N"`,
+      message: `${where}: provider publishes userinfo_endpoint '${publishedUserinfo}' and the manifest declares no identity mechanism — connections get no account identity (NULL accountId) and are labelled "Connexion N"`,
     });
   }
 

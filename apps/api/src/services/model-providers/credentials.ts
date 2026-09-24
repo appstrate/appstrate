@@ -725,17 +725,19 @@ export async function recordModelCredentialOutcome(
   );
 }
 
-/** Atomic `+1` on the streak (concurrent failures cannot lose a count). */
+/**
+ * Atomic `+1` on the streak (concurrent failures cannot lose a count). The
+ * streak is not on the wire, so it leaves `updatedAt` (the ETag) alone: a
+ * failing run must not 412 the If-Match PATCH that rotates the key. The
+ * `needs_reconnection` flip is visible and bumps it via `updateCredentialBlob`.
+ */
 async function incrementFailureStreak(
   orgId: string,
   id: string,
 ): Promise<{ refreshFailureCount: number; expiresAt: Date | null } | undefined> {
   const updated = await db
     .update(modelProviderCredentials)
-    .set({
-      refreshFailureCount: sql`${modelProviderCredentials.refreshFailureCount} + 1`,
-      updatedAt: sql`now()`,
-    })
+    .set({ refreshFailureCount: sql`${modelProviderCredentials.refreshFailureCount} + 1` })
     .where(
       scopedWhere(modelProviderCredentials, {
         orgId,

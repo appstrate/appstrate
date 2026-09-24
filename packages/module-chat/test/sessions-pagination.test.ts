@@ -27,6 +27,7 @@ interface SessionPage {
   hasMore: boolean;
 }
 interface HistoryPage {
+  message_count: number;
   messages: { id: string; seq: number }[];
   hasMore: boolean;
 }
@@ -163,6 +164,7 @@ describe("chat pagination", () => {
       const id = await seedHistory(MESSAGES_MAX_LIMIT + 1);
       const byDefault = (await (await get(`/api/chat/sessions/${id}`)).json()) as HistoryPage;
       expect(byDefault.messages).toHaveLength(100);
+      expect(byDefault.message_count).toBe(MESSAGES_MAX_LIMIT + 1);
       expect(byDefault.hasMore).toBe(true);
       const atMax = (await (
         await get(`/api/chat/sessions/${id}?limit=${MESSAGES_MAX_LIMIT}`)

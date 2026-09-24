@@ -16,20 +16,72 @@ describe("parseJsonPath", () => {
     expect(parseJsonPath(`$['display name']["x"][0][-1]`)).toEqual(["display name", "x", 0, -1]);
   });
 
+  it.each<[string, (string | number)[]]>([
+    ["$._a1", ["_a1"]],
+    ["$.é.日本", ["é", "日本"]],
+    ["$.a1_B", ["a1_B"]],
+    ["$['a]b']", ["a]b"]],
+    ["$['a.b[0]']", ["a.b[0]"]],
+    [`$["a','b"]`, ["a','b"]],
+    [String.raw`$['x\'y']`, ["x'y"]],
+    [String.raw`$["x\"y"]`, ['x"y']],
+    [`$['"']`, ['"']],
+    [`$["'"]`, ["'"]],
+    [String.raw`$['\\\/\b\f\n\r\t']`, ["\\/\b\f\n\r\t"]],
+    [String.raw`$['é']`, ["é"]],
+    ["$['\\uD83D\\uDE00']", ["\u{1F600}"]],
+    ["$['']", [""]],
+    ["$[ 'a' ][ 0 ]", ["a", 0]],
+    ["$[0]", [0]],
+    ["$[10]", [10]],
+    ["$[-1]", [-1]],
+    ["$[-10]", [-10]],
+  ])("accepts %p", (path, segments) => {
+    expect(parseJsonPath(path)).toEqual(segments);
+  });
+
   it.each([
     ["email", "must start with '$'"],
     ["", "must start with '$'"],
-    ["$..email", "empty segment"],
+    ["$..email", "recursive descent"],
+    ["$.", "expected a member name"],
     ["$.*", "wildcard"],
-    ["$[*]", "unsupported jsonpath segment"],
-    ["$[?(@.a)]", "unsupported jsonpath segment"],
-    ["$[0:2]", "unsupported jsonpath segment"],
-    ["$[0", "unterminated"],
+    ["$[*]", "unsupported selector"],
+    ["$[?(@.a)]", "unsupported selector"],
+    ["$[0:2]", "slice"],
+    ["$[0", "unterminated '['"],
+    ["$[", "unterminated '['"],
+    ["$['a'", "unterminated '['"],
+    ["$['a", "unterminated string"],
     ["$email", "unexpected character"],
-    ["$.data.0.id", "starting with a digit"],
+    ["$.data.0.id", "cannot start with a digit"],
+    ["$['a','b']", "union"],
+    ["$[0,1]", "union"],
+    ["$.a]", "unexpected character ']'"],
+    ["$.a b", "unexpected character ' '"],
+    ["$.a-b", "unexpected character '-'"],
+    ["$.arr[-0]", "not an RFC 9535 int"],
+    ["$.arr[01]", "not an RFC 9535 int"],
+    ["$.arr[-01]", "not an RFC 9535 int"],
+    ["$.arr[-]", "expected an index"],
+    ["$[9007199254740992]", "out of range"],
+    ["$[0 1]", "expected ']'"],
+    ["$['a' 'b']", "expected ']'"],
+    [String.raw`$['\q']`, "invalid escape"],
+    [String.raw`$['\"']`, "invalid escape"],
+    [String.raw`$["\'"]`, "invalid escape"],
+    [String.raw`$['\u12']`, "4 hex digits"],
+    [String.raw`$['\uD83D']`, "without a low surrogate"],
+    [String.raw`$['\uDE00']`, "lone low surrogate"],
+    ["$['a\nb']", "control character"],
   ])("rejects %p", (path, message) => {
     expect(() => parseJsonPath(path)).toThrow(JsonPathSyntaxError);
     expect(() => parseJsonPath(path)).toThrow(message);
+  });
+
+  it("reports the offset of the offending character", () => {
+    expect(() => parseJsonPath("$.a b")).toThrow("at offset 3");
+    expect(() => parseJsonPath("$.arr[01]")).toThrow("at offset 6");
   });
 });
 
