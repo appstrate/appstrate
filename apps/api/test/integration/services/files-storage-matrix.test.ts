@@ -231,6 +231,7 @@ describeRequiresS3("files storage parity — S3 presigned posture", () => {
       origin: "https://instance.example",
       authHeaders: new Headers(),
       permissions: new Set<string>(),
+      ceiling: undefined,
       actor: { type: "user", id: ctx.user.id },
       scope,
       // Never reached: this test drives `resources/read`, not the bundle tools.

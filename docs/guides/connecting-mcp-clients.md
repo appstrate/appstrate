@@ -188,9 +188,11 @@ the space you are calling from — the only ones filtering tests — and
 shown so you can see them and never used to filter. `ceiling_permissions`
 carries the scopes a delegated credential (API key, OAuth token) must include
 for an operation authorized by ownership rather than a role, such as deleting
-your own connection; it is shown and never used to filter either. `search_operations`'
-`denied[].required_permissions` and the `403` hint below carry the caller-space
-half alone. Enforcement itself never moves: `invoke_operation` always
+your own connection. A session is never filtered on them; a delegated credential
+whose scopes omit one sees the operation as not granted, and its
+`search_operations` `denied[]` entry and `403` answer name them as
+`ceiling_permissions`. Otherwise `denied[].required_permissions` and the `403`
+hint below carry the caller-space half alone. Enforcement itself never moves: `invoke_operation` always
 dispatches. A `403` attributable to a permission
 missing from your own space comes back with `required_permissions` and a hint to
 report it rather than retry; a refusal decided by the row, or by the space the

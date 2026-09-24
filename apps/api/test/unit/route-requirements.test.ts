@@ -621,8 +621,32 @@ describe("isGranted", () => {
     expect(isGranted(targetSpace, new Set())).toBe(true);
   });
 
-  it("ignores ceiling requirements — they cap a credential, not a role", () => {
+  it("ignores ceiling requirements for a session — they cap a credential, not a role", () => {
     // A session holder with no role grant still acts on what it owns.
     expect(isGranted(ceilingOnly, new Set())).toBe(true);
+  });
+
+  it("asks a delegated credential's scopes for each ceiling requirement", () => {
+    expect(isGranted(ceilingOnly, new Set(), new Set(["integrations:read"]))).toBe(false);
+    expect(isGranted(ceilingOnly, new Set(), new Set(["integrations:disconnect"]))).toBe(true);
+    // The role never stands in for the scope.
+    expect(isGranted(ceilingOnly, new Set(["integrations:disconnect"]), new Set())).toBe(false);
+  });
+
+  it("needs any alternative within one ceiling entry", () => {
+    const ceilingDisjunction: RouteRequirement = {
+      requirements: [],
+      targetSpaceRequirements: [],
+      ceilingRequirements: ["runs:read|runs:read-all"],
+    };
+    expect(isGranted(ceilingDisjunction, new Set(), new Set(["runs:read"]))).toBe(true);
+    expect(isGranted(ceilingDisjunction, new Set(), new Set(["runs:read-all"]))).toBe(true);
+    expect(isGranted(ceilingDisjunction, new Set(), new Set(["runs:cancel"]))).toBe(false);
+  });
+
+  it("judges an ordinary requirement against the permissions, not the ceiling", () => {
+    const scopes = new Set(["agents:write", "agents:run"]);
+    expect(isGranted(conjunction, new Set(), scopes)).toBe(false);
+    expect(isGranted(conjunction, scopes, new Set())).toBe(true);
   });
 });

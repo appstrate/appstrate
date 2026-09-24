@@ -389,7 +389,11 @@ describe("requirement anchors", () => {
       Object.keys(expected).map((operationId) => [operationId, op(operationId).requirement]),
     );
     expect(ceilings).toEqual(expected);
-    expect(isGranted(op("deleteMyConnection").requirement, new Set())).toBe(true);
+    const deleteMine = op("deleteMyConnection").requirement;
+    // A session: ownership decides. A delegated credential: its scopes must hold the ceiling.
+    expect(isGranted(deleteMine, new Set())).toBe(true);
+    expect(isGranted(deleteMine, new Set(), new Set())).toBe(false);
+    expect(isGranted(deleteMine, new Set(), new Set(["integrations:disconnect"]))).toBe(true);
 
     function req(ceilingRequirements: string[]) {
       return { requirements: [], targetSpaceRequirements: [], ceilingRequirements };

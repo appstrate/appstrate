@@ -8,8 +8,8 @@
  * matching before it only adds its guard. Guards mounted after a space
  * re-scope (`markSpaceRescope`) are enforced in the space the PATH names, so
  * they are reported apart and never filter. So are ceiling guards
- * (`requireCeiling`): they cap a delegated credential, not a role, so a caller
- * without the permission may still act.
+ * (`requireCeiling`), except against a delegated credential: they cap its
+ * scopes, not a role, so a caller acting on a session is never refused by them.
  */
 
 import { PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";
@@ -23,7 +23,7 @@ export interface RouteRequirement {
   readonly requirements: readonly string[];
   /** Guards mounted after a space re-scope: enforced in the space the path names. Shown, never filtered. */
   readonly targetSpaceRequirements: readonly string[];
-  /** Ceiling guards: a delegated credential's scopes must include each; no role grant is asked. Shown, never filtered. */
+  /** Ceiling guards: a delegated credential's scopes must include each; no role grant is asked. Filter a delegated caller only. */
   readonly ceilingRequirements: readonly string[];
 }
 
@@ -199,14 +199,21 @@ function tokenCovers(token: Token, segment: TemplateSegment): Match {
 }
 
 /** Every requirement holds, a `|` entry on any alternative. Target-space
- *  requirements never count: only that space can refuse them. Nor do ceiling
- *  requirements: they test the credential's scopes, not `permissions`. The row
- *  a handler loads may still refuse, with the route's own error. */
+ *  requirements never count: only that space can refuse them. Ceiling
+ *  requirements count only for a delegated credential (`ceiling` defined):
+ *  its scopes, not `permissions`, must hold each. The row a handler loads may
+ *  still refuse, with the route's own error. */
 export function isGranted(
   requirement: RouteRequirement,
   permissions: ReadonlySet<string>,
+  ceiling?: ReadonlySet<string>,
 ): boolean {
-  return requirement.requirements.every((entry) =>
-    entry.split("|").some((alternative) => permissions.has(alternative)),
+  return (
+    holdsEach(requirement.requirements, permissions) &&
+    (ceiling === undefined || holdsEach(requirement.ceilingRequirements, ceiling))
   );
+}
+
+function holdsEach(entries: readonly string[], held: ReadonlySet<string>): boolean {
+  return entries.every((entry) => entry.split("|").some((alternative) => held.has(alternative)));
 }

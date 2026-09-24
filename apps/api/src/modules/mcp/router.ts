@@ -161,6 +161,7 @@ const MCP_RATE_LIMIT_PER_MIN = 120;
  */
 export function buildServerInstructions(
   permissions: ReadonlySet<string>,
+  ceiling: ReadonlySet<string> | undefined,
   surface: McpSurface,
   contextInjected = false,
 ): string {
@@ -168,7 +169,8 @@ export function buildServerInstructions(
   const { invokes, runs, composes: inline, authors, importsPackages } = surface;
   // A sentence naming an operation renders only for a caller its route grants,
   // unless the gate it sits under already implies that grant.
-  const granted = (operationId: string): boolean => operationIdGranted(operationId, permissions);
+  const granted = (operationId: string): boolean =>
+    operationIdGranted(operationId, permissions, ceiling);
   const listsIntegrations = invokes && granted("listIntegrations");
   const connects = runs && granted("initiateIntegrationConnect");
   const runningAgents = runs ? "configuring or running" : "configuring";
@@ -261,7 +263,7 @@ ${heavyListBullet}${
   }- Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed in your caller context / get_me — connecting it was an explicit choice), then (2) one that is activated for this space but not yet connected, then (3) one that is neither.${integrationListing}${connectBullets}
 
 ${OPERATION_INDEX_HEADING}
-${buildOperationIndex(permissions)}`;
+${buildOperationIndex(permissions, ceiling)}`;
 }
 
 function forwardAuthHeaders(src: Headers): Headers {
@@ -462,6 +464,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // means the chain was rewired, not that the caller holds nothing.
     const permissions = c.get("permissions");
     if (!permissions) throw new Error("mcp: permissions missing on a guarded route");
+    // A delegated credential's scopes; ceiling guards refuse what they omit.
+    const ceiling = c.get("scopeCeiling");
     const authHeaders = forwardAuthHeaders(c.req.raw.headers);
     const dispatch: Dispatch = dispatchInProcess;
     // The caller identity + space scope for tools that call a service directly (the
@@ -532,6 +536,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       mayShareRoot: (packageId: string) => holdsPackageShareAuthority(c, packageId),
       origin,
       permissions,
+      ceiling,
       authHeaders,
       dispatch,
       observe,
@@ -539,7 +544,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       actor,
       scope,
     };
-    const surface = deriveMcpSurface(permissions, actor);
+    const surface = deriveMcpSurface(permissions, ceiling, actor);
     const tools = buildMcpTools(toolCtx, surface);
     // `resources/read` for `appfile://file_xxx` — resolves through the same
     // forwarded-auth in-process dispatch as the tools (files are NOT listed
@@ -549,7 +554,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
       {
-        instructions: buildServerInstructions(permissions, surface, contextInjected),
+        instructions: buildServerInstructions(permissions, ceiling, surface, contextInjected),
         resources,
       },
     );
