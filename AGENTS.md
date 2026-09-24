@@ -285,7 +285,7 @@ Tier 0 (zero-install) requires only Bun.
 
 - Auth: cookie session + `X-Org-Id` / `X-Space-Id`, API key (`apst_*`) tried first — § "Stack — Critical Constraints" has the full rule
 - Request pipeline: error handler -> Request-Id -> CORS -> health -> auth -> org context -> routes
-- Route guards (`middleware/guards.ts`): `requireAgent()`, `requireOrgAgent()`, `requireActiveAgent()`, `requirePackageInOrg()`, `requireMutableAgent()`, `apiKeyOrgScopeGuard()`/`pinnedSpaceScopeGuard()`. RBAC is `requirePermission(resource, action)` (`middleware/require-permission.ts`) — there is **no** `requireAdmin()` / `requireOwner()`
+- Route guards (`middleware/guards.ts`): `requireAgent()`, `requireActiveAgent()`, `requirePackageInOrg()`, `apiKeyOrgScopeGuard()`/`pinnedSpaceScopeGuard()`. RBAC is `requirePermission(resource, action)` (`middleware/require-permission.ts`) — there is **no** `requireAdmin()` / `requireOwner()`
 - Rate limiting: Redis-backed, keyed by `method:path:identity`
 
 ### Frontend Patterns

@@ -518,9 +518,9 @@ export function renderFieldPath(path: readonly PropertyKey[]): string {
  * `unrecognized_keys` is the one issue that does NOT name its field through
  * `path`: Zod reports the container's path (EMPTY for a top-level body) and
  * puts the offending names in `issue.keys`. Routing it through the generic
- * branch therefore blamed `fallbackField` — so `PUT /agents/{scope}/{name}/
- * skills` (`param: "skillIds"`) answered `field: "skillIds"` for a body whose
- * `skillIds` was perfectly valid, naming the one field the client got right.
+ * branch therefore blamed `fallbackField` — so `POST /packages/import-github`
+ * (`param: "url"`) answered `field: "url"` for a body whose `url` was
+ * perfectly valid, naming the one field the client got right.
  * Each unrecognized key gets its OWN entry, appended to the container path, so
  * `{ extra, other }` yields two actionable pointers instead of one ambiguous
  * combined message.

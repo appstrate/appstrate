@@ -18,7 +18,6 @@ import { createRunsRouter } from "./routes/runs.ts";
 import { createRunsRemoteRouter } from "./routes/runs-remote.ts";
 import { createRunsEventsRouter } from "./routes/runs-events.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
-import { createUserAgentsRouter } from "./routes/user-agents.ts";
 import { createApiKeysRouter } from "./routes/api-keys.ts";
 import { createProxiesRouter } from "./routes/proxies.ts";
 import { createModelsRouter } from "./routes/models.ts";
@@ -321,7 +320,6 @@ process.on("uncaughtException", (err, origin) => {
 });
 
 // Routes
-const userAgentsRouter = createUserAgentsRouter();
 const agentsRouter = createAgentsRouter();
 const runsRouter = createRunsRouter();
 const schedulesRouter = createSchedulesRouter();
@@ -340,7 +338,6 @@ app.route("/api/orgs", orgsRouter);
 // inside org (or space) context.
 app.route("/api/me", meRouter);
 
-app.route("/api/agents", userAgentsRouter); // Must be before agentsRouter (import/delete routes)
 app.route("/api/agents", agentsRouter);
 app.route("/api", createNotificationsRouter());
 // Unified-runner event ingestion — HMAC-authenticated, no user principal.

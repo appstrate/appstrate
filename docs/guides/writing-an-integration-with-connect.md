@@ -21,7 +21,7 @@ All value templates use the Arazzo runtime-expression grammar `{$credential.<fie
 ```jsonc
 {
   "$schema": "https://schemas.afps.dev/v0/integration.schema.json",
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "type": "integration",
   // …
 }

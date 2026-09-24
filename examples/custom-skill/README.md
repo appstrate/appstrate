@@ -54,7 +54,7 @@ The `manifest.json` follows the AFPS (Agent Format Packaging Standard) format:
   "name": "@acme/custom-skill",
   "version": "1.0.0",
   "type": "skill",
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "display_name": "Custom Skill",
   "description": "A minimal example skill",
   "license": "Apache-2.0"
