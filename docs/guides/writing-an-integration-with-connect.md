@@ -671,7 +671,33 @@ open-redirect chains MUST NOT cross the allowlist (§8.6).
 
 The runtime layer (sidecar MITM) enforces this on the wire, including across redirect
 hops (per-hop allowlist check, per-hop SSRF blocklist, hybrid credential-strip on
-cross-host hops).
+cross-host hops). For a `source.kind: "local"` integration run in Docker, the same list is also the
+runner's whole network egress: a destination it does not grant is refused, and an
+auth that declares neither `authorized_uris` nor `allow_all_uris` gives its runner no
+way out at all. Only patterns with a `scheme://` count for raw TCP traffic: a pattern
+without a port grants only the scheme's default port (443 for https/wss, 80 for
+http/ws, 22 for ssh/sftp, none for any other scheme), and a bare `scheme://**` grants
+any host on any port.
+
+A `uv` server builds its venv at startup (`uv run` fetches the dependencies from the
+package index) through that same egress, and the platform makes no exception for it:
+either list the index in `authorized_uris` (`https://pypi.org/**` and
+`https://files.pythonhosted.org/**`, or your private index), or vendor the
+dependencies in the bundle.
+
+When the target depends on what the user enters (a self-hosted server), reference a
+connection field with `{$credential.<field>}`:
+
+```jsonc
+"authorized_uris": ["ssh://{$credential.host}:{$credential.port}"]
+```
+
+The field must be declared and listed in `credentials.schema.required`, and the entry
+must start with `scheme://` with its placeholders in the host and port only (never in
+the path or query). Templates are refused on an `oauth2` auth, on an auth that declares
+`connect`, and on one exposing `api_call`. At run time a value containing anything but
+letters, digits, `.` and `-`, or made only of dots, drops the pattern, so a user cannot
+add a wildcard, a separator or another host.
 
 ---
 

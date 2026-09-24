@@ -371,7 +371,7 @@
   "integrationEditor.auths.apiCall": "Exposer l'outil api_call",
   "integrationEditor.auths.apiCallDesc": "Donne à l'agent un outil api_call générique qui injecte les identifiants de cette authentification dans des appels HTTP. Indépendant de la source MCP.",
   "integrationEditor.auths.authorizedUris": "URIs autorisées",
-  "integrationEditor.auths.authorizedUrisDesc": "Motifs autorisés (* / ** acceptés). Entrée ou virgule pour ajouter.",
+  "integrationEditor.auths.authorizedUrisDesc": "Motifs autorisés (* / ** acceptés ; {$credential.host} insère un champ obligatoire de la connexion, hôte ou port). Entrée ou virgule pour ajouter.",
   "integrationEditor.auths.delivery": "Injection (en-tête HTTP)",
   "integrationEditor.auths.headerName": "Nom de l'en-tête",
   "integrationEditor.auths.headerPrefix": "Préfixe",

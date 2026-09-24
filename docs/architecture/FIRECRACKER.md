@@ -346,6 +346,9 @@ chain (`FIRECRACKER_EGRESS_DENY_CIDRS`) — "egress" means the internet, never
 the host's private neighbourhood. Everything else guest→internet is
 masqueraded and reserved, inside the guest, to the sidecar/runner uids
 (default-deny `output` chain; IPv6 is disabled in the guest entirely).
+Because the runner uid egresses directly, the sidecar's per-connection
+runner allowlist (#1458, `SIDECAR.md` → "Runner egress allowlist") does not
+bind a guest runner: only the host `forward` chain does.
 The `appstrate_fc` table also carries a host-side `output`-hook chain:
 host-originated traffic whose socket uid falls in the jailed-VMM range
 (`FIRECRACKER_JAIL_UID_BASE` … base + cap) is dropped toward the

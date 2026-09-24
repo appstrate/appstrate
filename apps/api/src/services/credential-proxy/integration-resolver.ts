@@ -29,7 +29,10 @@ import {
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type ProxyCredentialsPayload,
 } from "@appstrate/connect";
-import type { AfpsManifestAuth } from "../integration-manifest-helpers.ts";
+import {
+  renderAuthAuthorizedUris,
+  type AfpsManifestAuth,
+} from "../integration-manifest-helpers.ts";
 import type { Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
 import {
@@ -331,7 +334,7 @@ function buildPayloadFromFields(
   return buildProxyCredentialsPayload({
     fields,
     plan,
-    authorizedUris: authDef.authorized_uris ?? [],
+    authorizedUris: renderAuthAuthorizedUris(authDef, fields),
     allowAllUris: authDef.allow_all_uris === true,
   });
 }

@@ -229,6 +229,63 @@ describe("credential-proxy integration-resolver", () => {
     ).rejects.toBeInstanceOf(IntegrationCredentialNotFoundError);
   });
 
+  it("renders templated authorized_uris from the connection's fields (#1458)", async () => {
+    const TENANT = "@official/tenant";
+    await seedPackage({
+      id: TENANT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: {
+        schema_version: "0.1",
+        type: "integration",
+        name: TENANT,
+        version: "1.0.0",
+        display_name: "Tenant",
+        source: { kind: "local", server: { name: "@official/tenant-server", version: "^1.0.0" } },
+        auths: {
+          primary: {
+            type: "api_key",
+            authorized_uris: ["https://{$credential.host}/**", "https://{$credential.missing}/**"],
+            credentials: {
+              schema: {
+                type: "object",
+                properties: {
+                  api_key: { type: "string" },
+                  host: { type: "string" },
+                  missing: { type: "string" },
+                },
+                required: ["api_key", "host", "missing"],
+              },
+            },
+            delivery: {
+              http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" },
+            },
+          },
+        },
+      },
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, TENANT);
+    await db.insert(integrationConnections).values({
+      integrationId: TENANT,
+      authKey: "primary",
+      accountId: "acct-1",
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      credentialsEncrypted: encryptCredentialEnvelope({
+        outputs: { api_key: "k", host: "tenant.example.com" },
+      }),
+    });
+
+    const resolved = await resolveIntegrationProxyCredentials({
+      ...input(),
+      integrationId: TENANT,
+    });
+    // The entry whose field is absent is dropped, never forwarded raw.
+    expect(resolved.payload.authorizedUris).toEqual(["https://tenant.example.com/**"]);
+  });
+
   it("returns null and flags needsReconnection on a revoked refresh token (force-refresh path)", async () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ error: "invalid_grant", error_description: "revoked" }, 400);

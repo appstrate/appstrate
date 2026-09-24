@@ -35,10 +35,14 @@ import {
   apiUploadToolNameFor as deriveApiUploadToolName,
   assertUniqueApiToolAuthTokens,
 } from "@appstrate/afps-shared/api-tool-naming";
+import { credentialTemplateRefs } from "@appstrate/afps-shared/credential-template";
 import { isBareAuthSchemePrefix } from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
+
+/** RFC 3986 `scheme://` prefix a templated authorized_uris entry must start with. */
+const TEMPLATE_SCHEME_PREFIX = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 
 // ─────────────────────────────────────────────
 // Appstrate vendor extension: api_call (`_meta["dev.appstrate/api"]`)
@@ -128,6 +132,7 @@ function walkForNonFragmentRefs(
 export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefine((m, ctx) => {
   const manifest = m as unknown as IntegrationManifest;
   const auths = manifest.auths ?? {};
+  const apiCallAuthKeys = new Set(Object.keys(readApiMetaAuths(manifest) ?? {}));
 
   for (const [authKey, auth] of Object.entries(auths)) {
     // (1) authorized_uris non-empty unless allow_all_uris.
@@ -246,6 +251,75 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
           index,
           "condition",
         ]);
+      }
+    });
+
+    // (1g) Templated authorized_uris entries (#1458) reference declared, required
+    // fields, in the authority only. Forbidden with `connect` and api_call (their hosts are pinned past
+    // the SSRF gate) and on oauth2 (a refresh keeps only tokens in the bundle).
+    const credentialFields = credentialsSchema as
+      { properties?: Record<string, unknown>; required?: unknown } | undefined;
+    const declaredFields = new Set(Object.keys(credentialFields?.properties ?? {}));
+    const requiredFields = credentialFields?.required;
+    authorizedUris.forEach((pattern, index) => {
+      const refs = credentialTemplateRefs(pattern);
+      if (refs.length === 0) return;
+      const path = ["auths", authKey, "authorized_uris", index];
+      // Placeholders live in the authority only: a rendered `..` in a path would widen it.
+      const scheme = TEMPLATE_SCHEME_PREFIX.exec(pattern);
+      const afterScheme = scheme ? pattern.slice(scheme[0].length) : "";
+      const authorityEnd = afterScheme.search(/[/?#]/);
+      if (!scheme) {
+        ctx.addIssue({
+          code: "custom",
+          message: `authorized_uris entry "${pattern}" is templated without a scheme:// prefix; placeholders are only allowed in the host and port`,
+          path,
+        });
+      } else if (
+        authorityEnd !== -1 &&
+        credentialTemplateRefs(afterScheme.slice(authorityEnd)).length > 0
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          message: `authorized_uris entry "${pattern}" has a placeholder outside the authority; placeholders are only allowed in the host and port`,
+          path,
+        });
+      }
+      if (auth.connect !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          message: `authorized_uris entry "${pattern}" is templated, which is forbidden on an auth declaring connect`,
+          path,
+        });
+      }
+      if (auth.type === "oauth2") {
+        ctx.addIssue({
+          code: "custom",
+          message: `authorized_uris entry "${pattern}" is templated, which is forbidden on an oauth2 auth`,
+          path,
+        });
+      }
+      if (apiCallAuthKeys.has(authKey)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `authorized_uris entry "${pattern}" is templated, which is forbidden on an auth exposing api_call (_meta["${API_META_KEY}"])`,
+          path,
+        });
+      }
+      for (const ref of refs) {
+        if (!declaredFields.has(ref)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `authorized_uris entry "${pattern}" references '${ref}', which is not a credentials.schema property`,
+            path,
+          });
+        } else if (!Array.isArray(requiredFields) || !requiredFields.includes(ref)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `authorized_uris entry "${pattern}" references '${ref}', which is not listed in credentials.schema.required`,
+            path,
+          });
+        }
       }
     });
 
@@ -480,16 +554,6 @@ interface DeliveryView {
   files?: Record<string, { value?: string }>;
 }
 
-/** Extract `{$credential.<field>}` references from a delivery value template. */
-function extractCredentialRefs(template: string | undefined): string[] {
-  if (!template) return [];
-  const out: string[] = [];
-  const re = /\{\$credential\.([A-Za-z0-9_]+)\}/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(template)) !== null) out.push(match[1]!);
-  return out;
-}
-
 /**
  * Every credential field name a `delivery.{http,env,files}` block references
  * via a `{$credential.<field>}` template. Used to enforce the §7.7 gating
@@ -498,12 +562,12 @@ function extractCredentialRefs(template: string | undefined): string[] {
 function collectDeliveryCredentialRefs(delivery: DeliveryView | undefined): string[] {
   if (!delivery) return [];
   const refs: string[] = [];
-  refs.push(...extractCredentialRefs(delivery.http?.value));
+  refs.push(...credentialTemplateRefs(delivery.http?.value ?? ""));
   for (const entry of Object.values(delivery.env ?? {})) {
-    refs.push(...extractCredentialRefs(entry.value));
+    refs.push(...credentialTemplateRefs(entry.value ?? ""));
   }
   for (const entry of Object.values(delivery.files ?? {})) {
-    refs.push(...extractCredentialRefs(entry.value));
+    refs.push(...credentialTemplateRefs(entry.value ?? ""));
   }
   return refs;
 }

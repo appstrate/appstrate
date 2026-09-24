@@ -13,7 +13,9 @@ import {
   resolveAndCheckHost,
   OUTBOUND_TIMEOUT_MS,
   HOP_BY_HOP_HEADERS,
+  peerAdmitted,
   type HostResolver,
+  type PeerCheck,
   type SidecarConfig,
 } from "./helpers.ts";
 import {
@@ -36,6 +38,8 @@ interface ForwardProxyDeps {
    * the trusted platform host keeps its name-based connect.
    */
   resolveHostFn?: HostResolver;
+  /** Keeps integration runners from bypassing their own egress allowlist here (#1458). */
+  isPeerAllowed: PeerCheck;
 }
 
 export interface ForwardProxyResult {
@@ -169,7 +173,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     return check.blocked ? null : check.pinnedAddress;
   }
 
-  const server = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
+  function handleRequest(req: IncomingMessage, res: ServerResponse) {
     // Regular HTTP requests (non-CONNECT) — forward through upstream or direct
     const targetUrl = req.url;
     if (!targetUrl) {
@@ -262,10 +266,9 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
         headers: { ...cleaned, host: parsed.host },
       });
     });
-  });
+  }
 
-  // CONNECT handler — HTTPS tunneling
-  server.on("connect", (req: IncomingMessage, clientSocket: Socket, head: Buffer) => {
+  function handleConnect(req: IncomingMessage, clientSocket: Socket, head: Buffer) {
     const target = req.url ?? "";
 
     // Parse host:port — handles IPv6 bracket notation ([::1]:443)
@@ -381,6 +384,22 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
         clientSocket.on("error", () => targetSocket.destroy());
       });
     }
+  }
+
+  // Peer gate on BOTH paths, before any upstream work.
+  const server = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
+    void peerAdmitted(req.socket, deps.isPeerAllowed).then((ok) => {
+      if (ok) return handleRequest(req, res);
+      res.writeHead(403);
+      res.end("Blocked: peer not allowed");
+    });
+  });
+  server.on("connect", (req: IncomingMessage, clientSocket: Socket, head: Buffer) => {
+    void peerAdmitted(clientSocket, deps.isPeerAllowed).then((ok) => {
+      if (ok) return handleConnect(req, clientSocket, head);
+      clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      clientSocket.destroy();
+    });
   });
 
   server.on("error", (err) => {
