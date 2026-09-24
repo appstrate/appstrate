@@ -52,6 +52,7 @@ import {
   type CatalogOperation,
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
+import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
   getFileForActor,
@@ -314,12 +315,12 @@ function describePayload(
   };
 }
 
-/** A denial's ceiling half: named only when a delegated credential's scopes are what refused. */
+/** A denial's ceiling half: named only when a delegated credential's scopes miss one. */
 function deniedCeiling(
   op: CatalogOperation,
   ctx: Pick<McpToolContext, "ceiling">,
 ): { ceiling_permissions?: readonly string[] } {
-  return ctx.ceiling !== undefined && op.requirement.ceilingRequirements.length > 0
+  return ctx.ceiling !== undefined && !ceilingHolds(op.requirement.ceilingRequirements, ctx.ceiling)
     ? { ceiling_permissions: op.requirement.ceilingRequirements }
     : {};
 }
@@ -822,9 +823,11 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
             required_permissions: op.requirement.requirements,
             ...deniedCeiling(op, ctx),
             hint:
-              "Your role, or your credential's scopes, do not hold this permission. Report it " +
-              "to the user; do not retry and do not look for another operation that does the " +
-              "same thing.",
+              (ctx.ceiling === undefined
+                ? "Your role does not hold this permission."
+                : "Your role, or your credential's scopes, do not hold this permission.") +
+              " Report it to the user; do not retry and do not look for another operation " +
+              "that does the same thing.",
           }
         : undefined;
     return readResponse(response, denial);

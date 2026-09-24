@@ -56,6 +56,8 @@ function makeTools(
       status: 200,
       headers: { "content-type": "application/json" },
     }),
+  /** A delegated credential's scopes; `undefined` for a session. */
+  ceiling?: ReadonlySet<string>,
 ) {
   const calls: Request[] = [];
   const dispatch: Dispatch = async (req) => {
@@ -66,7 +68,7 @@ function makeTools(
     origin: "https://test.local",
     authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
     permissions: new Set(permissions),
-    ceiling: undefined,
+    ceiling,
     dispatch,
     actor,
     scope: { orgId: "org_1", spaceId: "spc_1" },
@@ -712,6 +714,9 @@ describe("invoke_operation", () => {
     expect(body.status).toBe(403);
     expect(body.required_permissions).toEqual(["agents:read|agents:run"]);
     expect(body.hint).toContain("do not retry");
+    // A session has no credential scopes to blame.
+    expect(body.hint).toStartWith("Your role does not hold this permission.");
+    expect(body).not.toHaveProperty("ceiling_permissions");
   });
 
   it("adds no permission hint to a non-403 failure", async () => {
@@ -759,6 +764,49 @@ describe("invoke_operation", () => {
     expect(body.status).toBe(403);
     expect("hint" in body).toBe(false);
     expect("required_permissions" in body).toBe(false);
+  });
+
+  describe("a delegated credential's ceiling", () => {
+    const forbidden = () =>
+      new Response(JSON.stringify({ title: "Forbidden" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      });
+    const invokeDelete = async (ceiling: ReadonlySet<string>) => {
+      const { byName } = makeTools(
+        ["mcp:read", "mcp:invoke"],
+        false,
+        { type: "user", id: "user_1" },
+        forbidden,
+        ceiling,
+      );
+      return parseResult(
+        await byName.get("invoke_operation")!.handler(
+          {
+            operation_id: "deleteMyConnection",
+            path_params: { connectionId: "conn_1" },
+          },
+          noExtra,
+        ),
+      );
+    };
+
+    it("names the ceiling scope when the credential's scopes refused the 403", async () => {
+      const body = await invokeDelete(new Set(["integrations:read"]));
+      expect(body.status).toBe(403);
+      expect(body.ceiling_permissions).toEqual(["integrations:disconnect"]);
+      expect(body.hint).toStartWith(
+        "Your role, or your credential's scopes, do not hold this permission.",
+      );
+    });
+
+    it("adds no permission answer to a 403 the row decided under a satisfied ceiling", async () => {
+      const body = await invokeDelete(new Set(["integrations:disconnect"]));
+      expect(body.status).toBe(403);
+      expect(body).not.toHaveProperty("hint");
+      expect(body).not.toHaveProperty("ceiling_permissions");
+      expect(body).not.toHaveProperty("required_permissions");
+    });
   });
 
   it("errors when required path params are missing", async () => {
@@ -878,6 +926,15 @@ describe("buildOperationIndex", () => {
     // Everything an agent guard gates is gone with it.
     expect(listed).not.toContain("listAgents");
     expect(listed).not.toContain("runAgent");
+  });
+
+  it("drops a ceiling-guarded operation for a delegated credential lacking its scope, never for a session", () => {
+    expect(indexIds(buildOperationIndex(new Set<string>(), new Set()))).not.toContain(
+      "deleteMyConnection",
+    );
+    expect(indexIds(buildOperationIndex(new Set<string>(), undefined))).toContain(
+      "deleteMyConnection",
+    );
   });
 
   it("carries no structured method+path columns (those come from describe / best_match)", () => {

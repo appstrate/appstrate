@@ -210,8 +210,16 @@ export function isGranted(
 ): boolean {
   return (
     holdsEach(requirement.requirements, permissions) &&
-    (ceiling === undefined || holdsEach(requirement.ceilingRequirements, ceiling))
+    (ceiling === undefined || ceilingHolds(requirement.ceilingRequirements, ceiling))
   );
+}
+
+/** A delegated credential's scopes hold every ceiling requirement. */
+export function ceilingHolds(
+  ceilingRequirements: readonly string[],
+  ceiling: ReadonlySet<string>,
+): boolean {
+  return holdsEach(ceilingRequirements, ceiling);
 }
 
 function holdsEach(entries: readonly string[], held: ReadonlySet<string>): boolean {

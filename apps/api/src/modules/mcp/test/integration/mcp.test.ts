@@ -625,6 +625,53 @@ describe("mcp tool round-trip", () => {
   });
 });
 
+describe("mcp ceiling guards for a delegated credential", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  // `DELETE /api/me/connections/{id}` asks no role grant, only the key's
+  // scopes: the router must hand the tools and the index `scopeCeiling`, or
+  // both halves below read `granted`.
+  async function surfaceFor(scopes: string[]): Promise<{ granted: unknown; indexed: boolean }> {
+    const headers = await apiKeyHeaders(scopes);
+    const init = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "t", version: "1" },
+      },
+    });
+    const instructions = init.envelope.result?.instructions as string;
+    const index = instructions.split("## Operation index")[1]!;
+    const described = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "describe_operation", arguments: { operation_id: "deleteMyConnection" } },
+    });
+    return {
+      granted: toolPayload(described.envelope).data.granted,
+      indexed: /\bdeleteMyConnection\b/.test(index),
+    };
+  }
+
+  it("withholds deleteMyConnection from a key without integrations:disconnect", async () => {
+    const surface = await surfaceFor(["mcp:read", "mcp:invoke"]);
+    expect(surface.granted).toBe(false);
+    expect(surface.indexed).toBe(false);
+  });
+
+  it("offers deleteMyConnection to the same key once it carries integrations:disconnect", async () => {
+    const surface = await surfaceFor(["mcp:read", "mcp:invoke", "integrations:disconnect"]);
+    expect(surface.granted).toBe(true);
+    expect(surface.indexed).toBe(true);
+  });
+});
+
 describe("mcp audit + rate limiting", () => {
   beforeEach(async () => {
     await truncateAll();
