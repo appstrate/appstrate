@@ -219,7 +219,7 @@ export function parseServedModels(apiShape: string, body: unknown): ParsedServed
   return { models, capped };
 }
 
-export interface ListingConfig {
+interface ListingConfig {
   apiShape: string;
   baseUrl: string;
   apiKey: string;

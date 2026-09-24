@@ -26,7 +26,6 @@ import {
 } from "../services/model-providers/credentials.ts";
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
 import { hasLiveModelSearch } from "../services/model-search.ts";
-import { discoverAvailableModels } from "../services/model-providers/model-discovery.ts";
 import { listServedModels } from "../services/model-providers/model-listing.ts";
 import { describeServedModel } from "../services/model-providers/model-metadata.ts";
 import { listCatalogModels } from "../services/model-catalog.ts";
@@ -100,8 +99,8 @@ interface DiscoverTarget {
 /**
  * Enumeration never spends a subscription token
  * (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`). The declaration that keeps
- * a credential off the listing path is `modelDiscovery: { mode: "static" }` —
- * the same predicate `discoverAvailableModels` branches on — not the auth mode:
+ * a credential off the listing path is `modelDiscovery: { mode: "static" }`,
+ * not the auth mode:
  * the registry requires every oauth2 provider to declare it at boot
  * (`assertSubscriptionNeverEnumerated`), and an api-key provider that declares
  * it is asking for the same treatment.
@@ -383,10 +382,9 @@ export function createModelProviderCredentialsRouter() {
   // POST /api/model-provider-credentials/discover — what an endpoint serves,
   // described from its listing and the catalog, BEFORE a credential exists.
   // Writes no model state and never echoes the key — the probe itself is
-  // audited, since it spends a key on an operator-supplied URL. Gated like
-  // `refresh-models`. The listing is followed across its pages, and `truncated`
-  // says when a cap cut the read short rather than letting a partial list pass
-  // for a whole one.
+  // audited, since it spends a key on an operator-supplied URL. The listing is
+  // followed across its pages, and `truncated` says when a cap cut the read
+  // short rather than letting a partial list pass for a whole one.
   router.post(
     "/discover",
     rateLimit(6),
@@ -471,48 +469,6 @@ export function createModelProviderCredentialsRouter() {
           id,
           error: getErrorMessage(err),
         });
-        throw internalError();
-      }
-    },
-  );
-
-  // POST /api/model-provider-credentials/:id/refresh-models — model
-  // discovery. For API-key providers this is empirical: one `GET /models`
-  // listing against the live credential, intersected with the provider's
-  // discovery candidates, persisted as `available_model_ids`. For
-  // `mode: "static"` providers (subscription: codex, claude-code) it is a
-  // no-op that reports the current list: ZERO upstream calls and ZERO writes,
-  // because their served set is the provider's offer, derived on every read.
-  // Rate-limited: each call reaches the provider on the user's own credential.
-  router.post(
-    "/:id/refresh-models",
-    rateLimit(6),
-    requirePermission("model-provider-credentials", "write"),
-    async (c) => {
-      const orgId = c.get("orgId");
-      const id = c.req.param("id")!;
-      if (isSystemModelProviderCredential(id)) {
-        throw systemEntityForbidden("model provider credential", id);
-      }
-      try {
-        const result = await discoverAvailableModels(orgId, id);
-        if (result.outcome === "credential_not_found") {
-          throw notFound("Model provider credential not found");
-        }
-        // Re-read through the credential DTO rather than echoing the ids
-        // discovery just verified: on a round that verified nothing the
-        // previous list is what still stands, and the DTO is the single
-        // place where a static provider's list gets derived. Both provider
-        // kinds therefore answer with exactly what a subsequent GET returns.
-        const credential = await getOrgModelProviderCredential(orgId, id);
-        return c.json({
-          outcome: result.outcome,
-          candidate_count: result.candidateCount,
-          available_model_ids: credential?.available_model_ids ?? null,
-        });
-      } catch (err) {
-        if (err instanceof ApiError) throw err;
-        logger.error("Model discovery failed", { id, error: getErrorMessage(err) });
         throw internalError();
       }
     },

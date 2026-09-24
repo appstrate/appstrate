@@ -94,23 +94,6 @@ const defaultModel = createDefaultPointer({
 // --- Model-alias projection (Threat A: dashboard user) ---
 
 /**
- * Strip the real binding from a model alias before it reaches a user-facing
- * surface. For `aliased` entries the public `id`/`label` survive (the user
- * selected the alias) but the backing — provider/protocol (`apiShape`),
- * endpoint (`baseUrl`), upstream id (`modelId`), credential, and every
- * capability/cost field — is nulled. Backing-derived capability/cost fields are
- * dropped too (not just the ids): a distinctive context window or price could
- * identify the real model. The exception is the normalized, portable generation
- * contract required to render safe temperature/reasoning controls; adaptive
- * transport details remain private. Non-aliased models pass through.
- *
- * Applied at the user-facing read boundary (`GET /api/models`, the effective-
- * default response) — NOT inside {@link listOrgModels}, so the operator
- * create/update handlers (which re-project via {@link getOrgModel}) still see
- * the full resource they just configured. Resolution (`resolveModel` /
- * `loadModel`) is unaffected — the run executor always gets the real binding.
- */
-/**
  * What an alias accepts, whatever its backing: a backing's own level set
  * fingerprints its family. Pi's default set — `xhigh`/`max` exist only where a
  * record maps them — and a run clamps the chosen level to the backing's
@@ -124,6 +107,11 @@ const ALIAS_REASONING_LEVELS: readonly ModelReasoningLevel[] = [
   "high",
 ];
 
+/**
+ * An alias's public generation contract. Applied by {@link generationOf}, so
+ * `listOrgModels` and `ResolvedModel` both carry it: settings are validated
+ * against it, then {@link clampToBackingLevel} maps the level to the backing.
+ */
 function projectAliasedGenerationCapabilities(
   capabilities: ModelGenerationCapabilities | null,
 ): ModelGenerationCapabilities {
@@ -134,8 +122,8 @@ function projectAliasedGenerationCapabilities(
   const reasoningSupported = capabilities?.reasoning.supported === "supported";
 
   // Alias callers cannot inspect the backing model to compensate for an
-  // unknown capability. Expose only catalog-confirmed support and fail closed
-  // for unknowns. The runtime still resolves the full, unprojected contract.
+  // unknown capability: expose only catalog-confirmed support, fail closed on
+  // unknowns.
   return {
     temperature: temperatureSupported ? "supported" : "unsupported",
     reasoning: {
@@ -154,6 +142,20 @@ function projectAliasedGenerationCapabilities(
   };
 }
 
+/**
+ * Strip the real binding from a model alias before it reaches a user-facing
+ * surface. For `aliased` entries the public `id`/`label` survive (the user
+ * selected the alias) but the backing — provider/protocol (`apiShape`),
+ * endpoint (`baseUrl`), upstream id (`modelId`), credential, and every
+ * capability/cost field — is nulled: a distinctive context window or price
+ * could identify the real model. `generation` is already the alias's public
+ * contract (re-projecting it is idempotent). Non-aliased models pass through.
+ *
+ * Applied at the user-facing read boundary (`GET /api/models`, the effective-
+ * default response), not inside {@link listOrgModels}, so the operator
+ * create/update handlers still see the binding they configured. Resolution
+ * (`resolveModel` / `loadModel`) keeps the real binding.
+ */
 export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
   if (!model.aliased) return model;
   // Allowlist, NOT a denylist (`{ ...model, field: null }`): build the public

@@ -998,12 +998,6 @@ export interface ModelProviderCredentialInfo {
   oauth_email?: string | null;
   /** True when the credential is dead (an OAuth `invalid_grant`, or undecryptable). */
   needs_reconnection?: boolean;
-  /**
-   * Offered model ids this credential serves: what its listing reported, or
-   * the whole offer for a static-discovery provider. Informational — it gates
-   * nothing. NULL/absent = never listed.
-   */
-  available_model_ids?: string[] | null;
   created_by: string | null;
   createdAt: string;
   updatedAt: string;

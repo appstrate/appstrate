@@ -822,24 +822,15 @@ export interface ModelProviderDefinition {
   featuredModels: readonly string[];
 
   /**
-   * Model-discovery strategy. When omitted, discovery is **empirical**
-   * (listing): the platform reads the credential's `GET <baseUrl>/models` and
-   * persists the candidates it serves as the credential's `availableModelIds`.
+   * Model-discovery strategy. When omitted, the platform may enumerate the
+   * endpoint (`GET <baseUrl>/models`) on an operator's request.
    *
    * `{ mode: "static" }` declares that the platform must issue ZERO API calls to
    * discover models: the served set is the provider's offer, WITHOUT per-model
    * live probing. Set by subscription providers
    * (`claude-code`, `codex`) so a user's subscription token is never spent
    * enumerating models — real per-model availability is validated at the
-   * first agent run (on the Pi engine).
-   *
-   * Nothing is written to `availableModelIds` under this mode. With no probe,
-   * the answer is a pure function of (definition, catalog) and therefore
-   * identical for every credential of the provider; a persisted copy would
-   * carry no per-credential information and could only go stale — which is
-   * exactly how users kept being offered a model list two generations old.
-   * The platform resolves it on read instead, so a Pi registry bump corrects
-   * every existing credential at once.
+   * first agent run (on the Pi engine). Required of every `oauth2` provider.
    *
    * Offline credential VALIDATION (no upstream probe to test a token) is a
    * separate, orthogonal concern inferred from the PRESENCE of

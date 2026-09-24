@@ -342,7 +342,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Enumerate the models an endpoint serves",
       description:
-        "Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the model catalog (Pi's pinned registry) otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `providerId` + `api_key` inline — and it **persists no model state**: no credential is created, no `available_model_ids` is written (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A provider whose listing is unauthenticated has its key checked first by one minimal chat completion, so a rejected key answers `auth_failed` instead of a listing it did not unlock. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.",
+        "Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the model catalog (Pi's pinned registry) otherwise; `source` says which described a given model. `label` always comes from the catalog. It works BEFORE a credential exists — the operator supplies `providerId` + `api_key` inline, or names a stored `credentialId` — and it **persists nothing**: no credential is created (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A provider whose listing is unauthenticated has its key checked first by one minimal chat completion, so a rejected key answers `auth_failed` instead of a listing it did not unlock. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -604,55 +604,6 @@ export const modelProviderCredentialsPaths = {
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/TestResult" },
-            },
-          },
-        },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "429": { $ref: "#/components/responses/RateLimited" },
-        "500": { $ref: "#/components/responses/InternalServerError" },
-      },
-    },
-  },
-  "/api/model-provider-credentials/{id}/refresh-models": {
-    post: {
-      operationId: "refreshModelProviderCredentialModels",
-      tags: ["Model Provider Credentials"],
-      summary: "Discover the models this credential serves",
-      description:
-        "Discovers the models a credential serves. For API-key providers this is empirical: the credential's provider is asked for its model listing (`GET <base_url>/models`) — a listing that declares a next page is followed to its end, under a page cap, a model cap and a per-page byte budget — and the models of the provider's offer present in that listing are persisted as `available_model_ids`. A provider whose listing is unauthenticated has its key checked first by one minimal chat completion, so a rejected key answers `auth_failed` instead of a listing it did not unlock. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is the provider's offer (Pi's model registry), derived on every read. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the listing path an auth failure, an unreadable listing, a listing cut short by one of those caps, or an empty intersection leaves the previously persisted list untouched; a `429` from the provider is replayed once before the attempt is abandoned.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { name: "id", in: "path", required: true, schema: { type: "string" } },
-      ],
-      responses: {
-        "200": {
-          description: "Discovery outcome + the credential's current verified list",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["outcome", "candidate_count", "available_model_ids"],
-                properties: {
-                  outcome: {
-                    type: "string",
-                    enum: ["ok", "auth_failed", "nothing_verified", "no_candidates"],
-                    description:
-                      "`ok` — list resolved (persisted on the listing path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — the listing could not be read, it was read but cut short by the page, model or byte cap (intersecting against a partial view would drop candidates sitting past it), or no candidate appeared in it; a provider `429` is replayed once before the read counts as failed. Previous list kept. `no_candidates` — provider resolves no discovery candidate.",
-                  },
-                  candidate_count: {
-                    type: "integer",
-                    description:
-                      "Number of models the provider offers (its discovery candidates) — the same meaning on both paths. Not a request count: the listing path's requests are bounded by the listing's own pagination, not by the candidate count, and `offline`-validation providers (codex, claude-code) spend none. Not a count of what is served either: `available_model_ids` carries that.",
-                  },
-                  available_model_ids: {
-                    type: ["array", "null"],
-                    items: { type: "string" },
-                  },
-                },
-              },
             },
           },
         },

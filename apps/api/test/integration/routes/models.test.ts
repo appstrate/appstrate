@@ -1747,7 +1747,7 @@ describe("Models API", () => {
         apiShape: "openai",
         baseUrl: "https://api.openai.com",
       });
-      for (const camel of [{ apiKey: "sk-test" }, { existingModelId: "mdl_x" }]) {
+      for (const camel of [{ apiKey: "sk-test" }]) {
         const res = await app.request("/api/models/test", {
           method: "POST",
           headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -1896,8 +1896,7 @@ describe("Models API", () => {
     });
   });
 
-  // `existing_model_id` lends a stored key to the probe: it must never lend a
-  // key to a credential (hence a base URL) other than the model's own.
+  // The probe spends a stored key only on its own credential's base URL.
   describe("POST /api/models/test — stored key stays on its own credential", () => {
     const SYSTEM_MODEL_ID = "sys-model-probe-test";
     const SYSTEM_KEY = "sk-system-probe-secret";
@@ -1947,36 +1946,14 @@ describe("Models API", () => {
       });
     }
 
-    it("refuses a built-in model and sends its key nowhere", async () => {
+    it("refuses existing_model_id as an unknown field", async () => {
       const res = await probe({
         credentialId: await callerCredential(),
         modelId: "any-model",
         existing_model_id: SYSTEM_MODEL_ID,
       });
-      expect(seen.filter((line) => line.includes(SYSTEM_KEY))).toEqual([]);
-      expect(res.status).toBe(403);
-    });
-
-    it("refuses a model bound to another credential and sends its key nowhere", async () => {
-      const own = await seedOrgModelProviderKey({
-        orgId: ctx.orgId,
-        apiShape: "openai-completions",
-        baseUrl: "https://1.1.1.1/v1",
-        apiKey: "sk-own-model-secret",
-      });
-      const model = await seedOrgModel({
-        orgId: ctx.orgId,
-        credentialId: own.id,
-        modelId: "own-model",
-      });
-      const res = await probe({
-        credentialId: await callerCredential(),
-        modelId: "own-model",
-        existing_model_id: model.id,
-      });
-      expect(seen.filter((line) => line.includes("sk-own-model-secret"))).toEqual([]);
       expect(res.status).toBe(400);
-      expect(((await res.json()) as { param?: string }).param).toBe("existing_model_id");
+      expect(seen).toEqual([]);
     });
 
     it("refuses a built-in credential", async () => {
@@ -1985,25 +1962,12 @@ describe("Models API", () => {
       expect(seen).toEqual([]);
     });
 
-    it("lends a model's key to its own credential", async () => {
-      const own = await seedOrgModelProviderKey({
-        orgId: ctx.orgId,
-        apiShape: "openai-completions",
-        baseUrl: "https://1.1.1.1/v1",
-        apiKey: "sk-own-model-secret",
-      });
-      const model = await seedOrgModel({
-        orgId: ctx.orgId,
-        credentialId: own.id,
-        modelId: "own-model",
-      });
-      const res = await probe({
-        credentialId: own.id,
-        modelId: "own-model",
-        existing_model_id: model.id,
-      });
+    it("probes with the credential's stored key", async () => {
+      const res = await probe({ credentialId: await callerCredential(), modelId: "any-model" });
       expect(res.status).toBe(200);
-      expect(seen.some((line) => line.startsWith("https://1.1.1.1/"))).toBe(true);
+      expect(
+        seen.some((line) => line.startsWith("https://9.9.9.9/") && line.includes("sk-caller")),
+      ).toBe(true);
     });
   });
 });

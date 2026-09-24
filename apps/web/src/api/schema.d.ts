@@ -2066,7 +2066,7 @@ export interface paths {
         put?: never;
         /**
          * Enumerate the models an endpoint serves
-         * @description Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the model catalog (Pi's pinned registry) otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `providerId` + `api_key` inline — and it **persists no model state**: no credential is created, no `available_model_ids` is written (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A provider whose listing is unauthenticated has its key checked first by one minimal chat completion, so a rejected key answers `auth_failed` instead of a listing it did not unlock. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.
+         * @description Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the model catalog (Pi's pinned registry) otherwise; `source` says which described a given model. `label` always comes from the catalog. It works BEFORE a credential exists — the operator supplies `providerId` + `api_key` inline, or names a stored `credentialId` — and it **persists nothing**: no credential is created (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A provider whose listing is unauthenticated has its key checked first by one minimal chat completion, so a rejected key answers `auth_failed` instead of a listing it did not unlock. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.
          */
         post: operations["discoverModelProviderCredentialModels"];
         delete?: never;
@@ -2137,26 +2137,6 @@ export interface paths {
          * @description Update a model provider credential's mutable fields. The `apiShape` and `base_url` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
          */
         patch: operations["updateModelProviderCredential"];
-        trace?: never;
-    };
-    "/api/model-provider-credentials/{id}/refresh-models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Discover the models this credential serves
-         * @description Discovers the models a credential serves. For API-key providers this is empirical: the credential's provider is asked for its model listing (`GET <base_url>/models`) — a listing that declares a next page is followed to its end, under a page cap, a model cap and a per-page byte budget — and the models of the provider's offer present in that listing are persisted as `available_model_ids`. A provider whose listing is unauthenticated has its key checked first by one minimal chat completion, so a rejected key answers `auth_failed` instead of a listing it did not unlock. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is the provider's offer (Pi's model registry), derived on every read. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the listing path an auth failure, an unreadable listing, a listing cut short by one of those caps, or an empty intersection leaves the previously persisted list untouched; a `429` from the provider is replayed once before the attempt is abandoned.
-         */
-        post: operations["refreshModelProviderCredentialModels"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/model-provider-credentials/{id}/test": {
@@ -2338,7 +2318,7 @@ export interface paths {
         put?: never;
         /**
          * Test model configuration inline
-         * @description Test a model configuration without saving it first. If editing an existing model, pass `existing_model_id` to fall back to its stored API key when `api_key` is omitted; that model must be bound to `credentialId` (400 otherwise). A built-in credential or model is refused (403). Rate limited to 5 requests per minute.
+         * @description Test a model configuration without saving it first. The probe uses `api_key` when given, the credential's stored key otherwise. A built-in credential is refused (403). Rate limited to 5 requests per minute.
          */
         post: operations["testModelInline"];
         delete?: never;
@@ -5597,8 +5577,6 @@ export interface components {
             providerId?: string | null;
             oauth_email?: string | null;
             needs_reconnection?: boolean;
-            /** @description Model ids of the provider's offer this credential serves. For API-key providers, the offered ids its `GET <base_url>/models` listing reported, persisted by model discovery (POST /:id/refresh-models); models are not inference-probed (a provider whose listing is unauthenticated has its key checked by one minimal chat completion first, and a rejected key persists nothing). Empty when discovery never ran, and per-credential because the listing depends on the account's plan. For static-discovery providers (subscription: codex, claude-code) nothing is ever persisted: the list is the provider's whole offer (Pi's model registry), derived on every read. Informational: it does not restrict which models can be created on the credential. */
-            available_model_ids?: string[] | null;
             created_by: string | null;
             /** Format: date-time */
             createdAt: string;
@@ -14128,47 +14106,6 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
-    refreshModelProviderCredentialModels: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Discovery outcome + the credential's current verified list */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /**
-                         * @description `ok` — list resolved (persisted on the listing path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — the listing could not be read, it was read but cut short by the page, model or byte cap (intersecting against a partial view would drop candidates sitting past it), or no candidate appeared in it; a provider `429` is replayed once before the read counts as failed. Previous list kept. `no_candidates` — provider resolves no discovery candidate.
-                         * @enum {string}
-                         */
-                        outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates";
-                        /** @description Number of models the provider offers (its discovery candidates) — the same meaning on both paths. Not a request count: the listing path's requests are bounded by the listing's own pagination, not by the candidate count, and `offline`-validation providers (codex, claude-code) spend none. Not a count of what is served either: `available_model_ids` carries that. */
-                        candidate_count: number;
-                        available_model_ids: string[] | null;
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            429: components["responses"]["RateLimited"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
     testModelProviderCredential: {
         parameters: {
             query?: never;
@@ -14230,7 +14167,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `available_model_ids` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credentialId` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is the provider's offer (Pi's model registry), derived with no upstream call; for probe-validated providers a reconnect preserves the credential's empirically discovered list. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list. */
+            /** @description Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `available_model_ids` is the provider's offer (Pi's model registry), derived with no upstream call: every OAuth provider is a subscription provider (`codex`, `claude-code`) whose models are never enumerated. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -14742,10 +14679,8 @@ export interface operations {
                     credentialId: string;
                     /** @description Model identifier */
                     modelId: string;
-                    /** @description Override API key for the probe. Falls back to `existing_model_id`'s key, then the credential's stored key. */
+                    /** @description Override API key for the probe. Falls back to the credential's stored key. */
                     api_key?: string;
-                    /** @description Existing model ID, bound to `credentialId`, whose stored API key the probe falls back to */
-                    existing_model_id?: string;
                 };
             };
         };

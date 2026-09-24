@@ -4,8 +4,7 @@
  * Tests for `parseServedModels` — the pure half of model listing — plus the
  * one `listServedModels` verdict reachable without a network: a base URL the
  * egress guard refuses. The rest of the network half is covered where it is
- * used, through the injected `listModels` dependency of
- * `discoverAvailableModels`.
+ * used, by the `POST /api/model-provider-credentials/discover` route tests.
  */
 
 import { describe, it, expect } from "bun:test";

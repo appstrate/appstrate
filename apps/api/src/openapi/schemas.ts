@@ -1623,12 +1623,6 @@ export const schemas = {
       },
       oauth_email: { type: ["string", "null"] },
       needs_reconnection: { type: "boolean" },
-      available_model_ids: {
-        type: ["array", "null"],
-        items: { type: "string" },
-        description:
-          "Model ids of the provider's offer this credential serves. For API-key providers, the offered ids its `GET <base_url>/models` listing reported, persisted by model discovery (POST /:id/refresh-models); models are not inference-probed (a provider whose listing is unauthenticated has its key checked by one minimal chat completion first, and a rejected key persists nothing). Empty when discovery never ran, and per-credential because the listing depends on the account's plan. For static-discovery providers (subscription: codex, claude-code) nothing is ever persisted: the list is the provider's whole offer (Pi's model registry), derived on every read. Informational: it does not restrict which models can be created on the credential.",
-      },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },

@@ -183,7 +183,6 @@ column llm_usage.request_id text
 column llm_usage.run_id text
 column llm_usage.source llm_usage_source not null
 column llm_usage.user_id text
-column model_provider_credentials.available_model_ids jsonb
 column model_provider_credentials.base_url_override text
 column model_provider_credentials.created_at timestamp with time zone not null default now()
 column model_provider_credentials.created_by text

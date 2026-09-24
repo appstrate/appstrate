@@ -19,7 +19,6 @@ import {
   seedOrgModelsForCredential,
   testModelConnection,
   testModelConfig,
-  loadModel,
   deriveModelLabel,
   projectAliasedModel,
   resolveCatalogDefaults,
@@ -152,7 +151,6 @@ export const testInlineSchema = z
     credentialId: z.string().min(1, "credentialId is required"),
     modelId: z.string().min(1),
     api_key: z.string().optional(),
-    existing_model_id: z.string().optional(),
   })
   .strict();
 
@@ -455,10 +453,8 @@ export function createModelsRouter() {
 
     // Resolve the provider via the credential's providerId — the registry
     // owns apiShape and the default baseUrl. The user-supplied `api_key` (if
-    // any) overrides the stored credential for "verify before save" flows.
-    // A stored key only ever reaches its own credential's base URL: built-in
-    // credentials and models are refused, and `existing_model_id` must be
-    // bound to `credentialId`.
+    // any) overrides the stored key for "verify before save" flows. A built-in
+    // credential is refused: its key never reaches a caller-chosen probe.
     if (getSystemModelProviderCredentials().has(data.credentialId)) {
       throw systemEntityForbidden("model provider credential", data.credentialId, "test");
     }
@@ -466,25 +462,7 @@ export function createModelsRouter() {
     if (!creds) {
       throw notFound("Credential not found");
     }
-
-    let apiKey = data.api_key;
-    if (!apiKey && data.existing_model_id) {
-      if (isSystemModel(data.existing_model_id)) {
-        throw systemEntityForbidden("model", data.existing_model_id, "test");
-      }
-      const existing = await loadModel(orgId, data.existing_model_id);
-      if (!existing) throw notFound("Model not found");
-      if (existing.credentialId !== data.credentialId) {
-        throw invalidRequest(
-          "existing_model_id must be bound to credentialId",
-          "existing_model_id",
-        );
-      }
-      apiKey = existing.apiKey;
-    }
-    if (!apiKey) {
-      apiKey = creds.apiKey;
-    }
+    const apiKey = data.api_key || creds.apiKey;
     if (!apiKey) {
       throw invalidRequest("API key is required");
     }

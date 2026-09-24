@@ -316,6 +316,26 @@ describe("runPiCatalogMigration", () => {
     expect(await state(fx)).toEqual(after);
   });
 
+  it("names a backup written for a change that was not committed", async () => {
+    const before = await state(fx);
+    const backupPath = `${BACKUP_DIR}/0030-backup-uncommitted.json`;
+    await expect(
+      runPiCatalogMigration({
+        apply: true,
+        catalog: registryCatalog(),
+        systemKeys: [],
+        backupPath,
+        out: (line) => {
+          lines.push(line);
+          if (line.startsWith("backup: wrote")) throw new Error("fails after the backup");
+        },
+      }),
+    ).rejects.toThrow(/fails after the backup/);
+    expect(await state(fx)).toEqual(before);
+    expect(await Bun.file(backupPath).exists()).toBe(true);
+    expect(lines).toContain(`backup: ${backupPath} was NOT committed — discard it`);
+  });
+
   it("reports a declared system model outside the offer without its key, and refuses to apply", async () => {
     const keys = [
       {

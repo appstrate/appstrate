@@ -630,7 +630,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         // Model aliases (issue #727, Threat A): the run DTO (`state/runs.ts`)
         // emits `modelCredentialId` to any dashboard user who can read the run,
         // and a credential id cross-references — via GET /api/model-provider-
-        // credentials → `available_model_ids` — straight to the backing model.
+        // credentials → its provider and endpoint — straight to the backing.
         // Drop it for aliases; the operator audit trail already recorded the
         // create. Non-aliased runs keep it for the connections/credentials panel.
         modelCredentialId: plan.llmConfig.aliased ? null : (plan.llmConfig.credentialId ?? null),

@@ -274,6 +274,7 @@ export async function runPiCatalogMigration(options: {
   }
 
   let plan: PiCatalogPlan | undefined;
+  let backupWritten = false;
   try {
     await db.transaction(async (tx) => {
       await tx.execute("SET LOCAL lock_timeout = '3s'");
@@ -303,12 +304,17 @@ export async function runPiCatalogMigration(options: {
       }
       if (backup.org_models.length + changes === 0)
         return out("backup: nothing changed, none written");
+      // Written before COMMIT so a committed change always has its backup.
       await Bun.write(backupPath, `${JSON.stringify(backup, null, 2)}\n`);
+      backupWritten = true;
       out(`backup: wrote ${backupPath}: ${summary}`);
     });
     out("0030: APPLIED — committed.");
   } catch (error) {
-    if (!(error instanceof DryRunRollback)) throw error;
+    if (!(error instanceof DryRunRollback)) {
+      if (backupWritten) out(`backup: ${backupPath} was NOT committed — discard it`);
+      throw error;
+    }
     out("0030: DRY RUN — rolled back, nothing written. Re-run with --apply to commit.");
   }
   return plan!;
@@ -348,7 +354,7 @@ if (import.meta.main) {
     await main();
     code = 0;
   } catch (error) {
-    process.stdout.write(`0030: FAILED, nothing written — ${getErrorMessage(error)}\n`);
+    process.stdout.write(`0030: FAILED, nothing committed — ${getErrorMessage(error)}\n`);
   } finally {
     await closeDb();
   }

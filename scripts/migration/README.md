@@ -879,7 +879,8 @@ needs no running service.
 3. `--apply`, from a directory you keep: it writes `0030-backup-<timestamp>.json`
    there (path printed) — the deleted rows in full and every pointer changed,
    before and after — then commits. One transaction; every write is guarded on
-   the value read, and an after-check aborts unless nothing is left.
+   the value read, and an after-check aborts unless nothing is left. A failure
+   after the backup is written names that file as not committed.
 4. Start the new image.
 
 ## Log

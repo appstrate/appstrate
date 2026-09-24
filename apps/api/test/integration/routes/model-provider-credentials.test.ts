@@ -1,58 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { auditEvents, modelProviderCredentials } from "@appstrate/db/schema";
+import { auditEvents } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
-import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { registerModelProvider } from "../../../src/services/model-providers/registry.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { getModelProvider } from "../../../src/services/model-providers/registry.ts";
 import { listCatalogModels, lookupCatalogModel } from "../../../src/services/model-catalog.ts";
 
 const app = getTestApp();
-
-/**
- * Synthetic `modelDiscovery: { mode: "static" }` provider — a stand-in for the
- * subscription sign-ins (codex, claude-code), which the core suite must not
- * depend on (zero-footprint invariant). It offers Pi's Anthropic records.
- */
-const STATIC_PROVIDER_ID = "test-refresh-static";
-const S_ONE = "claude-opus-5";
-/** The static provider's served set: its whole offer. */
-const staticOffer = () => listCatalogModels(getModelProvider(STATIC_PROVIDER_ID)!).map((m) => m.id);
-
-function registerStaticRefreshProvider(): void {
-  try {
-    registerModelProvider({
-      providerId: STATIC_PROVIDER_ID,
-      displayName: "Test Static Refresh",
-      iconUrl: "anthropic",
-      description: "Synthetic offline-validation provider.",
-      apiShape: "anthropic-messages",
-      defaultBaseUrl: "https://static.example.test",
-      baseUrlOverridable: false,
-      authMode: "oauth2",
-      oauth: {
-        clientId: "test-static-client",
-        authorizationUrl: "https://auth.example.test/authorize",
-        tokenUrl: "https://auth.example.test/token",
-        refreshUrl: "https://auth.example.test/token",
-        scopes: ["openid"],
-        pkce: "S256",
-      },
-      catalogProviderId: "anthropic",
-      featuredModels: [S_ONE],
-      modelDiscovery: { mode: "static" },
-    });
-  } catch {
-    // Already registered in this process — the registry rejects duplicates.
-  }
-}
 
 /** Synthetic api-key provider whose listing is unauthenticated (`publicModelListing`). */
 const PUBLIC_LISTING_PROVIDER_ID = "test-public-listing-route";
@@ -910,103 +870,6 @@ describe("Model Provider Keys API", () => {
       } finally {
         await foreign.server.stop(true);
       }
-    });
-  });
-
-  /**
-   * `POST /:id/refresh-models` for a `mode: "static"` provider. The endpoint
-   * is deliberately kept as a truthful no-op rather than 404-ing: the model
-   * form drives both provider kinds through the same call, and the response
-   * still has to be the credential's current list. The harness validates
-   * every JSON body against the OpenAPI response schema, so these tests also
-   * gate the documented shape (`outcome`, `candidate_count`,
-   * `available_model_ids`).
-   */
-  describe("POST /api/model-provider-credentials/:id/refresh-models (static provider)", () => {
-    beforeAll(registerStaticRefreshProvider);
-    afterAll(() => {
-      // Restore the canonical baseline — `bun test` shares one process and the
-      // registry rejects duplicate ids.
-      seedTestModelProviders();
-    });
-    beforeEach(registerStaticRefreshProvider);
-
-    it("returns the derived list and writes nothing", async () => {
-      const cred = await seedOrgModelProviderOAuth({
-        orgId: ctx.org.id,
-        providerId: STATIC_PROVIDER_ID,
-      });
-
-      const res = await app.request(`/api/model-provider-credentials/${cred.id}/refresh-models`, {
-        method: "POST",
-        headers: authHeaders(ctx),
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        outcome: string;
-        candidate_count: number;
-        available_model_ids: string[] | null;
-      };
-      expect(body.outcome).toBe("ok");
-      // The whole offer is counted, none requested — the platform never
-      // spends a subscription quota to enumerate models.
-      expect(body.candidate_count).toBe(staticOffer().length);
-      expect(body.available_model_ids).toEqual(staticOffer());
-      expect(body.available_model_ids).toContain(S_ONE);
-
-      const [row] = await db
-        .select({ ids: modelProviderCredentials.availableModelIds })
-        .from(modelProviderCredentials)
-        .where(eq(modelProviderCredentials.id, cred.id));
-      expect(row?.ids ?? null).toBeNull();
-    });
-
-    it("ignores a stale persisted array instead of returning or refreshing it", async () => {
-      // The production shape this whole change exists for: a row written once
-      // at discovery time, never refreshed, still being served to the picker
-      // long after the provider definition moved on.
-      const cred = await seedOrgModelProviderOAuth({
-        orgId: ctx.org.id,
-        providerId: STATIC_PROVIDER_ID,
-      });
-      await db
-        .update(modelProviderCredentials)
-        .set({ availableModelIds: ["s-ancient"] })
-        .where(eq(modelProviderCredentials.id, cred.id));
-
-      const res = await app.request(`/api/model-provider-credentials/${cred.id}/refresh-models`, {
-        method: "POST",
-        headers: authHeaders(ctx),
-      });
-
-      const body = (await res.json()) as { available_model_ids: string[] | null };
-      expect(body.available_model_ids).toEqual(staticOffer());
-
-      // Still not written — the column is inert for this provider kind, which
-      // is exactly why migration 0030 clears the historical rows.
-      const [row] = await db
-        .select({ ids: modelProviderCredentials.availableModelIds })
-        .from(modelProviderCredentials)
-        .where(eq(modelProviderCredentials.id, cred.id));
-      expect(row?.ids).toEqual(["s-ancient"]);
-    });
-
-    it("exposes the same derived list on GET (list and refresh cannot disagree)", async () => {
-      const cred = await seedOrgModelProviderOAuth({
-        orgId: ctx.org.id,
-        providerId: STATIC_PROVIDER_ID,
-      });
-
-      const res = await app.request("/api/model-provider-credentials", {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: { id: string; available_model_ids?: string[] | null }[];
-      };
-      const found = body.data.find((k) => k.id === cred.id);
-      expect(found?.available_model_ids).toEqual(staticOffer());
     });
   });
 });

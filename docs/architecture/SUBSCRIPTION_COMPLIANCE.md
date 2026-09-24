@@ -125,22 +125,13 @@ are now **offline**:
   structural gate that catches malformed and expired credentials early; it is
   not proof of liveness.
 
-- **Model discovery** (`POST /api/model-provider-credentials/:id/refresh-models`):
-  for a `modelDiscovery: { mode: "static" }` provider the platform probes no
-  model **and writes nothing**. The served set is the provider's offer — the
-  records of its Pi provider (`openai-codex`, `anthropic`) in Pi's pinned model
-  registry, which ships with the SDK and is read locally — resolved on every
-  read by `resolveCredentialModelIds`
-  (`apps/api/src/services/model-providers/credentials.ts`); the endpoint is a
-  truthful no-op that reports the current list
-  (`apps/api/src/services/model-providers/model-discovery.ts` →
-  `discoverAvailableModels`, static branch). Not persisting is the point:
-  with no upstream listing the answer is a pure function of (provider definition,
-  Pi registry) and therefore identical for every credential of the
-  provider, so a stored copy would hold no per-credential information and
-  could only fall behind — which is how connections kept offering a model list
-  two generations old. `available_model_ids` is written by the listing path only.
-  Real per-model availability still surfaces at the first agent run, not via a
+- **Model discovery**: a `modelDiscovery: { mode: "static" }` provider is never
+  enumerated — `POST /api/model-provider-credentials/discover` refuses it with a
+  `400` before any request. Its models are the provider's offer — the records of
+  its Pi provider (`openai-codex`, `anthropic`) in Pi's pinned model registry,
+  which ships with the SDK and is read locally — so they are identical for
+  every credential of the provider and nothing is stored per credential. Real
+  per-model availability surfaces at the first agent run, not via a
   platform-side request.
 
 The `validateCredential` hook + `credentialValidation` flag are provider-agnostic

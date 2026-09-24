@@ -370,7 +370,7 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   (`@earendil-works/pi-ai`), read locally. A named provider offers exactly the
   records of its Pi provider served over its `apiShape`: creating or rebinding
   an org model (`POST`, `PATCH /api/models`) and the seed refuse any other id
-  with a `400` on `modelId`, and model discovery keeps only offered ids. The gateways (`openai-compatible`, `anthropic-compatible`) and
+  with a `400` on `modelId`. The gateways (`openai-compatible`, `anthropic-compatible`) and
   OpenRouter's live search still take any id, and an OpenRouter model keeps the
   price read from OpenRouter. A model `cost` may carry `tiers` (a rate set that
   prices the whole request above an input-token threshold — OpenAI's
@@ -384,11 +384,11 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `apiShape`** (#1549): the provider — or the stored credential named by
   `credentialId` — decides what is tested, so the field is refused with a `400`
   like any unknown field, and `providerId` is required.
-- **BREAKING (API): `POST /api/models/test` lends a stored key only to its own
-  credential** (#1549). A built-in credential or model answers `403`; an
-  `existing_model_id` bound to another credential than `credentialId` answers
-  `400` (`param: existing_model_id`), and one that does not exist `404` (it was
-  ignored).
+- **BREAKING (API): `POST /api/models/test` takes no `existing_model_id`**
+  (#1549): the probe uses `api_key`, or the stored key of the credential named
+  by `credentialId` — the same key the model's would be — so the field is
+  refused with a `400` like any unknown field. A built-in credential answers
+  `403`.
 - **BREAKING (API): a managed alias offers the same reasoning levels whatever
   model backs it** (#1549): `off`, `minimal`, `low`, `medium`, `high` in its
   `generation.reasoning.levels`, validated as such on every surface (runs,
@@ -425,7 +425,7 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `POST …/discover` takes `credentialId` and `providerId` (were
   `credential_id`, `provider_id`), like the other bodies. Org models:
   `provider_name`, `base_url`; seed `model_ids` and `promoted_default`; test
-  `api_key`, `existing_model_id`. OAuth pairing: `consumed_at` on the pairing,
+  `api_key`. OAuth pairing: `consumed_at` on the pairing,
   and the redeem route (`POST /api/model-providers-oauth/pair/redeem`) takes
   `access_token`, `refresh_token`, `account_id` (RFC 6749 names) and returns
   `available_model_ids`. The old names are refused with a `400`.
@@ -514,6 +514,14 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
 
 ### Removed
 
+- **BREAKING (API): `POST /api/model-provider-credentials/{id}/refresh-models`
+  is removed, with the credential's `available_model_ids`** (#1549). Nothing
+  read the list any more: the models a credential can back are its provider's
+  offer in Pi's registry, and `POST /api/model-provider-credentials/discover`
+  still enumerates an endpoint on demand. Drizzle `0071` drops
+  `model_provider_credentials.available_model_ids` (one-way: a previous build
+  reads the column on every credential read). The pairing redeem still returns
+  `available_model_ids`: the provider's offer.
 - **BREAKING (operators): `FEATURED_MODELS_EXCLUDE` is removed** (#1549), with
   the LiteLLM pricing pipeline and the models.dev featured list it filtered:
   each provider pins its featured model ids, and an `.env` still setting the

@@ -403,7 +403,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Test model configuration inline",
       description:
-        "Test a model configuration without saving it first. If editing an existing model, pass `existing_model_id` to fall back to its stored API key when `api_key` is omitted; that model must be bound to `credentialId` (400 otherwise). A built-in credential or model is refused (403). Rate limited to 5 requests per minute.",
+        "Test a model configuration without saving it first. The probe uses `api_key` when given, the credential's stored key otherwise. A built-in credential is refused (403). Rate limited to 5 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -423,12 +423,7 @@ export const modelsPaths = {
                 api_key: {
                   type: "string",
                   description:
-                    "Override API key for the probe. Falls back to `existing_model_id`'s key, then the credential's stored key.",
-                },
-                existing_model_id: {
-                  type: "string",
-                  description:
-                    "Existing model ID, bound to `credentialId`, whose stored API key the probe falls back to",
+                    "Override API key for the probe. Falls back to the credential's stored key.",
                 },
               },
               additionalProperties: false,
