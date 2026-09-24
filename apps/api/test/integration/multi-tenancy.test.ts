@@ -263,23 +263,6 @@ describe("Multi-tenancy isolation", () => {
     });
   });
 
-  // ─── Agent dependency isolation ──────────────────────────
-
-  describe("Agent dependencies", () => {
-    it("cannot modify another org's agent skills", async () => {
-      await seedAgent({ id: "@org-a/agent", orgId: orgA.orgId });
-
-      const res = await app.request("/api/agents/@org-a/agent/skills", {
-        method: "PUT",
-        headers: authHeaders(orgB, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ skillIds: ["@org-b/evil-skill"] }),
-      });
-
-      // requireAgent() guard returns 404 for cross-org
-      expect(res.status).toBe(404);
-    });
-  });
-
   // ─── Profile batch isolation ─────────────────────────────
 
   describe("Profile batch lookup", () => {

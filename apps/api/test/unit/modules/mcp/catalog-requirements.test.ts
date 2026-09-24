@@ -266,9 +266,6 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   ...rowDecided("placement, `<type>:read` and the org's copy restriction; a draft asks its home", [
     [["GET"], "/api/packages/{scope}/{name}/{version}/download"],
   ]),
-  ...rowDecided("`requirePackageInOrg()`: `agents:write` in the agent's home space", [
-    [["PUT"], "/api/agents/{scope}/{name}/skills"],
-  ]),
   ...Object.values(PACKAGE_TYPE_ROUTE_SEGMENT).flatMap((segment) =>
     rowDecided("`requirePackageInOrg()`: the type's write/delete permission in its home", [
       [["PATCH", "DELETE"], `/api/packages/${segment}/{scope}/{name}`],

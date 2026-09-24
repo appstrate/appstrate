@@ -36,6 +36,7 @@ describe("401 — unauthenticated requests", () => {
     { method: "GET", path: "/api/model-provider-credentials" },
     { method: "GET", path: "/api/notifications" },
     { method: "GET", path: "/api/packages" },
+    { method: "DELETE", path: "/api/packages/agents/@myorg/some-agent" },
   ];
 
   for (const route of authRequiredRoutes) {

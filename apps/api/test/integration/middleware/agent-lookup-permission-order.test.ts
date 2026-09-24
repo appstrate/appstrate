@@ -3,7 +3,7 @@
 /**
  * Agent-lookup ordering guard (#1341).
  *
- * `requireAgent()` / `requireOrgAgent()` resolve an agent from the route params
+ * `requireAgent()` resolves an agent from the route params
  * and 404 when it is unreachable from the caller's space. Mounted BEFORE the
  * route's permission guard, that 404 answers "does this agent exist?" to a
  * caller who was never allowed to ask: 403 means the agent exists, 404 means it

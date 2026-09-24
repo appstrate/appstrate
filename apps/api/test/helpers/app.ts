@@ -58,7 +58,6 @@ import { createRunsEventsRouter } from "../../src/routes/runs-events.ts";
 import { createRunsRemoteRouter } from "../../src/routes/runs-remote.ts";
 import { createSchedulesRouter } from "../../src/routes/schedules.ts";
 import { createLibraryRouter } from "../../src/routes/library.ts";
-import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
 import { createProxiesRouter } from "../../src/routes/proxies.ts";
 import { createModelsRouter } from "../../src/routes/models.ts";
@@ -259,7 +258,6 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.use("*", idempotencyGuard());
 
   // Mount routes (same order as production)
-  const userAgentsRouter = createUserAgentsRouter();
   const agentsRouter = createAgentsRouter();
   const runsRouter = createRunsRouter();
   const schedulesRouter = createSchedulesRouter();
@@ -273,7 +271,6 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/orgs", orgsRouter);
   app.route("/api/me", meRouter);
   app.route("/api/library", createLibraryRouter());
-  app.route("/api/agents", userAgentsRouter);
   app.route("/api/agents", agentsRouter);
   app.route("/api", createNotificationsRouter());
   // HMAC-signed event ingestion. Must mount BEFORE runsRouter so the

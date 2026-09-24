@@ -140,26 +140,11 @@ describe("unknown request-body fields are refused, not stripped", () => {
     expect((await put(base)).status).toBe(200);
   });
 
-  // The two routes that pass a `param` to `readJsonBody`. That param is the
+  // The route that passes a `param` to `readJsonBody`. That param is the
   // fallback field name for a Zod issue with an empty path — and Zod reports
-  // `unrecognized_keys` with an EMPTY path, so both used to answer a 400 that
+  // `unrecognized_keys` with an EMPTY path, so it used to answer a 400 that
   // blamed the field the request had spelled correctly. Live half of
   // `test/unit/unknown-key-field-naming.test.ts`.
-  it("skills — PUT /api/agents/{scope}/{name}/skills names the extra key, not `skillIds`", async () => {
-    const packageId = "@strictbodies/skillsbody";
-    await seedPackage({ id: packageId, orgId: ctx.orgId, type: "agent" });
-
-    const res = await app.request(`/api/agents/${packageId}/skills`, {
-      method: "PUT",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ skillIds: [], extra: 1 }),
-    });
-
-    const body = await expectUnknownField(res);
-    expect(body.errors![0]!.field).toBe("extra");
-    expect(body.detail).toStartWith("extra: ");
-  });
-
   it("github import — POST /api/packages/import-github names the extra key, not `url`", async () => {
     const res = await app.request("/api/packages/import-github", {
       method: "POST",
