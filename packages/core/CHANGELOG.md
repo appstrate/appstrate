@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`AFPS_SCHEMA_VERSION`** (`@appstrate/core/validation`) — the AFPS
+  `schema_version` every manifest the platform writes declares (`"0.3"`, the
+  revision spec Appendix A tells producers to emit). The skill-only import, the
+  seeded Hello World agent, the MCP `get_runtime_capabilities` template, the
+  inline `run_and_wait` manifest and the web editor wrote `0.1` or `0.2`
+  depending on the path (#1520); they all read this constant now. Reading is
+  unchanged: any MINOR of `SUPPORTED_SCHEMA_VERSION_MAJOR` is still accepted.
+
 - **`formatLogLine`**, **`PINO_LEVELS`** and **`LogLevel`**
   (`@appstrate/core/log-line`, new import-free subpath) — one pino-compatible
   JSON log line (numeric `level`, epoch-ms `time`, `msg`, fields) for the

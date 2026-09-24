@@ -6,6 +6,7 @@ import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import type { Dispatch, McpToolContext } from "../../../../src/modules/mcp/tools.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
+import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { instructionsFor, toolsFor } from "./helpers.ts";
 
@@ -38,8 +39,8 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const defaultInlineManifest = (overrides: Record<string, unknown>) => ({
-  $schema: "https://schemas.afps.dev/v0/agent.schema.json",
-  schema_version: "0.2",
+  $schema: AFPS_SCHEMA_URLS.agent,
+  schema_version: AFPS_SCHEMA_VERSION,
   type: "agent",
   version: "1.0.0",
   dependencies: {},

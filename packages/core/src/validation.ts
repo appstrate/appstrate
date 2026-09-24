@@ -53,6 +53,14 @@ export const SCHEMA_VERSION_REGEX: RegExp = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/
  */
 export const SUPPORTED_SCHEMA_VERSION_MAJOR = 0 as const;
 
+/**
+ * The AFPS `schema_version` every manifest this platform writes declares — the
+ * spec revision it conforms to (spec Appendix A: "producers MUST emit `0.3`"). Reading
+ * is governed by `SUPPORTED_SCHEMA_VERSION_MAJOR`, not by this value: a lower
+ * MINOR of the same MAJOR stays valid per §2.4.
+ */
+export const AFPS_SCHEMA_VERSION = "0.3" as const;
+
 export const scopedNameRegex: RegExp = (() => {
   // Zod 4 internal: scopedName._zod.def.checks[0]._zod.def.pattern : RegExp
   type ZodInternalCheck = { _zod?: { def?: { pattern?: RegExp } } };

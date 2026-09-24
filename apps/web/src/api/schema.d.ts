@@ -7292,7 +7292,7 @@ export interface operations {
                      *           "id": "@acme/email-sorter",
                      *           "display_name": "Email Sorter",
                      *           "description": "Automatically sorts and labels incoming emails",
-                     *           "schema_version": "0.1",
+                     *           "schema_version": "0.3",
                      *           "author": "Acme Corp",
                      *           "keywords": [
                      *             "email",
@@ -7313,7 +7313,7 @@ export interface operations {
                      *           "id": "@appstrate/code-reviewer",
                      *           "display_name": "Code Reviewer",
                      *           "description": "Reviews pull requests and suggests improvements",
-                     *           "schema_version": "0.1",
+                     *           "schema_version": "0.3",
                      *           "author": "Appstrate",
                      *           "keywords": [
                      *             "code",
@@ -19758,7 +19758,7 @@ export interface operations {
                  *         "display_name": "Summarize attached file",
                  *         "version": "0.0.0",
                  *         "type": "agent",
-                 *         "schema_version": "0.1",
+                 *         "schema_version": "0.3",
                  *         "dependencies": {}
                  *       },
                  *       "prompt": "Summarize the attached file in three bullet points.",
@@ -19858,7 +19858,7 @@ export interface operations {
                      *         "display_name": "Summarize attached file",
                      *         "version": "0.0.0",
                      *         "type": "agent",
-                     *         "schema_version": "0.1",
+                     *         "schema_version": "0.3",
                      *         "dependencies": {}
                      *       },
                      *       "inline_prompt": "Summarize the attached file in three bullet points."

@@ -18,6 +18,7 @@ import {
 } from "../utils";
 import type { SchemaField } from "../schema-section";
 import type { JSONSchemaObject } from "@appstrate/core/form";
+import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 
 // ─── getManifestName ────────────────────────────────────────
 
@@ -202,8 +203,7 @@ describe("defaultEditorState", () => {
     expect(state.manifest.author).toBe("user@test.com");
     expect(state.manifest.type).toBe("agent");
     expect(state.manifest.version).toBe("1.0.0");
-    // Canonical AFPS 0.x draft manifest version.
-    expect(state.manifest.schema_version).toBe("0.2");
+    expect(state.manifest.schema_version).toBe(AFPS_SCHEMA_VERSION);
     expect(state.manifest.schemaVersion).toBeUndefined();
     expect(state.operations).toEqual([{ op: "write", path: "prompt.md", text: "" }]);
   });

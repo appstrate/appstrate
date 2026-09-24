@@ -4,6 +4,7 @@ import { isFileProducedByRun } from "./file-uri.ts";
 import { asRecordOrNull } from "./safe-json.ts";
 import { encodePackageIdPath, toSlug } from "./naming.ts";
 import { terminalRunStatusValues } from "./run-status.ts";
+import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "./validation.ts";
 
 /**
  * Fallback wait ceiling for a caller that has no deadline of its own.
@@ -138,8 +139,6 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-const INLINE_MANIFEST_SCHEMA = "https://schemas.afps.dev/v0/agent.schema.json";
-
 /**
  * Turn the concise manifest accepted by `run_and_wait` into the one canonical
  * AFPS manifest sent to the inline-run route.
@@ -176,8 +175,8 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
   }
 
   const defaults: Record<string, unknown> = {};
-  if (!hasOwn("$schema")) defaults.$schema = INLINE_MANIFEST_SCHEMA;
-  if (!hasOwn("schema_version")) defaults.schema_version = "0.2";
+  if (!hasOwn("$schema")) defaults.$schema = AFPS_SCHEMA_URLS.agent;
+  if (!hasOwn("schema_version")) defaults.schema_version = AFPS_SCHEMA_VERSION;
   if (!hasOwn("name")) defaults.name = derivedName;
   if (!hasOwn("type")) defaults.type = "agent";
   if (!hasOwn("version")) defaults.version = "1.0.0";

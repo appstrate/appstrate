@@ -20,7 +20,7 @@ import {
 } from "../../../../src/modules/mcp/catalog.ts";
 import type { Dispatch } from "../../../../src/modules/mcp/tools.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
-import { validateManifest } from "@appstrate/core/validation";
+import { AFPS_SCHEMA_VERSION, validateManifest } from "@appstrate/core/validation";
 import { orgPermissions, presetPermissions } from "../../../../src/lib/permissions.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { toolsFor } from "./helpers.ts";
@@ -1053,6 +1053,7 @@ describe("buildMcpTools contextInjected", () => {
     expect(payload).toMatchObject({
       archive_required: true,
       entry_point_must_exist: true,
+      schema_version: AFPS_SCHEMA_VERSION,
       package_archive_max_bytes: 10 * 1024 * 1024,
       runtimes: [
         { runtime: "node", manifest_version: "0.3", server_type: "node" },
@@ -1062,7 +1063,7 @@ describe("buildMcpTools contextInjected", () => {
           server_type: "node",
           manifest_template: {
             manifest_version: "0.3",
-            schema_version: "0.1",
+            schema_version: AFPS_SCHEMA_VERSION,
             type: "mcp-server",
             server: {
               type: "node",
