@@ -2,7 +2,7 @@
   "name": "@appstrate/google-drive",
   "version": "1.0.5",
   "type": "integration",
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "display_name": "Google Drive (API)",
   "description": "Cloud file storage and synchronization",
   "keywords": ["storage", "productivity"],

@@ -2,7 +2,7 @@
   "name": "@appstrate/discord",
   "version": "1.0.5",
   "type": "integration",
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "display_name": "Discord (API)",
   "description": "Communication platform for communities and teams",
   "keywords": ["social-media", "messaging", "community"],
