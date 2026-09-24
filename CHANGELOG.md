@@ -36,6 +36,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (operators): MinIO runs from `cgr.dev/chainguard/minio`, as uid
+  65532 — an existing MinIO volume must be re-owned before the upgrade.**
+  MinIO's own registries (`quay.io/minio/*`, Docker Hub `minio/*`) now refuse
+  anonymous pulls, which failed every compose file that starts MinIO: CI,
+  development tier 3, the self-hosting examples and the production deploy. They
+  all pull Chainguard's build instead, pinned by digest (MinIO
+  `RELEASE.2026-09-22T19-25-18Z`); the bucket-init containers reuse it for `mc`.
+  It runs as uid 65532, and a volume the previous image wrote holds root-owned
+  files: started on one, MinIO crash-loops with `FATAL Unable to initialize
+backend: Unable to write to the backend`. A fresh install needs nothing.
+  **Operators**, once per existing MinIO volume — production `<uuid>_miniodata`
+  (`deploy/README.md`), self-hosting `<project>_miniodata`
+  (`examples/self-hosting/README.md`, "Data Persistence"), development
+  `appstrate-dev_miniodata`:
+  1. Stop the stack (production: stop the application in Coolify).
+  2. **Snapshot the volume. This is a forward-only MinIO upgrade**: production
+     moves from `quay.io/minio/minio:latest` — whichever release the host last
+     pulled — to `RELEASE.2026-09-22T19-25-18Z`, and nothing guarantees an
+     older MinIO reopens a backend a newer one has written — and the previous
+     image can no longer be pulled anonymously.
+     `docker volume create <volume>_backup && docker run --rm -v <volume>:/from:ro -v <volume>_backup:/to --user 0 --entrypoint cp cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 -a /from/. /to/`
+  3. `docker run --rm -v <volume>:/data --user 0 --entrypoint chown cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 -R 65532:65532 /data`
+  4. Deploy. `appstrate-minio` reports healthy and serves the objects already
+     stored; skipping step 3 fails loudly with the error above, not silently.
 - **BREAKING (integrations): a local integration runner can reach only what its
   connection's `authorized_uris` grant** (#1458). Every sidecar listener
   enforces it: the CONNECT listener by `host:port` and by the TLS SNI inside
@@ -390,16 +414,6 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `409 agent_in_use`; no other draft edit ever did).
 
 ### Fixed
-
-- **MinIO images pull again in CI, development, self-hosting and
-  production.** MinIO's own repositories (`quay.io/minio/*`, Docker Hub
-  `minio/*`) now refuse anonymous pulls, which failed every compose file that
-  starts MinIO. They all use `cgr.dev/chainguard/minio` instead, pinned by
-  digest (MinIO `RELEASE.2026-09-22T19-25-18Z`); the bucket-init containers
-  reuse that image for `mc`. The image runs as uid 65532, so every MinIO server
-  with a persistent volume sets `user: "0:0"` — the privileges the previous
-  image had — so that volumes it created, holding root-owned files, stay
-  writable. Nothing to migrate.
 
 - **Google connections are ready again, and their agents launch** (#1131).
   Google's token endpoint echoes the requested OIDC `email` scope as

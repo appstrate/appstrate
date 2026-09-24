@@ -38,14 +38,10 @@ services:
     entrypoint: ["/bin/sh", "-c", "echo 'sidecar image built'"]
 
   # ── MinIO for local S3-compatible storage ─────────────────────
-  # Chainguard image pinned by digest (MinIO RELEASE.2026-09-22T19-25-18Z) —
-  # why, and the refresh recipe: the `appstrate-minio` comment in
-  # docker-compose.yml. The init container below reuses it for `mc`.
+  # Pinned with docker-compose.yml's `appstrate-minio` (why, uid 65532 and the
+  # refresh recipe there). The init container below reuses it for `mc`.
   appstrate-minio:
     image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
-    # Root, as the previous upstream image ran: existing `miniodata` volumes
-    # hold root-owned files the image's default uid (65532) cannot write.
-    user: "0:0"
     command: server /data
     networks:
       - appstrate-data

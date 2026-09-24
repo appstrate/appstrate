@@ -54,14 +54,10 @@ services:
       retries: 10
 
   # ─── MinIO (S3-compatible) — Tier 3 ────────────────────────
-  # Chainguard image pinned by digest (MinIO RELEASE.2026-09-22T19-25-18Z) —
-  # why, and the refresh recipe: the `appstrate-minio` comment in
-  # docker-compose.yml. `minio-init` reuses it for its `mc` and `/bin/sh`.
+  # Pinned with docker-compose.yml's `appstrate-minio` (why, uid 65532 and the
+  # refresh recipe there). `minio-init` reuses it for `mc` and `/bin/sh`.
   minio:
     image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
-    # Root, as the previous upstream image ran: existing `miniodata` volumes
-    # hold root-owned files the image's default uid (65532) cannot write.
-    user: "0:0"
     profiles: ["full"]
     command: server /data
     ports:

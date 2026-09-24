@@ -71,16 +71,13 @@ services:
   # proxying is unsupported, minio/minio#7857) and set S3_PUBLIC_ENDPOINT
   # on the appstrate service.
   minio:
-    # Chainguard's MinIO build (MinIO RELEASE.2026-09-22T19-25-18Z): MinIO's
-    # own repositories refuse anonymous pulls since 2026-09. Pinned by digest
-    # because Chainguard's free tier publishes only `latest`, which would let
-    # `docker compose pull` silently swap the storage engine under running
-    # data. Refresh: `docker pull cgr.dev/chainguard/minio:latest`, then
-    # `docker image inspect --format '{{index .RepoDigests 0}}'` on it.
+    # Chainguard's MinIO build (MinIO's own registries require authentication),
+    # pinned by digest so `docker compose pull` can never swap the storage
+    # engine under running data. Runs as uid 65532: `miniodata` must be owned
+    # by it. Ownership repair: "Data Persistence" in examples/self-hosting/
+    # README.md; refresh recipe: docker-compose.yml — both in
+    # https://github.com/appstrate/appstrate.
     image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
-    # Root, as the previous upstream image ran: existing `miniodata` volumes
-    # hold root-owned files the image's default uid (65532) cannot write.
-    user: "0:0"
     networks:
       - appstrate-data
     command: server /data
