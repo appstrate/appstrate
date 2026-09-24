@@ -233,11 +233,12 @@ provider. Resolution, in order:
 
 1. the `accountId` (or `account_id`) key of your `identity_claims` map;
 2. a top-level `email`, `account_email` or `sub` in the payload;
-3. none: the account key is `null`.
+3. the literal `"default"`.
 
-Landing on `null` is not an error and nothing is logged: the connection is
-simply labelled `Connexion 1`, `Connexion 2`, … and carries no account key, so
-a member holding two accounts cannot tell them apart. **Declare `accountId` explicitly.** Choose the most human-readable
+Landing on `"default"` is not an error and nothing is logged: the connection is
+simply labelled `Connexion 1`, `Connexion 2`, … and every connection on that
+provider shares one account key, so a member holding two accounts cannot tell
+them apart. **Declare `accountId` explicitly.** Choose the most human-readable
 value that is _unique per account_ — email, else a unique handle, else an opaque
 id. A display name that two accounts can share is the wrong choice even though
 it reads better.

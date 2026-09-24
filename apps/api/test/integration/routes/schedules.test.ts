@@ -20,10 +20,6 @@ import {
 } from "../../helpers/seed.ts";
 import { publishAndInstall, seedDivergedAgent } from "../../helpers/schedule-fixtures.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import { recordScheduleFire } from "../../../src/services/scheduler.ts";
-import { db } from "@appstrate/db/client";
-import { schedules } from "@appstrate/db/schema";
-import { eq, sql } from "drizzle-orm";
 import { schedulesPaths } from "../../../src/openapi/paths/schedules.ts";
 import { responses } from "../../../src/openapi/responses.ts";
 
@@ -515,101 +511,24 @@ describe("Schedules API", () => {
       expect(body.name).toBe("Kept");
     });
 
-    it("honours an optional If-Match against the schedule's ETag", async () => {
-      const fid = agentId("etag-agent");
-      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
-      await publish(fid);
-      const schedule = await seedSchedule({
-        packageId: agent.id,
-        orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
-        userId: ctx.user.id,
-        name: "Tagged",
-      });
-      const read = await app.request(`/api/schedules/${schedule.id}`, {
-        headers: authHeaders(ctx),
-      });
-      const etag = read.headers.get("ETag")!;
-      expect(etag).toMatch(/^"\d+"$/);
-      const patch = (name: string, headers: Record<string, string> = {}) =>
-        app.request(`/api/schedules/${schedule.id}`, {
-          method: "PATCH",
-          headers: { ...authHeaders(ctx), "Content-Type": "application/json", ...headers },
-          body: JSON.stringify({ name }),
-        });
-
-      // Timestamps are the version: make sure the write lands on a later millisecond.
-      await Bun.sleep(5);
-      const first = await patch("First", { "If-Match": etag });
-      expect(first.status).toBe(200);
-      const next = first.headers.get("ETag")!;
-      expect(next).not.toBe(etag);
-
-      const stale = await patch("Stale", { "If-Match": etag });
-      expect(stale.status).toBe(412);
-      expect(((await stale.json()) as { code: string }).code).toBe("precondition_failed");
-      expect(stale.headers.get("ETag")).toBe(next);
-
-      // Optional: without the header the write is last-write-wins.
-      expect((await patch("Unconditional")).status).toBe(200);
-    });
-
-    it("lets exactly one of two concurrent writers holding the same ETag through", async () => {
-      const fid = agentId("etag-race");
-      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
-      await publish(fid);
-      const schedule = await seedSchedule({
-        packageId: agent.id,
-        orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
-        userId: ctx.user.id,
-      });
-      // Sub-millisecond precision in the row, truncated in the ETag: still a match.
-      await db
-        .update(schedules)
-        .set({ updatedAt: sql`'2026-01-01 00:00:00.123789+00'::timestamptz` })
-        .where(eq(schedules.id, schedule.id));
-      const etag = (
-        await app.request(`/api/schedules/${schedule.id}`, { headers: authHeaders(ctx) })
-      ).headers.get("ETag")!;
-      expect(etag).toBe('"1767225600123"');
-
-      const patch = (name: string) =>
-        app.request(`/api/schedules/${schedule.id}`, {
-          method: "PATCH",
-          headers: { ...authHeaders(ctx), "Content-Type": "application/json", "If-Match": etag },
-          body: JSON.stringify({ name }),
-        });
-      const statuses = (await Promise.all([patch("A"), patch("B")])).map((r) => r.status);
-      expect(statuses.sort()).toEqual([200, 412]);
-    });
-
-    it("keeps the ETag across a fire — a fire is not an edit", async () => {
-      const fid = agentId("etag-fire");
-      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
-      const schedule = await seedSchedule({
-        packageId: agent.id,
-        orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
-        userId: ctx.user.id,
-      });
-      const read = () =>
-        app.request(`/api/schedules/${schedule.id}`, { headers: authHeaders(ctx) });
-      const before = await read();
-      await Bun.sleep(5);
-      await recordScheduleFire(schedule.id, { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
-      const after = await read();
-      expect(after.headers.get("ETag")).toBe(before.headers.get("ETag"));
-      expect(((await after.json()) as { last_run_at: string | null }).last_run_at).not.toBeNull();
-    });
-
     it("is not served on PUT", async () => {
-      const res = await app.request(`/api/schedules/sched_absent`, {
+      const agent = await seedAgent({
+        id: agentId("put-agent"),
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+      });
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+      });
+      const res = await app.request(`/api/schedules/${schedule.id}`, {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "x" }),
       });
-      expect(res.status).toBe(404);
+      expect([404, 405]).toContain(res.status);
     });
 
     it("reconciles the generation override when the model changes", async () => {

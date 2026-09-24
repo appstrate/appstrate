@@ -1,6 +1,6 @@
--- 0023 — revoke the unrevoked API keys in the retired `ask_` format, which
--- `validateApiKey` refuses (401 `api_key_format_retired`) and which cannot be
--- converted (only the hash is stored), so Settings stops listing them as active.
+-- 0022 — revoke the unrevoked API keys in the retired `ask_` format, which no
+-- longer authenticate and cannot be converted (only the hash is stored), so
+-- Settings stops listing them as active.
 -- Run once, AFTER deploying the release carrying the `apst_` format.
 -- Cost: one UPDATE setting `revoked_at`, no row deleted (`runs.api_key_id` and
 -- the audit trail keep resolving); idempotent. Rows: UNMEASURED — rehearse on

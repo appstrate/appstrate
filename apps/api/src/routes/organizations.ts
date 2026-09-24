@@ -53,8 +53,6 @@ import { createDefaultSpace } from "../services/spaces.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { ifMatchWhere, preconditionFailed, setEtag } from "../lib/conditional-request.ts";
-import { organizations } from "@appstrate/db/schema";
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
 
@@ -216,17 +214,6 @@ router.post("/", async (c) => {
 
 // --- Routes below require org context (orgId from params, verified via membership) ---
 
-// The org row's `updatedAt` versions both its detail and its settings.
-async function staleOrgError(orgId: string) {
-  const org = await getOrgById(orgId);
-  return org ? preconditionFailed(org.updatedAt) : notFound("Organization not found");
-}
-
-async function stampOrgEtag(c: Context<AppEnv>, orgId: string) {
-  const org = await getOrgById(orgId);
-  if (org) setEtag(c, org.updatedAt);
-}
-
 // OrgDetail serializer — shared by GET /:orgId and PATCH /:orgId so the update
 // response is the exact same resource shape as the detail read.
 async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
@@ -239,7 +226,6 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
   if (!org) {
     throw notFound("Organization not found");
   }
-  setEtag(c, org.updatedAt);
 
   // Storage consumption vs. the org's file storage limit. `used_bytes` is
   // the transactionally-maintained `organizations.files_bytes_used` counter.
@@ -309,15 +295,10 @@ router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
     }
   }
 
-  const updated = await updateOrganization(
-    orgId,
-    {
-      ...(data.name?.trim() ? { name: data.name.trim() } : {}),
-      ...(data.slug ? { slug: data.slug } : {}),
-    },
-    ifMatchWhere(c, organizations.updatedAt),
-  );
-  if (!updated) throw await staleOrgError(orgId);
+  await updateOrganization(orgId, {
+    ...(data.name?.trim() ? { name: data.name.trim() } : {}),
+    ...(data.slug ? { slug: data.slug } : {}),
+  });
 
   await recordAuditFromContext(c, {
     action: "org.updated",
@@ -633,7 +614,6 @@ router.get("/:orgId/settings", async (c) => {
   if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
   const settings = await getOrgSettings(orgId);
-  await stampOrgEtag(c, orgId);
   return c.json(settings);
 });
 
@@ -674,8 +654,7 @@ router.patch("/:orgId/settings", requirePermission("org", "settings"), async (c)
     );
   }
 
-  const settings = await updateOrgSettings(orgId, data, ifMatchWhere(c, organizations.updatedAt));
-  if (!settings) throw await staleOrgError(orgId);
+  const settings = await updateOrgSettings(orgId, data);
   await recordAuditFromContext(c, {
     action: "org.settings_updated",
     resourceType: "org",
@@ -683,7 +662,6 @@ router.patch("/:orgId/settings", requirePermission("org", "settings"), async (c)
     after: data as unknown as Record<string, unknown>,
     orgIdOverride: orgId,
   });
-  await stampOrgEtag(c, orgId);
   return c.json(settings);
 });
 

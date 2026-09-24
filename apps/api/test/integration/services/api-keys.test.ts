@@ -8,7 +8,6 @@ import {
   generateApiKey,
   hashApiKey,
   extractKeyPrefix,
-  isRetiredApiKey,
   isWellFormedApiKey,
   createApiKeyRecord,
   findApiKeySpace,
@@ -79,7 +78,7 @@ describe("api-keys service", () => {
     });
   });
 
-  // ── isWellFormedApiKey / isRetiredApiKey ────────────────────
+  // ── isWellFormedApiKey ──────────────────────────────────────
 
   describe("key format", () => {
     it("rejects a key whose checksum does not match its random part", () => {
@@ -96,11 +95,6 @@ describe("api-keys service", () => {
       expect(isWellFormedApiKey(key.slice(0, -1))).toBe(false);
       expect(isWellFormedApiKey(key.replace(/.$/, "-"))).toBe(false);
       expect(isWellFormedApiKey(`ask_${"0".repeat(48)}`)).toBe(false);
-    });
-
-    it("recognises the retired ask_ format", () => {
-      expect(isRetiredApiKey(`ask_${"0".repeat(48)}`)).toBe(true);
-      expect(isRetiredApiKey(generateApiKey())).toBe(false);
     });
   });
 

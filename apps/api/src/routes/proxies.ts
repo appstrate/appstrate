@@ -21,8 +21,6 @@ import { logger } from "../lib/logger.ts";
 import { ApiError, notFound, internalError, systemEntityForbidden } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { ifMatchWhere, preconditionFailed, setEtag } from "../lib/conditional-request.ts";
-import { orgProxies } from "@appstrate/db/schema";
 
 export const createProxySchema = z
   .object({
@@ -148,11 +146,9 @@ export function createProxiesRouter() {
     if (isSystemProxy(proxyId)) {
       throw systemEntityForbidden("proxy", proxyId);
     }
+
     try {
-      if (!(await updateOrgProxy(orgId, proxyId, data, ifMatchWhere(c, orgProxies.updatedAt)))) {
-        const stale = await getOrgProxy(orgId, proxyId);
-        throw stale ? preconditionFailed(stale.updatedAt) : notFound("Proxy not found");
-      }
+      await updateOrgProxy(orgId, proxyId, data);
       await recordAuditFromContext(c, {
         action: "proxy.updated",
         resourceType: "proxy",
@@ -163,7 +159,6 @@ export function createProxiesRouter() {
       // serializer — so callers don't need a follow-up GET (#657).
       const proxy = await getOrgProxy(orgId, proxyId);
       if (!proxy) throw notFound("Proxy not found");
-      setEtag(c, proxy.updatedAt);
       return c.json(proxy);
     } catch (err) {
       if (err instanceof ApiError) throw err;

@@ -120,7 +120,7 @@ async function main(): Promise<void> {
       findings.push(...(await checkOAuthMetadata(entry)));
       // Credential-free: a bogus bearer must be rejected. Catches a
       // `userinfo_endpoint` that has been renamed or retired, which otherwise
-      // leaves connections without an account identity, in silence.
+      // degrades connections to accountId "default" in silence.
       findings.push(...(await checkIdentityEndpoints(entry)));
     }
   }

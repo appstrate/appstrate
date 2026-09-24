@@ -109,7 +109,7 @@ column files.size bigint not null
 column files.space_id text not null
 column files.storage_key text not null
 column files.user_id text
-column integration_connections.account_id text
+column integration_connections.account_id text not null
 column integration_connections.auth_key text not null
 column integration_connections.client_ref text
 column integration_connections.created_at timestamp with time zone not null default now()

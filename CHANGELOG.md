@@ -24,7 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   credential-only integrations whose API nothing probes.
 - **`identity-source` conformance check** (every tier, WARN): an `oauth2` auth
   declaring none of `identity_claims`, `userinfo_endpoint` or `issuer` resolves
-  every connection to no account id (`null`) unless its token response happens
+  every connection to accountId `"default"` unless its token response happens
   to carry `email`/`sub`. Nine shipped integrations are in that state today:
   dropbox, dynamics365, hubspot, linear, mailchimp, monday, notion,
   quickbooks-online, youtube.
@@ -41,11 +41,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   characters + a 6-character base62 CRC32 of those 30, so a secret scanner can
   recognise and validate a leaked key offline, and a malformed key is refused
   before any database lookup. Keys are stored hashed and cannot be converted:
-  an `ask_` key is refused with `401 api_key_format_retired` (header and
-  `?token=` alike). **Every API-key client (CI, GitHub Action secrets, MCP
-  clients) fails from the moment of the upgrade until a new key, created after
-  it, is swapped in.**
-  Run `scripts/migration/0023-revoke-retired-api-keys.sql` after the deploy: it
+  an `ask_` key stops working; create a new `apst_` key. **Every API-key
+  client (CI, GitHub Action secrets, MCP clients) fails from the moment of the
+  upgrade until a new key, created after it, is swapped in.**
+  Run `scripts/migration/0022-revoke-retired-api-keys.sql` after the deploy: it
   revokes the stored `ask_` keys, so Settings → API keys stops listing them. The
   display prefix grows from `ask_` + 4 to `apst_` + 8 characters.
 - **BREAKING (CLI): `appstrate packages pull --version <spec>` is now
@@ -80,10 +79,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 precondition_failed` (it was `409 conflict`), and a body still sending
   `lock_version` is a `400` (unknown field). Publishing
   (`POST …/versions`) and restoring take an optional `If-Match` in place of
-  the body's `lock_version`. The other `PATCH` resources (schedules,
-  webhooks, proxies, models, model-provider credentials, organizations and
-  their settings, spaces, space packages, roles) now send an `ETag` and honour
-  an optional `If-Match` the same way. MCP: `invoke_operation` results carry
+  the body's `lock_version`. MCP: `invoke_operation` results carry
   `etag`, and the tool takes `if_match`. CLI: `appstrate packages` records
   ETags per working folder; a lock table written by an older CLI is refused as
   invalid, with the steps to rebuild it — delete it, then re-pull or
@@ -191,14 +187,9 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   version is read, an organization's integration holding one of these fails
   every connect and run with `invalid_manifest` from the deploy on, and a
   published version cannot be rewritten: publish a fixed version.
-  `scripts/migration/0024-verify-integration-jsonpaths.ts` lists every one
-  with its rewrite, and is step 1 of the deploy (see the operators entry
+  `scripts/migration/0023-verify-integration-jsonpaths.ts` lists every one,
+  and is step 1 of the deploy (see the operators entry
   below). `@appstrate/wrike` 1.0.5 is updated accordingly.
-- **BREAKING (API): a connection with no provider identity has
-  `account_id: null`**, not the magic `"default"` — on connection listings and
-  on `candidate_connections[]` of `409 missing_integration_connection`. A real
-  account named `default` is now an ordinary account. Stored rows move with
-  `scripts/migration/0022` (see the operators entries below).
 - **BREAKING (credential proxy): the `X-Substitute-Body`, `X-Stream-Request`
   and `X-Stream-Response` flags take `1` or `0` only**; any other value
   (`true`, `yes`, …) is a `400` naming the header.
@@ -208,12 +199,6 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   truncated with an 8-hex FNV-1a suffix instead of `tool_N` (the description
   names the upstream tool). Exposed names of such tools change; manifests keep
   referencing upstream names and are unaffected.
-- **BREAKING (chat): `GET /api/chat/sessions/{id}` is paginated.** It returns
-  the first 100 messages (`?limit=`, at most 500) instead of the whole thread;
-  when `hasMore` is `true`, pass the last message's `seq` as `?since=<seq>` or
-  follow the `Link: rel="next"` header. Each message carries `seq`, and the
-  response carries `message_count` (the session's total). A client that reads
-  `messages` once sees only the first page of a longer session.
 - **BREAKING (chat): `POST /api/chat` validates the new message** with the AI
   SDK's `safeValidateUIMessages` and caps it at 256 KB; a malformed or larger
   message is a `400` on `messages`.
@@ -231,14 +216,14 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   the `chat_sessions` read pointers to `bigint` — it rewrites `run_logs` and
   `llm_usage` under `ACCESS EXCLUSIVE`, so rehearse it on a production dump to
   size the window. `0070` replaces the webhook-deliveries index with a keyset
-  one; `0071` makes `integration_connections.account_id` nullable.
+  one.
   `@appstrate/module-ee` applies its own `0008` (the `llm_usage` id columns of
   its ledger, cursor and floor, to `bigint`) at init. Scripts, in
-  `scripts/migration/`, in order: **1. `0024` BEFORE the deploy**, read-only —
+  `scripts/migration/`, in order: **1. `0023` BEFORE the deploy**, read-only —
   it must exit 0 (every integration draft and published version whose
   JSONPath the release refuses on read is fixed or superseded, see the
   integrations entry above); `0021` inside the deploy window (old application
-  stopped, new one not started), `0022` and `0023` right after the deploy.
+  stopped, new one not started), `0022` right after the deploy.
 - **BREAKING (operators): more env values fail boot instead of falling back.**
   A `CHAT_PI_MAX_CONCURRENCY` that is not a positive integer
   (`@appstrate/module-chat`), `MODEL_RETRY_ENABLED` / `MODEL_COMPACTION_ENABLED`

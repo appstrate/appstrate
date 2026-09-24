@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, type SQL } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
@@ -499,9 +499,7 @@ export async function updateOrgModel(
     credentialId?: string;
     aliased?: boolean;
   },
-  /** `If-Match` predicate (`ifMatchWhere`); false when nothing was updated. */
-  ifMatch?: SQL,
-): Promise<boolean> {
+): Promise<void> {
   if (isSystemModel(modelDbId)) {
     throw new Error("Cannot modify built-in model");
   }
@@ -520,13 +518,11 @@ export async function updateOrgModel(
     "aliased",
   ]);
 
-  let updated: unknown[] = [];
   try {
-    updated = await db
+    await db
       .update(orgModels)
       .set(updates)
-      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId), ifMatch] }))
-      .returning({ id: orgModels.id });
+      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
   } catch (err) {
     // Repointing a row's model or credential can land on a binding another row
     // already holds. The failed UPDATE rolled back, so the row still reads its
@@ -542,7 +538,6 @@ export async function updateOrgModel(
   }
   // Drop the cached resolution (modelId/enabled/credential/cost may have changed).
   invalidateResolvedModel(orgId, modelDbId);
-  return updated.length > 0;
 }
 
 export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<void> {

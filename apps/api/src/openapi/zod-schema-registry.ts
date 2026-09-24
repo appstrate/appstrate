@@ -49,9 +49,6 @@ import { updateSkillsSchema } from "../routes/user-agents.ts";
 // --- Welcome schemas (routes/welcome.ts) ---
 import { welcomeSetupSchema } from "../routes/welcome.ts";
 
-// --- Internal (sidecar) schemas (routes/internal.ts) ---
-import { modelCredentialOutcomeSchema } from "../routes/internal.ts";
-
 // --- Proxy schemas (routes/proxies.ts) ---
 import {
   createProxySchema,
@@ -320,14 +317,6 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/welcome/setup",
     jsonSchema: toJsonSchema(welcomeSetupSchema),
     description: "Welcome setup",
-  },
-
-  // ─── Internal (sidecar) ─────────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/internal/model-credential/outcome",
-    jsonSchema: toJsonSchema(modelCredentialOutcomeSchema),
-    description: "Report the upstream outcome for the run's model API key",
   },
 
   // ─── Proxies ────────────────────────────────────────────────────────────

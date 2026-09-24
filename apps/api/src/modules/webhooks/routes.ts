@@ -40,8 +40,6 @@ import { assertSpaceId } from "../../lib/ids.ts";
 import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
 import { parseListPagination } from "../../lib/list-query.ts";
 import { setCursorLinkHeader } from "../../lib/pagination-link.ts";
-import { ifMatchWhere, setEtag } from "../../lib/conditional-request.ts";
-import { webhooks } from "@appstrate/db/schema";
 
 /**
  * Assert that a space belongs to the given org.
@@ -316,9 +314,7 @@ export function createWebhooksRouter() {
   // Every by-id route mounts no permission guard: `loadWebhookForAction` enters the ROW's
   // space and judges there.
   router.get("/api/webhooks/:id", rateLimit(300), async (c) => {
-    const webhook = await loadWebhookForAction(c, "read");
-    setEtag(c, webhook.updatedAt);
-    return c.json(webhook);
+    return c.json(await loadWebhookForAction(c, "read"));
   });
 
   // PATCH /api/webhooks/:id — update webhook (url, events, filters — not secret/level)
@@ -327,19 +323,13 @@ export function createWebhooksRouter() {
     await loadWebhookForAction(c, "write");
     const data = await readJsonBody(c, updateWebhookSchema);
 
-    const result = await updateWebhook(
-      webhookScope(c),
-      c.req.param("id")!,
-      data,
-      ifMatchWhere(c, webhooks.updatedAt),
-    );
+    const result = await updateWebhook(webhookScope(c), c.req.param("id")!, data);
     await recordAuditFromContext(c, {
       action: "webhook.updated",
       resourceType: "webhook",
       resourceId: c.req.param("id")!,
       after: data as unknown as Record<string, unknown>,
     });
-    setEtag(c, result.updatedAt);
     return c.json(result);
   });
 

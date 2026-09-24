@@ -47,29 +47,21 @@ describe("extractIdentity", () => {
     expect("email" in identityClaims).toBe(false);
   });
 
-  it("returns a null account id when the provider exposed no identity", () => {
+  it("falls back to the 'default' account id when the provider exposed no identity", () => {
     const { accountId } = extractIdentity(manifestWith(), "primary", { access_token: "t" });
-    expect(accountId).toBeNull();
+    expect(accountId).toBe("default");
   });
 
-  it("treats an account literally named 'default' as a real identity", () => {
-    const m = manifestWith({ accountId: "$.login" });
-    expect(extractIdentity(m, "primary", { login: "default" }).accountId).toBe("default");
+  it("fails the connect with invalid_config on a path outside the subset", () => {
+    const m = manifestWith({ accountId: "$..login" });
+    let caught: unknown;
+    try {
+      extractIdentity(m, "primary", { login: "ada" });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).code).toBe("invalid_config");
+    expect((caught as ApiError).message).toContain("auths.primary.identity_claims.accountId");
   });
-
-  it.each(["login", "$..login", "$.users[*].id"])(
-    "fails the connect with invalid_config on the unsupported path %p",
-    (path) => {
-      const m = manifestWith({ accountId: path });
-      let caught: unknown;
-      try {
-        extractIdentity(m, "primary", { login: "ada" });
-      } catch (err) {
-        caught = err;
-      }
-      expect(caught).toBeInstanceOf(ApiError);
-      expect((caught as ApiError).code).toBe("invalid_config");
-      expect((caught as ApiError).message).toContain("auths.primary.identity_claims.accountId");
-    },
-  );
 });

@@ -16,7 +16,6 @@ import {
   seedAgent,
   seedPackage,
   seedPackageVersion,
-  seedPublishedVersion,
   seedSpace,
   seedSpaceMember,
   seedSpacePackage,
@@ -319,27 +318,6 @@ describe("Packages API", () => {
       const body = (await res.json()) as any;
       expect(body.version_count).toBe(1);
       expect(body.has_unarchived_changes).toBe(false);
-    });
-
-    it("stamps the draft's ETag only when the served definition is the draft", async () => {
-      const id = "@pkgorg/etag-published-agent";
-      await seedAgent({
-        id,
-        homeSpaceId: ctx.defaultSpaceId,
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
-      await seedPublishedVersion(id, "1.0.0");
-      const url = `/api/packages/agents/${id}`;
-
-      const draft = await app.request(url, { headers: authHeaders(ctx) });
-      expect(((await draft.json()) as any).definition).toBe("draft");
-      expect(draft.headers.get("ETag")).toMatch(/^"\d+"$/);
-
-      const published = await app.request(`${url}?version=1.0.0`, { headers: authHeaders(ctx) });
-      expect(((await published.json()) as any).definition).toBe("published");
-      expect(published.headers.get("ETag")).toBeNull();
     });
 
     it("returns 404 for non-existent package", async () => {

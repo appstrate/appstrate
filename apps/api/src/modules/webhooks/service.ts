@@ -5,7 +5,7 @@
  */
 
 import { z } from "zod";
-import { and, eq, or, desc, isNull, sql, type InferSelectModel, type SQL } from "drizzle-orm";
+import { and, eq, or, desc, isNull, sql, type InferSelectModel } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
@@ -29,7 +29,6 @@ type WebhookDeliveryRow = InferSelectModel<typeof webhookDeliveries>;
 import { isBlockedUrl, guardedFetch, SsrfBlockedError } from "@appstrate/core/ssrf";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { buildUpdateSet, scopedWhere } from "../../lib/db-helpers.ts";
-import { preconditionFailed } from "../../lib/conditional-request.ts";
 import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import { createQueue, PermanentJobError } from "../../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../../infra/queue/index.ts";
@@ -367,8 +366,6 @@ export async function updateWebhook(
     payloadMode?: string;
     enabled?: boolean;
   },
-  /** `If-Match` predicate (`ifMatchWhere`): a stale row is refused with `412`. */
-  ifMatch?: SQL,
 ): Promise<WebhookInfo> {
   await getWebhook(scope, webhookId);
 
@@ -383,13 +380,12 @@ export async function updateWebhook(
     .where(
       scopedWhere(webhooks, {
         orgId: scope.orgId,
-        extra: [eq(webhooks.id, webhookId), ...scopeExtras(scope), ifMatch],
+        extra: [eq(webhooks.id, webhookId), ...scopeExtras(scope)],
       }),
     )
     .returning();
 
-  if (!updated) throw preconditionFailed((await getWebhook(scope, webhookId)).updatedAt);
-  return toWebhookResponse(updated);
+  return toWebhookResponse(updated!);
 }
 
 export async function deleteWebhook(

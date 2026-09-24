@@ -83,8 +83,6 @@ import {
 import type { PackageType } from "@appstrate/core/validation";
 import type { SpaceSweepResult } from "@appstrate/shared-types";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { ifMatchWhere, setEtag } from "../lib/conditional-request.ts";
-import { spacePackages, spaces as spacesTable } from "@appstrate/db/schema";
 import { listSpaceRoles } from "../services/space-roles.ts";
 import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
@@ -472,7 +470,6 @@ export function createSpacesRouter() {
       if (!isSpaceVisibleTo(orgRole, access.space, role)) {
         throw notFound(`Space '${spaceId}' not found in this organization`);
       }
-      setEtag(c, space.updatedAt);
       return c.json(spaceWireForCaller(c, { ...space, ...access.space }, role));
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -519,7 +516,6 @@ export function createSpacesRouter() {
           spaceId,
           { ...rest, defaultRole: default_role },
           current,
-          ifMatchWhere(c, spacesTable.updatedAt),
         );
         await recordAuditFromContext(c, {
           action: "space.updated",
@@ -527,7 +523,6 @@ export function createSpacesRouter() {
           resourceId: space.id,
           after: data,
         });
-        setEtag(c, space.updatedAt);
         return c.json(spaceWireForCaller(c, space, c.get("spaceRole") ?? null));
       } catch (err) {
         if (err instanceof ApiError) throw err;
@@ -885,7 +880,6 @@ export function createSpacesRouter() {
           detail: `Package '${packageId}' is not placed in this space`,
         });
       }
-      setEtag(c, row.updatedAt);
       return c.json({ object: "space_package", ...row });
     },
   );
@@ -953,10 +947,9 @@ export function createSpacesRouter() {
       scope,
       packageId,
       { ...rest, ...(generationConfig !== undefined ? { generationConfig } : {}) },
-      { requirePlacement: true, ifMatch: ifMatchWhere(c, spacePackages.updatedAt) },
+      { requirePlacement: true },
     );
     const updated = await getSpacePackage(scope, packageId);
-    if (updated) setEtag(c, updated.updatedAt);
     return c.json({ object: "space_package", ...updated });
   });
 

@@ -4677,9 +4677,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -4738,9 +4735,6 @@
         "summary": "Update a schedule",
         "description": "Update a cron schedule (expression, timezone, enabled state, or input). Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
         "parameters": [
-          {
-            "$ref": "#/components/parameters/IfMatch"
-          },
           {
             "$ref": "#/components/parameters/XOrgId"
           },
@@ -4850,9 +4844,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -4882,9 +4873,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NoPublishedVersion"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
           }
         }
       },
@@ -5292,8 +5280,7 @@
                                   "type": "string"
                                 },
                                 "account_id": {
-                                  "type": ["string", "null"],
-                                  "description": "Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity."
+                                  "type": "string"
                                 },
                                 "identity_claims": {
                                   "type": ["object", "null"],
@@ -6144,8 +6131,7 @@
                       "type": "string"
                     },
                     "account_id": {
-                      "type": ["string", "null"],
-                      "description": "Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity."
+                      "type": "string"
                     },
                     "identity_claims": {
                       "type": ["object", "null"],
@@ -6637,8 +6623,7 @@
                           "type": "string"
                         },
                         "account_id": {
-                          "type": ["string", "null"],
-                          "description": "Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity."
+                          "type": "string"
                         },
                         "identity_claims": {
                           "type": ["object", "null"],
@@ -6821,8 +6806,7 @@
                             "type": "string"
                           },
                           "account_id": {
-                            "type": ["string", "null"],
-                            "description": "Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity."
+                            "type": "string"
                           },
                           "identity_claims": {
                             "type": ["object", "null"],
@@ -6982,8 +6966,7 @@
                       "type": "string"
                     },
                     "account_id": {
-                      "type": ["string", "null"],
-                      "description": "Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity."
+                      "type": "string"
                     },
                     "identity_claims": {
                       "type": ["object", "null"],
@@ -7204,8 +7187,7 @@
                                   "type": "string"
                                 },
                                 "account_id": {
-                                  "type": ["string", "null"],
-                                  "description": "Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity."
+                                  "type": "string"
                                 },
                                 "identity_claims": {
                                   "type": ["object", "null"],
@@ -8489,9 +8471,6 @@
         "description": "Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
         "parameters": [
           {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
@@ -8579,9 +8558,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -8606,9 +8582,6 @@
           },
           "409": {
             "$ref": "#/components/responses/ModelAlreadyAdded"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
           }
         }
       },
@@ -9336,9 +9309,6 @@
         "description": "Update a model provider credential's mutable fields. The `apiShape` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
         "parameters": [
           {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
@@ -9380,9 +9350,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -9411,9 +9378,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
@@ -10142,9 +10106,6 @@
         "description": "Update a custom proxy (label, url, enabled). Built-in proxies cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
         "parameters": [
           {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
@@ -10189,9 +10150,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -10225,9 +10183,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
           }
         }
       },
@@ -10813,9 +10768,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -10866,9 +10818,6 @@
         "description": "Update organization name and/or slug. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
         "parameters": [
           {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
             "name": "orgId",
             "in": "path",
             "required": true,
@@ -10907,9 +10856,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -10931,9 +10877,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
           }
         }
       },
@@ -11439,9 +11382,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -11469,9 +11409,6 @@
         "summary": "Update organization settings",
         "description": "Update organization settings. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
         "parameters": [
-          {
-            "$ref": "#/components/parameters/IfMatch"
-          },
           {
             "name": "orgId",
             "in": "path",
@@ -11515,9 +11452,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -11536,9 +11470,6 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
           }
         }
       }
@@ -12047,7 +11978,7 @@
                                   ]
                                 },
                                 "identity": {
-                                  "type": ["string", "null"]
+                                  "type": "string"
                                 },
                                 "reused_by_agents": {
                                   "type": "integer"
@@ -13222,56 +13153,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "/internal/model-credential/outcome": {
-      "post": {
-        "operationId": "reportModelCredentialOutcome",
-        "tags": ["Internal"],
-        "summary": "Report what the upstream said about the run's model API key",
-        "description": "Sidecar-only. Auth via Bearer run token. The sidecar's `/llm/*` API-key path reports an upstream `401` as `rejected` and the first `2xx` after a rejection (or of the run) as `accepted`. `rejected` counts toward the credential's failure streak — at `INTEGRATION_REFRESH_MAX_FAILURES` consecutive rejections the credential is flagged `needs_reconnection` — and is dropped when `key_sha256` does not match the stored key (a run still holding a key the user has since rotated). `accepted` resets the streak. The credential is always the run's own pinned `model_credential_id`; a run with none (built-in key, model alias, remote run) is a no-op.",
-        "security": [
-          {
-            "bearerExecToken": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["outcome", "key_sha256"],
-                "properties": {
-                  "outcome": {
-                    "type": "string",
-                    "enum": ["rejected", "accepted"]
-                  },
-                  "key_sha256": {
-                    "type": "string",
-                    "pattern": "^[0-9a-f]{64}$",
-                    "description": "SHA-256 (hex) of the API key the sidecar used — never the key itself."
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Recorded (or nothing to record for this run)."
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -18662,9 +18543,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -18695,9 +18573,6 @@
         "summary": "Update a space",
         "description": "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility` or `default_role` is a 409 `personal_space_immutable`.",
         "parameters": [
-          {
-            "$ref": "#/components/parameters/IfMatch"
-          },
           {
             "$ref": "#/components/parameters/XOrgId"
           },
@@ -18762,9 +18637,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -18796,9 +18668,6 @@
                 }
               }
             }
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
           }
         }
       },
@@ -19185,9 +19054,6 @@
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
-              },
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -19215,9 +19081,6 @@
         "summary": "Configure how this space runs a placed package",
         "description": "Update the model/proxy overrides and generation settings of a package PLACED in this space. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{spaceId}/packages` and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`, where the placement rule and the offer that may have to be created with it are stated once. Sending it is a `400`. There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
         "parameters": [
-          {
-            "$ref": "#/components/parameters/IfMatch"
-          },
           {
             "$ref": "#/components/parameters/XOrgId"
           },
@@ -19270,9 +19133,6 @@
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
-              },
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -19295,9 +19155,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
           }
         }
       },
@@ -20059,9 +19916,6 @@
         "description": "Rename, re-describe or re-scope a bundle. Requires `roles:write`. The `srl_` id never changes, so assignments follow the edit. A `permissions` array is validated as on create: an unknown string is a 400 naming it, and a set holding a permission without one of the reads its vocabulary entry's `requires_one_of` names is a 400 naming each missing read. A request without `permissions` is not re-judged.",
         "parameters": [
           {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
@@ -20117,9 +19971,6 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -20151,9 +20002,6 @@
                 }
               }
             }
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
           }
         }
       },
@@ -23637,7 +23485,7 @@
       "bearerApiKey": {
         "type": "http",
         "scheme": "bearer",
-        "description": "API key authentication. Use `Authorization: Bearer apst_...` header. The org is resolved from the key — no `X-Org-Id` header needed. A key is `apst_` + 30 base62 characters + a 6-character base62 CRC32 of those 30, so a malformed key is refused without a lookup. A key in the retired `ask_` format is refused with `401 api_key_format_retired`: create a new key."
+        "description": "API key authentication. Use `Authorization: Bearer apst_...` header. The org is resolved from the key — no `X-Org-Id` header needed. A key is `apst_` + 30 base62 characters + a 6-character base62 CRC32 of those 30, so a malformed key is refused without a lookup."
       },
       "bearerJwt": {
         "type": "http",
@@ -23783,7 +23631,7 @@
         "name": "token",
         "in": "query",
         "required": false,
-        "description": "API key (`apst_` prefix) for SSE authentication. A retired `ask_` key is `401 api_key_format_retired`. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
+        "description": "API key (`apst_` prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
         "schema": {
           "type": "string"
         }
@@ -23922,8 +23770,8 @@
                   "description": "User-given name; `null` when the connection was never labelled."
                 },
                 "account_id": {
-                  "type": ["string", "null"],
-                  "description": "The auth's account discriminator (`sub` claim, email, host…); `null` when the provider exposed no identity."
+                  "type": "string",
+                  "description": "The auth's account discriminator (`sub` claim, email, host…)."
                 },
                 "owned_by_actor": {
                   "type": "boolean",
@@ -25967,7 +25815,7 @@
           },
           "needs_reconnection": {
             "type": "boolean",
-            "description": "True when the model's stored credential can no longer be used for inference — a credential flagged as needing reconnection (an OAuth grant revoked, or an API key the upstream rejected on consecutive calls), or a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment."
+            "description": "True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment."
           },
           "aliased": {
             "type": "boolean",
@@ -26216,7 +26064,7 @@
                   "type": "string"
                 },
                 "account_id": {
-                  "type": ["string", "null"]
+                  "type": "string"
                 },
                 "label": {
                   "type": ["string", "null"]

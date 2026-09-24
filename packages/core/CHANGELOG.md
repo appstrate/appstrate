@@ -86,10 +86,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `invalid_manifest`. Write `$['x-auth-token']`, `$.data[0]`, `$.sub`. A login
   selector's `[-1]` now selects the last element; the previous engine
   selected nothing.
-- **`ConnectionCandidate.accountId`** (`@appstrate/core/integration`) and
-  **`ResolutionFieldError.candidate_connections[].account_id`**
-  (`@appstrate/core/api-errors`) are `string | null`. `null` means the provider
-  exposed no identity; it replaces the magic account id `"default"`.
 - **`SubscriptionChatModel.input`** (`@appstrate/core/chat-contract`) is typed
   `ModelInputModality[] | null` instead of `string[] | null`.
 - **`formatErrorChain`** (`@appstrate/core/errors`) starts a cause as a new

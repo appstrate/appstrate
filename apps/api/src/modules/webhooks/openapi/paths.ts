@@ -240,7 +240,6 @@ export const webhooksPaths = {
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-            ETag: { $ref: "#/components/headers/ETag" },
           },
           content: {
             "application/json": {
@@ -274,7 +273,6 @@ export const webhooksPaths = {
       description:
         "Update webhook URL, events, filters, or enabled status. Cannot change the secret or the scoping level. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
       parameters: [
-        { $ref: "#/components/parameters/IfMatch" },
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -315,7 +313,6 @@ export const webhooksPaths = {
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-            ETag: { $ref: "#/components/headers/ETag" },
           },
           content: {
             "application/json": {
@@ -337,7 +334,6 @@ export const webhooksPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

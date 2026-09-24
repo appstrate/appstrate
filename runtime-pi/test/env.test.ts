@@ -351,34 +351,11 @@ describe("scrubSinkEnv", () => {
   });
 });
 
+// The knob grammar is tested in packages/runner-pi/test/loop-env.test.ts.
 describe("parseRuntimeEnv — Pi loop knobs", () => {
-  it("defaults both loops on and leaves the tool-result cap to the runner", () => {
-    const env = parseRuntimeEnv(VALID);
-    expect(env.modelRetry).toBe(true);
-    expect(env.modelCompaction).toBe(true);
-    expect(env.toolResultByteLimit).toBeUndefined();
-  });
-
-  it("parses what buildRuntimePiEnv emits", () => {
-    const env = parseRuntimeEnv({
-      ...VALID,
-      MODEL_RETRY_ENABLED: "false",
-      MODEL_COMPACTION_ENABLED: "false",
-      TOOL_RESULT_BYTE_LIMIT: "16384",
-    });
-    expect(env.modelRetry).toBe(false);
-    expect(env.modelCompaction).toBe(false);
-    expect(env.toolResultByteLimit).toBe(16_384);
-  });
-
-  it("fails boot on a malformed value instead of silently using the default", () => {
-    expect(() =>
-      parseRuntimeEnv({
-        ...VALID,
-        MODEL_RETRY_ENABLED: "no",
-        MODEL_COMPACTION_ENABLED: "0",
-        TOOL_RESULT_BYTE_LIMIT: "12.5",
-      }),
-    ).toThrow(/MODEL_RETRY_ENABLED[\s\S]*MODEL_COMPACTION_ENABLED[\s\S]*TOOL_RESULT_BYTE_LIMIT/);
+  it("fails boot with a RuntimeEnvError naming a malformed knob", () => {
+    const parse = () => parseRuntimeEnv({ ...VALID, TOOL_RESULT_BYTE_LIMIT: "12.5" });
+    expect(parse).toThrow(RuntimeEnvError);
+    expect(parse).toThrow(/TOOL_RESULT_BYTE_LIMIT/);
   });
 });

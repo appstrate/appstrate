@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { and, asc, desc, eq, isNotNull, isNull, lt, or } from "drizzle-orm";
-import type { InferSelectModel, SQL } from "drizzle-orm";
+import type { InferSelectModel } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
 import {
@@ -15,7 +15,6 @@ import {
   uploads,
 } from "@appstrate/db/schema";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
-import { preconditionFailed } from "../lib/conditional-request.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import { scopedWhere, type DbOrTx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -238,8 +237,6 @@ export async function updateSpace(
     defaultRole?: SpaceRolePreset;
   },
   judged: Pick<SpaceRow, "visibility" | "defaultRole" | "ownerUserId" | "isDefault">,
-  /** `If-Match` predicate (`ifMatchWhere`): a stale row is refused with `412`. */
-  ifMatch?: SQL,
 ) {
   const changesAccess = params.visibility !== undefined || params.defaultRole !== undefined;
   // Both rules are DB CHECKs too, but a named 4xx beats a 23514.
@@ -277,16 +274,14 @@ export async function updateSpace(
           eq(spaces.id, spaceId),
           changesAccess ? eq(spaces.visibility, judged.visibility) : undefined,
           changesAccess ? eq(spaces.defaultRole, judged.defaultRole) : undefined,
-          ifMatch,
         ],
       }),
     )
     .returning();
 
   if (space) return space;
-  const current = await getSpace(orgId, spaceId); // 404 when it is gone rather than changed
-  if (ifMatch) throw preconditionFailed(current.updatedAt);
   if (changesAccess) {
+    await getSpace(orgId, spaceId); // 404 when it is gone rather than changed
     throw conflict(
       "space_access_changed",
       "The space's visibility or default role changed while this request was being handled. Reload it and retry.",

@@ -97,8 +97,8 @@ describe("LoginSecretStrategy.complete — store the secret, session pending", (
       mot_de_passe: "s3cr3t",
     });
 
-    // Connection metadata: no provider identity, not flagged for reconnection.
-    expect(summary.account_id).toBeNull();
+    // Connection metadata: default account, not flagged for reconnection.
+    expect(summary.account_id).toBe("default");
     expect(summary.needs_reconnection).toBe(false);
     expect(summary.expiresAt).toBeNull();
     expect(summary.scopes_granted).toEqual([]);

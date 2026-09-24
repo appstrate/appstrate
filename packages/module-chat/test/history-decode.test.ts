@@ -29,28 +29,6 @@ describe("loadHistory decode", () => {
     ] as never);
   });
 
-  it("walks every page by `since` so a long thread opens whole", async () => {
-    const urls: string[] = [];
-    const pages = [
-      { messages: [{ id: "m1", seq: 7, content: { role: "user", parts: [] } }], hasMore: true },
-      {
-        messages: [{ id: "m2", seq: 42, content: { role: "assistant", parts: [] } }],
-        hasMore: false,
-      },
-    ];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      urls.push(String(input));
-      return Response.json({ id: "chs_1", ...pages[urls.length - 1] });
-    }) as typeof fetch;
-
-    const msgs = await loadHistory(() => ({}), "chs_1");
-    expect(msgs.map((m) => m.id)).toEqual(["m1", "m2"]);
-    expect(urls).toEqual([
-      "/api/chat/sessions/chs_1?limit=500",
-      "/api/chat/sessions/chs_1?limit=500&since=7",
-    ]);
-  });
-
   it("returns [] for a not-yet-persisted conversation (404)", async () => {
     globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
     expect(await loadHistory(() => ({}), "chs_new")).toEqual([]);

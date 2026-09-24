@@ -367,12 +367,8 @@ describe("API Keys API", () => {
     });
   });
 
-  // RFC 9110 §11.4: the auth-scheme is a case-insensitive token separated
-  // from the credentials by `1*SP`. The auth pipeline's API-key branch used
-  // to sniff `startsWith("Bearer ask_")`, so a conformant client sending
-  // `authorization: bearer ask_…` got an undiagnosable 401.
   describe("retired ask_ key format", () => {
-    it("is refused with a 401 naming the replacement, even when its hash is stored", async () => {
+    it("is refused with a 401 even when its hash is stored", async () => {
       const rawKey = `ask_${"a1".repeat(24)}`;
       await seedApiKey({
         orgId: ctx.orgId,
@@ -387,12 +383,13 @@ describe("API Keys API", () => {
       });
       expect(res.status).toBe(401);
       expect(res.headers.get("content-type")).toContain("application/problem+json");
-      const body = (await res.json()) as { code: string; detail: string };
-      expect(body.code).toBe("api_key_format_retired");
-      expect(body.detail).toContain("create a new key");
     });
   });
 
+  // RFC 9110 §11.4: the auth-scheme is a case-insensitive token separated
+  // from the credentials by `1*SP`. The auth pipeline's API-key branch used
+  // to sniff `startsWith("Bearer ask_")`, so a conformant client sending
+  // `authorization: bearer ask_…` got an undiagnosable 401.
   describe("API key auth accepts a non-canonical bearer scheme", () => {
     it.each(["bearer", "BEARER", "BeArEr"])("authenticates with %s", async (scheme) => {
       const apiKey = await seedApiKey({

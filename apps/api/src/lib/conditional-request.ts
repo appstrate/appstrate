@@ -2,12 +2,10 @@
 
 /**
  * Conditional requests (RFC 9110 §13): `If-None-Match` for reads, `If-Match`
- * as the platform's optimistic-concurrency mechanism for writes.
+ * for the optimistic concurrency of package draft writes.
  */
 
 import type { Context } from "hono";
-import { inArray, sql, type SQL } from "drizzle-orm";
-import type { PgColumn } from "drizzle-orm/pg-core";
 import { ApiError } from "@appstrate/core/api-errors";
 
 interface IfNoneMatchOptions {
@@ -37,46 +35,14 @@ export function ifNoneMatchSatisfied(
     .some((tag) => (tag === "*" ? allowWildcard : strip(tag) === target));
 }
 
-/** A resource's version: a monotonic counter, or its `updatedAt`. */
-export type ResourceVersion = number | Date | string;
-
-/** The strong entity-tag of one version; timestamps at millisecond precision. */
-export function versionEtag(version: ResourceVersion): string {
-  const value =
-    typeof version === "number" ? String(version) : new Date(version).getTime().toString();
-  return `"${value}"`;
+/** The strong entity-tag of a draft's `lock_version`. */
+function versionEtag(version: number): string {
+  return `"${version}"`;
 }
 
-/** Stamp the response with the resource's `ETag`. */
-export function setEtag(c: Context, version: ResourceVersion): void {
+/** Stamp the response with the draft's `ETag`. */
+export function setEtag(c: Context, version: number): void {
   c.header("ETag", versionEtag(version));
-}
-
-/**
- * `If-Match` as a predicate on `updatedAt` for the write's own UPDATE, so two
- * writers holding the same ETag cannot both pass. Undefined for no header or
- * `*`; zero rows updated means gone (404) or stale ({@link preconditionFailed}).
- */
-export function ifMatchWhere(c: Context, updatedAt: PgColumn): SQL | undefined {
-  const header = c.req.header("If-Match");
-  if (header === undefined) return undefined;
-  const tags = header.split(",").map((tag) => tag.trim());
-  if (tags.includes("*")) return undefined;
-  const versions = tags.flatMap((tag) => /^"(\d+)"$/.exec(tag)?.[1] ?? []);
-  if (versions.length === 0) return sql`false`;
-  return inArray(sql`floor(extract(epoch from ${updatedAt}) * 1000)::bigint`, versions);
-}
-
-/** The `412` for a write whose `If-Match` no longer names `current`. */
-export function preconditionFailed(current: ResourceVersion): ApiError {
-  return new ApiError({
-    status: 412,
-    code: "precondition_failed",
-    title: "Precondition Failed",
-    detail:
-      "The resource changed since you read it: If-Match does not match its current ETag. Re-read it, reapply your change, and send the new ETag.",
-    headers: { ETag: versionEtag(current) },
-  });
 }
 
 /**
@@ -84,11 +50,7 @@ export function preconditionFailed(current: ResourceVersion): ApiError {
  * version read under the write's lock. Absent header: no-op, or `428` when
  * `required` (RFC 6585 §3).
  */
-export function assertIfMatch(
-  c: Context,
-  current: ResourceVersion,
-  opts?: { required?: boolean },
-): void {
+export function assertIfMatch(c: Context, current: number, opts?: { required?: boolean }): void {
   const header = c.req.header("If-Match");
   if (header === undefined) {
     if (!opts?.required) return;
@@ -102,5 +64,12 @@ export function assertIfMatch(
   }
   const etag = versionEtag(current);
   if (header.split(",").some((tag) => tag.trim() === "*" || tag.trim() === etag)) return;
-  throw preconditionFailed(current);
+  throw new ApiError({
+    status: 412,
+    code: "precondition_failed",
+    title: "Precondition Failed",
+    detail:
+      "The resource changed since you read it: If-Match does not match its current ETag. Re-read it, reapply your change, and send the new ETag.",
+    headers: { ETag: etag },
+  });
 }

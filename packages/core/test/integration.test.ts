@@ -599,24 +599,15 @@ describe("integrationManifestSchema — identity_claims JSONPath install gate", 
       },
     });
 
-  it("accepts every form of the manifest JSONPath subset", () => {
-    const claims = {
-      a: "$.email",
-      b: "$.data[0].id",
-      d: "$['display name']",
-      e: "$.items[-1]",
-    };
-    expect(integrationManifestSchema.safeParse(withClaims(claims)).success).toBe(true);
+  // The grammar itself is tested in packages/afps-shared/test/jsonpath.test.ts.
+  it("accepts a path in the subset and refuses one outside it on the claim's own path", () => {
+    expect(integrationManifestSchema.safeParse(withClaims({ a: "$.data[0].id" })).success).toBe(
+      true,
+    );
+    expect(errorPaths(withClaims({ accountId: "$..email" }))).toContain(
+      "auths.key.identity_claims.accountId",
+    );
   });
-
-  it.each(["email", "$..email", "$.users[*].id", "$[?(@.a)]", "$.data.0.id"])(
-    "rejects %p on the claim's own path",
-    (path) => {
-      expect(errorPaths(withClaims({ accountId: path }))).toContain(
-        "auths.key.identity_claims.accountId",
-      );
-    },
-  );
 });
 
 // ─────────────────────────────────────────────
@@ -771,21 +762,20 @@ describe("integrationManifestSchema — connect.login", () => {
     ).toContain("auths.session.connect.login.expires_in_output");
   });
 
-  it.each(["$.items.*", "$.items[*].token", "$..token", "$['a','b']", "$.arr[01]"])(
-    "rejects the jsonpath output selector %p at import",
-    (selector) => {
-      expect(
-        errorPaths(
-          customWithConnect({
-            login: {
-              request: { method: "POST", url: "https://x" },
-              outputs: { token: { context: "$response.body", selector, type: "jsonpath" } },
+  it("rejects a jsonpath output selector outside the subset at import", () => {
+    expect(
+      errorPaths(
+        customWithConnect({
+          login: {
+            request: { method: "POST", url: "https://x" },
+            outputs: {
+              token: { context: "$response.body", selector: "$..token", type: "jsonpath" },
             },
-          }),
-        ),
-      ).toContain("auths.session.connect.login.outputs.token.selector");
-    },
-  );
+          },
+        }),
+      ),
+    ).toContain("auths.session.connect.login.outputs.token.selector");
+  });
 
   it("rejects a jsonpath success criterion outside the subset, and leaves other types alone", () => {
     const paths = errorPaths(

@@ -39,8 +39,8 @@ export interface IntegrationConnection {
   id: string;
   packageId: string;
   auth_key: string;
-  /** Multi-account discriminator extracted at connect time; `null` = no identity. */
-  account_id: string | null;
+  /** Multi-account discriminator extracted at connect time. */
+  account_id: string;
   /** Identity claims extracted via `extractTokenIdentity` (e.g. `sub`, `email`). */
   identity_claims: Record<string, unknown> | null;
   scopes_granted: string[];
@@ -168,8 +168,7 @@ export interface IntegrationOAuthClient {
 export interface AccessibleIntegrationConnection {
   id: string;
   auth_key: string;
-  /** `null` when the provider exposed no identity. */
-  account_id: string | null;
+  account_id: string;
   label: string | null;
   owner_user_id: string | null;
   owner_end_user_id: string | null;

@@ -87,7 +87,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
     await db.insert(integrationConnections).values({
       integrationId: INTEG,
       authKey: "primary",
-      accountId: null,
+      accountId: "default",
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,

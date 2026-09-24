@@ -24,12 +24,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
 import { getAuth } from "@appstrate/db/auth";
-import {
-  API_KEY_PREFIX,
-  apiKeyFormatRetired,
-  isRetiredApiKey,
-  validateApiKey,
-} from "../services/api-keys.ts";
+import { API_KEY_PREFIX, validateApiKey } from "../services/api-keys.ts";
 import { requireOrgContext } from "../middleware/org-context.ts";
 import { requirePlatformRealm } from "../middleware/realm-guard.ts";
 import { isEndUserInSpace } from "../services/end-users.ts";
@@ -211,7 +206,6 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
 
     // Try Bearer API key
     const rawKey = parseBearer(c.req.header("Authorization"));
-    if (rawKey && isRetiredApiKey(rawKey)) throw apiKeyFormatRetired();
     if (rawKey?.startsWith(API_KEY_PREFIX)) {
       const keyInfo = await validateApiKey(rawKey);
       if (!keyInfo) {

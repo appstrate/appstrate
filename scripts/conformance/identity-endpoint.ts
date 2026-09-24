@@ -5,9 +5,9 @@
  *
  * An `identity_claims` mapping is only as good as the URL it reads from, and a
  * wrong URL fails silently: `oauth2-strategy` logs a warning nobody reads, then
- * stores no identity (a NULL accountId), so the connection is labelled
- * "Connexion N" and a reconnect with a different upstream account goes
- * unnoticed. A transcription slip here survives code review, type checking and
+ * falls back to accountId `"default"`, so the connection is labelled
+ * "Connexion N" and shares one account key with every other connection on that
+ * provider. A transcription slip here survives code review, type checking and
  * every offline test — the fixture suite pins each JSONPath against a
  * documented payload, but nothing pins the URL those paths are read from.
  *
@@ -93,7 +93,7 @@ export function classifyIdentityProbe(
       packageId,
       check: CHECK,
       severity: "fail",
-      message: `${where}: HTTP ${status} — no identity endpoint at this URL (or it refuses GET), so every connection silently gets no account identity (NULL accountId)`,
+      message: `${where}: HTTP ${status} — no identity endpoint at this URL (or it refuses GET), so every connection silently falls back to accountId "default"`,
     };
   }
   if (status >= 200 && status < 300) {

@@ -1872,13 +1872,13 @@ export async function deleteIntegrationOAuthClient(
  * fails the connect with `invalid_config`.
  *
  * `accountId` is the declared `accountId` / `account_id` claim, else the
- * source's `email` / `account_email` / `sub`, else `null`: no provider identity.
+ * source's `email` / `account_email` / `sub`, else `"default"` (single-account).
  */
 export function extractIdentity(
   manifest: IntegrationManifest,
   authKey: string,
   source: Record<string, unknown>,
-): { accountId: string | null; identityClaims: Record<string, unknown> } {
+): { accountId: string; identityClaims: Record<string, unknown> } {
   const auth = lookupAuth(manifest, authKey) as AfpsManifestAuth;
   const mapping = auth.identity_claims ?? {};
   const claims: Record<string, unknown> = {};
@@ -1892,7 +1892,7 @@ export function extractIdentity(
     (typeof source.email === "string" && source.email) ||
     (typeof source.account_email === "string" && source.account_email) ||
     (typeof source.sub === "string" && source.sub) ||
-    null;
+    "default";
   return { accountId, identityClaims: claims };
 }
 
@@ -2003,8 +2003,7 @@ export function assertRequiredIdentityClaims(
 interface StoreConnectionInput {
   packageId: string;
   authKey: string;
-  /** `null` = the provider exposed no identity. */
-  accountId: string | null;
+  accountId: string;
   credentials: Record<string, unknown>;
   identityClaims?: Record<string, unknown>;
   scopesGranted?: string[];
@@ -2088,8 +2087,7 @@ interface PersistCredentialInput {
   inputs?: Record<string, unknown>;
   expiresAt?: Date | null;
   needsReconnection?: boolean;
-  /** `null` = no provider identity; `undefined` = leave untouched. */
-  accountId?: string | null;
+  accountId?: string;
   identityClaims?: Record<string, unknown>;
   scopesGranted?: string[];
   /**
@@ -2120,7 +2118,7 @@ interface PersistCredentialInput {
  *
  * Why no upsert-by-accountId: the previous model collapsed every connection on
  * the same `(packageId, authKey, accountId, space, owner)` tuple and silently
- * overwrote every identity-less row onto one. The current model
+ * overwrote rows when `accountId` defaulted to "default". The current model
  * trusts the caller's intent — explicit connectionId = update; no id = insert.
  *
  * Callers that pass explicit `connectionId` for UPDATE: token refresh paths,
@@ -2167,7 +2165,8 @@ export async function persistCredentialBundle(
     // count for this (space, integration) + 1, computed as a subquery in the
     // INSERT so it's one statement. This is the single source of truth for the
     // UI: no render-time fallback, the label is always set. User-editable after.
-    const identityLabel = input.accountId || undefined;
+    const identityLabel =
+      input.accountId && input.accountId !== "default" ? input.accountId : undefined;
     const ownerFilter = userId ? sql`user_id = ${userId}` : sql`end_user_id = ${endUserId}`;
     const labelValue: string | SQL =
       identityLabel ??
@@ -2255,7 +2254,7 @@ export async function persistCredentialBundle(
     // refuse — silently rebinding a connection (possibly shared or pinned to
     // agents under the assumption it's account A) to a different account is a
     // data-integrity and access surprise. Only enforced between two real
-    // identities; a null (identity-less) side never blocks an upgrade.
+    // identities; "default" (identity-less) never blocks an upgrade.
     //
     // The read (identity check) and the write must be atomic: performed as two
     // separate statements, a concurrent update could change `accountId` between
@@ -2263,14 +2262,18 @@ export async function persistCredentialBundle(
     // transaction and take a row lock (`FOR UPDATE`) on the SELECT so the row
     // is pinned for the duration.
     const row = await db.transaction(async (tx) => {
-      if (input.accountId) {
+      if (input.accountId !== undefined && input.accountId !== "default") {
         const [existing] = await tx
           .select({ accountId: integrationConnections.accountId })
           .from(integrationConnections)
           .where(ownerScope)
           .limit(1)
           .for("update");
-        if (existing?.accountId && existing.accountId !== input.accountId) {
+        if (
+          existing &&
+          existing.accountId !== "default" &&
+          existing.accountId !== input.accountId
+        ) {
           throw conflict(
             "identity_mismatch",
             `This connection is linked to a different account (${existing.accountId}). Reconnect with the same account, or create a new connection.`,

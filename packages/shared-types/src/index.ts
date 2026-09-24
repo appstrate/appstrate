@@ -459,8 +459,8 @@ export interface MeConnectionEntry {
   connected_at: string;
   needs_reconnection: boolean;
   expiresAt: string | null;
-  /** Human-friendly identity (accountEmail, sub claim); `null` = none exposed. */
-  identity: string | null;
+  /** Human-friendly identity (accountEmail, sub claim). */
+  identity: string;
   /** Which auth slot this connection satisfies. */
   auth_key: string;
   /** Admin/owner sharing toggle (per-org). */
@@ -939,10 +939,11 @@ export interface OrgModelInfo extends ModelMetadata {
   is_default: boolean;
   /**
    * True when the model's stored credential can no longer be used for
-   * inference — flagged `needsReconnection` (revoked OAuth refresh token, or
-   * an API key repeatedly rejected) or a blob that no longer decrypts. The
-   * model is listed (inspect/detach/delete) but never selectable for
-   * inference. Always false for built-in/system models, which
+   * inference — an OAuth credential flagged `needsReconnection` (revoked
+   * refresh token), or, for either auth mode, a stored blob that no longer
+   * decrypts (e.g. a key rotation that retired a kid still in use). The model
+   * is listed (so it can be inspected/detached/deleted) but must never be
+   * selectable for inference. Always false for built-in/system models, which
    * read their key from the environment and have no stored blob.
    *
    * snake_case on purpose: mirrors {@link ModelProviderCredentialInfo.needs_reconnection}
@@ -1000,7 +1001,7 @@ export interface ModelProviderCredentialInfo {
   providerId?: string | null;
   /** Surface email of the OAuth account (extracted from the access-token identity claim). UI shows it as transparency hint. */
   oauth_email?: string | null;
-  /** True when the credential is dead (`invalid_grant`, repeated 401, or undecryptable). */
+  /** True when the credential is dead (an OAuth `invalid_grant`, or undecryptable). */
   needs_reconnection?: boolean;
   /**
    * Model ids empirically verified against this credential by the

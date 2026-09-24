@@ -18,7 +18,7 @@
  *     service is concerned only with org-owned credentials.
  */
 
-import { eq, gt, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
@@ -31,7 +31,6 @@ import type { ModelProviderDefinition, ModelProviderIdentity } from "@appstrate/
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { getSystemModelProviderCredentials, getSystemModels } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
-import { getEnv } from "@appstrate/env";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
 import { clearResolvedModelCache } from "../resolved-model-cache.ts";
 
@@ -40,8 +39,6 @@ import { clearResolvedModelCache } from "../resolved-model-cache.ts";
 interface ApiKeyBlob {
   kind: "api_key";
   apiKey: string;
-  /** Set once upstream rejected the key repeatedly; rotating the key drops it. */
-  needsReconnection?: boolean;
 }
 
 /**
@@ -397,9 +394,7 @@ export async function updateModelProviderCredential(
   orgId: string,
   id: string,
   patch: UpdateModelProviderCredentialPatch,
-  /** `If-Match` predicate (`ifMatchWhere`); false when nothing was updated. */
-  ifMatch?: import("drizzle-orm").SQL,
-): Promise<boolean> {
+): Promise<void> {
   const updates: Record<string, unknown> = {};
   if (patch.label !== undefined) updates.label = patch.label;
   if (patch.baseUrlOverride !== undefined) updates.baseUrlOverride = patch.baseUrlOverride;
@@ -419,7 +414,7 @@ export async function updateModelProviderCredential(
         }),
       )
       .limit(1);
-    if (!row) return false;
+    if (!row) return;
     const existing = decryptBlob(row.credentialsEncrypted);
     if (existing?.kind !== "api_key") {
       throw new Error(
@@ -428,27 +423,23 @@ export async function updateModelProviderCredential(
     }
     const next: ApiKeyBlob = { kind: "api_key", apiKey: patch.apiKey };
     updates.credentialsEncrypted = encryptCredentials(next as unknown as Record<string, unknown>);
-    // The old key's rejection streak must not carry over to the new one.
-    updates.refreshFailureCount = 0;
   }
 
-  // Always written: the If-Match precondition is judged by this statement.
+  if (Object.keys(updates).length === 0) return;
   updates.updatedAt = new Date();
 
-  const updated = await db
+  await db
     .update(modelProviderCredentials)
     .set(updates)
     .where(
       scopedWhere(modelProviderCredentials, {
         orgId,
-        extra: [eq(modelProviderCredentials.id, id), ifMatch],
+        extra: [eq(modelProviderCredentials.id, id)],
       }),
-    )
-    .returning({ id: modelProviderCredentials.id });
+    );
   // Models backed by this credential may have a cached resolution carrying the
   // old key/baseUrl — drop it so the rotation takes effect immediately.
   clearResolvedModelCache();
-  return updated.length > 0;
 }
 
 // ─── Label derivation ──────────────────────────────────────────────────────
@@ -499,15 +490,19 @@ interface UpdateOAuthCredentialTokensInput {
 }
 
 /**
- * Shared blob read-modify-write (org-scoped). `mutate` returns the next blob,
- * or `null` to leave the row alone. A missing or undecryptable row is a no-op.
- * The denormalized `expiresAt` column is mirrored only when an OAuth blob's
- * expiry changes. `extraColumns` piggybacks plain column writes on the UPDATE.
+ * Shared OAuth-blob read-modify-write: select → decrypt → kind-gate → apply
+ * `mutate` → re-encrypt → update (org-scoped). `mutate` returns the next blob.
+ * A missing row or non-`oauth` kind is a no-op (handled by the pre-guards
+ * here, before `mutate` runs). The denormalized `expiresAt` column is mirrored
+ * ONLY when the next blob's `expiresAt` differs from the existing one — so
+ * callers that don't touch expiry (e.g. {@link markCredentialNeedsReconnection})
+ * leave the column untouched. `extraColumns` lets a caller piggyback plain
+ * column writes (e.g. the refresh-failure streak reset) onto the same UPDATE.
  */
-async function updateCredentialBlob(
+async function updateOAuthBlob(
   orgId: string,
   id: string,
-  mutate: (existing: CredentialsBlob) => CredentialsBlob | null,
+  mutate: (existing: OAuthBlob) => OAuthBlob,
   extraColumns?: Partial<typeof modelProviderCredentials.$inferInsert>,
 ): Promise<void> {
   // Optimistic concurrency (compare-and-swap). The read-modify-write below is
@@ -533,10 +528,9 @@ async function updateCredentialBlob(
       .limit(1);
     if (!row) return;
     const existing = decryptBlob(row.credentialsEncrypted);
-    if (!existing) return;
+    if (existing?.kind !== "oauth") return;
 
     const next = mutate(existing);
-    if (!next) return;
     const set: Record<string, unknown> = {
       ...extraColumns,
       credentialsEncrypted: encryptCredentials(next as unknown as Record<string, unknown>),
@@ -545,11 +539,7 @@ async function updateCredentialBlob(
     // Keep the denormalized cache in lockstep with the blob — the refresh worker
     // scan filters on this column to skip the per-row decrypt. Only write it when
     // the mutation actually changed the expiry.
-    if (
-      next.kind === "oauth" &&
-      existing.kind === "oauth" &&
-      next.expiresAt !== existing.expiresAt
-    ) {
+    if (next.expiresAt !== existing.expiresAt) {
       set.expiresAt = next.expiresAt !== null ? new Date(next.expiresAt) : null;
     }
 
@@ -569,7 +559,7 @@ async function updateCredentialBlob(
       .returning({ id: modelProviderCredentials.id });
 
     if (updated.length > 0) {
-      // Chokepoint for every blob write (token refresh + needsReconnection):
+      // Chokepoint for every OAuth blob write (token refresh + needsReconnection):
       // bust the resolved-model cache so a rotated token or a freshly-dead credential
       // stops being served immediately, not after the TTL.
       clearResolvedModelCache();
@@ -578,7 +568,7 @@ async function updateCredentialBlob(
     // Lost the CAS race (a concurrent writer rotated the ciphertext) — re-read
     // and re-apply against the fresh blob.
   }
-  logger.warn("updateCredentialBlob: exhausted CAS retries under contention", { id });
+  logger.warn("updateOAuthBlob: exhausted CAS retries under contention", { id });
 }
 
 export async function updateOAuthCredentialTokens(
@@ -586,20 +576,17 @@ export async function updateOAuthCredentialTokens(
   id: string,
   fresh: UpdateOAuthCredentialTokensInput,
 ): Promise<void> {
-  await updateCredentialBlob(
+  await updateOAuthBlob(
     orgId,
     id,
-    (existing) =>
-      existing.kind === "oauth"
-        ? {
-            ...existing,
-            accessToken: fresh.accessToken,
-            refreshToken: fresh.refreshToken,
-            expiresAt: fresh.expiresAt,
-            needsReconnection: false,
-            ...(fresh.accountId ? { accountId: fresh.accountId } : {}),
-          }
-        : null,
+    (existing) => ({
+      ...existing,
+      accessToken: fresh.accessToken,
+      refreshToken: fresh.refreshToken,
+      expiresAt: fresh.expiresAt,
+      needsReconnection: false,
+      ...(fresh.accountId ? { accountId: fresh.accountId } : {}),
+    }),
     // Any successful token write clears the transient-refresh streak — a
     // working refresh proves the credential is healthy again, so the
     // escalation counter must not carry over. See
@@ -609,9 +596,7 @@ export async function updateOAuthCredentialTokens(
 }
 
 export async function markCredentialNeedsReconnection(orgId: string, id: string): Promise<void> {
-  await updateCredentialBlob(orgId, id, (existing) =>
-    existing.kind === "oauth" ? { ...existing, needsReconnection: true } : null,
-  );
+  await updateOAuthBlob(orgId, id, (existing) => ({ ...existing, needsReconnection: true }));
 }
 
 /**
@@ -647,7 +632,23 @@ export async function recordModelCredentialRefreshFailure(
   maxFailures: number,
   graceSeconds: number,
 ): Promise<void> {
-  const row = await incrementFailureStreak(orgId, id);
+  const updated = await db
+    .update(modelProviderCredentials)
+    .set({
+      refreshFailureCount: sql`${modelProviderCredentials.refreshFailureCount} + 1`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      scopedWhere(modelProviderCredentials, {
+        orgId,
+        extra: [eq(modelProviderCredentials.id, id)],
+      }),
+    )
+    .returning({
+      refreshFailureCount: modelProviderCredentials.refreshFailureCount,
+      expiresAt: modelProviderCredentials.expiresAt,
+    });
+  const row = updated[0];
   if (!row) return;
   const expiredPastGrace =
     row.expiresAt !== null && row.expiresAt.getTime() < Date.now() - graceSeconds * 1000;
@@ -659,96 +660,6 @@ export async function recordModelCredentialRefreshFailure(
     });
     await markCredentialNeedsReconnection(orgId, id);
   }
-}
-
-/**
- * Record an upstream 401 on an API-key credential. With no expiry to prove the
- * key dead, CONSECUTIVE rejections alone escalate. A report about a key other
- * than the stored one (a run still holding a rotated key) is dropped.
- */
-async function recordModelCredentialAuthFailure(
-  orgId: string,
-  id: string,
-  isRejectedKey: (storedKey: string) => boolean,
-  maxFailures: number,
-): Promise<void> {
-  const isStoredRejectedKey = (blob: CredentialsBlob | null): blob is ApiKeyBlob =>
-    blob?.kind === "api_key" && isRejectedKey(blob.apiKey);
-  const loaded = await loadCredentialRow(id, orgId);
-  if (!loaded || !isStoredRejectedKey(loaded.blob)) return;
-  const row = await incrementFailureStreak(orgId, id);
-  if (!row || row.refreshFailureCount < maxFailures) return;
-  logger.warn("api-key model provider: escalating to needsReconnection after repeated 401s", {
-    credentialId: id,
-    refreshFailureCount: row.refreshFailureCount,
-  });
-  await updateCredentialBlob(orgId, id, (existing) =>
-    isStoredRejectedKey(existing) && !existing.needsReconnection
-      ? { ...existing, needsReconnection: true }
-      : null,
-  );
-}
-
-/** Reset the failure streak; `> 0` keeps the healthy case write-free. */
-async function clearModelCredentialFailureStreak(orgId: string, id: string): Promise<void> {
-  await db
-    .update(modelProviderCredentials)
-    .set({ refreshFailureCount: 0 })
-    .where(
-      scopedWhere(modelProviderCredentials, {
-        orgId,
-        extra: [
-          eq(modelProviderCredentials.id, id),
-          gt(modelProviderCredentials.refreshFailureCount, 0),
-        ],
-      }),
-    );
-}
-
-/**
- * What an upstream said about an org-owned API key, reported by the LLM proxy
- * and by a run's sidecar. `rejected` extends the streak that flags the key
- * `needs_reconnection`; `accepted` resets it.
- */
-export async function recordModelCredentialOutcome(
-  orgId: string,
-  id: string,
-  outcome: "accepted" | "rejected",
-  isRejectedKey: (storedKey: string) => boolean,
-): Promise<void> {
-  if (outcome === "accepted") return clearModelCredentialFailureStreak(orgId, id);
-  await recordModelCredentialAuthFailure(
-    orgId,
-    id,
-    isRejectedKey,
-    getEnv().INTEGRATION_REFRESH_MAX_FAILURES,
-  );
-}
-
-/**
- * Atomic `+1` on the streak (concurrent failures cannot lose a count). The
- * streak is not on the wire, so it leaves `updatedAt` (the ETag) alone: a
- * failing run must not 412 the If-Match PATCH that rotates the key. The
- * `needs_reconnection` flip is visible and bumps it via `updateCredentialBlob`.
- */
-async function incrementFailureStreak(
-  orgId: string,
-  id: string,
-): Promise<{ refreshFailureCount: number; expiresAt: Date | null } | undefined> {
-  const updated = await db
-    .update(modelProviderCredentials)
-    .set({ refreshFailureCount: sql`${modelProviderCredentials.refreshFailureCount} + 1` })
-    .where(
-      scopedWhere(modelProviderCredentials, {
-        orgId,
-        extra: [eq(modelProviderCredentials.id, id)],
-      }),
-    )
-    .returning({
-      refreshFailureCount: modelProviderCredentials.refreshFailureCount,
-      expiresAt: modelProviderCredentials.expiresAt,
-    });
-  return updated[0];
 }
 
 // ─── Delete ────────────────────────────────────────────────────────────────
@@ -877,8 +788,13 @@ export async function listOrgModelProviderCredentials(
         authMode: cfg?.authMode ?? "api_key",
         providerId: r.providerId,
         oauth_email: isOauth ? (blob.email ?? null) : null,
-        // Dead for inference: flagged dead (either auth mode) or undecryptable.
-        needs_reconnection: blob === null || !!blob.needsReconnection,
+        // Dead for inference, by either route: an OAuth blob flagged for
+        // re-consent, or (either auth mode) a blob that no longer decrypts —
+        // `blob === null`, which also makes `isOauth` false. The model list
+        // badges its rows on the same two cases and points the user at THIS
+        // tab to fix them; narrowing this flag to the OAuth case would show
+        // the blamed credential as healthy, with no Reconnect button.
+        needs_reconnection: blob === null || (isOauth && !!blob.needsReconnection),
         // Single read-time resolution point for the whole platform: the seed
         // gate, the refresh-models response and the credentials list all read
         // this DTO field, so none of them can observe a stale static list.
@@ -915,14 +831,14 @@ export async function getOrgModelProviderCredential(
  * (model probe, LLM proxy, sidecar config). Combines the two read paths
  * into one — system (env-driven) keys from `SYSTEM_PROVIDER_KEYS` and
  * DB-stored credentials (api-key or OAuth, decrypted on demand) — and
- * gates dead rows (`needsReconnection`, either auth mode).
+ * gates dead OAuth rows (`needsReconnection`).
  *
  * The returned shape carries the registry overlay (apiShape, baseUrl)
  * inline so downstream consumers (pi.ts, llm-proxy) don't
  * have to re-look-up `getModelProvider(providerId)`.
  *
  * Returns `null` when the id is unknown to either source, or when the
- * credential is dead and the caller must treat it as missing.
+ * OAuth credential is dead and the caller must treat it as missing.
  */
 export async function loadInferenceCredentials(
   orgId: string,
@@ -950,7 +866,7 @@ export async function loadInferenceCredentials(
   // the raw load keeps such a credential alive for the metadata callers, this
   // path does not.
   if (!loaded || !loaded.blob) return null;
-  if (loaded.blob.needsReconnection) return null;
+  if (loaded.blob.kind === "oauth" && loaded.blob.needsReconnection) return null;
 
   const common = {
     providerId: loaded.providerId,

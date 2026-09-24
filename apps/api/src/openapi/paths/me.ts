@@ -159,7 +159,7 @@ export const mePaths = {
                               expiresAt: {
                                 oneOf: [{ type: "string", format: "date-time" }, { type: "null" }],
                               },
-                              identity: { type: ["string", "null"] },
+                              identity: { type: "string" },
                               reused_by_agents: { type: "integer" },
                               auth_key: { type: "string" },
                               shared_with_org: { type: "boolean" },

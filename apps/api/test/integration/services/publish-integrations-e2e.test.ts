@@ -52,7 +52,7 @@ async function seedConnection(ctx: TestContext, integrationId: string) {
   await db.insert(integrationConnections).values({
     integrationId,
     authKey: "primary",
-    accountId: null,
+    accountId: "default",
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,

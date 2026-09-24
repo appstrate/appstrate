@@ -56,8 +56,8 @@ export const integrationConnections = pgTable(
       .references(() => packages.id, { onDelete: "cascade" }),
     /** Auth key as declared in `manifest.auths.{key}` (e.g. `"primary"`, `"github"`). */
     authKey: text("auth_key").notNull(),
-    /** Discriminator for multi-account-per-auth (e.g. `sub` claim, email); NULL = no identity. */
-    accountId: text("account_id"),
+    /** Discriminator for multi-account-per-auth (e.g. `sub` claim, email). */
+    accountId: text("account_id").notNull(),
     /** Space scope — mirrors the rest of the platform. */
     spaceId: text("space_id")
       .notNull()

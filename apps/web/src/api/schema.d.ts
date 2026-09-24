@@ -1079,10 +1079,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get a chat session with a page of its messages
-         * @description The session and its messages in insertion order, one page at a time: when `hasMore` is `true`, pass the last message's `seq` as `?since=`, or follow the RFC 5988 `Link: <…?since=<seq>>; rel="next"` response header. A malformed `since` is ignored (the page starts at the first message).
-         */
+        /** Get a chat session with its messages */
         get: operations["getChatSession"];
         put?: never;
         post?: never;
@@ -4872,26 +4869,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/internal/model-credential/outcome": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Report what the upstream said about the run's model API key
-         * @description Sidecar-only. Auth via Bearer run token. The sidecar's `/llm/*` API-key path reports an upstream `401` as `rejected` and the first `2xx` after a rejection (or of the run) as `accepted`. `rejected` counts toward the credential's failure streak — at `INTEGRATION_REFRESH_MAX_FAILURES` consecutive rejections the credential is flagged `needs_reconnection` — and is dropped when `key_sha256` does not match the stored key (a run still holding a key the user has since rotated). `accepted` resets the streak. The credential is always the run's own pinned `model_credential_id`; a run with none (built-in key, model alias, remote run) is a no-op.
-         */
-        post: operations["reportModelCredentialOutcome"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/internal/oauth-token/{credentialId}": {
         parameters: {
             query?: never;
@@ -5324,11 +5301,6 @@ export interface components {
         ChatMessage: {
             /** @description Server-generated message id */
             id: string;
-            /**
-             * Format: int64
-             * @description Insertion order (one sequence across all sessions, so a thread's values are not contiguous). Pass the last one as `?since=` to read the next page.
-             */
-            seq: number;
             /** @description Opaque encoded message */
             content: unknown;
         };
@@ -5497,7 +5469,7 @@ export interface components {
                 /** Format: uuid */
                 id: string;
                 auth_key: string;
-                account_id: string | null;
+                account_id: string;
                 label: string | null;
                 owner_user_id: string | null;
                 owner_end_user_id: string | null;
@@ -5742,7 +5714,7 @@ export interface components {
             reasoning?: boolean | null;
             enabled: boolean;
             is_default: boolean;
-            /** @description True when the model's stored credential can no longer be used for inference — a credential flagged as needing reconnection (an OAuth grant revoked, or an API key the upstream rejected on consecutive calls), or a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. */
+            /** @description True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. */
             needs_reconnection: boolean;
             /** @description Managed-model flag. When true, the binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge. */
             aliased: boolean;
@@ -6055,8 +6027,8 @@ export interface components {
                 id: string;
                 /** @description User-given name; `null` when the connection was never labelled. */
                 label: string | null;
-                /** @description The auth's account discriminator (`sub` claim, email, host…); `null` when the provider exposed no identity. */
-                account_id: string | null;
+                /** @description The auth's account discriminator (`sub` claim, email, host…). */
+                account_id: string;
                 /** @description True when the connection is the caller's own, false when inherited via org sharing. */
                 owned_by_actor: boolean;
             }[];
@@ -6911,7 +6883,7 @@ export interface components {
         SseSpaceId: string;
         /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=apst_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
         SseViewAs: string;
-        /** @description API key (`apst_` prefix) for SSE authentication. A retired `ask_` key is `401 api_key_format_retired`. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
+        /** @description API key (`apst_` prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
         SseToken: string;
         /**
          * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
@@ -10002,12 +9974,7 @@ export interface operations {
     };
     getChatSession: {
         parameters: {
-            query?: {
-                /** @description Sequence cursor — return only messages with `seq` greater than this. */
-                since?: number;
-                /** @description Page size. Out-of-range or non-numeric values fall back to 100. */
-                limit?: number;
-            };
+            query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -10021,21 +9988,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Session with a page of its messages */
+            /** @description Session with full message tree */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    Link: components["headers"]["Link"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ChatSession"] & {
-                        /** @description Total messages in the session, across all pages. */
-                        message_count: number;
                         messages: components["schemas"]["ChatMessage"][];
-                        /** @description True when later messages follow this page. */
-                        hasMore: boolean;
                     };
                 };
             };
@@ -11589,8 +11551,7 @@ export interface operations {
                             id: string;
                             packageId: string;
                             auth_key: string;
-                            /** @description Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity. */
-                            account_id: string | null;
+                            account_id: string;
                             identity_claims: {
                                 [key: string]: unknown;
                             } | null;
@@ -11704,8 +11665,7 @@ export interface operations {
                                 id: string;
                                 packageId: string;
                                 auth_key: string;
-                                /** @description Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity. */
-                                account_id: string | null;
+                                account_id: string;
                                 identity_claims: {
                                     [key: string]: unknown;
                                 } | null;
@@ -11865,8 +11825,7 @@ export interface operations {
                         id: string;
                         packageId: string;
                         auth_key: string;
-                        /** @description Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity. */
-                        account_id: string | null;
+                        account_id: string;
                         identity_claims: {
                             [key: string]: unknown;
                         } | null;
@@ -12207,8 +12166,7 @@ export interface operations {
                             id: string;
                             packageId: string;
                             auth_key: string;
-                            /** @description Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity. */
-                            account_id: string | null;
+                            account_id: string;
                             identity_claims: {
                                 [key: string]: unknown;
                             } | null;
@@ -12276,8 +12234,7 @@ export interface operations {
                         id: string;
                         packageId: string;
                         auth_key: string;
-                        /** @description Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity. */
-                        account_id: string | null;
+                        account_id: string;
                         identity_claims: {
                             [key: string]: unknown;
                         } | null;
@@ -12752,8 +12709,7 @@ export interface operations {
                                 id: string;
                                 packageId: string;
                                 auth_key: string;
-                                /** @description Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity. */
-                                account_id: string | null;
+                                account_id: string;
                                 identity_claims: {
                                     [key: string]: unknown;
                                 } | null;
@@ -13270,7 +13226,7 @@ export interface operations {
                                 connected_at: string;
                                 needs_reconnection: boolean;
                                 expiresAt: string | null;
-                                identity: string | null;
+                                identity: string;
                                 reused_by_agents: number;
                                 auth_key: string;
                                 shared_with_org: boolean;
@@ -14086,8 +14042,6 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
-                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
@@ -14110,7 +14064,6 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -14129,7 +14082,6 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
-            412: components["responses"]["PreconditionFailed"];
             500: components["responses"]["InternalServerError"];
         };
     };
@@ -14801,8 +14753,6 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
-                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
@@ -14841,7 +14791,6 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -14853,7 +14802,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["ModelAlreadyAdded"];
-            412: components["responses"]["PreconditionFailed"];
         };
     };
     testModel: {
@@ -15679,7 +15627,6 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -15743,10 +15690,7 @@ export interface operations {
     updateOrganization: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
-                "If-Match"?: components["parameters"]["IfMatch"];
-            };
+            header?: never;
             path: {
                 orgId: string;
             };
@@ -15766,7 +15710,6 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -15777,7 +15720,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            412: components["responses"]["PreconditionFailed"];
         };
     };
     listOrgCliSessions: {
@@ -16152,7 +16094,6 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -16171,10 +16112,7 @@ export interface operations {
     updateOrgSettings: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
-                "If-Match"?: components["parameters"]["IfMatch"];
-            };
+            header?: never;
             path: {
                 orgId: string;
             };
@@ -16198,7 +16136,6 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -16208,7 +16145,6 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            412: components["responses"]["PreconditionFailed"];
         };
     };
     listAgentPackages: {
@@ -19318,8 +19254,6 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
-                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
@@ -19344,7 +19278,6 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -19368,7 +19301,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            412: components["responses"]["PreconditionFailed"];
         };
     };
     testProxy: {
@@ -19411,7 +19343,7 @@ export interface operations {
                 view_as?: components["parameters"]["SseViewAs"];
                 /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
                 spaceId?: components["parameters"]["SseSpaceId"];
-                /** @description API key (`apst_` prefix) for SSE authentication. A retired `ask_` key is `401 api_key_format_retired`. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
+                /** @description API key (`apst_` prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
                 token?: components["parameters"]["SseToken"];
                 /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
                 verbose?: components["parameters"]["Verbose"];
@@ -19451,7 +19383,7 @@ export interface operations {
                 view_as?: components["parameters"]["SseViewAs"];
                 /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
                 spaceId?: components["parameters"]["SseSpaceId"];
-                /** @description API key (`apst_` prefix) for SSE authentication. A retired `ask_` key is `401 api_key_format_retired`. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
+                /** @description API key (`apst_` prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
                 token?: components["parameters"]["SseToken"];
                 /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
                 verbose?: components["parameters"]["Verbose"];
@@ -19488,7 +19420,7 @@ export interface operations {
                 view_as?: components["parameters"]["SseViewAs"];
                 /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
                 spaceId?: components["parameters"]["SseSpaceId"];
-                /** @description API key (`apst_` prefix) for SSE authentication. A retired `ask_` key is `401 api_key_format_retired`. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
+                /** @description API key (`apst_` prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
                 token?: components["parameters"]["SseToken"];
                 /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
                 verbose?: components["parameters"]["Verbose"];
@@ -19679,8 +19611,6 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
-                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
@@ -19706,7 +19636,6 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -19726,7 +19655,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            412: components["responses"]["PreconditionFailed"];
         };
     };
     listRuns: {
@@ -21038,7 +20966,6 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -21117,8 +21044,6 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
-                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
@@ -21165,7 +21090,6 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -21185,7 +21109,6 @@ export interface operations {
             /** @description Insufficient permissions — including `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NoPublishedVersion"];
-            412: components["responses"]["PreconditionFailed"];
         };
     };
     listScheduleRuns: {
@@ -21452,7 +21375,6 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -21506,8 +21428,6 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
-                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
@@ -21545,7 +21465,6 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -21565,7 +21484,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            412: components["responses"]["PreconditionFailed"];
         };
     };
     convertSpaceToTeam: {
@@ -22435,7 +22353,6 @@ export interface operations {
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -22481,8 +22398,6 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
-                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
@@ -22509,7 +22424,6 @@ export interface operations {
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -22521,7 +22435,6 @@ export interface operations {
             /** @description The caller lacks the package type's `configure` grant in this space. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            412: components["responses"]["PreconditionFailed"];
         };
     };
     getSpacePackageRunConfig: {
@@ -22924,7 +22837,6 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -22989,8 +22901,6 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
-                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
@@ -23020,7 +22930,6 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -23049,7 +22958,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            412: components["responses"]["PreconditionFailed"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -23571,36 +23479,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
-        };
-    };
-    reportModelCredentialOutcome: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @enum {string} */
-                    outcome: "rejected" | "accepted";
-                    /** @description SHA-256 (hex) of the API key the sidecar used — never the key itself. */
-                    key_sha256: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Recorded (or nothing to record for this run). */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
         };
     };
     getOAuthModelProviderToken: {

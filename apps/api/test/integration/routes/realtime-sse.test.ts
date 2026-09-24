@@ -723,12 +723,6 @@ describe("realtime SSE routes (integration)", () => {
       const res = await app.request(`/api/realtime/runs?token=apst_invalid_key`);
       expect(res.status).toBe(401);
     });
-
-    it("refuses a retired ask_ key with api_key_format_retired", async () => {
-      const res = await app.request(`/api/realtime/runs?token=ask_${"0".repeat(48)}`);
-      expect(res.status).toBe(401);
-      expect(((await res.json()) as { code: string }).code).toBe("api_key_format_retired");
-    });
   });
 
   // ── CRIT-04 — SSE auth: `runs:read` required, isAdmin derived (not hardcoded) ──

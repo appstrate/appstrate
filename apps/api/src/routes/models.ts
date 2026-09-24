@@ -2,7 +2,6 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { orgModels } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -47,7 +46,6 @@ import {
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { ifMatchWhere, preconditionFailed, setEtag } from "../lib/conditional-request.ts";
 
 export const createModelSchema = z
   .object({
@@ -735,10 +733,7 @@ export function createModelsRouter() {
     }
 
     try {
-      if (!(await updateOrgModel(orgId, modelId, data, ifMatchWhere(c, orgModels.updatedAt)))) {
-        const stale = await getOrgModel(orgId, modelId);
-        throw stale ? preconditionFailed(stale.updatedAt) : notFound("Model not found");
-      }
+      await updateOrgModel(orgId, modelId, data);
       await recordAuditFromContext(c, {
         action: "model.updated",
         resourceType: "model",
@@ -760,7 +755,6 @@ export function createModelsRouter() {
       // every backing an org admin (or a `models:write` API key) can name.
       const model = await getOrgModel(orgId, modelId);
       if (!model) throw notFound("Model not found");
-      setEtag(c, model.updatedAt);
       return c.json(projectAliasedModel(model));
     } catch (err) {
       if (err instanceof ApiError) throw err;

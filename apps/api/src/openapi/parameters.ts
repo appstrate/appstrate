@@ -129,7 +129,7 @@ export const parameters = {
     in: "query" as const,
     required: false,
     description:
-      "API key (`apst_` prefix) for SSE authentication. A retired `ask_` key is `401 api_key_format_retired`. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
+      "API key (`apst_` prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
     schema: { type: "string" },
   },
   XViewAs: {

@@ -44,11 +44,7 @@ import {
   seedRun,
   seedSpace,
 } from "../../helpers/seed.ts";
-import { _resetCacheForTesting, getEnv } from "@appstrate/env";
-import {
-  listOrgModelProviderCredentials,
-  updateModelProviderCredential,
-} from "../../../src/services/model-providers/credentials.ts";
+import { _resetCacheForTesting } from "@appstrate/env";
 
 /**
  * Drive the response cache through its ONLY input — the env. There is no
@@ -1041,87 +1037,5 @@ describe("POST /api/llm-proxy/* — model-alias swap", () => {
     expect(text).toContain("Upstream model error");
     expect(text).not.toContain("deepseek-chat-SECRET");
     expect(text).not.toContain("overloaded");
-  });
-});
-
-// A revoked BYOK key must end up flagged like a dead OAuth grant — but only
-// after CONSECUTIVE 401s, never on a 403 (valid key, model not entitled).
-describe("llm-proxy — API-key credential health", () => {
-  beforeEach(async () => {
-    await truncateAll();
-    await flushRedis();
-  });
-  afterEach(() => restoreFetch());
-
-  const max = () => getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
-
-  function upstreamSequence(statuses: number[]): void {
-    let i = 0;
-    mockUpstream(async () => {
-      const status = statuses[Math.min(i++, statuses.length - 1)]!;
-      const body =
-        status === 200
-          ? { id: "c", choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } }
-          : { error: { message: "nope" } };
-      return new Response(JSON.stringify(body), {
-        status,
-        headers: { "content-type": "application/json" },
-      });
-    });
-  }
-
-  async function call(h: Harness): Promise<number> {
-    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
-      method: "POST",
-      headers: authHeaders(h),
-      body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
-    });
-    await res.text();
-    return res.status;
-  }
-
-  async function flagged(h: Harness): Promise<boolean> {
-    const creds = await listOrgModelProviderCredentials(h.ctx.orgId);
-    return creds.find((c) => c.id === h.credentialId)!.needs_reconnection === true;
-  }
-
-  it("flags the credential after the threshold of consecutive 401s, and stops serving it", async () => {
-    const h = await buildHarness();
-    upstreamSequence([401]);
-    for (let i = 0; i < max() - 1; i++) expect(await call(h)).toBe(401);
-    expect(await flagged(h)).toBe(false);
-
-    expect(await call(h)).toBe(401);
-    expect(await flagged(h)).toBe(true);
-    // Dead credential → the preset no longer resolves; nothing reaches upstream.
-    expect(await call(h)).toBe(400);
-  });
-
-  it("an accepted call resets the streak", async () => {
-    const h = await buildHarness();
-    upstreamSequence([...Array(max() - 1).fill(401), 200, ...Array(max() - 1).fill(401)]);
-    for (let i = 0; i < 2 * max() - 1; i++) await call(h);
-    expect(await flagged(h)).toBe(false);
-  });
-
-  it("never counts a 403", async () => {
-    const h = await buildHarness();
-    upstreamSequence([403]);
-    for (let i = 0; i < max() + 1; i++) expect(await call(h)).toBe(403);
-    expect(await flagged(h)).toBe(false);
-  });
-
-  it("rotating the key clears the flag", async () => {
-    const h = await buildHarness();
-    upstreamSequence([401]);
-    for (let i = 0; i < max(); i++) await call(h);
-    expect(await flagged(h)).toBe(true);
-
-    await updateModelProviderCredential(h.ctx.orgId, h.credentialId, { apiKey: "sk-new" });
-    expect(await flagged(h)).toBe(false);
-    upstreamSequence([401]);
-    // The old streak did not carry over: one more 401 does not re-flag.
-    await call(h);
-    expect(await flagged(h)).toBe(false);
   });
 });

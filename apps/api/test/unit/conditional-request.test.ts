@@ -10,15 +10,7 @@
 import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
 import type { ApiError } from "@appstrate/core/api-errors";
-import { PgDialect } from "drizzle-orm/pg-core";
-import { schedules } from "@appstrate/db/schema";
-import {
-  assertIfMatch,
-  ifMatchWhere,
-  ifNoneMatchSatisfied,
-  setEtag,
-  versionEtag,
-} from "../../src/lib/conditional-request.ts";
+import { assertIfMatch, ifNoneMatchSatisfied, setEtag } from "../../src/lib/conditional-request.ts";
 
 describe("ifNoneMatchSatisfied", () => {
   it("rejects a missing or empty header", () => {
@@ -70,16 +62,6 @@ describe("ifNoneMatchSatisfied", () => {
   });
 });
 
-describe("versionEtag", () => {
-  it("mints a strong tag from a counter or a timestamp, at millisecond precision", () => {
-    expect(versionEtag(7)).toBe('"7"');
-    const at = new Date("2026-09-23T10:00:00.123Z");
-    expect(versionEtag(at)).toBe(`"${at.getTime()}"`);
-    // The ISO string a DTO carries names the same version as the Date it came from.
-    expect(versionEtag(at.toISOString())).toBe(versionEtag(at));
-  });
-});
-
 describe("assertIfMatch", () => {
   // The evaluation sees the request's header and throws the refusal.
   async function evaluate(ifMatch: string | undefined, required = false) {
@@ -126,36 +108,5 @@ describe("assertIfMatch", () => {
       status: 428,
       code: "precondition_required",
     });
-  });
-});
-
-describe("ifMatchWhere", () => {
-  // The predicate the request's header yields, rendered as SQL (or undefined).
-  async function predicate(ifMatch: string | undefined) {
-    let where: ReturnType<typeof ifMatchWhere>;
-    const app = new Hono().patch("/", (c) => {
-      where = ifMatchWhere(c, schedules.updatedAt);
-      return c.body(null, 204);
-    });
-    await app.request("/", {
-      method: "PATCH",
-      headers: ifMatch === undefined ? {} : { "If-Match": ifMatch },
-    });
-    return where && new PgDialect().sqlToQuery(where);
-  }
-
-  it("adds nothing without the header, or for `*`", async () => {
-    expect(await predicate(undefined)).toBeUndefined();
-    expect(await predicate('"1", *')).toBeUndefined();
-  });
-
-  it("compares the listed strong tags at the millisecond the ETag keeps", async () => {
-    const query = (await predicate('"1767225600123", "7"'))!;
-    expect(query.sql).toContain("floor(extract(epoch from");
-    expect(query.params).toEqual(["1767225600123", "7"]);
-  });
-
-  it("matches nothing for weak or foreign tags", async () => {
-    expect((await predicate('W/"1", "abc"'))!.sql).toBe("false");
   });
 });

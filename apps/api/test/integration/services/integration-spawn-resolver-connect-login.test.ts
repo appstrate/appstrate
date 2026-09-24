@@ -173,7 +173,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     await db.insert(integrationConnections).values({
       integrationId: INTEG,
       authKey: "session",
-      accountId: null,
+      accountId: "default",
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,

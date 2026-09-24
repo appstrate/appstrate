@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, type SQL } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgProxies } from "@appstrate/db/schema";
 import { encrypt, decrypt } from "@appstrate/connect";
@@ -138,9 +138,7 @@ export async function updateOrgProxy(
   orgId: string,
   proxyId: string,
   data: { label?: string; url?: string; enabled?: boolean },
-  /** `If-Match` predicate (`ifMatchWhere`); false when nothing was updated. */
-  ifMatch?: SQL,
-): Promise<boolean> {
+): Promise<void> {
   if (isSystemProxy(proxyId)) {
     throw new Error("Cannot modify built-in proxy");
   }
@@ -154,12 +152,10 @@ export async function updateOrgProxy(
     updates.urlEncrypted = encrypt(url);
   }
 
-  const updated = await db
+  await db
     .update(orgProxies)
     .set(updates)
-    .where(and(eq(orgProxies.id, proxyId), eq(orgProxies.orgId, orgId), ifMatch))
-    .returning({ id: orgProxies.id });
-  return updated.length > 0;
+    .where(and(eq(orgProxies.id, proxyId), eq(orgProxies.orgId, orgId)));
 }
 
 export async function deleteOrgProxy(orgId: string, proxyId: string): Promise<void> {

@@ -11,7 +11,7 @@ import {
 } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
-import { ApiError, forbidden } from "../lib/errors.ts";
+import { forbidden } from "../lib/errors.ts";
 import { lockOrgMember } from "./space-members.ts";
 import type { ApiKeyInfo } from "@appstrate/shared-types";
 import type { OrgRole } from "../types/index.ts";
@@ -24,8 +24,6 @@ import type { SpaceScope, OrgScope } from "../lib/scope.ts";
  * one without a database round-trip.
  */
 export const API_KEY_PREFIX = "apst_";
-/** Pre-checksum format. Keys are stored hashed and cannot be converted: refused, never looked up. */
-const RETIRED_API_KEY_PREFIX = "ask_";
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const RANDOM_LENGTH = 30;
 const CHECKSUM_LENGTH = 6;
@@ -66,20 +64,6 @@ export function generateApiKey(): string {
 export function isWellFormedApiKey(rawKey: string): boolean {
   const match = API_KEY_RE.exec(rawKey);
   return match !== null && checksum(match[1]!) === match[2];
-}
-
-/** A bearer in the retired `ask_` format: the caller must refuse it with `apiKeyFormatRetired()`. */
-export function isRetiredApiKey(rawKey: string): boolean {
-  return rawKey.startsWith(RETIRED_API_KEY_PREFIX);
-}
-
-export function apiKeyFormatRetired(): ApiError {
-  return new ApiError({
-    status: 401,
-    code: "api_key_format_retired",
-    title: "API Key Format Retired",
-    detail: `API key format retired; create a new key (${API_KEY_PREFIX}…) and replace this one.`,
-  });
 }
 
 /** SHA-256 hash of a raw key, returned as hex string. */

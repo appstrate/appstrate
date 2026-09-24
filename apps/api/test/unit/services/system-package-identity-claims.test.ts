@@ -6,8 +6,9 @@
  * Every `identity_claims` entry in a manifest is a hand-written accessor into
  * a third-party JSON payload — `$.data.email`, `$.team_user.user_id`,
  * `$.identity.email_address`. A typo in one of those paths does not throw and
- * does not warn: the path selects nothing, `extractIdentity` falls back to a
- * null account id, and the connection is silently labelled "Connexion N". The
+ * does not warn: the path selects nothing, `extractIdentity` falls back to
+ * `"default"`, and the connection is silently labelled "Connexion N" with an
+ * account key that collides with every other connection on that provider. The
  * defect is invisible until someone connects two accounts and cannot tell them
  * apart.
  *
@@ -480,18 +481,18 @@ describe("system-package identity_claims → accountId", () => {
     expect(failures).toEqual([]);
   });
 
-  // A null account id means "no identity resolved" — it makes every connection
-  // on a provider indistinguishable and produces the "Connexion N" label. A
-  // declared mapping that still lands there is a broken accessor, which is the
-  // exact failure this file exists to catch.
-  it("never falls back to a null account id for a declared mapping", async () => {
+  // "default" is the sentinel that means "no identity resolved" — it collapses
+  // every connection on a provider onto one indistinguishable key and produces
+  // the "Connexion N" label. A declared mapping that still lands there is a
+  // broken accessor, which is the exact failure this file exists to catch.
+  it("never falls back to the 'default' sentinel for a declared mapping", async () => {
     const declaring = await loadDeclaring();
     const fellBack: string[] = [];
     for (const [packageId, testCase] of Object.entries(CASES)) {
       const pkg = declaring.get(packageId);
       if (!pkg) continue;
       const { accountId } = extractIdentity(pkg.manifest, testCase.authKey, testCase.source);
-      if (accountId === null) fellBack.push(packageId);
+      if (accountId === "default") fellBack.push(packageId);
     }
     expect(fellBack).toEqual([]);
   });

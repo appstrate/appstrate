@@ -152,15 +152,11 @@ export async function stopSession(
 /** A stored message node as returned by `GET /sessions/:id`. */
 interface StoredMessage {
   id: string;
-  seq: number;
   content: Record<string, unknown>;
 }
 
-const HISTORY_PAGE_SIZE = 500;
-
 /**
  * Session history as `UIMessage[]`, ready to seed `useChat({ messages })`.
- * Walks every page (`?since=<seq>`): the runtime is seeded once, whole.
  * Stored `content` is the ai-sdk/v6 UIMessage minus its id (the id rides in the
  * row), so we reconstruct `{ id, ...content }`. A not-yet-persisted session
  * (a freshly-minted id whose first message hasn't been sent) 404s → empty.
@@ -169,26 +165,16 @@ export async function loadHistory(
   getHeaders: GetHeaders | null | undefined,
   id: string,
 ): Promise<UIMessage[]> {
-  const stored: StoredMessage[] = [];
-  let since: number | null = null;
-  for (;;) {
-    const cursor = since === null ? "" : `&since=${since}`;
-    const res = await fetch(`/api/chat/sessions/${id}?limit=${HISTORY_PAGE_SIZE}${cursor}`, {
-      credentials: "include",
-      headers: headers(getHeaders),
-    });
-    if (res.status === 404) return [];
-    if (!res.ok) throw new Error(`Failed to load session (HTTP ${res.status})`);
-    const body = (await res.json()) as { messages?: StoredMessage[]; hasMore?: boolean };
-    const page = body.messages ?? [];
-    stored.push(...page);
-    const last = page[page.length - 1];
-    if (!body.hasMore || !last) break;
-    since = last.seq;
-  }
+  const res = await fetch(`/api/chat/sessions/${id}`, {
+    credentials: "include",
+    headers: headers(getHeaders),
+  });
+  if (res.status === 404) return [];
+  if (!res.ok) throw new Error(`Failed to load session (HTTP ${res.status})`);
+  const body = (await res.json()) as { messages?: StoredMessage[] };
   // Spread `content` FIRST, then apply the authoritative row `id` — the id
   // lives in `message_id` and `content` is stored without it, but if a stored
   // payload ever carried a stray `id` key, a trailing spread would clobber the
   // real id. Ordering id last makes the row id win.
-  return stored.map((e) => ({ ...e.content, id: e.id }) as UIMessage);
+  return (body.messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage);
 }

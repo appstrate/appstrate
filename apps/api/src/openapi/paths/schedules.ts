@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { STD_RESPONSE_HEADERS, ETAG_RESPONSE_HEADERS } from "../headers.ts";
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
 export const schedulesPaths = {
   "/api/schedules": {
@@ -240,7 +240,7 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description: "Schedule details",
-          headers: ETAG_RESPONSE_HEADERS,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Schedule" },
@@ -287,7 +287,6 @@ export const schedulesPaths = {
       description:
         "Update a cron schedule (expression, timezone, enabled state, or input). Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
       parameters: [
-        { $ref: "#/components/parameters/IfMatch" },
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -358,7 +357,7 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description: "Schedule updated",
-          headers: ETAG_RESPONSE_HEADERS,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Schedule" },
@@ -374,7 +373,6 @@ export const schedulesPaths = {
             },
           },
         },
-        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           $ref: "#/components/responses/Forbidden",

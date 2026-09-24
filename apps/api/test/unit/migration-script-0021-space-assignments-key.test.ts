@@ -10,9 +10,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { replayJournal } from "../helpers/journal.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
-const MIGRATIONS_DIR = `${REPO_ROOT}/packages/db/drizzle`;
 const SCRIPT = `${REPO_ROOT}/scripts/migration/0021-space-assignments-spaceid-key.sql`;
 
 const ORG = "e0000000-0000-4000-8000-00000000d020";
@@ -20,18 +20,6 @@ const SPACE_A = "spc_d0200000-0000-4000-8000-000000000001";
 const SPACE_B = "spc_d0200000-0000-4000-8000-000000000002";
 
 let pg: PGlite;
-
-async function replayJournal(db: PGlite): Promise<void> {
-  const journal = (await Bun.file(`${MIGRATIONS_DIR}/meta/_journal.json`).json()) as {
-    entries: { tag: string }[];
-  };
-  for (const entry of journal.entries) {
-    const source = await Bun.file(`${MIGRATIONS_DIR}/${entry.tag}.sql`).text();
-    await db.transaction(async (tx) => {
-      await tx.exec(source.replaceAll("--> statement-breakpoint", ""));
-    });
-  }
-}
 
 async function value(query: string): Promise<unknown> {
   const { rows } = await pg.query<{ v: unknown }>(query);

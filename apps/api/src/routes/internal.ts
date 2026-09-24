@@ -2,8 +2,6 @@
 
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { z } from "zod";
-import { readJsonBody } from "@appstrate/core/request-body";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, packages, packageVersions, runs } from "@appstrate/db/schema";
@@ -52,7 +50,6 @@ import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
 } from "../services/model-providers/token-resolver.ts";
-import { recordModelCredentialOutcome } from "../services/model-providers/credentials.ts";
 import {
   resolveLiveIntegrationCredentials,
   serializeIntegrationCredentialsWire,
@@ -324,15 +321,6 @@ const EMPTY_CREDENTIALS_WIRE = {
   expiresAtEpochMs: {},
 };
 
-/** Body of `POST /internal/model-credential/outcome`. */
-export const modelCredentialOutcomeSchema = z
-  .object({
-    outcome: z.enum(["rejected", "accepted"]),
-    /** SHA-256 (hex) of the key the sidecar used — never the key itself. */
-    key_sha256: z.string().regex(/^[0-9a-f]{64}$/),
-  })
-  .strict();
-
 export function createInternalRouter() {
   const router = new Hono();
 
@@ -467,24 +455,6 @@ export function createInternalRouter() {
     const credentialId = c.req.param("credentialId");
     await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
     return c.json(await forceRefreshOAuthModelProviderToken(credentialId, run.orgId));
-  });
-
-  // POST /internal/model-credential/outcome — the sidecar reports what the
-  // upstream said about the run's API key. The credential is the run's own
-  // pin, never a caller-supplied id.
-  router.post("/model-credential/outcome", async (c) => {
-    const { run } = await verifyRunToken(c);
-    const body = await readJsonBody(c, modelCredentialOutcomeSchema);
-    if (run.modelCredentialId) {
-      await recordModelCredentialOutcome(
-        run.orgId,
-        run.modelCredentialId,
-        body.outcome,
-        (storedKey) =>
-          new Bun.CryptoHasher("sha256").update(storedKey).digest("hex") === body.key_sha256,
-      );
-    }
-    return c.body(null, 204);
   });
 
   /**

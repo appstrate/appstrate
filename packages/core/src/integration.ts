@@ -1241,14 +1241,14 @@ export type ConnectionResolutionErrorCode =
  * the rows, so denormalizing the three distinguishing fields costs no query.
  *
  * `label` is user-given and may be null; `accountId` is the connect flow's own
- * discriminator, `null` when the provider exposed no identity.
+ * discriminator and is always set, so the pair always identifies the account.
  */
 export interface ConnectionCandidate {
   id: string;
   /** User-given name, `null` when the connection was never labelled. */
   label: string | null;
-  /** The auth's account discriminator (`sub` claim, email, host…); `null` = no identity. */
-  accountId: string | null;
+  /** The auth's account discriminator (`sub` claim, email, host…). */
+  accountId: string;
   /** True when the row is the calling actor's own, false when inherited via org sharing. */
   ownedByActor: boolean;
 }

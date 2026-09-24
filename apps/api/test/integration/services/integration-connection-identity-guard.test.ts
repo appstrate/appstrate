@@ -6,7 +6,7 @@
  * re-consent authenticated a different identity, `persistCredentialBundle`
  * refuses (409 identity_mismatch) and leaves the row untouched — silently
  * rebinding a connection to another account would be a data-integrity and
- * access surprise. A null account id (identity-less) never blocks an upgrade.
+ * access surprise. "default" (identity-less) never blocks an upgrade.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -100,28 +100,19 @@ describe("integration connection — identity guard on reconnect/upgrade", () =>
   });
 
   it("allows upgrading an identity-less connection to a real identity", async () => {
-    // accountId null = no identity extracted (api_key/PAT-style).
+    // accountId "default" = no identity extracted (api_key/PAT-style).
     const created = await saveIntegrationConnection(scope, {
       packageId: INTEGRATION,
       authKey: "oauth",
-      accountId: null,
+      accountId: "default",
       credentials: { access_token: "tok" },
       actor,
     });
     // Identity-less connect falls back to the "Connexion N" label.
     expect(created.label).toBe("Connexion 1");
-    expect(created.account_id).toBeNull();
     const upgraded = await connect("alice@example.com", created.id);
     expect(upgraded.account_id).toBe("alice@example.com");
     // The label is fixed at creation — the upgrade doesn't rewrite it.
     expect(upgraded.label).toBe("Connexion 1");
-  });
-
-  // "default" used to be the identity-less sentinel; it is now an ordinary
-  // account id, so a real account named "default" is guarded like any other.
-  it("guards an account literally named 'default' like any other identity", async () => {
-    const created = await connect("default");
-    expect(created.label).toBe("default");
-    await expect(connect("bob@example.com", created.id)).rejects.toThrow(/different account/i);
   });
 });

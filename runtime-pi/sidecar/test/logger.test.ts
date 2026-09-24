@@ -19,30 +19,12 @@ function capture(fn: () => void): Array<Record<string, unknown>> {
 }
 
 describe("sidecar logger", () => {
-  it("writes pino-compatible lines: numeric level, epoch-ms time, msg", () => {
-    process.env.LOG_LEVEL = "debug";
-    const before = Date.now();
-    const records = capture(() => {
-      logger.debug("d");
-      logger.info("i", { k: 1 });
-      logger.warn("w");
-      logger.error("e");
-    });
-    expect(records.map((r) => r.level)).toEqual([20, 30, 40, 50]);
-    expect(records.map((r) => r.msg)).toEqual(["d", "i", "w", "e"]);
-    expect(records[1]!.k).toBe(1);
-    for (const r of records) {
-      expect(typeof r.time).toBe("number");
-      expect(r.time as number).toBeGreaterThanOrEqual(before);
-    }
-  });
-
-  it("drops lines below the LOG_LEVEL threshold", () => {
+  it("drops lines below LOG_LEVEL and writes pino's numeric level with the fields", () => {
     process.env.LOG_LEVEL = "warn";
     const records = capture(() => {
       logger.info("dropped");
-      logger.warn("kept");
+      logger.warn("kept", { k: 1 });
     });
-    expect(records.map((r) => r.msg)).toEqual(["kept"]);
+    expect(records).toEqual([expect.objectContaining({ level: 40, msg: "kept", k: 1 })]);
   });
 });

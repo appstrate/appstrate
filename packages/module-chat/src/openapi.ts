@@ -12,17 +12,6 @@ const stdHeaders = {
   "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
 } as const;
 
-const pagedHeaders = { ...stdHeaders, Link: { $ref: "#/components/headers/Link" } } as const;
-
-function limitParam(defaultLimit: number, maxLimit: number) {
-  return {
-    name: "limit",
-    in: "query",
-    description: `Page size. Out-of-range or non-numeric values fall back to ${defaultLimit}.`,
-    schema: { type: "integer", minimum: 1, maximum: maxLimit, default: defaultLimit },
-  } as const;
-}
-
 export const chatComponentSchemas = {
   ChatSession: {
     type: "object",
@@ -48,26 +37,21 @@ export const chatComponentSchemas = {
   // client can seed `useChat({ messages })` on load. Written server-side
   // (user turn before inference, assistant turn on finalize); `content` is the
   // ai-sdk/v6 format-encoded message (UIMessage minus its id). The list is
-  // returned in insertion order; `seq` is that order's cursor (`?since=`).
+  // returned in insertion order — the transcript carries no ordering field of
+  // its own.
   //
   // `parent_id` and `format` were removed in `0054` along with the columns
   // behind them: a re-encoding of `seq` order and a server constant, neither
   // read by any client.
   ChatMessage: {
     type: "object",
-    required: ["id", "seq", "content"],
+    required: ["id", "content"],
     properties: {
       id: {
         type: "string",
         minLength: 1,
         maxLength: 200,
         description: "Server-generated message id",
-      },
-      seq: {
-        type: "integer",
-        format: "int64",
-        description:
-          "Insertion order (one sequence across all sessions, so a thread's values are not contiguous). Pass the last one as `?since=` to read the next page.",
       },
       content: { description: "Opaque encoded message" },
     },
@@ -85,7 +69,12 @@ export const chatPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        limitParam(100, 100),
+        {
+          name: "limit",
+          in: "query",
+          description: "Page size. Out-of-range or non-numeric values fall back to 100.",
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 100 },
+        },
         {
           name: "startingAfter",
           in: "query",
@@ -97,7 +86,7 @@ export const chatPaths = {
       responses: {
         "200": {
           description: "Sessions page",
-          headers: pagedHeaders,
+          headers: { ...stdHeaders, Link: { $ref: "#/components/headers/Link" } },
           content: {
             "application/json": {
               schema: {
@@ -157,25 +146,16 @@ export const chatPaths = {
     get: {
       operationId: "getChatSession",
       tags: ["Chat"],
-      summary: "Get a chat session with a page of its messages",
-      description:
-        'The session and its messages in insertion order, one page at a time: when `hasMore` is `true`, pass the last message\'s `seq` as `?since=`, or follow the RFC 5988 `Link: <…?since=<seq>>; rel="next"` response header. A malformed `since` is ignored (the page starts at the first message).',
+      summary: "Get a chat session with its messages",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
-        {
-          name: "since",
-          in: "query",
-          description: "Sequence cursor — return only messages with `seq` greater than this.",
-          schema: { type: "integer", format: "int64", minimum: 0 },
-        },
-        limitParam(100, 500),
       ],
       responses: {
         "200": {
-          description: "Session with a page of its messages",
-          headers: pagedHeaders,
+          description: "Session with full message tree",
+          headers: stdHeaders,
           content: {
             "application/json": {
               schema: {
@@ -183,20 +163,11 @@ export const chatPaths = {
                   { $ref: "#/components/schemas/ChatSession" },
                   {
                     type: "object",
-                    required: ["message_count", "messages", "hasMore"],
+                    required: ["messages"],
                     properties: {
-                      message_count: {
-                        type: "integer",
-                        minimum: 0,
-                        description: "Total messages in the session, across all pages.",
-                      },
                       messages: {
                         type: "array",
                         items: { $ref: "#/components/schemas/ChatMessage" },
-                      },
-                      hasMore: {
-                        type: "boolean",
-                        description: "True when later messages follow this page.",
                       },
                     },
                   },

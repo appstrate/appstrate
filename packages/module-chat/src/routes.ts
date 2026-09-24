@@ -27,12 +27,12 @@
 
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import { and, asc, desc, eq, gt, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
 import { invalidRequest, notFound, parseBody } from "@appstrate/core/api-errors";
-import { setCursorLinkHeader, setSinceLinkHeader } from "@appstrate/core/pagination-link";
+import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
 import { stopStream } from "./stop-registry.ts";
@@ -43,19 +43,14 @@ import { logger } from "./logger.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
 const SESSIONS_PAGE_SIZE = 100;
-const MESSAGES_DEFAULT_LIMIT = 100;
-export const MESSAGES_MAX_LIMIT = 500;
 
-/** Lenient `?limit=`: out-of-range or unparseable → default. */
-function pageLimit(c: Context, defaultLimit: number, maxLimit: number): number {
-  return z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(maxLimit)
-    .catch(defaultLimit)
-    .parse(c.req.query("limit") ?? defaultLimit);
-}
+/** Lenient `?limit=`: out-of-range or unparseable → the full page. */
+const sessionsLimit = z.coerce
+  .number()
+  .int()
+  .min(1)
+  .max(SESSIONS_PAGE_SIZE)
+  .catch(SESSIONS_PAGE_SIZE);
 
 export const createSessionSchema = z.object({
   title: z.string().min(1).max(200).optional(),
@@ -91,8 +86,6 @@ function toSessionDto(row: SessionRow) {
 function toMessageDto(row: MessageRow) {
   return {
     id: row.messageId,
-    // The `?since=` cursor, so a body-only reader (CLI, MCP) can page too.
-    seq: row.seq,
     content: row.content,
   };
 }
@@ -134,19 +127,12 @@ async function getOwnedSession(
   return session;
 }
 
-async function loadMessages(
-  sessionId: string,
-  sinceSeq: number | undefined,
-  limit: number,
-): Promise<MessageRow[]> {
-  const conditions: SQL[] = [eq(chatMessages.sessionId, sessionId)];
-  if (sinceSeq !== undefined) conditions.push(gt(chatMessages.seq, sinceSeq));
+async function loadMessages(sessionId: string): Promise<MessageRow[]> {
   return db
     .select()
     .from(chatMessages)
-    .where(and(...conditions))
-    .orderBy(asc(chatMessages.seq))
-    .limit(limit);
+    .where(eq(chatMessages.sessionId, sessionId))
+    .orderBy(asc(chatMessages.seq));
 }
 
 // ---------------------------------------------------------------------------
@@ -177,7 +163,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // the bound is the cursor ROW, compared in SQL at full precision.
   router.get("/api/chat/sessions", requireModulePermission("chat", "read"), async (c) => {
     const scope = sessionScope(c);
-    const limit = pageLimit(c, SESSIONS_PAGE_SIZE, SESSIONS_PAGE_SIZE);
+    const limit = sessionsLimit.parse(c.req.query("limit") ?? SESSIONS_PAGE_SIZE);
     const conditions: SQL[] = [
       eq(chatSessions.orgId, scope.orgId),
       eq(chatSessions.userId, scope.userId),
@@ -230,33 +216,11 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     },
   );
 
-  // GET /api/chat/sessions/:id — messages paged by `?since=<seq>` like run logs.
+  // GET /api/chat/sessions/:id — the conversation's messages, in seq order (history load)
   router.get("/api/chat/sessions/:id", requireModulePermission("chat", "read"), async (c) => {
     const session = await getOwnedSession(c.req.param("id"), sessionScope(c));
-    const since = Number(c.req.query("since") || Number.NaN);
-    const sinceSeq = Number.isSafeInteger(since) && since >= 0 ? since : undefined;
-    const limit = pageLimit(c, MESSAGES_DEFAULT_LIMIT, MESSAGES_MAX_LIMIT);
-    const [rows, [total]] = await Promise.all([
-      loadMessages(session.id, sinceSeq, limit + 1),
-      db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(chatMessages)
-        .where(eq(chatMessages.sessionId, session.id)),
-    ]);
-    const hasMore = rows.length > limit;
-    const messages = hasMore ? rows.slice(0, limit) : rows;
-    setSinceLinkHeader({
-      c,
-      publicOrigin: deps.publicOrigin,
-      hasMore,
-      lastId: messages.at(-1)?.seq,
-    });
-    return c.json({
-      ...toSessionDto(session),
-      message_count: total?.count ?? 0,
-      messages: messages.map(toMessageDto),
-      hasMore,
-    });
+    const messages = await loadMessages(session.id);
+    return c.json({ ...toSessionDto(session), messages: messages.map(toMessageDto) });
   });
 
   // PATCH /api/chat/sessions/:id — rename

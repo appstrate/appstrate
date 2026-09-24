@@ -157,9 +157,8 @@ export const schemas = {
               description: "User-given name; `null` when the connection was never labelled.",
             },
             account_id: {
-              type: ["string", "null"],
-              description:
-                "The auth's account discriminator (`sub` claim, email, host…); `null` when the provider exposed no identity.",
+              type: "string",
+              description: "The auth's account discriminator (`sub` claim, email, host…).",
             },
             owned_by_actor: {
               type: "boolean",
@@ -1699,7 +1698,7 @@ export const schemas = {
       needs_reconnection: {
         type: "boolean",
         description:
-          "True when the model's stored credential can no longer be used for inference — a credential flagged as needing reconnection (an OAuth grant revoked, or an API key the upstream rejected on consecutive calls), or a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment.",
+          "True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment.",
       },
       aliased: {
         type: "boolean",
@@ -1868,7 +1867,7 @@ export const schemas = {
           properties: {
             id: { type: "string", format: "uuid" },
             auth_key: { type: "string" },
-            account_id: { type: ["string", "null"] },
+            account_id: { type: "string" },
             label: { type: ["string", "null"] },
             owner_user_id: { type: ["string", "null"] },
             owner_end_user_id: { type: ["string", "null"] },

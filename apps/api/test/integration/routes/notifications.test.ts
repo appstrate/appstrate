@@ -11,6 +11,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedEndUser, seedSpace } from "../../helpers/seed.ts";
+import { walkLinkPages } from "../../helpers/pagination.ts";
 import {
   createRunNotifications,
   markNotificationReadByRun,
@@ -759,30 +760,15 @@ describe("Notifications API (per-recipient, issue #667)", () => {
         await seedNotifiedRun({ agentName: `walk-${i}`, actor: { userId: ctx.user.id } });
       }
 
-      const seen: string[] = [];
-      let cursor: string | null = null;
-      let pages = 0;
-      // Bound the loop defensively so a pagination bug fails fast, not hangs.
-      while (pages < 10) {
-        pages++;
-        const url: string =
-          "/api/notifications?limit=2" + (cursor ? `&startingAfter=${cursor}` : "");
-        const res = await app.request(url, { headers: authHeaders(ctx) });
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
-        seen.push(...body.data.map((n) => n.id));
-        if (!body.has_more) break;
-        cursor = body.data.at(-1)!.id;
-        expect(cursor).not.toBeNull();
-      }
-
-      expect(pages).toBe(3);
+      const pages = await walkLinkPages<{ data: NotificationDto[]; has_more: boolean }>(
+        app,
+        "/api/notifications?limit=2",
+        authHeaders(ctx),
+      );
+      expect(pages.map((p) => p.has_more)).toEqual([true, true, false]);
+      const seen = pages.flatMap((p) => p.data.map((n) => n.id));
       expect(seen).toHaveLength(5);
-      // No duplicates across pages.
       expect(new Set(seen).size).toBe(5);
-      // Strictly newest-first across the whole walk (ids are random, so assert
-      // via created_at by re-reading is overkill — the per-page order assertion
-      // above plus the no-dup/no-skip set check pins the keyset invariant).
     });
 
     it("paginates correctly across rows sharing an identical created_at (tuple tiebreak)", async () => {
@@ -803,19 +789,12 @@ describe("Notifications API (per-recipient, issue #667)", () => {
         });
       }
 
-      const seen: string[] = [];
-      let cursor: string | null = null;
-      let pages = 0;
-      while (pages < 10) {
-        pages++;
-        const url: string =
-          "/api/notifications?limit=2" + (cursor ? `&startingAfter=${cursor}` : "");
-        const res = await app.request(url, { headers: authHeaders(ctx) });
-        const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
-        seen.push(...body.data.map((n) => n.id));
-        if (!body.has_more) break;
-        cursor = body.data.at(-1)!.id;
-      }
+      const pages = await walkLinkPages<{ data: NotificationDto[] }>(
+        app,
+        "/api/notifications?limit=2",
+        authHeaders(ctx),
+      );
+      const seen = pages.flatMap((p) => p.data.map((n) => n.id));
       expect(seen).toHaveLength(5);
       expect(new Set(seen).size).toBe(5); // no duplicate, no skip
     });

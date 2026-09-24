@@ -60,6 +60,7 @@ describe("parseSidecarEnv", () => {
   });
 
   it("renders a single-line message (connect mode relays it on one stdout sentinel)", () => {
+    expect.assertions(1);
     try {
       parseSidecarEnv({});
     } catch (err) {

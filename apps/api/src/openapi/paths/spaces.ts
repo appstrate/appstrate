@@ -2,11 +2,7 @@
 
 import { packageTypeValues } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
-import {
-  STD_RESPONSE_HEADERS,
-  REQUEST_ID_ONLY_HEADERS,
-  ETAG_RESPONSE_HEADERS,
-} from "../headers.ts";
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { SPACE_ROLE_ID_PATTERN } from "../schemas.ts";
 
 export const spacesPaths = {
@@ -181,7 +177,7 @@ export const spacesPaths = {
       responses: {
         "200": {
           description: "Space detail",
-          headers: ETAG_RESPONSE_HEADERS,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/SpaceObject" },
@@ -201,7 +197,6 @@ export const spacesPaths = {
       description:
         "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility` or `default_role` is a 409 `personal_space_immutable`.",
       parameters: [
-        { $ref: "#/components/parameters/IfMatch" },
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
@@ -252,7 +247,7 @@ export const spacesPaths = {
       responses: {
         "200": {
           description: "Space updated",
-          headers: ETAG_RESPONSE_HEADERS,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/SpaceObject" },
@@ -260,7 +255,6 @@ export const spacesPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -526,7 +520,7 @@ export const spacesPaths = {
       responses: {
         "200": {
           description: "Placement detail",
-          headers: { ...REQUEST_ID_ONLY_HEADERS, ETag: { $ref: "#/components/headers/ETag" } },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/SpacePackage" },
@@ -547,7 +541,6 @@ export const spacesPaths = {
         "There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{spaceId}/packages` and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`, where the placement rule and the offer that may have to be created with it are stated once. Sending it is a `400`. " +
         "There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
       parameters: [
-        { $ref: "#/components/parameters/IfMatch" },
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
@@ -576,7 +569,7 @@ export const spacesPaths = {
       responses: {
         "200": {
           description: "Updated placement",
-          headers: { ...REQUEST_ID_ONLY_HEADERS, ETag: { $ref: "#/components/headers/ETag" } },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/SpacePackage" },
@@ -584,7 +577,6 @@ export const spacesPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           $ref: "#/components/responses/Forbidden",

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { STD_RESPONSE_HEADERS, ETAG_RESPONSE_HEADERS } from "../headers.ts";
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import { ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
@@ -129,7 +129,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Organization detail with members and invitations",
-          headers: ETAG_RESPONSE_HEADERS,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgDetail" },
@@ -169,10 +169,7 @@ export const organizationsPaths = {
       summary: "Update organization",
       description:
         "Update organization name and/or slug. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
-      parameters: [
-        { $ref: "#/components/parameters/IfMatch" },
-        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
-      ],
+      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       requestBody: {
         required: true,
         content: {
@@ -191,7 +188,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Updated organization — same OrgDetail shape as GET /api/orgs/{orgId}",
-          headers: ETAG_RESPONSE_HEADERS,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgDetail" },
@@ -199,7 +196,6 @@ export const organizationsPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -481,7 +477,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Organization settings",
-          headers: ETAG_RESPONSE_HEADERS,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgSettings" },
@@ -501,10 +497,7 @@ export const organizationsPaths = {
       summary: "Update organization settings",
       description:
         "Update organization settings. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
-      parameters: [
-        { $ref: "#/components/parameters/IfMatch" },
-        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
-      ],
+      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       requestBody: {
         content: {
           "application/json": {
@@ -526,7 +519,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Settings updated",
-          headers: ETAG_RESPONSE_HEADERS,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgSettings" },
@@ -534,7 +527,6 @@ export const organizationsPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

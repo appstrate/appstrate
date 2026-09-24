@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
-import {
-  STD_RESPONSE_HEADERS,
-  REQUEST_ID_ONLY_HEADERS,
-  ETAG_RESPONSE_HEADERS,
-} from "../headers.ts";
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
 export const modelProviderCredentialsPaths = {
   "/api/model-provider-credentials/registry": {
@@ -497,7 +493,6 @@ export const modelProviderCredentialsPaths = {
       description:
         "Update a model provider credential's mutable fields. The `apiShape` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
       parameters: [
-        { $ref: "#/components/parameters/IfMatch" },
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
@@ -520,7 +515,7 @@ export const modelProviderCredentialsPaths = {
         "200": {
           description:
             "Model provider credential updated — the bare updated credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back.",
-          headers: ETAG_RESPONSE_HEADERS,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/ModelProviderCredential" },
@@ -528,7 +523,6 @@ export const modelProviderCredentialsPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description:

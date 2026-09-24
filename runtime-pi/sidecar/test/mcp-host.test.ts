@@ -406,32 +406,6 @@ describe("McpHost — buildTools", () => {
       await upstream.pair.close();
     }
   });
-
-  it("truncates an over-long upstream name deterministically within the ceiling", async () => {
-    const long = `fetch_${"x".repeat(80)}`;
-    const upstream = await makeUpstream([
-      {
-        descriptor: { name: long, inputSchema: { type: "object" } },
-        handler: async () => ({ content: [{ type: "text", text: "long" }] }),
-      },
-    ]);
-    try {
-      const host = new McpHost();
-      await host.register({ namespace: "gh", client: upstream.client });
-      const [only] = host.buildTools();
-      expect(only!.descriptor.name).toHaveLength(56);
-      expect(only!.descriptor.name).toBe(allocateMcpToolName("gh", long, () => false));
-      expect(only!.descriptor.description).toContain(long);
-      expect((await only!.handler({}, { signal: undefined as never } as never)).content[0]).toEqual(
-        {
-          type: "text",
-          text: "long",
-        },
-      );
-    } finally {
-      await upstream.pair.close();
-    }
-  });
 });
 
 describe("McpHost — namespace normalisation", () => {

@@ -21,7 +21,6 @@ import {
   updateSchedule,
   deleteSchedule,
 } from "../services/scheduler.ts";
-import { schedules as schedulesTable } from "@appstrate/db/schema";
 import { computeNextRun, isValidCron } from "../lib/cron.ts";
 import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -56,7 +55,6 @@ import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
-import { ifMatchWhere, preconditionFailed, setEtag } from "../lib/conditional-request.ts";
 
 // Both maps are the shared launch rules (`lib/launch-schemas.ts`). A schedule
 // freezes them onto the row and replays them on every tick, which is what makes
@@ -477,7 +475,6 @@ export function createSchedulesRouter() {
   router.get("/schedules/:id", requirePermission("schedules", "read"), async (c) => {
     const id = c.req.param("id")!;
     const schedule = await loadScheduleOr404(c, id, getSpaceScope(c));
-    setEtag(c, schedule.updatedAt);
     return c.json(schedule);
   });
 
@@ -700,10 +697,7 @@ export function createSchedulesRouter() {
       // looking at it.
       getActor(c),
       runVisibilityFilter(c),
-      ifMatchWhere(c, schedulesTable.updatedAt),
     );
-    // Nothing updated: deleted since the read above (404), or stale (412).
-    if (!schedule) throw preconditionFailed((await loadScheduleOr404(c, id, scope)).updatedAt);
     // Mirror schedule.created: explicit camelCase keys (dominant audit
     // convention — see api-keys.ts, modules/webhooks/routes.ts). Only
     // include keys the caller actually sent so the audit reflects the
@@ -733,7 +727,6 @@ export function createSchedulesRouter() {
       resourceId: id,
       after: auditAfter,
     });
-    setEtag(c, schedule.updatedAt);
     return c.json(schedule);
   });
 

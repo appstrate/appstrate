@@ -54,7 +54,7 @@ export class LoginSecretStrategy implements IntegrationConnectStrategy {
       credentials: {},
       // The login secret, persisted in the NON-injectable `inputs` plane.
       inputs: credentials,
-      accountId: null,
+      accountId: "default",
       identityClaims: {},
       scopesGranted: [],
       expiresAt: null,

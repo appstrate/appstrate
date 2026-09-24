@@ -126,11 +126,7 @@ const integrationConnectionSchema = {
     id: { type: "string", format: "uuid" },
     packageId: { type: "string" },
     auth_key: { type: "string" },
-    account_id: {
-      type: ["string", "null"],
-      description:
-        "Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity.",
-    },
+    account_id: { type: "string" },
     identity_claims: { type: ["object", "null"], additionalProperties: true },
     scopes_granted: { type: "array", items: { type: "string" } },
     needs_reconnection: { type: "boolean" },

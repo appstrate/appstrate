@@ -16,6 +16,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
+import { walkLinkPages } from "../../../../../../test/helpers/pagination.ts";
 
 const app = getTestApp();
 
@@ -67,21 +68,14 @@ describe("GET /api/webhooks/:id/deliveries pagination", () => {
 
   it("walks every delivery exactly once by following the Link header", async () => {
     await seedDeliveries(7);
-    const seen: string[] = [];
-    let url: string | null = `/api/webhooks/${webhookId}/deliveries?limit=3`;
-    let pages = 0;
-    while (url) {
-      const res = await app.request(url, { headers: authHeaders(ctx) });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as DeliveryPage;
-      seen.push(...body.data.map((d) => d.eventId));
-      const link = res.headers.get("Link");
-      expect(Boolean(link)).toBe(body.hasMore);
-      const next = link?.match(/<([^>]+)>; rel="next"/)?.[1];
-      url = next ? `${new URL(next).pathname}${new URL(next).search}` : null;
-      pages++;
-    }
-    expect(pages).toBe(3);
+    const pages = await walkLinkPages<DeliveryPage>(
+      app,
+      `/api/webhooks/${webhookId}/deliveries?limit=3`,
+      authHeaders(ctx),
+    );
+    // A Link was followed after every page but the last.
+    expect(pages.map((p) => p.hasMore)).toEqual([true, true, false]);
+    const seen = pages.flatMap((p) => p.data.map((d) => d.eventId));
     expect(seen).toHaveLength(7);
     expect(new Set(seen).size).toBe(7);
     // Newest first.

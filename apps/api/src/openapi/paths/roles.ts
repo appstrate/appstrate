@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
-import {
-  STD_RESPONSE_HEADERS,
-  REQUEST_ID_ONLY_HEADERS,
-  ETAG_RESPONSE_HEADERS,
-} from "../headers.ts";
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { SPACE_ROLE_ID_PATTERN } from "../schemas.ts";
 
 const ROLE_ID_PARAM = {
@@ -155,11 +151,7 @@ export const rolesPaths = {
       summary: "Update a custom space role",
       description:
         "Rename, re-describe or re-scope a bundle. Requires `roles:write`. The `srl_` id never changes, so assignments follow the edit. A `permissions` array is validated as on create: an unknown string is a 400 naming it, and a set holding a permission without one of the reads its vocabulary entry's `requires_one_of` names is a 400 naming each missing read. A request without `permissions` is not re-judged.",
-      parameters: [
-        { $ref: "#/components/parameters/IfMatch" },
-        { $ref: "#/components/parameters/XOrgId" },
-        ROLE_ID_PARAM,
-      ],
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }, ROLE_ID_PARAM],
       requestBody: {
         required: true,
         content: {
@@ -180,7 +172,7 @@ export const rolesPaths = {
       responses: {
         "200": {
           description: "Role updated",
-          headers: ETAG_RESPONSE_HEADERS,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/RoleObject" },
@@ -188,7 +180,6 @@ export const rolesPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

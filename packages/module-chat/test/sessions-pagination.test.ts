@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The session list and a session's message history are bounded, and every
- * row past the first page is reachable: honest `hasMore`, a cursor in the body
- * (`startingAfter=<session id>`, `since=<seq>`) and the RFC 5988 `Link` header.
- * The list used to stop at 100 with no cursor; the history had no bound at all.
+ * The session list is bounded, and every row past the first page is
+ * reachable: honest `hasMore`, a cursor in the body (`startingAfter=<session
+ * id>`) and the RFC 5988 `Link` header. It used to stop at 100 with no cursor.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions } from "@appstrate/db/schema";
+import { chatSessions } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { getTestApp } from "../../../apps/api/test/helpers/app.ts";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
@@ -18,7 +17,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
-import { MESSAGES_MAX_LIMIT } from "../src/routes.ts";
+import { walkLinkPages } from "../../../apps/api/test/helpers/pagination.ts";
 
 const app = getTestApp();
 
@@ -26,18 +25,8 @@ interface SessionPage {
   data: { id: string }[];
   hasMore: boolean;
 }
-interface HistoryPage {
-  message_count: number;
-  messages: { id: string; seq: number }[];
-  hasMore: boolean;
-}
 
-function nextPath(res: Response): string | null {
-  const next = res.headers.get("Link")?.match(/<([^>]+)>; rel="next"/)?.[1];
-  return next ? `${new URL(next).pathname}${new URL(next).search}` : null;
-}
-
-describe("chat pagination", () => {
+describe("chat session list pagination", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -68,15 +57,13 @@ describe("chat pagination", () => {
   it("walks every session exactly once, by Link header and by body cursor", async () => {
     const ids = await seedSessions(7);
 
-    const viaLink: string[] = [];
-    let path: string | null = "/api/chat/sessions?limit=3";
-    while (path) {
-      const res = await get(path);
-      const body = (await res.json()) as SessionPage;
-      viaLink.push(...body.data.map((s) => s.id));
-      expect(Boolean(res.headers.get("Link"))).toBe(body.hasMore);
-      path = nextPath(res);
-    }
+    const pages = await walkLinkPages<SessionPage>(
+      app,
+      "/api/chat/sessions?limit=3",
+      authHeaders(ctx),
+    );
+    expect(pages.map((p) => p.hasMore)).toEqual([true, true, false]);
+    const viaLink = pages.flatMap((p) => p.data.map((s) => s.id));
 
     const viaBody: string[] = [];
     let cursor: string | undefined;
@@ -103,13 +90,13 @@ describe("chat pagination", () => {
       .set({ updatedAt: new Date("2027-01-01T00:00:00Z") })
       .where(eq(chatSessions.id, cursor));
 
-    const rest: string[] = [];
-    let path: string | null = `/api/chat/sessions?limit=3&startingAfter=${cursor}`;
-    while (path) {
-      const res = await get(path);
-      rest.push(...((await res.json()) as SessionPage).data.map((s) => s.id));
-      path = nextPath(res);
-    }
+    const rest = (
+      await walkLinkPages<SessionPage>(
+        app,
+        `/api/chat/sessions?limit=3&startingAfter=${cursor}`,
+        authHeaders(ctx),
+      )
+    ).flatMap((p) => p.data.map((s) => s.id));
     const seen = new Set([...first.data.map((s) => s.id), ...rest]);
     expect(seen.size).toBe(ids.length);
   });
@@ -128,54 +115,5 @@ describe("chat pagination", () => {
     const body = (await (await get("/api/chat/sessions")).json()) as SessionPage;
     expect(body.data).toHaveLength(100);
     expect(body.hasMore).toBe(true);
-  });
-
-  describe("session history", () => {
-    async function seedHistory(count: number): Promise<string> {
-      const [id] = await seedSessions(1);
-      await db.insert(chatMessages).values(
-        Array.from({ length: count }, (_, i) => ({
-          sessionId: id!,
-          messageId: `m${i}`,
-          content: { role: "user", parts: [{ type: "text", text: `${i}` }] },
-        })),
-      );
-      return id!;
-    }
-
-    it("pages the messages in seq order by `since`, with hasMore and Link", async () => {
-      const id = await seedHistory(5);
-      const seen: string[] = [];
-      let path: string | null = `/api/chat/sessions/${id}?limit=2`;
-      let pages = 0;
-      while (path) {
-        const res = await get(path);
-        const body = (await res.json()) as HistoryPage;
-        seen.push(...body.messages.map((m) => m.id));
-        expect(Boolean(res.headers.get("Link"))).toBe(body.hasMore);
-        path = nextPath(res);
-        pages++;
-      }
-      expect(pages).toBe(3);
-      expect(seen).toEqual(["m0", "m1", "m2", "m3", "m4"]);
-    });
-
-    it("is bounded by default and at the maximum", async () => {
-      const id = await seedHistory(MESSAGES_MAX_LIMIT + 1);
-      const byDefault = (await (await get(`/api/chat/sessions/${id}`)).json()) as HistoryPage;
-      expect(byDefault.messages).toHaveLength(100);
-      expect(byDefault.message_count).toBe(MESSAGES_MAX_LIMIT + 1);
-      expect(byDefault.hasMore).toBe(true);
-      const atMax = (await (
-        await get(`/api/chat/sessions/${id}?limit=${MESSAGES_MAX_LIMIT}`)
-      ).json()) as HistoryPage;
-      expect(atMax.messages).toHaveLength(MESSAGES_MAX_LIMIT);
-      expect(atMax.hasMore).toBe(true);
-      const tail = (await (
-        await get(`/api/chat/sessions/${id}?since=${atMax.messages.at(-1)!.seq}`)
-      ).json()) as HistoryPage;
-      expect(tail.messages.map((m) => m.id)).toEqual([`m${MESSAGES_MAX_LIMIT}`]);
-      expect(tail.hasMore).toBe(false);
-    });
   });
 });

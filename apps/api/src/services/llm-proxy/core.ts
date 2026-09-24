@@ -35,7 +35,6 @@ import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
-import { recordModelCredentialOutcome } from "../model-providers/credentials.ts";
 
 /** Maximum request body the proxy will accept before refusing up-front. */
 const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
@@ -323,8 +322,6 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     throw err;
   }
 
-  await trackCredentialHealth(inputs.principal.orgId, resolved, upstream.status);
-
   // Forward + meter, weaving in the alias-swap (every branch) and the
   // response-cache write (non-streaming 2xx).
   return forwardMeteredResponse(
@@ -345,33 +342,6 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
         : null,
     },
   );
-}
-
-/**
- * Feed the upstream's verdict on an org-owned API key into its failure streak.
- * Only 401 counts (403 means valid but not entitled). Never fails the call.
- */
-async function trackCredentialHealth(
-  orgId: string,
-  resolved: ResolvedModel,
-  status: number,
-): Promise<void> {
-  const credentialId = resolved.credentialId;
-  const outcome = status === 401 ? "rejected" : status >= 200 && status < 300 ? "accepted" : null;
-  if (!credentialId || !outcome) return;
-  try {
-    await recordModelCredentialOutcome(
-      orgId,
-      credentialId,
-      outcome,
-      (storedKey) => storedKey === resolved.apiKey,
-    );
-  } catch (err) {
-    logger.warn("llm-proxy: credential health update failed", {
-      credentialId,
-      error: getErrorMessage(err),
-    });
-  }
 }
 
 async function resolvePresetForOrg(

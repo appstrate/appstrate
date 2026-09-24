@@ -402,7 +402,7 @@ function assertScopesInAuthCatalog(
  * target means the credential was renewed in place, not a new connection.
  */
 function connectionPersistedAudit(
-  conn: { id: string; account_id: string | null },
+  conn: { id: string; account_id: string },
   packageId: string,
   authKey: string,
   reconnected: boolean,

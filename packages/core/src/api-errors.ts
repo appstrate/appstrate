@@ -58,8 +58,7 @@ export interface ResolutionFieldError extends ValidationFieldError {
   candidate_connections?: {
     id: string;
     label: string | null;
-    /** `null` when the provider exposed no identity. */
-    account_id: string | null;
+    account_id: string;
     owned_by_actor: boolean;
   }[];
   /** `needs_reconnection` / `insufficient_scopes` — the existing connection's id to UPDATE in place. */
