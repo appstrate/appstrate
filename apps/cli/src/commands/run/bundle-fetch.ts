@@ -16,8 +16,7 @@
  *                               been published.
  *   - `version_not_found`     — 404 with a payload mentioning version.
  *   - `version_artifact_unavailable` — 422: the published version exists
- *                               but its stored archive is missing, corrupt
- *                               or lacks its required entry.
+ *                               but its stored archive is missing.
  *   - `integrity_mismatch`    — server omitted the integrity header,
  *                               or the downloaded bytes failed to verify.
  *   - `bundle_fetch_failed`   — anything else (network, 5xx, …).
@@ -144,7 +143,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
   if (!res.ok) {
     const detail = await safeText(res);
     // A storage fault on the server, not a typo: the version is published but
-    // its archive cannot be read. Any other 422 keeps the generic path below.
+    // its archive is missing from storage. Any other 422 keeps the generic path below.
     if (res.status === 422 && parseProblemCode(detail) === "version_artifact_unavailable") {
       const target = input.spec ? `${input.packageId}@${input.spec}` : input.packageId;
       throw new BundleFetchError(

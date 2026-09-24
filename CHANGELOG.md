@@ -59,6 +59,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   blocking the deploy, instead of falling back to the code default, which has
   no billing. Production already sets `MODULES` on its resource. See
   `deploy/README.md`.
+- **Bundle export, the file explorer, version download and fork answer
+  `422 version_artifact_unavailable` when a published version's archive is
+  missing from storage** (#1533). They answered 404 — fork `400` "no published
+  version" — which read as an unknown package or version. A storage outage
+  while reading a published archive now answers 5xx instead of that 422.
 
 ### Removed
 
@@ -127,16 +132,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   messages are written, and any other write refused for its own values
   (SQLSTATE class 22 or `23514`) is recorded as a `system`/`event_dropped` log
   row instead, so the stream moves on.
-- **A remote run of a broken published version names the storage fault, and
-  restoring one no longer empties the draft** (#1533). Runs, remote runs,
-  schedule writes, input-settings, package and version reads and restore answer
-  `422 version_artifact_unavailable` when the published archive is missing,
-  corrupt or without `prompt.md`/`SKILL.md`; bundle export, file explorer,
-  download and fork answer it when the archive is missing from storage (they
-  answered 404 or "no published version"). Remote runs failed on a misplaced
-  fault (`400 empty_prompt`, `412 missing_integration_connection`); restore
-  wrote an empty draft and answered 200. `appstrate run` now reports the broken
-  archive instead of "package not found".
+- **A published version with a broken archive is refused, not half-served**
+  (#1533). `POST /api/runs/remote` (`registry`, published) answers
+  `422 version_artifact_unavailable` instead of `400 empty_prompt` or
+  `412 missing_integration_connection`; version restore refuses instead of
+  writing an empty draft (200); `GET …/versions/{v}` refuses instead of 200
+  with `content: null`. `appstrate run` names the broken archive instead of
+  "package not found", and the file explorer shows "files unavailable" again.
+  The refusal is built in one place (`versionArtifactUnavailable`).
 
 ## [1.0.0-beta.61] - 2026-09-23
 
