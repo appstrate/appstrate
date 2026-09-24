@@ -533,6 +533,31 @@ describe("materializeAgent", () => {
     });
   });
 
+  it("lists required prompted fields first in argument-hint, keeping input.json's order", () => {
+    const view = agentView({
+      input: {
+        schema: {
+          type: "object",
+          properties: {
+            note: { type: "string" },
+            extra: { type: "string" },
+            brief: { type: "string" },
+          },
+          required: ["brief"],
+        },
+        values: {},
+        locked_fields: [],
+      },
+    });
+    const { frontmatter, contract } = renderAgent(view);
+    expect(frontmatter["argument-hint"]).toBe("<brief> [note] [extra]");
+    expect((contract.fields as { prompted: string[] }).prompted).toEqual([
+      "note",
+      "extra",
+      "brief",
+    ]);
+  });
+
   it("omits argument-hint when every field is locked or prefilled", () => {
     const view = agentView();
     view.input.locked_fields = ["topic", "audience", "account"];

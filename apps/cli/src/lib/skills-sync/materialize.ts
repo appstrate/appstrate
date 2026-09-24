@@ -347,9 +347,11 @@ export function materializeAgent(slug: string, view: AgentLaunchView): Record<st
     SKILL_DESCRIPTION_MAX_LENGTH,
   );
   const required = new Set(schema.required ?? []);
-  const argumentHint = fields.prompted
-    .map((key) => (required.has(key) ? `<${key}>` : `[${key}]`))
-    .join(" ");
+  // Required first: the server returns `properties` in jsonb key order, not the manifest's.
+  const argumentHint = [
+    ...fields.prompted.filter((key) => required.has(key)).map((key) => `<${key}>`),
+    ...fields.prompted.filter((key) => !required.has(key)).map((key) => `[${key}]`),
+  ].join(" ");
 
   const skillMd = [
     "---",
