@@ -251,10 +251,12 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   Set skills by editing the draft manifest instead:
   `PATCH /api/packages/agents/{scope}/{name}` with `If-Match` and a `manifest`
   whose `dependencies.skills` maps each skill id to its range (`"^1.2.0"`). That
-  route runs the same access check on every newly referenced skill, and more:
-  it also covers `mcp_servers` and `integrations`. The removed route also
-  refused with `409 agent_in_use` while a run was in progress; the manifest
-  `PATCH` does not, as it never has for any other draft edit.
+  route refuses a newly referenced skill the caller cannot read, as the removed
+  one did, and checks `mcp_servers` and `integrations` the same way. Two
+  answers differ: a skill id that exists nowhere is accepted and reported by
+  the agent's readiness (the removed route answered `404`), and an edit made
+  while a run is in progress is accepted (the removed route answered
+  `409 agent_in_use`; no other draft edit ever did).
 
 ### Fixed
 
