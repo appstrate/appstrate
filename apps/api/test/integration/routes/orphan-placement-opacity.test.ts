@@ -38,6 +38,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { and, asc, eq } from "drizzle-orm";
+import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { auditEvents, packageShares, spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -230,7 +231,7 @@ describe("`POST /api/runs/remote` — the fourth execution door", () => {
         type: "agent",
         display_name: "Live",
         description: "d",
-        schemaVersion: "1.0",
+        schema_version: AFPS_SCHEMA_VERSION,
         dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
       },
       draftContent: "prompt",

@@ -64,7 +64,7 @@ async function recordFirecrackerConsoleExcerpt(
       "system",
       "firecracker_console",
       message,
-      { exitCode },
+      { exit_code: exitCode },
       "error",
     );
   } catch (err) {

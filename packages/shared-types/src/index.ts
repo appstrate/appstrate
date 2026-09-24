@@ -65,8 +65,9 @@ import type { PricingStatus as _PricingStatus } from "@appstrate/db/pricing-stat
 /**
  * Wire-shape Run DTO returned to API consumers. The Drizzle `Run` row keeps
  * camelCase field names internally (Better Auth blocker); this is the single
- * snake_case wire surface every JSON response uses. Universal DB-convention
- * fields (`id`, `*Id`, `createdAt`, …) stay camelCase per Phase 3 scope.
+ * snake_case wire surface every JSON response uses. The universal
+ * DB-convention names (`id`, `packageId`, `createdAt`, `runOrigin`, …) stay
+ * camelCase — by their literal name, never by suffix.
  */
 export interface RunWireDto {
   id: string;
@@ -106,7 +107,7 @@ export interface RunWireDto {
    */
   cost_pricing_status: _PricingStatus | null;
   runNumber: number | null;
-  token_usage: unknown;
+  token_usage: TokenUsage | null;
   version_label: string | null;
   /**
    * Unambiguous reference to the agent definition the run executed (#636):
@@ -125,16 +126,6 @@ export interface RunWireDto {
   runner_kind: string | null;
   agent_scope: string | null;
   agent_name: string | null;
-  // CASING: `runOrigin`/`contextSnapshot` are NOT in the documented universal
-  // carve-out (id/*Id/createdAt/runNumber/…), so docs/CASING_CONVENTIONS.md
-  // would nominally call for snake_case (`run_origin`/`context_snapshot`).
-  // They are kept camelCase as a deliberate, known module carve-out: the wire
-  // contract already emits camelCase across all three surfaces in lockstep —
-  // the runtime mapper (services/state/runs.ts `toRunWireDto`), the OpenAPI
-  // spec (openapi/schemas.ts + baseline.json), and the SPA consumers
-  // (run-detail.tsx, run-row.tsx, api/schema.d.ts). Renaming here without
-  // re-cutting the spec + regenerating the client would break the contract, so
-  // this field name is intentionally left as-is.
   runOrigin: string | null;
   contextSnapshot: unknown;
   modelCredentialId: string | null;
@@ -459,7 +450,7 @@ export interface MeConnectionEntry {
   connected_at: string;
   needs_reconnection: boolean;
   expiresAt: string | null;
-  /** Human-friendly identity (accountEmail, sub claim). */
+  /** Human-friendly identity (`account_email`, sub claim). */
   identity: string;
   /** Which auth slot this connection satisfies. */
   auth_key: string;

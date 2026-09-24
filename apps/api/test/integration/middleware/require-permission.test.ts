@@ -23,6 +23,14 @@ import { activatePackage } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
 
+// A valid body whose credential does not exist: past the permission guard it
+// can only fail the reachability gate.
+const MODEL_BODY = JSON.stringify({
+  label: "Test",
+  modelId: "gpt-4",
+  credentialId: crypto.randomUUID(),
+});
+
 describe("RBAC — Permission enforcement", () => {
   let owner: TestContext;
   let admin: TestContext;
@@ -46,44 +54,31 @@ describe("RBAC — Permission enforcement", () => {
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(owner, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Test",
-          apiShape: "openai",
-          baseUrl: "https://api.example.com",
-          modelId: "gpt-4",
-          credentialId: "pk_test",
-        }),
+        body: MODEL_BODY,
       });
-      // May fail due to FK constraint on credentialId, but should NOT be 403
-      expect(res.status).not.toBe(403);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { detail: string }).detail).toContain(
+        "credentialId is unreachable",
+      );
     });
 
     it("admin can create model", async () => {
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(admin, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Test",
-          apiShape: "openai",
-          baseUrl: "https://api.example.com",
-          modelId: "gpt-4",
-          credentialId: "pk_test",
-        }),
+        body: MODEL_BODY,
       });
-      expect(res.status).not.toBe(403);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { detail: string }).detail).toContain(
+        "credentialId is unreachable",
+      );
     });
 
     it("member gets 403 on create model", async () => {
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(member, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Test",
-          apiShape: "openai",
-          baseUrl: "https://api.example.com",
-          modelId: "gpt-4",
-          credentialId: "pk_test",
-        }),
+        body: MODEL_BODY,
       });
       expect(res.status).toBe(403);
     });
@@ -92,13 +87,7 @@ describe("RBAC — Permission enforcement", () => {
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(spaceViewer, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Test",
-          apiShape: "openai",
-          baseUrl: "https://api.example.com",
-          modelId: "gpt-4",
-          credentialId: "pk_test",
-        }),
+        body: MODEL_BODY,
       });
       expect(res.status).toBe(403);
     });
@@ -164,7 +153,7 @@ describe("RBAC — Permission enforcement", () => {
         method: "POST",
         headers: authHeaders(member, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          cronExpression: "0 9 * * 1",
+          cron_expression: "0 9 * * 1",
         }),
       });
       // Members are read-only on schedules now — must be a permission 403.
@@ -187,7 +176,7 @@ describe("RBAC — Permission enforcement", () => {
         method: "POST",
         headers: authHeaders(spaceViewer, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          cronExpression: "0 9 * * 1",
+          cron_expression: "0 9 * * 1",
         }),
       });
       expect(res.status).toBe(403);
@@ -231,13 +220,7 @@ describe("RBAC — Permission enforcement", () => {
       const res = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(member, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Test",
-          apiShape: "openai",
-          baseUrl: "https://api.example.com",
-          modelId: "gpt-4",
-          credentialId: "pk_test",
-        }),
+        body: MODEL_BODY,
       });
       expect(res.status).toBe(403);
       const body = (await res.json()) as Record<string, unknown>;

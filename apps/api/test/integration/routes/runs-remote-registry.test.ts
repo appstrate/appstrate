@@ -483,8 +483,8 @@ describe("POST /api/runs/remote — kind: registry", () => {
   });
 
   it("rejects a malformed draft manifest with 400", async () => {
-    // Seed a draft that's missing required AFPS fields (no `displayName`,
-    // no `schemaVersion`). The full-AFPS validator must catch this here
+    // Seed a draft that's missing required AFPS fields (no `display_name`,
+    // no `schema_version`). The full-AFPS validator must catch this here
     // instead of letting the run pipeline crash later with a less
     // actionable error.
     await seedPackage({
@@ -496,7 +496,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         name: "@acme/broken-draft",
         version: "0.0.1",
         type: "agent",
-        // displayName + schemaVersion intentionally omitted
+        // display_name + schema_version intentionally omitted
         dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",

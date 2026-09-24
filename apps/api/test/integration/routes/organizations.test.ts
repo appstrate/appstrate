@@ -186,7 +186,7 @@ describe("Organizations API", () => {
       expect(body.code).toBe("slug_taken");
     });
 
-    it("pins apiVersion in settings at creation", async () => {
+    it("pins api_version in settings at creation", async () => {
       const testUser = await createTestUser();
 
       const res = await app.request("/api/orgs", {
@@ -1397,12 +1397,12 @@ describe("Organizations API", () => {
       expect(res.status).toBe(403);
     });
 
-    it("PUT /api/orgs/:otherOrgId/settings returns 403", async () => {
+    it("PATCH /api/orgs/:otherOrgId/settings returns 403", async () => {
       const { orgB, bearer } = await setupTwoOrgKey();
       const res = await app.request(`/api/orgs/${orgB.id}/settings`, {
         method: "PATCH",
         headers: { ...bearer, "Content-Type": "application/json" },
-        body: JSON.stringify({ apiVersion: "2026-03-21" }),
+        body: JSON.stringify({ api_version: "2026-03-21" }),
       });
       expect(res.status).toBe(403);
     });

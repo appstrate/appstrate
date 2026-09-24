@@ -45,7 +45,7 @@
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { TerminalRunResult } from "@appstrate/afps-runtime/runner";
-import { TERMINAL_RUN_STATUSES, type RunWireDto, type TokenUsage } from "@appstrate/shared-types";
+import { TERMINAL_RUN_STATUSES, type RunWireDto } from "@appstrate/shared-types";
 import type { TerminalRunStatus } from "@appstrate/core/run-status";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { createConsoleSink } from "./sink.ts";
@@ -838,7 +838,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * `$0.0000` line.
  */
 function buildMetricEvent(record: RemoteRunRecord): RunEvent | null {
-  const usage = (record.token_usage as TokenUsage | null) ?? null;
+  const usage = record.token_usage;
   const cost = record.cost ?? null;
   const hasUsage =
     usage != null && ((usage.input_tokens ?? 0) > 0 || (usage.output_tokens ?? 0) > 0);
@@ -881,7 +881,7 @@ function buildRunResultPayload(
   }
   if (record.duration != null) result.durationMs = record.duration;
   if (record.cost != null) result.cost = record.cost;
-  const u = record.token_usage as TokenUsage | null;
+  const u = record.token_usage;
   result.usage = {
     input_tokens: u?.input_tokens ?? 0,
     output_tokens: u?.output_tokens ?? 0,
