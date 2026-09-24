@@ -31,6 +31,7 @@ BEGIN
       WHERE jsonb_typeof(identity_claims) = 'object'
         AND EXISTS (SELECT 1 FROM jsonb_object_keys(identity_claims) AS k
                     WHERE k !~ '^[a-z][a-z0-9]*(_[a-z0-9]+)*$'
+                      AND lower(regexp_replace(k, '([a-z0-9])([A-Z])', '\1_\2', 'g')) <> k
                       AND identity_claims ? lower(regexp_replace(k, '([a-z0-9])([A-Z])', '\1_\2', 'g'))));
 END $$;
 
@@ -42,7 +43,7 @@ UPDATE integration_connections SET identity_claims = (
       THEN lower(regexp_replace(k, '([a-z0-9])([A-Z])', '\1_\2', 'g'))
       ELSE k END,
     v
-    ORDER BY (k !~ '^[a-z][a-z0-9]*(_[a-z0-9]+)*$') DESC)
+    ORDER BY (k !~ '^[a-z][a-z0-9]*(_[a-z0-9]+)*$') DESC, k)
   FROM jsonb_each(identity_claims) AS e(k, v))
 WHERE jsonb_typeof(identity_claims) = 'object'
   AND EXISTS (SELECT 1 FROM jsonb_object_keys(identity_claims) AS k

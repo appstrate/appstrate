@@ -276,7 +276,10 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   whose draft or `latest` version declares a camelCase identity claim key is
   fixed, see the identity-claims entry below); inside the deploy window (old
   application stopped, new one not started), `0021`, `0025`, `0027` and
-  `0028`; right after the deploy, `0022` and `0026`.
+  `0028`; right after the deploy, `0022` and `0026`. `0025`–`0028` are
+  one-way against the image: snapshot the database before the window, and roll
+  forward (the previous build reads the new spellings as unknown — agent
+  launches answer 500).
 - **BREAKING (operators): more env values fail boot instead of falling back.**
   A `CHAT_PI_MAX_CONCURRENCY` that is not a positive integer
   (`@appstrate/module-chat`), `MODEL_RETRY_ENABLED` / `MODEL_COMPACTION_ENABLED`

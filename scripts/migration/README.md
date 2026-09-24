@@ -796,8 +796,14 @@ connection count.
 
 **Not a runbook.** `ModelGenerationSettings` spells its reasoning effort
 `reasoning_level`; `0025` renames the stored `reasoningLevel` keys in the four
-jsonb columns that hold one. Run it inside the deploy window — each build reads
-only its own spelling. Details in the file header.
+jsonb columns that hold one. Run it inside the deploy window — each build parses
+its own spelling strictly, so a row left in the other one makes that agent's
+launches answer 500. Details in the file header.
+
+`0025`–`0028` are one-way against the image: after them, the previous build
+reads the new spelling as unknown (launches 500, unread counts empty, branding
+defaulted). Roll forward, or restore the pre-window snapshot — there is no
+inverse script.
 
 ## Detail — Identity-claim key casing (script `0026`)
 

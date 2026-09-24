@@ -5,8 +5,9 @@
 -- A row holding both spellings keeps its existing `reasoning_level` (the
 -- right operand of `||` wins) and loses `reasoningLevel`.
 -- Run INSIDE the deploy window (old app stopped, new one not started): each
--- build reads only its own spelling, so a row in the other one loses its
--- reasoning level. Cost: UPDATEs only the rows still holding `reasoningLevel`;
+-- build parses the stored settings strictly in its own spelling, so until this
+-- runs every launch (manual or scheduled) of an agent holding the other one
+-- answers 500. Cost: UPDATEs only the rows still holding `reasoningLevel`;
 -- idempotent. Rows: UNMEASURED — rehearse on a restored dump first (README
 -- requirement 4).
 
