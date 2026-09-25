@@ -141,13 +141,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **BREAKING: `LlmProxyConfig` gains a third member, `LlmProxyPlatformConfig`**
-  (`@appstrate/core/sidecar-types`), `authMode: "platform"`: the sidecar's
-  `/llm/*` upstream is the platform's metered LLM proxy for the run's
-  `apiShape`, authenticated with the run token; `baseUrl` is the model's own
-  endpoint (never dialed), with an optional `modelSwap`. It carries no provider
-  credential. A consumer that switches exhaustively on
-  `LlmProxyConfig["authMode"]` must handle the new member.
+- **BREAKING: `LlmProxyConfig` is `LlmProxyOauthConfig | LlmProxyPlatformConfig`**
+  (`@appstrate/core/sidecar-types`). The new `LlmProxyPlatformConfig`,
+  `authMode: "platform"`: the sidecar's `/llm/*` upstream is the platform's
+  metered LLM proxy for the run's `apiShape`, authenticated with the run token;
+  `baseUrl` is the model's own endpoint (never dialed), with an optional
+  `modelSwap`. It carries no provider credential, and replaces the removed
+  `api_key` member (see Removed). A consumer that switches exhaustively on
+  `LlmProxyConfig["authMode"]` must handle the new member and drop `api_key`.
 - **BREAKING: model generation settings are snake_case** (`@appstrate/core/model-generation`,
   #1545): `modelGenerationSettingsSchema` reads `reasoning_level` (was
   `reasoningLevel`), and `ModelGenerationCapabilities` spells
@@ -284,6 +285,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SDK parse. `syntheticAliasErrorBody` now builds on it (same output).
 
 ### Removed
+
+- **`LlmProxyApiKeyConfig`** (`@appstrate/core/sidecar-types`) — BREAKING. No
+  sidecar holds a provider API key any more: every API-key run's inference is
+  served by the platform LLM proxy (`LlmProxyPlatformConfig`), so
+  `LlmProxyConfig` has no `authMode: "api_key"` member (#1568).
+
+- **Four values of `MODEL_API_SHAPES`** — `google-generative-ai`,
+  `google-vertex`, `azure-openai-responses` and `bedrock-converse-stream`
+  (`@appstrate/core/sidecar-types`), and so of `ModelApiShape` — BREAKING. No
+  provider declares them and the platform LLM proxy serves none of them
+  (#1568).
 
 - **`IsolationBoundaryOptions`** (`@appstrate/core/platform-types`), the
   `opts` parameter of `RunOrchestrator.createIsolationBoundary`, and

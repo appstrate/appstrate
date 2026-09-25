@@ -227,9 +227,10 @@ them.)
 ## Limitations / follow-ups
 
 - **Sidecar-side LLM latency.** The LLM-latency histogram is recorded at the
-  in-process platform proxy seam (`/api/llm-proxy`). The credential-isolating
-  **sidecar** runs in a separate per-run container on an isolated network and
-  would need its own OTel bootstrap plus collector reachability to export from
+  in-process platform proxy seam (`/api/llm-proxy`, and `/internal/llm-proxy`
+  for every API-key run). An OAuth-subscription run's inference leaves through
+  its credential-isolating **sidecar**, which runs in a separate per-run
+  container on an isolated network and would need its own OTel bootstrap plus collector reachability to export from
   there — tracked as a follow-up. The container's outbound HTTP already carries
   the forwarded `traceparent`, so a future sidecar exporter would slot into the
   same trace.

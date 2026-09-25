@@ -106,24 +106,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `Failed to publish run abort after retries`,
     `Retrying run cancel publish` → `Retrying run abort publish`.
 
-- **BREAKING (operators): runs on a platform-provided model are served through
-  the platform's metered LLM proxy, like chat.** A run whose model is a
-  `SYSTEM_PROVIDER_KEYS` preset now reaches its model through
-  `/internal/llm-proxy/<api>/…`, authenticated by the run token: the sidecar
-  receives the proxy route instead of the provider key, the proxy serves the
-  run's own model whatever the request names, and the same request guards apply
-  as on `/api/llm-proxy`. Usage is metered per request from the provider's
-  response, on `llm_usage` proxy rows attributed to the run
-  (`credential_source = 'system'`); such a run no longer writes a `runner` row.
-  Runs on an organization's own credential are unchanged. New nullable column
-  `runs.model_id` (migration `0072`) records the model a platform run launched
-  with; a system run launched before migration `0072` (the deploy window) keeps
-  its previous path and ledger.
+- **BREAKING (operators): every run on an API-key model is served through the
+  platform's metered LLM proxy, like chat** (#1568). A run whose model is a
+  `SYSTEM_PROVIDER_KEYS` preset or an organization's own API-key credential
+  now reaches its model through `/internal/llm-proxy/<api>/…`, authenticated by
+  the run token: the sidecar receives the proxy route instead of a provider key,
+  the proxy serves the run's own model whatever the request names, and the same
+  request guards apply as on `/api/llm-proxy`. Usage is metered per request
+  from the provider's response, on `llm_usage` proxy rows attributed to the run
+  (`credential_source` `system` or `org`); such a run no longer writes a
+  `runner` row. An organization-credential run's cost is therefore priced per
+  request, price tiers included, rather than from the runner's aggregate at the
+  base rate. Only an OAuth-subscription run (claude-code, codex) keeps the
+  sidecar's bearer swap and its `runner` row. New nullable columns
+  `runs.model_id` (migration `0072`), the model a platform run launched with,
+  and `runs.inference_route` (migration `0073`, `proxy` | `sidecar`), who
+  serves its inference; a run launched before migration `0073` has a NULL route
+  and keeps its runner ledger row.
   Operators:
   - boot now fails when a `SYSTEM_PROVIDER_KEYS` entry binds a provider whose
     API shape the proxy does not serve (served: `openai-completions`,
-    `openai-responses`, `anthropic-messages`, `mistral-conversations`) —
-    `google-ai` is refused;
+    `openai-responses`, `anthropic-messages`, `mistral-conversations`);
   - the inference of these runs now depends on the API being up: a restart
     refuses new calls and graceful shutdown waits for open streams (and their
     metering) within its existing drain window; the agent's retry policy covers
@@ -131,8 +134,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - the request body of these calls is capped by
     `LLM_PROXY_LIMITS.max_request_bytes` (default 10 MiB) alone, not by
     `API_BODY_LIMIT_BYTES`;
-  - the API, `PI_IMAGE`, `SIDECAR_IMAGE` and the Firecracker runner daemon must
-    be deployed together.
+  - a model on a private or local endpoint (Ollama, a LAN vLLM) is now dialed
+    from the API process, not from the run's sidecar: its host must resolve and
+    be reachable from the API's own network (`localhost` is the API's
+    loopback), and still needs `EGRESS_ALLOW_INTERNAL_HOSTS`. The launch-time
+    check resolves the host the way the proxy does on every call;
+  - the sidecar's `api_key` LLM mode is gone (`PI_API_KEY` and `PI_PLACEHOLDER`
+    are no longer read; a sidecar serves `platform` or `oauth` only), so the
+    API, `PI_IMAGE`, `SIDECAR_IMAGE` and the Firecracker runner daemon must be
+    deployed together.
 
 - **Run-scoped secrets are never in the environment of the process that runs
   the agent.** The agent image's first process is now `runtime-pi/launcher.ts`
@@ -157,8 +167,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   scheme's default port. In local dev, an agent that reached another service on
   `host.docker.internal` through the proxy now gets 403, and
   `EGRESS_ALLOW_INTERNAL_HOSTS` does not change that — the agent's forward
-  proxy never reads it. That variable covers the sidecar's own egress to the `/llm` upstream
-  and to remote MCP servers, so an internal service meant for the agent is
+  proxy never reads it. That variable covers the sidecar's own egress to an OAuth
+  subscription's `/llm` upstream and to remote MCP servers, so an internal service meant for the agent is
   declared as a remote MCP integration with its host in
   `EGRESS_ALLOW_INTERNAL_HOSTS`. Integration runners never use this proxy.
 - **BREAKING (operators): one run topology — every run boots its sidecar.**
@@ -665,6 +675,18 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
 
 ### Removed
 
+- **BREAKING (API, operators): the `google-ai` model provider is removed**
+  (#1568). Its API shape, `google-generative-ai`, is one the LLM proxy does not
+  serve, and every API-key run is served by it; Gemini models stay reachable
+  through OpenRouter. The provider listing's `apiShape` enum drops
+  `google-generative-ai`, `google-vertex`, `azure-openai-responses` and
+  `bedrock-converse-stream`, which no provider declares. Run
+  `scripts/migration/0031-drop-google-ai-provider.sql` inside the deploy window,
+  before the new image boots: it deletes the `google-ai` credentials and their
+  org models, clearing the org default, space pin or schedule override that
+  names one first. A model bound to a credential whose provider the instance
+  does not register now fails with `409 model_provider_unregistered` instead of
+  falling through to the default model.
 - **BREAKING (API): `POST /api/model-provider-credentials/{id}/refresh-models`
   is removed, with the credential's `available_model_ids`** (#1549). Nothing
   read the list any more: the models a credential can back are its provider's
