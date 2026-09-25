@@ -49,7 +49,12 @@ function exit(): Exit {
  * exit is always observed FIRST, the ordering that must not be misread as a
  * sidecar death.
  */
-function createFake(opts: { sidecarExitsIndependently?: boolean; sidecarLogs?: string[] }) {
+function createFake(opts: {
+  sidecarExitsIndependently?: boolean;
+  sidecarLogs?: string[];
+  /** The sidecar's log stream never yields nor ends, as on a wedged daemon. */
+  sidecarLogsHang?: boolean;
+}) {
   const agent = exit();
   const sidecar = exit();
   const stopped: string[] = [];
@@ -97,7 +102,9 @@ function createFake(opts: { sidecarExitsIndependently?: boolean; sidecarLogs?: s
       return handle.role === "sidecar" ? sidecar.promise : agent.promise;
     },
     async *streamLogs(handle: WorkloadHandle): AsyncGenerator<string> {
-      if (handle.role === "sidecar") yield* opts.sidecarLogs ?? [];
+      if (handle.role !== "sidecar") return;
+      if (opts.sidecarLogsHang) await new Promise<never>(() => {});
+      yield* opts.sidecarLogs ?? [];
     },
     async stopByRunId(): Promise<StopResult> {
       return "stopped";
@@ -175,6 +182,8 @@ function launch(
 /** Let the launcher reach its wait before the test moves an exit. */
 const settle = () => new Promise((r) => setTimeout(r, 50));
 
+const SIDECAR_CRASH_LOG = "Sidecar exited while the run was in progress";
+
 describe("run launcher — sidecar death", () => {
   beforeEach(async () => {
     await truncateAll();
@@ -198,9 +207,7 @@ describe("run launcher — sidecar death", () => {
       await settle();
       fake.sidecar.resolve(1);
       await expect(run).rejects.toThrow("Sidecar exited with code 1");
-      const call = errorSpy.mock.calls.find(
-        ([msg]) => msg === "Sidecar exited while the run was in progress",
-      );
+      const call = errorSpy.mock.calls.find(([msg]) => msg === SIDECAR_CRASH_LOG);
       expect(call?.[1]).toEqual({
         runId: "run_sidecar_tail",
         exitCode: 1,
@@ -210,6 +217,53 @@ describe("run launcher — sidecar death", () => {
       errorSpy.mockRestore();
     }
   });
+
+  it("still fails the run when the sidecar's log stream hangs", async () => {
+    const fake = createFake({ sidecarExitsIndependently: true, sidecarLogsHang: true });
+    const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const run = launch("run_sidecar_logs_hang", fake.orchestrator);
+      await settle();
+      fake.sidecar.resolve(1);
+      await expect(run).rejects.toThrow("Sidecar exited with code 1");
+      const call = errorSpy.mock.calls.find(([msg]) => msg === SIDECAR_CRASH_LOG);
+      expect(call?.[1]).toEqual({ runId: "run_sidecar_logs_hang", exitCode: 1 });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  }, 4_000);
+
+  it("reports the sidecar's crash when the agent's exit wins the race", async () => {
+    const fake = createFake({ sidecarExitsIndependently: true, sidecarLogs: ["boom"] });
+    const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const run = launch("run_both_exit", fake.orchestrator);
+      await settle();
+      fake.agent.resolve(1);
+      setTimeout(() => fake.sidecar.resolve(1), 10);
+      expect(await run).toEqual({ exitCode: 1, timedOut: false, cancelled: false });
+      const call = errorSpy.mock.calls.find(([msg]) => msg === SIDECAR_CRASH_LOG);
+      expect(call?.[1]).toEqual({ runId: "run_both_exit", exitCode: 1, tail: "boom" });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("reports no sidecar crash when the agent fails alone", async () => {
+    const fake = createFake({ sidecarExitsIndependently: true, sidecarLogs: ["fine"] });
+    const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const run = launch("run_agent_fails_alone", fake.orchestrator);
+      await settle();
+      fake.agent.resolve(1);
+      expect(await run).toEqual({ exitCode: 1, timedOut: false, cancelled: false });
+      const messages = errorSpy.mock.calls.map(([msg]) => msg);
+      expect(messages).toContain("Agent container exited non-zero");
+      expect(messages).not.toContain(SIDECAR_CRASH_LOG);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  }, 5_000);
 
   it("ignores the sidecar on an orchestrator that cannot observe it on its own", async () => {
     const fake = createFake({});
