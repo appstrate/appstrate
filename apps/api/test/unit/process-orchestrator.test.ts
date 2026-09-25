@@ -437,19 +437,51 @@ describe("ProcessOrchestrator", () => {
       // threw after 5 draws whenever that neighbour was taken — CI's
       // `Failed to find available port after retries`. Refusing every
       // explicit port makes that host deterministic.
-      const realServe = Bun.serve.bind(Bun);
-      const serve = spyOn(Bun, "serve").mockImplementation(((
-        options: Parameters<typeof Bun.serve>[0],
+      const realListen = Bun.listen.bind(Bun);
+      const listen = spyOn(Bun, "listen").mockImplementation(((
+        options: Parameters<typeof Bun.listen>[0],
       ) => {
         if ((options as { port?: number }).port !== 0) throw new Error("EADDRINUSE");
-        return realServe(options);
-      }) as typeof Bun.serve);
+        return realListen(options);
+      }) as typeof Bun.listen);
       try {
         orchestrator = new ProcessOrchestrator();
         const ports = await (orchestrator as unknown as PortFinder).findAvailablePorts();
+        expect(listen).toHaveBeenCalled();
         expect(ports.forwardProxy).not.toBe(ports.sidecar);
       } finally {
-        serve.mockRestore();
+        listen.mockRestore();
+      }
+    });
+
+    it("redraws when both probes report the same port", async () => {
+      // `bun --hot` (the dev server) hot-reloads a second `Bun.serve()` into
+      // the first, so a Bun.serve-based finder handed out one port twice and
+      // the sidecar refused to boot. A draw that yields two equal ports must
+      // be rejected, never returned.
+      const realListen: (
+        options: Bun.TCPSocketListenOptions<undefined>,
+      ) => Bun.TCPSocketListener<undefined> = Bun.listen.bind(Bun);
+      let calls = 0;
+      let firstPort = 0;
+      const listen = spyOn(Bun, "listen").mockImplementation(((
+        options: Bun.TCPSocketListenOptions<undefined>,
+      ) => {
+        const listener = realListen(options);
+        calls++;
+        if (calls === 1) firstPort = listener.port;
+        if (calls === 2) {
+          return { port: firstPort, stop: (force?: boolean) => listener.stop(force) };
+        }
+        return listener;
+      }) as typeof Bun.listen);
+      try {
+        orchestrator = new ProcessOrchestrator();
+        const ports = await (orchestrator as unknown as PortFinder).findAvailablePorts();
+        expect(calls).toBeGreaterThan(2);
+        expect(ports.forwardProxy).not.toBe(ports.sidecar);
+      } finally {
+        listen.mockRestore();
       }
     });
   });
