@@ -40,7 +40,7 @@ import type { TerminalRunStatus } from "./run-status.ts";
  * attributes, bundler support). `packages/core/test/core-version.test.ts`
  * asserts it equals the published `version` field, so it cannot drift.
  */
-export const CORE_VERSION = "11.1.0";
+export const CORE_VERSION = "12.0.0";
 
 /** Metadata describing a module. */
 export interface ModuleManifest {
