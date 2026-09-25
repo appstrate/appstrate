@@ -52,7 +52,7 @@ function exit(): Exit {
 function createFake(opts: {
   sidecarExitsIndependently?: boolean;
   sidecarLogs?: string[];
-  /** The sidecar's log stream never yields nor ends, as on a wedged daemon. */
+  /** The sidecar's log stream yields `sidecarLogs`, then never ends, as on a wedged daemon. */
   sidecarLogsHang?: boolean;
 }) {
   const agent = exit();
@@ -109,8 +109,8 @@ function createFake(opts: {
     },
     async *streamLogs(handle: WorkloadHandle): AsyncGenerator<string> {
       if (handle.role !== "sidecar") return;
-      if (opts.sidecarLogsHang) await new Promise<never>(() => {});
       yield* opts.sidecarLogs ?? [];
+      if (opts.sidecarLogsHang) await new Promise<never>(() => {});
     },
     async stopByRunId(): Promise<StopResult> {
       return "stopped";
@@ -228,7 +228,11 @@ describe("run launcher — sidecar death", () => {
   });
 
   it("still fails the run when the sidecar's log stream hangs", async () => {
-    const fake = createFake({ sidecarExitsIndependently: true, sidecarLogsHang: true });
+    const fake = createFake({
+      sidecarExitsIndependently: true,
+      sidecarLogs: ["partial"],
+      sidecarLogsHang: true,
+    });
     const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
     try {
       const run = launch("run_sidecar_logs_hang", fake.orchestrator);
@@ -236,7 +240,13 @@ describe("run launcher — sidecar death", () => {
       fake.sidecar.resolve(1);
       await expect(run).rejects.toThrow("Sidecar exited with code 1");
       const call = errorSpy.mock.calls.find(([msg]) => msg === SIDECAR_CRASH_LOG);
-      expect(call?.[1]).toEqual({ runId: "run_sidecar_logs_hang", exitCode: 1 });
+      // The time bound won: what was read is reported, flagged as not the log's end.
+      expect(call?.[1]).toEqual({
+        runId: "run_sidecar_logs_hang",
+        exitCode: 1,
+        tail: "partial",
+        truncated: true,
+      });
     } finally {
       errorSpy.mockRestore();
     }
@@ -250,7 +260,7 @@ describe("run launcher — sidecar death", () => {
       await settle();
       fake.exitSidecarUnobserved(1);
       fake.agent.resolve(1);
-      expect(await run).toEqual({ exitCode: 1, timedOut: false, cancelled: false });
+      expect(await run).toEqual({ exitCode: 1, timedOut: false, stopRequested: false });
       const call = errorSpy.mock.calls.find(([msg]) => msg === SIDECAR_CRASH_LOG);
       expect(call?.[1]).toEqual({ runId: "run_both_exit", exitCode: 1, tail: "boom" });
     } finally {
@@ -266,7 +276,7 @@ describe("run launcher — sidecar death", () => {
       await settle();
       const start = performance.now();
       fake.agent.resolve(1);
-      expect(await run).toEqual({ exitCode: 1, timedOut: false, cancelled: false });
+      expect(await run).toEqual({ exitCode: 1, timedOut: false, stopRequested: false });
       // A healthy sidecar must not hold up a failed run's teardown.
       expect(performance.now() - start).toBeLessThan(1_000);
       const messages = errorSpy.mock.calls.map(([msg]) => msg);
@@ -284,7 +294,7 @@ describe("run launcher — sidecar death", () => {
     fake.sidecar.resolve(1);
     await settle();
     fake.agent.resolve(0);
-    expect(await run).toEqual({ exitCode: 0, timedOut: false, cancelled: false });
+    expect(await run).toEqual({ exitCode: 0, timedOut: false, stopRequested: false });
     expect(fake.stopped).not.toContain("agent");
   });
 
@@ -293,7 +303,7 @@ describe("run launcher — sidecar death", () => {
     const run = launch("run_agent_first", fake.orchestrator);
     await settle();
     fake.agent.resolve(0);
-    expect(await run).toEqual({ exitCode: 0, timedOut: false, cancelled: false });
+    expect(await run).toEqual({ exitCode: 0, timedOut: false, stopRequested: false });
   });
 
   it("falls back to waiting for the agent when the sidecar's exit cannot be observed", async () => {
@@ -303,7 +313,7 @@ describe("run launcher — sidecar death", () => {
     fake.sidecar.reject(new Error("daemon unreachable"));
     await settle();
     fake.agent.resolve(0);
-    expect(await run).toEqual({ exitCode: 0, timedOut: false, cancelled: false });
+    expect(await run).toEqual({ exitCode: 0, timedOut: false, stopRequested: false });
   });
 
   it("reports a timeout, not a sidecar death, when the timeout stops the sidecar first", async () => {
@@ -312,7 +322,7 @@ describe("run launcher — sidecar death", () => {
       timeout: 0,
       timeoutBootGraceMs: 50,
     });
-    expect(result).toEqual({ exitCode: 137, timedOut: true, cancelled: false });
+    expect(result).toEqual({ exitCode: 137, timedOut: true, stopRequested: false });
   });
 
   it("reports a cancel, not a sidecar death, when the cancel stops the sidecar first", async () => {
@@ -321,6 +331,6 @@ describe("run launcher — sidecar death", () => {
     const run = launch("run_cancel", fake.orchestrator, { signal: controller.signal });
     await settle();
     controller.abort();
-    expect(await run).toEqual({ exitCode: 137, timedOut: false, cancelled: true });
+    expect(await run).toEqual({ exitCode: 137, timedOut: false, stopRequested: true });
   });
 });

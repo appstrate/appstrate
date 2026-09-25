@@ -100,10 +100,10 @@ export interface PlatformContainerResult {
   /** Whether the agent container was stopped because the run timed out. */
   timedOut: boolean;
   /**
-   * Whether the caller's `AbortSignal` fired — a platform-requested stop
-   * (cancel route or stall watchdog), not only a user cancel.
+   * Whether the caller's `AbortSignal` fired: the platform asked for this stop
+   * (cancel route or stall watchdog), which then owns the run's terminal state.
    */
-  cancelled: boolean;
+  stopRequested: boolean;
 }
 
 interface RunPlatformContainerInput {
@@ -668,7 +668,7 @@ async function waitForWorkload(
     return {
       exitCode,
       timedOut,
-      cancelled: signal?.aborted ?? false,
+      stopRequested: signal?.aborted ?? false,
     };
   } finally {
     clearTimeout(timeoutHandle);
@@ -753,11 +753,12 @@ async function logSidecarCrash(
   sidecar: WorkloadHandle,
   exitCode: number,
 ): Promise<void> {
-  const tail = await readLogTail(orch, sidecar);
+  const { tail, truncated } = await readLogTail(orch, sidecar);
   logger.error("Sidecar exited while the run was in progress", {
     runId: sidecar.runId,
     exitCode,
     ...(tail ? { tail } : {}),
+    ...(truncated ? { truncated: true } : {}),
   });
 }
 
@@ -765,9 +766,13 @@ async function logSidecarCrash(
  * Last lines of an exited workload's logs, for the crash report. Bounded in
  * time whatever the orchestrator does with the signal (Docker's only checks
  * it once the response arrives); best-effort, so a log read failure never
- * masks the exit itself.
+ * masks the exit itself. The stream reads from the start, so when the time
+ * bound wins `tail` is the last lines READ, not the log's end: `truncated`.
  */
-async function readLogTail(orch: RunOrchestrator, handle: WorkloadHandle): Promise<string> {
+async function readLogTail(
+  orch: RunOrchestrator,
+  handle: WorkloadHandle,
+): Promise<{ tail: string; truncated: boolean }> {
   const abort = new AbortController();
   const lines: string[] = [];
   const read = (async () => {
@@ -780,9 +785,12 @@ async function readLogTail(orch: RunOrchestrator, handle: WorkloadHandle): Promi
       // Diagnostics only.
     }
   })();
-  await withTimeout(read, SIDECAR_TAIL_TIMEOUT_MS);
+  const done = await withTimeout(
+    read.then(() => true),
+    SIDECAR_TAIL_TIMEOUT_MS,
+  );
   abort.abort();
-  return lines.join("\n");
+  return { tail: lines.join("\n"), truncated: done === undefined };
 }
 
 /** Leading dash-separated segments a placeholder may keep. */

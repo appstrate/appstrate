@@ -177,7 +177,7 @@ async function executeAgentInBackgroundImpl(input: ExecuteAgentInBackgroundInput
     // Container exited normally. If it finalised itself over HTTP, our
     // synthesis is a CAS no-op. If it didn't (crash, timeout), we fill in
     // the terminal state the platform observed — except on an aborted stop.
-    if (lifecycle.cancelled) {
+    if (lifecycle.stopRequested) {
       // Aborted: the aborter owns the terminal — the cancel route writes
       // `cancelled`, the stall watchdog `failed`. Nothing to do here.
       return;
