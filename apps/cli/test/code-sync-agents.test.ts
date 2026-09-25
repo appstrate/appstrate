@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate packages sync` — agent commands (issue #1268, D18–D25).
+ * `appstrate code sync` — agent commands (issue #1268, D18–D25).
  *
- * Same harness as `packages-sync-command.test.ts`: the command is called
+ * Same harness as `code-sync-command.test.ts`: the command is called
  * directly with a per-test `createMemoryIO()` sink, throw-away config / data /
  * `HOME` directories, and the shared stub server serving skills AND agents.
  * What is asserted here is the wiring: which space the agents come from, which
@@ -14,7 +14,7 @@
 import { describe, it, expect } from "bun:test";
 import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { packagesSyncCommand } from "../src/commands/packages-sync.ts";
+import { codeSyncCommand } from "../src/commands/code-sync.ts";
 import { getStatePath } from "../src/lib/skills-sync/state.ts";
 import { seedLoggedInProfile } from "./helpers/auth-fixture.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
@@ -73,12 +73,12 @@ async function ledgerVersion(slug: string): Promise<string | undefined> {
 
 const occurrences = (text: string, needle: string): number => text.split(needle).length - 1;
 
-describe("packages sync — agent commands in the plugin", () => {
+describe("code sync — agent commands in the plugin", () => {
   it("writes each active agent as skills/run-<name>/{SKILL.md,input.json}", async () => {
     serve([REPORT]);
     const { io, stderr } = createMemoryIO();
 
-    await packagesSyncCommand({}, io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, io);
 
     expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
     expect((await readdir(join(pluginSkills(), "run-report"))).sort()).toEqual([
@@ -93,7 +93,7 @@ describe("packages sync — agent commands in the plugin", () => {
   it("never writes an agent to codex or claude-user, and lists none for them", async () => {
     const server = serve([REPORT]);
 
-    await packagesSyncCommand({ target: ["codex", "claude-user"] }, createMemoryIO().io);
+    await codeSyncCommand({ target: ["codex", "claude-user"] }, createMemoryIO().io);
 
     expect(await readdir(join(harness.home(), ".agents", "skills"))).toEqual(["pdf-tools"]);
     expect(await readdir(join(harness.home(), ".claude", "skills"))).toEqual(["pdf-tools"]);
@@ -103,7 +103,7 @@ describe("packages sync — agent commands in the plugin", () => {
   it("keeps a shared target free of agents when it syncs beside the plugin", async () => {
     serve([REPORT]);
 
-    await packagesSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
 
     expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
     expect(await readdir(join(harness.home(), ".agents", "skills"))).toEqual(["pdf-tools"]);
@@ -111,11 +111,11 @@ describe("packages sync — agent commands in the plugin", () => {
 
   it("leaves the plugin untouched when nothing changed", async () => {
     const server = serve([REPORT]);
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
     const before = await snapshot(pluginRoot());
     const command = await lstat(commandFile("run-report"));
 
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
     expect(await snapshot(pluginRoot())).toEqual(before);
     // Same inode: the tree was not rebuilt, so the plugin's hash cannot move.
@@ -125,11 +125,11 @@ describe("packages sync — agent commands in the plugin", () => {
 
   it("rewrites the command when a newer version is published", async () => {
     serve([REPORT]);
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
     const before = await readText(commandFile("run-report"));
 
     serve([{ ...REPORT, versions: ["1.0.0", "1.1.0"] }]);
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
     expect(await readText(commandFile("run-report"))).not.toBe(before);
     expect(await readText(commandFile("run-report"))).toContain("1.1.0");
@@ -138,21 +138,21 @@ describe("packages sync — agent commands in the plugin", () => {
 
   it("rewrites the command when the space locks another field", async () => {
     serve([REPORT]);
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
     const before = await readText(commandFile("run-report", "input.json"));
 
     serve([{ ...REPORT, locked_fields: ["account"] }]);
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
     expect(await readText(commandFile("run-report", "input.json"))).not.toBe(before);
   });
 
   it("removes an agent that is no longer active in the pinned space", async () => {
     serve([REPORT]);
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
     serve([{ ...REPORT, activeIn: [] }]);
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
     expect(await readdir(pluginSkills())).toEqual(["pdf-tools"]);
     expect(await ledgerVersion("run-report")).toBeUndefined();
@@ -160,7 +160,7 @@ describe("packages sync — agent commands in the plugin", () => {
 
   it("preserves the installation and ledger when the agent listing fails", async () => {
     serve([REPORT]);
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
     const before = await snapshot(pluginRoot());
     const ledger = await readText(getStatePath());
     // The listing is the catalogue: a 500 there says nothing about which agents left.
@@ -171,7 +171,9 @@ describe("packages sync — agent commands in the plugin", () => {
         : serveRest(input, init)) as typeof fetch;
     const { io, stdout } = createMemoryIO();
 
-    await expect(packagesSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(
+      codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
+    ).rejects.toBeInstanceOf(ExitError);
 
     expect(stdout()).toBe("");
     expect(await snapshot(pluginRoot())).toEqual(before);
@@ -180,12 +182,12 @@ describe("packages sync — agent commands in the plugin", () => {
 
   it("keeps the installed command when its detail read fails transiently", async () => {
     serve([REPORT]);
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
     const before = await readText(commandFile("run-report"));
 
     serve([{ ...REPORT, detailError: 500 }]);
     const { io, stdout, stderr } = createMemoryIO();
-    await packagesSyncCommand({ printPath: true }, io);
+    await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(stderr()).toContain("Skipped @acme/report");
@@ -195,12 +197,12 @@ describe("packages sync — agent commands in the plugin", () => {
 
   it("removes an installed command that can no longer be rendered, and says why", async () => {
     serve([REPORT]);
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
     // Deterministic, unlike a 500: keeping the old command would keep it forever.
     serve([{ ...REPORT, versions: ["1.0.0", "not-a-version"] }]);
     const { io, stdout, stderr } = createMemoryIO();
-    await packagesSyncCommand({ printPath: true }, io);
+    await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(stderr()).toContain("Skipped @acme/report");
@@ -210,14 +212,14 @@ describe("packages sync — agent commands in the plugin", () => {
 
   it("switches a shared target's context although an agent command is unresolved", async () => {
     serve([REPORT]);
-    await packagesSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
     // The plugin moves to the new login alone; codex still holds the old one.
     await seedLoggedInProfile("default", { orgId: "org_1", spaceId: PINNED, userId: "u_2" });
-    await packagesSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
     serve([{ ...REPORT, detailError: 500 }]);
     const { io, stdout } = createMemoryIO();
-    await packagesSyncCommand({ target: ["claude-plugin", "codex"], printPath: true }, io);
+    await codeSyncCommand({ target: ["claude-plugin", "codex"], printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     const state = JSON.parse(await readText(getStatePath())) as {
@@ -229,7 +231,7 @@ describe("packages sync — agent commands in the plugin", () => {
   });
 });
 
-describe("packages sync — agents come from the pinned space only (D19)", () => {
+describe("code sync — agents come from the pinned space only (D19)", () => {
   const ELSEWHERE: AgentFixture = {
     id: "@acme/triage",
     description: "Triage.",
@@ -238,12 +240,12 @@ describe("packages sync — agents come from the pinned space only (D19)", () =>
 
   it("replaces the agent set on a space switch and leaves the skills alone", async () => {
     const server = serve([{ ...REPORT, activeIn: [PINNED] }, ELSEWHERE]);
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
     expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
     const skill = await readText(commandFile("pdf-tools"));
 
     await seedLoggedInProfile("default", { orgId: "org_1", spaceId: OTHER });
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
     expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-triage"]);
     expect(await readText(commandFile("pdf-tools"))).toBe(skill);
@@ -253,7 +255,7 @@ describe("packages sync — agents come from the pinned space only (D19)", () =>
   it("installs the pinned space's agents whatever --space selects for skills", async () => {
     serve([{ ...REPORT, activeIn: [PINNED] }, ELSEWHERE]);
 
-    await packagesSyncCommand({ space: [OTHER] }, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"], space: [OTHER] }, createMemoryIO().io);
 
     expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
   });
@@ -276,7 +278,7 @@ describe("packages sync — agents come from the pinned space only (D19)", () =>
       serve([REPORT], { spaces: withRole([...permissions]) });
       const { io, stderr } = createMemoryIO();
 
-      await packagesSyncCommand({ printPath: true }, io);
+      await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
 
       expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
       expect(stderr()).not.toContain("Agent commands not synced");
@@ -292,7 +294,7 @@ describe("packages sync — agents come from the pinned space only (D19)", () =>
       const server = serve([REPORT], { spaces: withRole([...permissions]) });
       const { io, stderr } = createMemoryIO();
 
-      await packagesSyncCommand({ printPath: true }, io);
+      await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
 
       expect(await readdir(pluginSkills())).toEqual(["pdf-tools"]);
       expect(occurrences(stderr(), "Agent commands not synced")).toBe(1);
@@ -311,7 +313,7 @@ describe("packages sync — agents come from the pinned space only (D19)", () =>
     });
     const { io, stderr } = createMemoryIO();
 
-    await packagesSyncCommand({ printPath: true }, io);
+    await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
 
     expect(stderr()).toContain(`Pinned space "${PINNED}" is not accessible`);
     expect(stderr()).not.toContain("Agent commands not synced");
@@ -319,11 +321,11 @@ describe("packages sync — agents come from the pinned space only (D19)", () =>
   });
 });
 
-describe("packages sync — agents under --source draft", () => {
+describe("code sync — agents under --source draft", () => {
   it("pins the draft, and resolves a system agent — which has none — published", async () => {
     serve([REPORT, { id: "@appstrate/assistant", description: "Helps.", source: "system" }]);
 
-    await packagesSyncCommand({ source: "draft" }, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"], source: "draft" }, createMemoryIO().io);
 
     expect(await ledgerVersion("run-report")).toBe("draft");
     expect(await ledgerVersion("run-assistant")).toBe("1.0.0");
@@ -331,14 +333,14 @@ describe("packages sync — agents under --source draft", () => {
 
   it("lets a context switch through when a draft is refused, removing it", async () => {
     serve([REPORT]);
-    await packagesSyncCommand({ source: "draft" }, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"], source: "draft" }, createMemoryIO().io);
     expect(await ledgerVersion("run-report")).toBe("draft");
 
     // A refusal is authority, not chance: it must not hold the old context forever.
     await seedLoggedInProfile("default", { orgId: "org_1", spaceId: PINNED, userId: "u_2" });
     serve([{ ...REPORT, draft: { notWritable: true } }]);
     const { io, stdout, stderr } = createMemoryIO();
-    await packagesSyncCommand({ source: "draft", printPath: true }, io);
+    await codeSyncCommand({ target: ["claude-plugin"], source: "draft", printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(stderr()).toContain("author's working copy");
@@ -353,13 +355,13 @@ describe("packages sync — agents under --source draft", () => {
     serve([{ id: "@appstrate/assistant", source: "system", detailError: 404 }]);
     const { io, stderr } = createMemoryIO();
 
-    await packagesSyncCommand({ source: "draft", printPath: true }, io);
+    await codeSyncCommand({ target: ["claude-plugin"], source: "draft", printPath: true }, io);
 
     expect(stderr()).toContain("Skipped @appstrate/assistant: no published version available.");
   });
 });
 
-describe("packages sync — agent command names (D23)", () => {
+describe("code sync — agent command names (D23)", () => {
   it("falls back to run-<scope>-<name> when a skill already holds run-<name>", async () => {
     serve([{ ...REPORT, id: "@team/pdf-tools" }], {
       skills: [
@@ -369,7 +371,7 @@ describe("packages sync — agent command names (D23)", () => {
     });
     const { io, stderr } = createMemoryIO();
 
-    await packagesSyncCommand({}, io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, io);
 
     expect((await readdir(pluginSkills())).sort()).toEqual([
       "pdf-tools",
@@ -383,16 +385,16 @@ describe("packages sync — agent command names (D23)", () => {
   });
 });
 
-describe("packages sync — an installed name stays with its package", () => {
+describe("code sync — an installed name stays with its package", () => {
   it("never hands an agent's command to a newcomer that sorts first", async () => {
     const zeta: AgentFixture = { ...REPORT, id: "@zeta/report", description: "Zeta." };
     const alpha: AgentFixture = { ...REPORT, id: "@alpha/report", description: "Alpha." };
     serve([zeta]);
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
     serve([alpha, zeta]);
     const { io, stderr } = createMemoryIO();
-    await packagesSyncCommand({}, io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, io);
 
     expect(await readText(commandFile("run-report"))).toContain("@zeta/report");
     expect(await readText(commandFile("run-alpha-report"))).toContain("@alpha/report");
@@ -400,7 +402,7 @@ describe("packages sync — an installed name stays with its package", () => {
 
     // Once the incumbent leaves, the name goes to the newcomer.
     serve([alpha]);
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
     expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
     expect(await readText(commandFile("run-report"))).toContain("@alpha/report");
@@ -411,12 +413,12 @@ describe("packages sync — an installed name stays with its package", () => {
     const alpha: SkillFixture = { id: "@alpha/report", skillMd: skillMd("report", "Alpha.") };
     // codex records `report` for zeta, the plugin records it for alpha.
     serve([], { skills: [zeta] });
-    await packagesSyncCommand({ target: ["codex"] }, createMemoryIO().io);
+    await codeSyncCommand({ target: ["codex"] }, createMemoryIO().io);
     serve([], { skills: [alpha] });
-    await packagesSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
     serve([], { skills: [alpha, zeta] });
-    await packagesSyncCommand({ target: ["codex", "claude-plugin"] }, createMemoryIO().io);
+    await codeSyncCommand({ target: ["codex", "claude-plugin"] }, createMemoryIO().io);
 
     const codex = join(harness.home(), ".agents", "skills");
     expect(await readText(commandFile("report"))).toContain("Alpha.");
@@ -426,7 +428,7 @@ describe("packages sync — an installed name stays with its package", () => {
   });
 });
 
-describe("packages sync — stored values stay on the server (D20)", () => {
+describe("code sync — stored values stay on the server (D20)", () => {
   it("never writes a stored input value anywhere under the plugin", async () => {
     const LOCKED = "SENTINEL-locked-7f3a";
     const PREFILLED = "SENTINEL-prefilled-91c2";
@@ -438,7 +440,7 @@ describe("packages sync — stored values stay on the server (D20)", () => {
       },
     ]);
 
-    await packagesSyncCommand({}, createMemoryIO().io);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
     const files = await snapshot(pluginRoot());
     expect(Object.keys(files)).toContain("skills/run-report/input.json");

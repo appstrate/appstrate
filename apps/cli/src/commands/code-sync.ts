@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate packages sync` — the skills of every space this profile is a member
+ * `appstrate code sync` — the skills of every space this profile is a member
  * of, as Agent Skills directories, plus one command per agent active in the
  * pinned space (plugin only), run by a *machine*: a marketplace `command`
  * source re-runs it once per session in the background. So `--print-path` writes
@@ -68,7 +68,7 @@ import {
   type SyncTarget,
 } from "../lib/skills-sync/targets.ts";
 
-export interface PackagesSyncOptions {
+export interface CodeSyncOptions {
   profile?: string;
   target?: SyncTarget[];
   space?: string[];
@@ -90,14 +90,20 @@ interface Report {
   note(message: string): void;
 }
 
-export async function packagesSyncCommand(
-  opts: PackagesSyncOptions,
+export async function codeSyncCommand(
+  opts: CodeSyncOptions,
   io: CommandIO = DEFAULT_IO,
 ): Promise<void> {
   const targets = uniqueTargets(opts.target);
   const source: SkillSource = opts.source ?? "published";
   const printPath = opts.printPath === true;
 
+  // No default: a plugin tree is useless unless the plugin is installed, and
+  // the one unattended caller (the marketplace command) names its targets.
+  if (targets.length === 0) {
+    io.stderr.write(`--target is required (repeatable): ${SYNC_TARGETS.join(" | ")}\n`);
+    io.exit(1);
+  }
   if (printPath && !targets.includes("claude-plugin")) {
     io.stderr.write(
       "--print-path prints the Claude Code plugin directory. Add: --target claude-plugin\n",
@@ -161,7 +167,7 @@ export async function packagesSyncCommand(
             current.profile.spaceId !== profile!.spaceId ||
             JSON.stringify(current.profile.syncSpaces) !== JSON.stringify(profile!.syncSpaces)
           ) {
-            throw new Error("Active sync context changed; run `appstrate packages sync` again.");
+            throw new Error("Active sync context changed; run the same command again.");
           }
         };
         const sources = await selectSources(
@@ -616,8 +622,7 @@ function reportPlans(plans: TargetPlan[], sink: LineSink): void {
 }
 
 function uniqueTargets(requested: SyncTarget[] | undefined): SyncTarget[] {
-  if (!requested || requested.length === 0) return ["claude-plugin"];
-  return [...new Set(requested)];
+  return [...new Set(requested ?? [])];
 }
 
 /** What the list route requires of the caller in the space it is asked about. */

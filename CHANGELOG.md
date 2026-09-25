@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **`appstrate packages sync` installs the pinned space's agents as Claude Code
+- **`appstrate code sync` installs the pinned space's agents as Claude Code
   commands** (#1268). Each agent active in the pinned space becomes
   `/appstrate:run-<agent>` in the plugin: Claude builds the input from your
   request, uploads local files and launches the agent with the plugin MCP
@@ -124,6 +124,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Run `scripts/migration/0022-revoke-retired-api-keys.sql` after the deploy: it
   revokes the stored `ask_` keys, so Settings → API keys stops listing them. The
   display prefix grows from `ask_` + 4 to `apst_` + 8 characters.
+- **BREAKING (CLI): `appstrate packages sync` is now `appstrate code sync`, and
+  `--target` is required** (#1559). The command does not mirror AFPS packages:
+  it writes the org's skills, and the pinned space's agents as commands, into
+  coding-agent tools, so it is named for them and leaves `packages` to `pull`,
+  `status`, `push` and `publish`. Same flags otherwise, same on-disk state: a
+  machine that synced before keeps its plugin and the skill directories it
+  owns. `appstrate packages sync` no longer exists (`unknown command`), and
+  there is no default target any more: a bare `appstrate code sync` exits 1
+  with a usage line naming the three (`claude-plugin`, `codex`,
+  `claude-user`). What users do once:
+  - **Claude Code plugin:** the marketplace (`appstrate/claude-plugins`) runs
+    the new command from this release on. Claude Code stops re-running a
+    changed command in the background until it is accepted again: run
+    `claude plugin update appstrate@appstrate` and accept it once.
+  - **CLI older than this release:** the marketplace runs a globally installed
+    `appstrate` before falling back to `npx`, and an older one does not know
+    `code sync`, so the plugin stops refreshing until it is upgraded:
+    `appstrate self-update` (curl install) or `npm i -g appstrate@latest`
+    (npm install).
+  - **Scripts:** a cron or launchd entry running `packages sync` (e.g.
+    `--target claude-user`) must be edited to `code sync`, keeping its
+    `--target`; one that relied on the default must add
+    `--target claude-plugin`.
 - **BREAKING (CLI): `appstrate packages pull --version <spec>` is now
   `appstrate packages pull <package>@<spec>`** — the shape `appstrate run` and
   npm already take: `@acme/pdf@1.2.0`, `pdf@latest`, `@acme/pdf@^1.2`. The flag

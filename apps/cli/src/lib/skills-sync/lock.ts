@@ -22,5 +22,5 @@ export function getLockPath(): string {
  * unlocked, after a warning on stderr, where `flock(2)` does not work.
  */
 export function withSyncLock<T>(body: () => Promise<T>, options: FileLockOptions = {}): Promise<T> {
-  return withFileLock(getLockPath(), "packages sync", body, options);
+  return withFileLock(getLockPath(), "code sync", body, options);
 }

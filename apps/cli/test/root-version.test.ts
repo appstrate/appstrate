@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { Command } from "commander";
 import { asksForVersion, valueFlagsOf } from "../src/lib/root-version.ts";
 import { CLI_VERSION } from "../src/lib/version.ts";
+import { runCli } from "./helpers/isolated-process.ts";
 
 const VALUE_FLAGS = new Set(["-p", "--profile"]);
 
@@ -77,7 +78,6 @@ describe("valueFlagsOf", () => {
 });
 
 describe("the real CLI", () => {
-  const CLI_ROOT = join(import.meta.dir, "..");
   let home: string;
 
   beforeAll(async () => {
@@ -87,27 +87,7 @@ describe("the real CLI", () => {
     await rm(home, { recursive: true, force: true });
   });
 
-  async function cli(...args: string[]) {
-    const proc = Bun.spawn([process.execPath, "src/cli.ts", ...args], {
-      cwd: CLI_ROOT,
-      env: {
-        PATH: process.env.PATH ?? "",
-        HOME: home,
-        XDG_CONFIG_HOME: join(home, "config"),
-        XDG_DATA_HOME: join(home, "data"),
-        APPSTRATE_NO_DUAL_INSTALL_CHECK: "1",
-        NO_COLOR: "1",
-      },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    return { stdout, stderr, exitCode };
-  }
+  const cli = (...args: string[]) => runCli(home, ...args);
 
   it("prints its version for -V / --version at the top level", async () => {
     for (const args of [["--version"], ["-V"], ["--profile", "prod", "--version"], ["-Vp", "x"]]) {

@@ -2,7 +2,7 @@
 
 /**
  * Every file of one definition of a package — its draft, or one published
- * version — as ONE archive download. The one code path `packages sync` and
+ * version — as ONE archive download. The one code path `code sync` and
  * `packages pull | status | push` read a package through, so the two cannot
  * disagree about what a definition contains.
  *

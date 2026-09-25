@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The pure half of `appstrate packages sync`: ZIP entries → skill directory.
+ * The pure half of `appstrate code sync`: ZIP entries → skill directory.
  * No network, no filesystem — the drop list, the name rewrite and the
  * determinism rule are assertable in isolation.
  */

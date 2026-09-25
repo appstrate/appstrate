@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The cross-process lock `appstrate packages sync` holds for its whole body.
+ * The cross-process lock `appstrate code sync` holds for its whole body.
  *
  * Tested through the helper rather than the command: the production wait is
  * 60 seconds, and a suite that exercised it for real would take a minute to
@@ -40,7 +40,7 @@ async function expectSyncBusy(run: Promise<unknown>): Promise<void> {
     (e: unknown) => e,
   );
   expect(error).toBeInstanceOf(FileLockBusyError);
-  expect((error as FileLockBusyError).label).toBe("packages sync");
+  expect((error as FileLockBusyError).label).toBe("code sync");
 }
 
 describe("withSyncLock", () => {
@@ -167,7 +167,7 @@ describe("withSyncLock without a working flock", () => {
       tryLock: () => ({ status: "unsupported", reason: "Windows has no flock(2)" }),
     });
     expect(result).toBe("ran");
-    expect(stderr()).toContain("packages sync lock unavailable (Windows has no flock(2))");
+    expect(stderr()).toContain("code sync lock unavailable (Windows has no flock(2))");
     expect(stderr()).toContain("continuing unlocked");
   });
 

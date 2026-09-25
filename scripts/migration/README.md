@@ -586,7 +586,7 @@ idempotent; a second run of either inserts nothing.
   switch it back on there and it returns to the index. The **Intégrations** page
   has no Actives / Toutes tabs — the library is the other half — and an empty
   index names the library rather than pretending the space holds nothing.
-- `appstrate packages sync` writes only the skills a space has ACTIVE. Switch a
+- `appstrate code sync` writes only the skills a space has ACTIVE. Switch a
   skill off in a space, sync again, and its directory disappears from the target;
   switch it back on and the next sync restores it.
 - A SCHEDULE on a switched-off agent creates a **visible failed run** naming the

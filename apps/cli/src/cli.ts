@@ -12,8 +12,10 @@
  *   - `appstrate token`:   print access + refresh token metadata (debug).
  *   - `appstrate org`:     manage the pinned organization (`X-Org-Id`).
  *   - `appstrate space`:   manage the pinned space (`X-Space-Id`).
- *   - `appstrate packages`: sync the spaces' skills to Claude Code / Codex; pull a package
- *                           into a folder, push it to its draft, publish it.
+ *   - `appstrate code`:    project the spaces' skills and the pinned space's agents into
+ *                           coding-agent tools (Claude Code plugin, `~/.claude/skills`, Codex).
+ *   - `appstrate packages`: pull a package into a folder, compare it, push it to its draft,
+ *                           publish it.
  *   - `appstrate api`:     authenticated HTTP passthrough for coding agents.
  *
  * Global flags:
@@ -51,7 +53,7 @@ import {
   spaceCurrentCommand,
   spaceCreateCommand,
 } from "./commands/space.ts";
-import { packagesSyncCommand } from "./commands/packages-sync.ts";
+import { codeSyncCommand } from "./commands/code-sync.ts";
 import {
   packagesPublishCommand,
   packagesPullCommand,
@@ -132,7 +134,7 @@ function collect(val: string, prev: string[]): string[] {
   return [...prev, val];
 }
 
-/** Repeatable `--target`. No commander default: the command owns that rule. */
+/** Repeatable `--target`. Required, enforced by the command rather than commander. */
 function collectTarget(val: string, prev: SyncTarget[] | undefined): SyncTarget[] {
   if (!(SYNC_TARGETS as readonly string[]).includes(val)) {
     throw new InvalidArgumentError(`expected one of ${SYNC_TARGETS.join(", ")}, got "${val}"`);
@@ -140,7 +142,7 @@ function collectTarget(val: string, prev: SyncTarget[] | undefined): SyncTarget[
   return [...(prev ?? []), val as SyncTarget];
 }
 
-/** `--source` on `appstrate packages sync`. */
+/** `--source` on `appstrate code sync`. */
 function parseSkillSource(val: string): SkillSource {
   if (val !== "published" && val !== "draft") {
     throw new InvalidArgumentError(`expected published or draft, got "${val}"`);
@@ -532,22 +534,22 @@ spaceGroup
     });
   });
 
-// ─── `appstrate packages …` — sync skills to Claude Code / Codex; the authoring loop ─
+// ─── `appstrate code …` — skills and agent commands into coding-agent tools ──
 
-const packagesGroup = program
-  .command("packages")
+const codeGroup = program
+  .command("code")
   .description(
-    "Packages on this machine: sync your spaces' skills to Claude Code and Codex; edit a package (skill, agent, integration, MCP server) in a local folder, push it back, publish it",
+    "Coding-agent tools on this machine: project your spaces' skills and the pinned space's agents into Claude Code and Codex",
   );
 
-packagesGroup
+codeGroup
   .command("sync")
   .description(
-    "Materialize the skills of every space this profile is a member of as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
+    "Materialize the skills of every space this profile is a member of as Agent Skills directories, and the pinned space's agents as plugin commands. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
   )
   .option(
     "--target <target>",
-    `Destination to write (repeatable): ${SYNC_TARGETS.join(" | ")}. Default: claude-plugin.`,
+    `Destination to write (required, repeatable): ${SYNC_TARGETS.join(" | ")}.`,
     collectTarget,
   )
   .option(
@@ -570,7 +572,7 @@ packagesGroup
       dryRun?: boolean;
     }) => {
       const globalOpts = program.opts<{ profile?: string }>();
-      await packagesSyncCommand({
+      await codeSyncCommand({
         profile: globalOpts.profile,
         target: opts.target,
         space: opts.space,
@@ -579,6 +581,14 @@ packagesGroup
         dryRun: opts.dryRun,
       });
     },
+  );
+
+// ─── `appstrate packages …` — the authoring loop ────────
+
+const packagesGroup = program
+  .command("packages")
+  .description(
+    "Edit a package (skill, agent, integration, MCP server) in a local folder: pull it, compare it, push it back to its draft, publish it",
   );
 
 packagesGroup
