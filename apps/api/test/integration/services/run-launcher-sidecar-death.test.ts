@@ -11,7 +11,7 @@
  * deterministic.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import type {
   RunOrchestrator,
   IsolationBoundary,
@@ -21,6 +21,7 @@ import type {
   StopResult,
 } from "@appstrate/core/platform-types";
 import { truncateAll } from "../../helpers/db.ts";
+import { logger } from "../../../src/lib/logger.ts";
 import { runPlatformContainer } from "../../../src/services/run-launcher/pi.ts";
 import { mintSinkCredentials } from "../../../src/lib/mint-sink-credentials.ts";
 import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.ts";
@@ -48,7 +49,7 @@ function exit(): Exit {
  * exit is always observed FIRST, the ordering that must not be misread as a
  * sidecar death.
  */
-function createFake(opts: { sidecarExitsIndependently?: boolean }) {
+function createFake(opts: { sidecarExitsIndependently?: boolean; sidecarLogs?: string[] }) {
   const agent = exit();
   const sidecar = exit();
   const stopped: string[] = [];
@@ -95,7 +96,9 @@ function createFake(opts: { sidecarExitsIndependently?: boolean }) {
     waitForExit(handle: WorkloadHandle): Promise<number> {
       return handle.role === "sidecar" ? sidecar.promise : agent.promise;
     },
-    async *streamLogs(): AsyncGenerator<string> {},
+    async *streamLogs(handle: WorkloadHandle): AsyncGenerator<string> {
+      if (handle.role === "sidecar") yield* opts.sidecarLogs ?? [];
+    },
     async stopByRunId(): Promise<StopResult> {
       return "stopped";
     },
@@ -184,6 +187,28 @@ describe("run launcher — sidecar death", () => {
     fake.sidecar.resolve(1);
     await expect(run).rejects.toThrow("Sidecar exited with code 1 while the run was in progress");
     expect(fake.stopped).toContain("agent");
+  });
+
+  it("logs the sidecar's exit code and the tail of its logs", async () => {
+    const logs = Array.from({ length: 40 }, (_, i) => `line ${i}`);
+    const fake = createFake({ sidecarExitsIndependently: true, sidecarLogs: logs });
+    const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const run = launch("run_sidecar_tail", fake.orchestrator);
+      await settle();
+      fake.sidecar.resolve(1);
+      await expect(run).rejects.toThrow("Sidecar exited with code 1");
+      const call = errorSpy.mock.calls.find(
+        ([msg]) => msg === "Sidecar exited while the run was in progress",
+      );
+      expect(call?.[1]).toEqual({
+        runId: "run_sidecar_tail",
+        exitCode: 1,
+        tail: logs.slice(-30).join("\n"),
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("ignores the sidecar on an orchestrator that cannot observe it on its own", async () => {

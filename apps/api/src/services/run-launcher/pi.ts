@@ -645,10 +645,11 @@ async function waitForWorkload(
       // and forward proxy all sat behind the sidecar. Stop it rather than let
       // it wait out its MCP handshake deadline, then fail on the real cause.
       orch.stopWorkload(agent).catch(() => {});
-      await agentExit.catch(() => {});
+      const [, tail] = await Promise.all([agentExit.catch(() => {}), readLogTail(orch, sidecar)]);
       logger.error("Sidecar exited while the run was in progress", {
         runId: agent.runId,
         exitCode: sidecarDeath,
+        ...(tail ? { tail } : {}),
       });
       throw new Error(
         `Sidecar exited with code ${sidecarDeath} while the run was in progress; the agent was stopped`,
@@ -703,6 +704,30 @@ async function firstUnexpectedSidecarExit(
   const first = await Promise.race([agentDone, sidecarDone]);
   if (first === null || stopRequested()) return agentDone;
   return first;
+}
+
+const SIDECAR_TAIL_LINES = 30;
+const SIDECAR_TAIL_TIMEOUT_MS = 2_000;
+
+/**
+ * Last lines of an exited workload's logs, for the crash report. Bounded in
+ * time; best-effort, so a log read failure never masks the exit itself.
+ */
+async function readLogTail(orch: RunOrchestrator, handle: WorkloadHandle): Promise<string> {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), SIDECAR_TAIL_TIMEOUT_MS);
+  const lines: string[] = [];
+  try {
+    for await (const line of orch.streamLogs(handle, abort.signal)) {
+      lines.push(line);
+      if (lines.length > SIDECAR_TAIL_LINES) lines.shift();
+    }
+  } catch {
+    // Diagnostics only.
+  } finally {
+    clearTimeout(timer);
+  }
+  return lines.join("\n");
 }
 
 /** Leading dash-separated segments a placeholder may keep. */
