@@ -556,8 +556,8 @@ interface CreateRunParams {
   modelSource?: string;
   /** The model the run launched with — see `runs.model_id`. */
   modelId: string | null;
-  /** Who serves the run's inference — see `runs.inference_route`. Absent on a remote-origin run. */
-  inferenceRoute?: InferenceRoute;
+  /** Who serves the run's inference — see `runs.inference_route`. Null on a remote-origin run. */
+  inferenceRoute: InferenceRoute | null;
   /**
    * Per-1M-token rates the run is launched with (the `MODEL_COST` the container
    * receives). Persisted so the runner's ledger row — whose `cost` the container
@@ -704,7 +704,7 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
       modelLabel: params.modelLabel,
       modelSource: params.modelSource,
       modelId: params.modelId,
-      inferenceRoute: params.inferenceRoute ?? null,
+      inferenceRoute: params.inferenceRoute,
       modelCost: params.modelCost ?? null,
       generationConfig:
         params.generationConfig == null

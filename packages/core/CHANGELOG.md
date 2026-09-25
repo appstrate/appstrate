@@ -149,6 +149,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `modelSwap`. It carries no provider credential, and replaces the removed
   `api_key` member (see Removed). A consumer that switches exhaustively on
   `LlmProxyConfig["authMode"]` must handle the new member and drop `api_key`.
+- **BREAKING: `checkAliasInvariants` takes no `apiShape`, and
+  `AliasInvariantViolation` has no `non_aliasable_shape` member**
+  (`@appstrate/core/model-swap`, #1568). An alias's backing shape is its
+  provider's, and the platform refuses to register a provider on
+  `ALIAS_CLIENT_API_SHAPE`, so the check could no longer fail. A caller drops
+  the `apiShape` input and any branch on the removed violation.
 - **BREAKING: model generation settings are snake_case** (`@appstrate/core/model-generation`,
   #1545): `modelGenerationSettingsSchema` reads `reasoning_level` (was
   `reasoningLevel`), and `ModelGenerationCapabilities` spells

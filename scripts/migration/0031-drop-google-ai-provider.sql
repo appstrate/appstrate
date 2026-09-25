@@ -53,6 +53,34 @@ SELECT
      JOIN model_provider_credentials c ON c.id = r.model_credential_id
      WHERE c.provider_id = 'google-ai') AS runs_losing_credential_id;
 
+-- ═══ RECORD — every row deleted or re-pointed below, with what it held.
+-- Nothing else keeps it: save this psql output with the deploy notes. ═══
+SELECT c.org_id, c.id AS credential_id, c.label AS credential_label
+FROM model_provider_credentials c
+WHERE c.provider_id = 'google-ai'
+ORDER BY c.org_id, c.id;
+
+SELECT m.org_id, m.id AS org_model_id, m.label, m.model_id AS upstream_model_id,
+       m.credential_id
+FROM org_models m
+JOIN doomed_google_ai_models d ON m.id::text = d.id
+ORDER BY m.org_id, m.id;
+
+SELECT o.id AS org_id, o.default_model_id AS nulled_model_id
+FROM organizations o
+JOIN doomed_google_ai_models d ON o.default_model_id = d.id
+ORDER BY o.id;
+
+SELECT p.space_id, p.package_id, p.model_id AS nulled_model_id
+FROM space_packages p
+JOIN doomed_google_ai_models d ON p.model_id = d.id
+ORDER BY p.space_id, p.package_id;
+
+SELECT s.id AS schedule_id, s.org_id, s.model_id_override AS nulled_model_id
+FROM package_schedules s
+JOIN doomed_google_ai_models d ON s.model_id_override = d.id
+ORDER BY s.id;
+
 -- ═══ POINTERS — every column naming a doomed model ═══
 UPDATE organizations o
 SET default_model_id = NULL, updated_at = now()

@@ -123,6 +123,18 @@ describe("/llm/* — platform mode", () => {
     }
     expect(fetchFn).not.toHaveBeenCalled();
   });
+
+  it("refuses to build for a shape the platform proxy does not serve", () => {
+    const { fetchFn } = capturingFetch();
+    const llm: LlmProxyConfig = {
+      authMode: "platform",
+      apiShape: "openai-codex-responses",
+      baseUrl: "https://chatgpt.com/backend-api",
+    };
+    expect(() => createTestApp(deps(llm, fetchFn))).toThrow(
+      'LLM api shape "openai-codex-responses" is not served by the platform LLM proxy',
+    );
+  });
 });
 
 describe("/llm/messages — platform mode, aliased", () => {

@@ -406,8 +406,8 @@ function llmFetchErrorResponse(targetUrl: string, err: unknown): Response {
     // Not a parseable URL — omit the hostname hint rather than fail.
   }
   const suffix = code ? `: ${code}` : "";
-  // Only non-aliased requests reach an upstream fetch here, so the hostname
-  // keeps its debugging value.
+  // The host dialed: the platform API (platform mode) or the subscription
+  // provider (oauth) — never an aliased backing, which pi-ai dials itself.
   const domainHint = domain ? ` (${domain})` : "";
   return llmProxyError(502, "api_error", `LLM request failed${suffix}${domainHint}`);
 }
@@ -506,9 +506,6 @@ function deriveLlmTarget(
   return { targetUrl: `${baseUrl}${path}${qs}`, method: c.req.method, path };
 }
 
-/** pi-ai needs a key to sign with; the proxy ignores it and reads the run token. */
-const PLATFORM_PROXY_API_KEY = "appstrate-run";
-
 /** Where a platform-mode `/llm/*` call goes, and how the sidecar authenticates there. */
 interface PlatformLlmUpstream {
   baseUrl: string;
@@ -520,12 +517,14 @@ interface PlatformLlmUpstream {
   pi: PiMessagesBackendDeps["upstream"];
 }
 
-/** `null` for a shape the proxy does not serve, which `server.ts` refuses at boot. */
+/** Throws for a shape the proxy does not serve — `server.ts` refuses it at boot too. */
 function platformLlmUpstream(
   config: SidecarConfig,
   llm: LlmProxyPlatformConfig,
-): PlatformLlmUpstream | null {
-  if (!isProxiedApiShape(llm.apiShape)) return null;
+): PlatformLlmUpstream {
+  if (!isProxiedApiShape(llm.apiShape)) {
+    throw new Error(`LLM api shape "${llm.apiShape}" is not served by the platform LLM proxy`);
+  }
   const headers = { authorization: `Bearer ${config.runToken}` };
   const baseUrl = llmProxyBaseUrl(config.platformApiUrl, llm.apiShape, RUN_LLM_PROXY_MOUNT);
   return {
@@ -537,7 +536,7 @@ function platformLlmUpstream(
       return forwarded;
     },
     // The Model keeps the backing's endpoint (pi-ai reads its dialect off it).
-    pi: { baseUrl: llm.baseUrl, apiKey: PLATFORM_PROXY_API_KEY, via: { baseUrl, headers } },
+    pi: { modelBaseUrl: llm.baseUrl, proxyBaseUrl: baseUrl, headers },
   };
 }
 
@@ -749,8 +748,8 @@ export function createApp(deps: AppDeps): Hono {
       return handleOauthLlmRequest(c, llm);
     }
 
-    const upstreamLlm = platformUpstream;
-    if (!upstreamLlm) return llmProxyError(503, "api_error", "LLM proxy not configured");
+    // Built by `createApp` for every platform config (it throws otherwise).
+    const upstreamLlm = platformUpstream!;
     const { targetUrl, method, path } = deriveLlmTarget(c, upstreamLlm.baseUrl);
 
     // ALIASED runs get a narrowed `/llm/*` surface — the pi-messages inference

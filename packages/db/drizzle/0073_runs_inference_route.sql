@@ -4,10 +4,10 @@
 -- subscription token; the runner reports its own usage).
 --
 -- SHAPE ONLY (`docs/NO_TRANSITIONAL_CODE.md` §2): a nullable column, no
--- backfill. NULL = a remote-origin run, or a run launched before this
--- migration; both keep their runner ledger row and are refused by the
--- proxy's run entry. Every existing row is NULL, so the CHECK validates
--- vacuously.
+-- backfill. NULL = no route recorded (every remote-origin run, every row
+-- existing at migration time): the runner's ledger row is kept and the
+-- proxy's run entry refuses the run. Every existing row is NULL, so the
+-- CHECK validates vacuously.
 --
 -- ROLLBACK: a previous build never reads the column; drop the constraint,
 -- the column, then the type.

@@ -23,16 +23,15 @@ import {
   syntheticAliasErrorBody,
 } from "../src/model-swap.ts";
 import { classifyModelError } from "../src/model-error.ts";
-import type { ModelApiShape, ModelSwap } from "../src/sidecar-types.ts";
+import { MODEL_API_SHAPES, type ModelApiShape, type ModelSwap } from "../src/sidecar-types.ts";
 
 describe("checkAliasInvariants", () => {
   const wellFormed = {
     label: "Appstrate Medium",
-    apiShape: "anthropic-messages" as ModelApiShape,
     authMode: "api_key" as const,
   };
 
-  it("accepts a labelled, body-model, api-key alias", () => {
+  it("accepts a labelled api-key alias", () => {
     expect(checkAliasInvariants(wellFormed)).toBeNull();
   });
 
@@ -46,32 +45,14 @@ describe("checkAliasInvariants", () => {
     expect(checkAliasInvariants({ ...wellFormed, authMode: "oauth2" })).toBe("oauth_provider");
   });
 
-  it("reports the label violation before the shape/auth ones (route error precedence)", () => {
-    expect(
-      checkAliasInvariants({ label: undefined, apiShape: wellFormed.apiShape, authMode: "oauth2" }),
-    ).toBe("missing_label");
+  it("reports the label violation before the auth one (route error precedence)", () => {
+    expect(checkAliasInvariants({ label: undefined, authMode: "oauth2" })).toBe("missing_label");
   });
 
-  it("rejects the client-only dialect as a backing", () => {
-    // `pi-messages` is what an aliased CONTAINER speaks to the sidecar. It is
-    // never something the sidecar re-originates against.
-    expect(checkAliasInvariants({ ...wellFormed, apiShape: "pi-messages" })).toBe(
-      "non_aliasable_shape",
-    );
-  });
-
-  it("isAliasBackingShape matches the backing whitelist", () => {
-    const backingShapes: ModelApiShape[] = [
-      "anthropic-messages",
-      "openai-completions",
-      "openai-responses",
-      "openai-codex-responses",
-      "mistral-conversations",
-    ];
-    for (const shape of backingShapes) {
-      expect(isAliasBackingShape(shape)).toBe(true);
+  it("isAliasBackingShape accepts every shape but the client dialect", () => {
+    for (const shape of MODEL_API_SHAPES) {
+      expect(isAliasBackingShape(shape)).toBe(shape !== "pi-messages");
     }
-    expect(isAliasBackingShape("pi-messages")).toBe(false);
   });
 
   it("isAliasClientShape accepts only the canonical client dialect", () => {

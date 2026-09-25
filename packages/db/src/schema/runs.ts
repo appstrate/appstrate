@@ -165,9 +165,9 @@ export const runs = pgTable(
     // run's own inference from it, never from a model the request names. NULL
     // on a remote-origin run, which resolves no platform model.
     modelId: text("model_id"),
-    // Who serves the run's inference, decided at launch. NULL on a remote-origin
-    // run, which resolves no platform model, and on a run launched before the
-    // column existed — both report their own usage as a runner ledger row.
+    // Who serves the run's inference, decided at launch. NULL = no route
+    // recorded (a remote-origin run resolves no platform model): the runner's
+    // ledger row is kept and the proxy's run entry refuses the run.
     inferenceRoute: inferenceRouteEnum("inference_route"),
     // Effective generation settings frozen at kickoff for reproducibility.
     generationConfig: jsonb("generation_config").$type<ModelGenerationSettings>(),

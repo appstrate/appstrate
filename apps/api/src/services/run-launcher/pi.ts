@@ -49,7 +49,7 @@ import { startBootHeartbeat } from "../run-boot-heartbeat.ts";
 import { runWithSpan, currentTraceparent, recordContainerSpawn } from "@appstrate/core/telemetry";
 
 import { getEnv } from "@appstrate/env";
-import { checkEgressUrl } from "../../lib/egress-host-guard.ts";
+import { isBlockedEgressUrl } from "../../lib/egress-host-guard.ts";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { LlmProxyConfig, ModelSwap, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 
@@ -77,16 +77,22 @@ function platformTimeoutBootGraceMs(): number {
 /**
  * Thrown before provisioning when the model's base URL targets a network range
  * the platform's egress guard refuses (loopback, private, link-local, internal
- * names) and `EGRESS_ALLOW_INTERNAL_HOSTS` does not list its host.
+ * names) and `EGRESS_ALLOW_INTERNAL_HOSTS` does not list its host. The message
+ * lands in `runs.error`, readable by run readers: an aliased model's host is
+ * never named, since the alias exists to hide its backing.
  */
 class LlmBaseUrlBlockedError extends Error {
-  constructor(baseUrl: string) {
-    const host = URL.parse(baseUrl)?.hostname ?? "(unparseable URL)";
+  constructor(baseUrl: string, aliased: boolean) {
+    const host = aliased ? null : (URL.parse(baseUrl)?.hostname ?? "(unparseable URL)");
     super(
-      `The model's base URL targets a blocked network range (host "${host}"). The ` +
-        `platform reaches a private or local model endpoint only when ` +
-        `EGRESS_ALLOW_INTERNAL_HOSTS lists its host. Add "${host}" to ` +
-        `EGRESS_ALLOW_INTERNAL_HOSTS, or point the model at a public endpoint.`,
+      host
+        ? `The model's base URL targets a blocked network range (host "${host}"). The ` +
+            `platform reaches a private or local model endpoint only when ` +
+            `EGRESS_ALLOW_INTERNAL_HOSTS lists its host. Add "${host}" to ` +
+            `EGRESS_ALLOW_INTERNAL_HOSTS, or point the model at a public endpoint.`
+        : `The model's base URL targets a blocked network range. The platform ` +
+            `reaches a private or local model endpoint only when ` +
+            `EGRESS_ALLOW_INTERNAL_HOSTS lists its host.`,
     );
     this.name = "LlmBaseUrlBlockedError";
   }
@@ -165,12 +171,12 @@ async function runPlatformContainerImpl(
 
   const { llmConfig } = plan;
 
-  // Classified by `inferenceRouteOf`, the route stamped on the run: an
-  // oauth-class credential is delivered via the sidecar `/llm` bearer-swap;
-  // everything else is served by the platform LLM proxy. Fail-closed: an OAuth
-  // provider that resolved WITHOUT a stored credential id throws here (invalid
-  // configuration — it must never downgrade to the proxy, which cannot use a
-  // subscription token).
+  // Classified by `inferenceRouteOf`, the function the pipeline also stamps
+  // `runs.inference_route` from: an oauth-class credential is delivered via
+  // the sidecar `/llm` bearer-swap; everything else is served by the platform
+  // LLM proxy. Fail-closed: an OAuth provider that resolved WITHOUT a stored
+  // credential id throws here (invalid configuration — it must never downgrade
+  // to the proxy, which cannot use a subscription token).
   const delivery = resolveCredentialDelivery({
     providerId: llmConfig.providerId,
     credentialId: llmConfig.credentialId,
@@ -217,11 +223,12 @@ async function runPlatformContainerImpl(
       providerId: llmConfig.providerId,
     });
 
-    // Whoever dials the base URL refuses a blocked range. Same guard, same
-    // allowlist, checked here so the run fails with the remedy at launch instead
-    // of on its first inference call.
-    if (!(await checkEgressUrl(llmConfig.baseUrl)).ok) {
-      throw new LlmBaseUrlBlockedError(llmConfig.baseUrl);
+    // Whoever dials the base URL refuses a blocked range, re-checked with DNS on
+    // every call. The literal check here (same allowlist, no DNS lookup) fails
+    // an obviously blocked endpoint at launch, with the remedy, instead of on
+    // its first inference call.
+    if (isBlockedEgressUrl(llmConfig.baseUrl)) {
+      throw new LlmBaseUrlBlockedError(llmConfig.baseUrl, !!llmConfig.aliased);
     }
 
     // Boot-phase liveness (see services/run-boot-heartbeat.ts). From here to

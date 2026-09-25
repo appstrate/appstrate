@@ -28,7 +28,7 @@ import { HOP_BY_HOP_HEADERS } from "./proxy-primitives.ts";
 
 const DROPPED = new Set([
   ...HOP_BY_HOP_HEADERS,
-  // The auth slots pi-ai's SDKs write a provider key into.
+  // Inbound credential slots, never forwarded: each proxy sets its own auth.
   "authorization",
   "x-api-key",
   "x-goog-api-key",

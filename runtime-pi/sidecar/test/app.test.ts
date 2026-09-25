@@ -211,7 +211,7 @@ describe("ALL /llm/* — basic routing", () => {
     });
   });
 
-  it("forwards path and query string to baseUrl", async () => {
+  it("forwards the query string to the platform proxy's inference endpoint", async () => {
     const fetchFn = mock(
       async (_url: string, _init?: RequestInit) =>
         new Response('{"id":"msg_1"}', {
@@ -232,7 +232,7 @@ describe("ALL /llm/* — basic routing", () => {
     expect(url).toBe(`${PROXY_INFERENCE_URL}?stream=true`);
   });
 
-  it("returns 502 with hostname hint when upstream fetch fails", async () => {
+  it("returns 502 naming the platform host when the proxy fetch fails", async () => {
     const fetchFn = mock(async () => {
       throw new Error("ECONNREFUSED");
     });

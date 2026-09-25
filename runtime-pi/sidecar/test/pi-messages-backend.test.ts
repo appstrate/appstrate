@@ -133,9 +133,9 @@ const PROXY_HEADERS = { authorization: "Bearer run-token" };
 
 function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessagesBackendDeps {
   const upstream = {
-    baseUrl: backing.baseUrl,
-    apiKey: "appstrate-run",
-    via: { baseUrl: "https://platform.invalid/internal/llm-proxy/x", headers: PROXY_HEADERS },
+    modelBaseUrl: backing.baseUrl,
+    proxyBaseUrl: "https://platform.invalid/internal/llm-proxy/x",
+    headers: PROXY_HEADERS,
   };
   const swap: ModelSwap = {
     alias: "appstrate-medium",
@@ -605,7 +605,7 @@ describe("event projection", () => {
  * them" but "hold them sidecar-side behind opaque handles", a redesign.
  * `docs/architecture/MODEL_ALIASES.md` (tier 1) records them and what closing
  * them would cost. Each note below says what its field narrows to, measured
- * against the five shapes an alias can be backed by (`ALIAS_BACKING_SHAPES`:
+ * against the five shapes an alias can be backed by (`AliasBackingApiShape`:
  * anthropic-messages, openai-completions, openai-responses,
  * openai-codex-responses, mistral-conversations).
  */

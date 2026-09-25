@@ -43,7 +43,7 @@ function makeDeps(fetchFn: typeof fetch): AppDeps {
 }
 
 describe("/llm/* upstream failure (no alias)", () => {
-  it("keeps the upstream hostname in a fetch-level 502 when NO swap is configured", async () => {
+  it("names the platform host in a fetch-level 502 when NO swap is configured", async () => {
     const fetchFn = mock(async () => {
       throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ConnectionRefused" });
     }) as unknown as typeof fetch;
@@ -58,7 +58,7 @@ describe("/llm/* upstream failure (no alias)", () => {
     });
     expect(res.status).toBe(502);
     const text = await res.text();
-    // No alias to protect — the hostname keeps its debugging value.
+    // No alias to protect, and the host dialed is the platform API's.
     expect(text).toContain("ConnectionRefused");
     expect(text).toContain("(mock)");
   });

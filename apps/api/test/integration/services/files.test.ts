@@ -1879,6 +1879,7 @@ describe("files service + routes", () => {
       actor: userActor,
       input: { source: `appfile://${doc.id}` },
       modelId: null,
+      inferenceRoute: null,
       consumedFileIds: [doc.id, doc.id],
     });
 
@@ -1899,6 +1900,7 @@ describe("files service + routes", () => {
         actor: userActor,
         input: { source: `appfile://${missingFileId}` },
         modelId: null,
+        inferenceRoute: null,
         consumedFileIds: [missingFileId],
       });
       throw new Error("expected createRunState to reject");

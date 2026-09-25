@@ -886,11 +886,14 @@ needs no running service.
 ## Detail — Retired `google-ai` model provider (script `0031`)
 
 **Not a runbook.** The release drops the `google-ai` provider and the
-`google-generative-ai` shape; a model bound to a surviving credential of it is
-refused at resolution (409 `model_provider_unregistered`), never silently
-replaced. `0031` deletes those credentials and their `org_models`, NULLing the
-three pointers that name one first. Run it inside the deploy window, before the
-new image boots. Details in the file header.
+`google-generative-ai` shape; at runtime a model bound to a surviving credential
+of it is refused (409 `model_provider_unregistered`). `0031` deletes those
+credentials and their `org_models`, and NULLs the three pointers that name one
+first — an org default, space pin or schedule override that named one silently
+falls back to the next model in line. It lists every row it deletes or
+re-points, with the value it held, before writing: that psql output is the only
+record, keep it. Run it inside the deploy window, before the new image boots.
+Details in the file header.
 
 ## Log
 

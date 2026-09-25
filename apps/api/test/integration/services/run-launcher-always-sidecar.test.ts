@@ -576,7 +576,7 @@ describe("run-launcher — sidecar wiring", () => {
 
   // The platform proxy refuses a base URL on a blocked range unless
   // EGRESS_ALLOW_INTERNAL_HOSTS lists the host. The launcher applies the same
-  // guard before provisioning anything.
+  // literal blocklist and allowlist before provisioning anything.
   describe("LLM base URL on a blocked network range", () => {
     const localModel = (baseUrl: string): AppstrateRunPlan["llmConfig"] => ({
       providerId: "openai-compatible",
@@ -591,11 +591,16 @@ describe("run-launcher — sidecar wiring", () => {
       aliasId: "llama3",
     });
 
-    const launch = (runId: string, baseUrl: string, orchestrator: RunOrchestrator) =>
+    const launch = (
+      runId: string,
+      baseUrl: string,
+      orchestrator: RunOrchestrator,
+      overrides: Partial<AppstrateRunPlan["llmConfig"]> = {},
+    ) =>
       runPlatformContainer({
         runId,
         context: buildContext(runId),
-        plan: buildRunPlan({ llmConfig: localModel(baseUrl) }),
+        plan: buildRunPlan({ llmConfig: { ...localModel(baseUrl), ...overrides } }),
         sinkCredentials: mintSinkCredentials({
           runId,
           appUrl: "http://platform:3000",
@@ -633,6 +638,20 @@ describe("run-launcher — sidecar wiring", () => {
         ).rejects.toMatchObject({ name: "LlmBaseUrlBlockedError" });
         expect(counts.createBoundaryCalls).toBe(0);
       }
+    });
+
+    it("never names an aliased model's host in the run error", async () => {
+      const { orchestrator, counts } = createCountingFake();
+      const error = await launch(
+        "run_aliased_blocked_llm",
+        "http://10.0.0.7:8000/v1",
+        orchestrator,
+        { aliased: true, aliasId: "appstrate-local" },
+      ).catch((e: unknown) => e);
+      expect(error).toMatchObject({ name: "LlmBaseUrlBlockedError" });
+      expect((error as Error).message).toContain("EGRESS_ALLOW_INTERNAL_HOSTS");
+      expect((error as Error).message).not.toContain("10.0.0.7");
+      expect(counts.createBoundaryCalls).toBe(0);
     });
 
     it("launches when the operator allowlisted the host", async () => {

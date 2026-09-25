@@ -3,10 +3,10 @@
 /**
  * What a credential's provider serves: guarded `GET <baseUrl>/models` requests
  * (`fetchModelListing`, the credential test's transport), parsed from the
- * `{ data: [{ id }] }` body every supported shape answers. Per-entry capability fields some servers publish (vLLM
- * `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` /
- * `architecture` / `supported_parameters`, LM Studio `max_context_length`)
- * are read from the entry in hand as hints.
+ * `{ data: [{ id }] }` body every supported shape answers. Per-entry capability
+ * fields some servers publish (vLLM `max_model_len`, Mistral `capabilities`,
+ * OpenRouter `context_length` / `architecture` / `supported_parameters`, LM
+ * Studio `max_context_length`) are read from the entry in hand as hints.
  *
  * A listing that declares a next page is followed to its end, under a page cap,
  * a model cap and a per-page byte budget; a result cut by any of them is

@@ -158,7 +158,7 @@ export const testInlineSchema = z
  * Map an alias-invariant violation to its 400 — shared by the create and
  * update handlers so PATCH cannot accept a state POST rejects (issue #727).
  */
-function throwOnAliasViolation(violation: AliasInvariantViolation | null, apiShape: string): void {
+function throwOnAliasViolation(violation: AliasInvariantViolation | null): void {
   // 1. Require an explicit label. The derive-from-catalog fallback (POST) —
   //    or a label derived at creation time and kept on update — would name
   //    the alias after its REAL backing ("DeepSeek Chat"), and `label`
@@ -170,16 +170,7 @@ function throwOnAliasViolation(violation: AliasInvariantViolation | null, apiSha
       "label",
     );
   }
-  // 2. An alias is backed by a vendor protocol whose body `model` field the
-  //    swap rewrites; `pi-messages` is the client dialect an aliased run
-  //    speaks, never a backing. Reject up front.
-  if (violation === "non_aliasable_shape") {
-    throw invalidRequest(
-      `Model aliases are not supported for the "${apiShape}" protocol — it is a client dialect, not a vendor protocol an alias can be backed by.`,
-      "aliased",
-    );
-  }
-  // 3. The oauth-subscription run path is a pure sidecar bearer-swap —
+  // 2. The oauth-subscription run path is a pure sidecar bearer-swap —
   //    it never rewrites the body, so an alias there could not be
   //    swapped (nor masked). Reject up front.
   if (violation === "oauth_provider") {
@@ -287,10 +278,8 @@ export function createModelsRouter() {
         throwOnAliasViolation(
           checkAliasInvariants({
             label: data.label,
-            apiShape: creds.apiShape,
             authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
           }),
-          creds.apiShape,
         );
       }
       // Token-budget invariant on the EFFECTIVE state: an override omitted
@@ -589,10 +578,8 @@ export function createModelsRouter() {
           // already-aliased row's label is explicit by construction (POST
           // enforced it), so it stays valid when this PATCH omits `label`.
           label: data.label ?? (current.aliased ? current.label : undefined),
-          apiShape: creds.apiShape,
           authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
         }),
-        creds.apiShape,
       );
     }
 

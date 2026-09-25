@@ -204,7 +204,14 @@ describe("DELETE /api/orgs/:orgId — deletion reservation", () => {
 
     const err = await createRun(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-      { id: "run_after_reservation", packageId: pkg.id, actor: null, input: null, modelId: null },
+      {
+        id: "run_after_reservation",
+        packageId: pkg.id,
+        actor: null,
+        input: null,
+        modelId: null,
+        inferenceRoute: null,
+      },
     ).then(
       () => null,
       (e: unknown) => e,
@@ -222,7 +229,14 @@ describe("DELETE /api/orgs/:orgId — deletion reservation", () => {
 
     await createRun(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-      { id: "run_no_reservation", packageId: pkg.id, actor: null, input: null, modelId: null },
+      {
+        id: "run_no_reservation",
+        packageId: pkg.id,
+        actor: null,
+        input: null,
+        modelId: null,
+        inferenceRoute: null,
+      },
     );
 
     const rows = await db.select({ id: runs.id }).from(runs).where(eq(runs.orgId, ctx.orgId));

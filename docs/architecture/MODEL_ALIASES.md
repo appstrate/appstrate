@@ -264,19 +264,23 @@ differently — and neither does it by "letting the headers flow".**
   transaction, not the vendor) — and why the ALIAS, which does not, is kept out
   of that same string.
 
-Non-aliased models keep full verbatim passthrough (bodies, headers, hostnames)
-— the opacity cost applies only to aliases, whose contract is precisely that
-opacity. The trade-off: aliased callers lose upstream error detail (e.g. a
+Non-aliased models keep the upstream's error bodies verbatim, relayed by the
+platform LLM proxy — a run still reaches only that proxy's inference endpoint,
+and the sidecar still cuts response headers to `LLM_PASSTHROUGH_RESPONSE_HEADERS`.
+The synthesized-error cost applies only to aliases, whose contract is precisely
+that opacity. The trade-off: aliased callers lose upstream error detail (e.g. a
 provider's "max_tokens too large" prose); the detail remains in server logs.
 
 ## Constraints
 
 - **Body-`model` protocols only, and BACKING and CLIENT are separate sets.**
-  `isAliasBackingShape` — the invariant `POST/PUT /api/models` and the env-seeded
-  registry both check — admits exactly `anthropic-messages`,
+  An alias's backing shape is its credential's provider shape, and provider
+  registration refuses `pi-messages` on any provider, so every backing is in
+  `AliasBackingApiShape`, which the sidecar re-checks on `PI_MODEL_SWAP_JSON` at
+  boot (`isAliasBackingShape`). It admits exactly `anthropic-messages`,
   `openai-completions`, `openai-responses`, `openai-codex-responses`,
-  `mistral-conversations` (`ALIAS_BACKING_SHAPES`) — every vendor protocol the
-  platform maps, each carrying the model id in the body. `pi-messages` is
+  `mistral-conversations` (every `ModelApiShape` but the client dialect) — every vendor protocol the platform maps, each carrying the
+  model id in the body. `pi-messages` is
   **not** a backing shape: it is the CLIENT dialect, matched by the separate
   `isAliasClientShape` / `ALIAS_CLIENT_API_SHAPE`. Because sidecar boot pins
   `clientApiShape` to that dialect, the inference allowlist is a single path
@@ -318,8 +322,8 @@ entry `id` is the public alias.
 ]
 ```
 
-A misconfigured alias (no label, or the client-only `pi-messages` protocol) is **skipped and
-logged** at boot rather than registered half-working.
+A misconfigured alias (no label) is **skipped and logged** at boot rather than registered
+half-working.
 
 ### 2. Custom (DB) models — `POST /api/models`
 
@@ -356,15 +360,15 @@ a NEW sidecar image gets its aliased runs refused, with the offending field
 named in an operator log (never its value). Aliased runs stop; nothing leaks.
 Non-aliased runs are unaffected — they carry no descriptor.
 
-The reverse is the dangerous direction, and nothing but the tag rule detects it.
-A NEW platform against OLD runtime images means the container is told to speak
-`pi-messages` and the sidecar has no `pi-messages` backend to terminate it, and
-the `/llm/*` surface allowlist is not there either — an old sidecar is a total
-passthrough. The aliased run does fail, because its inference call has no route;
-but it fails _after_ the container has had a verbatim proxy to the vendor's own
-endpoints for as long as it lived, which is long enough for one
-`GET /v1/models`. The platform's own side of the contract looks entirely
-satisfied throughout, so there is no runtime signal to act on.
+The reverse direction fails too, and nothing but the tag rule detects it before
+a run does. A NEW platform against OLD runtime images means the container is
+told to speak `pi-messages` and the sidecar may have no `pi-messages` backend to
+terminate it. Such a sidecar predates the platform LLM proxy route as well, and
+its only other API-key upstream needed a vendor key the platform no longer
+ships to any sidecar — so it has no LLM upstream at all, and every run on an
+API-key model fails at its first inference call having reached nothing. The
+platform's own side of the contract looks entirely satisfied throughout, so
+there is no runtime signal to act on.
 
 **Where ordering is still the only control.** The tag rule reads configuration
 at boot, so it is blind wherever the tag stops identifying the build. Two of its

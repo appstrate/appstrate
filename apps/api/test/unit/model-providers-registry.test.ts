@@ -229,6 +229,40 @@ describe("model-providers runtime registry", () => {
     });
   });
 
+  /** Every api-key run is served by the LLM proxy, so an api-key provider must be proxiable. */
+  describe("api-key provider shape", () => {
+    it("refuses an api_key provider on a shape the llm-proxy does not serve", () => {
+      expect(() =>
+        registerModelProvider(fakeDef("codex-key", { apiShape: "openai-codex-responses" })),
+      ).toThrow(/"codex-key".*"openai-codex-responses".*anthropic-messages/s);
+      expect(getModelProvider("codex-key")).toBeNull();
+    });
+
+    it("accepts an oauth2 provider on a shape the llm-proxy does not serve", () => {
+      registerModelProvider(
+        fakeDef("codex", {
+          apiShape: "openai-codex-responses",
+          authMode: "oauth2",
+          modelDiscovery: { mode: "static" },
+        }),
+      );
+      expect(getModelProvider("codex")?.apiShape).toBe("openai-codex-responses");
+    });
+
+    it("refuses the alias client dialect on any auth mode", () => {
+      expect(() =>
+        registerModelProvider(
+          fakeDef("pi-oauth", {
+            apiShape: "pi-messages",
+            authMode: "oauth2",
+            modelDiscovery: { mode: "static" },
+          }),
+        ),
+      ).toThrow(/"pi-oauth".*"pi-messages".*client dialect/s);
+      expect(getModelProvider("pi-oauth")).toBeNull();
+    });
+  });
+
   /** The inference probe speaks `openai-completions` only and needs an offered model. */
   describe("publicModelListing", () => {
     const CATALOG = "opencode-go";

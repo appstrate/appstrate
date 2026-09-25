@@ -962,7 +962,8 @@ async function loadModelFromDb(orgId: string, modelDbId: string): Promise<Resolv
     throw conflict(
       "model_provider_unregistered",
       `Model '${modelDbId}' is bound to a credential of provider '${row.providerId}', which this ` +
-        `instance does not register. Delete the model and its credential in Settings → Models.`,
+        `instance does not register. Load that provider's module again (MODULES), or have an ` +
+        `operator remove the model and its credential.`,
     );
   }
 
@@ -989,7 +990,8 @@ async function loadModelFromDb(orgId: string, modelDbId: string): Promise<Resolv
  * credential row is gone, or whose `providerId` has no registry entry (its
  * provider module was dropped from `MODULES`), is not listed at all — and its
  * credential is fine, so "reconnect it" would be advice that fixes nothing
- * about a row the client cannot even see. The fix there is to restore the
+ * about a row the client cannot even see (`loadModel` refuses the latter with
+ * 409 `model_provider_unregistered`). The fix there is to restore the
  * provider.
  *
  * One divergence from the list is deliberate: a DISABLED row on a dead
