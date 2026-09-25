@@ -77,6 +77,33 @@ describe("applySpecToSidecarEnv", () => {
     expect(env.PI_API_KEY).toBeUndefined();
   });
 
+  it("ships the platform llm route as a shape, the model's endpoint and a swap — no key", () => {
+    const modelSwap = {
+      alias: "appstrate-medium",
+      real: "deepseek-chat",
+      clientApiShape: "pi-messages" as const,
+      backingApiShape: "openai-completions" as const,
+      backing: { providerId: "deepseek", input: ["text"] },
+    };
+    const spec: SidecarLaunchSpec = {
+      runToken: "rt_test",
+      llm: {
+        authMode: "platform",
+        apiShape: "openai-completions",
+        baseUrl: "https://api.deepseek.com",
+        modelSwap,
+      },
+    };
+    const env: Record<string, string> = {};
+    applySpecToSidecarEnv(spec, env);
+
+    expect(env.PI_LLM_PLATFORM_API_SHAPE).toBe("openai-completions");
+    expect(env.PI_MODEL_SWAP_JSON).toBe(JSON.stringify(modelSwap));
+    expect(env.PI_BASE_URL).toBe("https://api.deepseek.com");
+    expect(env.PI_API_KEY).toBeUndefined();
+    expect(env.PI_LLM_OAUTH_CONFIG_JSON).toBeUndefined();
+  });
+
   it("omits keys for absent optional fields", () => {
     const spec: SidecarLaunchSpec = { runToken: "rt_test" };
     const env: Record<string, string> = {};

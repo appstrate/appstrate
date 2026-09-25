@@ -95,6 +95,7 @@ async function seedSinkRun(
   ctx: TestContext,
   overrides: {
     modelSource?: string | null;
+    modelId?: string | null;
     runOrigin?: "platform" | "remote";
     tokenUsage?: Record<string, number> | null;
     /**
@@ -115,7 +116,10 @@ async function seedSinkRun(
     spaceId: ctx.defaultSpaceId,
     status: "running",
     runOrigin: overrides.runOrigin ?? "platform",
-    modelSource: overrides.modelSource ?? "system",
+    // BYOK: a platform run whose runner row is its ledger (a system run's is
+    // the proxy's per-call rows).
+    modelSource: overrides.modelSource ?? "org",
+    modelId: overrides.modelId ?? null,
     modelCost: overrides.modelCost ?? null,
     sinkSecretEncrypted: encrypt(RUN_SECRET),
     sinkExpiresAt: new Date(Date.now() + 3600_000),
@@ -225,6 +229,28 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
   afterEach(() => {
     // Restored per test so sibling files sharing this process keep a real logger.
     errorSpy.mockRestore();
+  });
+
+  it("the terminal barrier skips a proxy-metered run and keeps a system run the proxy never served", async () => {
+    const usage = { input_tokens: 100, output_tokens: 50 };
+    const rates = { input: 1, output: 2 };
+    const proxied = await seedSinkRun(ctx, {
+      modelSource: "system",
+      modelId: "sys-preset",
+      tokenUsage: usage,
+      modelCost: rates,
+    });
+    const direct = await seedSinkRun(ctx, {
+      modelSource: "system",
+      modelId: null,
+      tokenUsage: usage,
+      modelCost: rates,
+    });
+    await synthesisedFinalize(proxied);
+    await synthesisedFinalize(direct);
+
+    expect(await runnerRow(proxied)).toBeUndefined();
+    expect((await runnerRow(direct))?.credentialSource).toBe("system");
   });
 
   it("a runner snapshot arriving after the run settled is refused, leaving the billed total intact", async () => {

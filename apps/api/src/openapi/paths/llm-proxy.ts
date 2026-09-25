@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { llmProxyUrlPath } from "@appstrate/runner-pi";
+import {
+  LLM_PROXY_MOUNT,
+  RUN_LLM_PROXY_MOUNT,
+  llmProxyUrlPath,
+  type ProxiedApiShape,
+} from "@appstrate/runner-pi";
 
 /**
- * LLM proxy endpoints — server-side model injection for remote-backed
- * AFPS runs. Route implementation: `apps/api/src/routes/llm-proxy.ts`.
+ * LLM proxy endpoints — server-side model injection and per-call metering for
+ * API callers (remote runs, the CLI, chat) under `LLM_PROXY_MOUNT`, and for a
+ * platform run's own inference under `RUN_LLM_PROXY_MOUNT`. Route
+ * implementation: `apps/api/src/routes/llm-proxy.ts`.
  *
  * Four protocol families ship today; each gets its own concrete endpoint
  * so callers hit the upstream shape they already know (OpenAI Chat
@@ -71,7 +78,7 @@ const baseResponses = {
       "Validation error — malformed body, missing/empty `model`, model " +
       "preset not enabled for this org, preset's protocol does not " +
       "match this endpoint (use the corresponding " +
-      "`/api/llm-proxy/<api>/…` route instead), the preset's provider is an " +
+      "endpoint for its protocol instead), the preset's provider is an " +
       "OAuth subscription with no proxyable gateway (connect an API-key " +
       "provider instead), or request body exceeds " +
       "the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB).",
@@ -108,7 +115,7 @@ const baseResponses = {
 } as const;
 
 export const llmProxyPaths = {
-  [`/api/llm-proxy${llmProxyUrlPath("openai-completions")}`]: {
+  [`${LLM_PROXY_MOUNT}${llmProxyUrlPath("openai-completions")}`]: {
     post: {
       operationId: "llmProxyOpenaiChatCompletions",
       tags: ["LLM Proxy"],
@@ -153,7 +160,7 @@ export const llmProxyPaths = {
       responses: baseResponses,
     },
   },
-  [`/api/llm-proxy${llmProxyUrlPath("openai-responses")}`]: {
+  [`${LLM_PROXY_MOUNT}${llmProxyUrlPath("openai-responses")}`]: {
     post: {
       operationId: "llmProxyOpenaiResponses",
       tags: ["LLM Proxy"],
@@ -202,7 +209,7 @@ export const llmProxyPaths = {
       responses: baseResponses,
     },
   },
-  [`/api/llm-proxy${llmProxyUrlPath("anthropic-messages")}`]: {
+  [`${LLM_PROXY_MOUNT}${llmProxyUrlPath("anthropic-messages")}`]: {
     post: {
       operationId: "llmProxyAnthropicMessages",
       tags: ["LLM Proxy"],
@@ -272,7 +279,7 @@ export const llmProxyPaths = {
       responses: baseResponses,
     },
   },
-  [`/api/llm-proxy${llmProxyUrlPath("mistral-conversations")}`]: {
+  [`${LLM_PROXY_MOUNT}${llmProxyUrlPath("mistral-conversations")}`]: {
     post: {
       operationId: "llmProxyMistralChatCompletions",
       tags: ["LLM Proxy"],
@@ -323,3 +330,61 @@ export const llmProxyPaths = {
     },
   },
 } as const;
+
+const RUN_OPERATION_IDS: Record<ProxiedApiShape, string> = {
+  "openai-completions": "runLlmProxyOpenaiChatCompletions",
+  "openai-responses": "runLlmProxyOpenaiResponses",
+  "anthropic-messages": "runLlmProxyAnthropicMessages",
+  "mistral-conversations": "runLlmProxyMistralChatCompletions",
+};
+
+/**
+ * A platform run's own inference, one endpoint per shape at the same path
+ * convention under `RUN_LLM_PROXY_MOUNT`. Route: `createRunLlmProxyRouter`.
+ */
+export const runLlmProxyPaths = Object.fromEntries(
+  (Object.keys(RUN_OPERATION_IDS) as ProxiedApiShape[]).map((shape) => [
+    `${RUN_LLM_PROXY_MOUNT}${llmProxyUrlPath(shape)}`,
+    {
+      post: {
+        operationId: RUN_OPERATION_IDS[shape],
+        tags: ["Internal"],
+        summary: `Run inference (${shape}) — metered by the platform LLM proxy`,
+        description:
+          "Container-to-host only. Auth via Bearer run token. Serves a running " +
+          "platform-origin run whose model is platform-provided: the run's own " +
+          "model is resolved and injected server-side whatever `body.model` " +
+          "names, and each call is metered from the provider's response and " +
+          "attributed to the run. Same request guards and response forwarding " +
+          "as the corresponding `/api/llm-proxy/…` endpoint.",
+        security: [{ bearerExecToken: [] }],
+        requestBody: {
+          description: "The provider payload for this protocol; `model` is ignored.",
+          required: true,
+          content: {
+            "application/json": { schema: { type: "object", additionalProperties: true } },
+          },
+        },
+        responses: {
+          "200": baseResponses["200"],
+          "400": {
+            description:
+              "Validation error — malformed or empty body, a field the proxy cannot " +
+              "meter, or the run's model is not served by this endpoint.",
+          },
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": {
+            description:
+              "The run is not running, is remote-origin, or its model is not a " +
+              "platform-provided model pinned at launch.",
+          },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "409": baseResponses["409"],
+          "413": { description: "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`." },
+          "429": { $ref: "#/components/responses/RateLimited" },
+          "502": baseResponses["502"],
+        },
+      },
+    },
+  ]),
+);

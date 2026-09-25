@@ -43,6 +43,8 @@ export interface RunSinkContext {
    * module listeners can distinguish billable from non-billable runs.
    */
   modelSource: string | null;
+  /** The model the run launched with (`runs.model_id`). */
+  modelId: string | null;
   /**
    * Per-1M-token rates snapshotted at kickoff (`runs.model_cost`). The runner
    * reports its own cost, so this is the only platform-side fact from which its

@@ -10,6 +10,7 @@ import type { ModelMetadata } from "@appstrate/shared-types";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { lookupCatalogModel, restrictsToOffer } from "./model-catalog.ts";
+import { LLM_PROXY_ROUTES, isProxiedApiShape } from "@appstrate/runner-pi/llm-proxy-routes";
 
 // --- Types ---
 
@@ -201,6 +202,17 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
             `subscription tokens cannot be configured as static system API keys — a system key ` +
             `is shared by every organization, a subscription is not. Store it as an org model provider credential ` +
             `instead and remove this entry from SYSTEM_PROVIDER_KEYS.`,
+        );
+      }
+
+      // A platform-provided model is served to runs only through the platform's
+      // metered LLM proxy, so its protocol must be one the proxy routes.
+      if (!isProxiedApiShape(provider.apiShape)) {
+        throw new Error(
+          `[model-registry] SYSTEM_PROVIDER_KEYS entry "${validCredential.id}" binds providerId ` +
+            `"${validCredential.providerId}", whose api shape "${provider.apiShape}" the platform ` +
+            `LLM proxy does not serve (served: ${Object.keys(LLM_PROXY_ROUTES).join(", ")}). ` +
+            `Remove this entry, or configure the model as an org model provider credential.`,
         );
       }
 

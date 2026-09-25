@@ -553,6 +553,8 @@ interface CreateRunParams {
   proxyLabel?: string;
   modelLabel?: string;
   modelSource?: string;
+  /** The model the run launched with — see `runs.model_id`. */
+  modelId: string | null;
   /**
    * Per-1M-token rates the run is launched with (the `MODEL_COST` the container
    * receives). Persisted so the runner's ledger row — whose `cost` the container
@@ -698,6 +700,7 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
       proxyLabel: params.proxyLabel,
       modelLabel: params.modelLabel,
       modelSource: params.modelSource,
+      modelId: params.modelId,
       modelCost: params.modelCost ?? null,
       generationConfig:
         params.generationConfig == null
@@ -919,6 +922,23 @@ const notRunnerMirrorSql = sql<boolean>`NOT (
       AND mirrored_proxy.source = 'proxy'
   )
 )`;
+
+/** `runs.model_source` of a resolved model: whose credential its inference spends. */
+export function modelSourceOf(model: { isSystemModel: boolean }): "system" | "org" {
+  return model.isSystemModel ? "system" : "org";
+}
+
+/**
+ * Whether a run's inference is served and metered by the platform LLM proxy —
+ * routed there by the launcher, served by its run entry, no runner ledger row.
+ * `modelId` covers the deploy window: a run launched before migration `0072`
+ * has no pinned model and still holds its own credential.
+ */
+export function isMeteredByPlatformProxy<
+  T extends { modelSource?: string | null; modelId: string | null },
+>(run: T): run is T & { modelId: string } {
+  return run.modelSource === "system" && run.modelId !== null;
+}
 
 /** A run's attributable spend and how much of it is backed by real rates. */
 interface RunSpend {

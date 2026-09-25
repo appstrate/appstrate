@@ -21,7 +21,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 // regex here would pass forever after the upstream one changed.
 import { isRetryableAssistantError } from "@earendil-works/pi-ai";
 import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
-import type { LlmProxyApiKeyConfig, ModelSwap } from "../helpers.ts";
+import type { ModelSwap } from "../helpers.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
@@ -129,12 +129,7 @@ const CONTEXT_WINDOW = 200_000;
 const MAX_TOKENS = 32_768;
 
 function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessagesBackendDeps {
-  const llm: LlmProxyApiKeyConfig = {
-    authMode: "api_key",
-    baseUrl: backing.baseUrl,
-    apiKey: "sk-real-key",
-    placeholder: "sk-placeholder",
-  };
+  const upstream = { baseUrl: backing.baseUrl, apiKey: "sk-real-key" };
   const swap: ModelSwap = {
     alias: "appstrate-medium",
     real: backing.modelId,
@@ -147,7 +142,7 @@ function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessage
     },
   };
   return {
-    llm,
+    upstream,
     swap,
     limits: { modelContextWindow: CONTEXT_WINDOW, modelMaxTokens: MAX_TOKENS },
     ...(streamBackingFn ? { streamBackingFn } : {}),

@@ -74,7 +74,8 @@ import { createUploadsRouter, createUploadContentRouter } from "../../src/routes
 import { createFilesRouter, createFilePreviewRouter } from "../../src/routes/files.ts";
 import { createAdminStorageDeletionRouter } from "../../src/routes/admin-storage-deletion.ts";
 import { createCredentialProxyRouter } from "../../src/routes/credential-proxy.ts";
-import { createLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
+import { createLlmProxyRouter, createRunLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
+import { LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT } from "@appstrate/runner-pi";
 import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
@@ -313,10 +314,11 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/integrations", createIntegrationsRouter());
   app.route("/api/credential-proxy", createCredentialProxyRouter());
-  app.route("/api/llm-proxy", createLlmProxyRouter());
+  app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
   app.route("/invite", invitationsRouter);
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());
+  app.route(RUN_LLM_PROXY_MOUNT, createRunLlmProxyRouter());
 
   // Mirrors production: unknown /api/* → 404 problem+json (no SPA fallback in tests).
   app.all(

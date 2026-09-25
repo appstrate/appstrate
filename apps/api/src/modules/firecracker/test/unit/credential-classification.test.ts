@@ -51,6 +51,9 @@ const CLASSIFIED_NON_SECRET: readonly string[] = [
   "PI_PLACEHOLDER",
   // Backing model ids (alias↔real) — a masking concern, not a credential.
   "PI_MODEL_SWAP_JSON",
+  // Api shape of the platform llm-proxy route — a protocol name; the sidecar
+  // authenticates there with RUN_TOKEN.
+  "PI_LLM_PLATFORM_API_SHAPE",
   // Selected runtime tool names (output/log/note/…) — plain configuration.
   "RUNTIME_TOOLS_JSON",
   // Agent output JSON Schema — declared structure, no credential.
@@ -112,6 +115,12 @@ const apiKeySpec = buildSpec({
   },
 });
 
+const platformSpec = buildSpec({
+  authMode: "platform",
+  apiShape: "openai-completions",
+  baseUrl: "https://api.openai.com/v1",
+});
+
 function emittedKeys(spec: SidecarLaunchSpec): string[] {
   return Object.keys(
     buildBaseSidecarEnv({
@@ -130,6 +139,7 @@ describe("sidecar env key classification (MMDS broker coverage)", () => {
   const allEmitted = new Set<string>([
     ...emittedKeys(oauthSpec),
     ...emittedKeys(apiKeySpec),
+    ...emittedKeys(platformSpec),
     // Orchestrator-local — layered after the base build (see sidecar-env.ts
     // module doc), so the builders never emit it; include it by hand.
     "INTEGRATION_RUNTIME_ADAPTER",
@@ -177,6 +187,9 @@ describe("sidecar env key classification (MMDS broker coverage)", () => {
     expect(oauthKeys.has("PI_API_KEY")).toBe(false);
     expect(apiKeyKeys.has("PI_API_KEY")).toBe(true);
     expect(apiKeyKeys.has("PI_LLM_OAUTH_CONFIG_JSON")).toBe(false);
+    const platformKeys = new Set(emittedKeys(platformSpec));
+    expect(platformKeys.has("PI_API_KEY")).toBe(false);
+    expect(platformKeys.has("PI_LLM_OAUTH_CONFIG_JSON")).toBe(false);
   });
 });
 

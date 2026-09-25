@@ -24,7 +24,7 @@ import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
 import { resolvePricingStatus } from "../pricing-provenance.ts";
 import { aggregatedCostUsd } from "../token-cost.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
-import { appendRunLog, updateRun } from "../state/runs.ts";
+import { appendRunLog, isMeteredByPlatformProxy, updateRun } from "../state/runs.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenUsage } from "./types.ts";
@@ -43,11 +43,14 @@ export async function persistRunEvent(
   scope: SpaceScope,
   runId: string,
   event: RunEvent,
-  opts: {
-    writeLedger?: boolean;
-    modelSource?: string | null;
-    modelCost?: ModelCost | null;
-  } = {},
+  opts:
+    | { writeLedger?: false }
+    | {
+        writeLedger: true;
+        modelSource?: string | null;
+        modelId: string | null;
+        modelCost?: ModelCost | null;
+      } = {},
 ): Promise<string | null> {
   switch (event.type) {
     case "output.emitted": {
@@ -146,7 +149,13 @@ export async function persistRunEvent(
         await writeRunnerLedgerRow(
           scope,
           runId,
-          { cost, usage, modelSource: opts.modelSource, modelCost: opts.modelCost },
+          {
+            cost,
+            usage,
+            modelSource: opts.modelSource,
+            modelId: opts.modelId,
+            modelCost: opts.modelCost,
+          },
           { executor },
         );
         // Best-effort live broadcast, throttled per run — never blocks the
@@ -188,6 +197,8 @@ export async function writeRunnerLedgerRow(
     usage: TokenUsage | null;
     /** Run's model source — stamped as `credential_source`. */
     modelSource?: string | null;
+    /** Run's pinned model (`runs.model_id`) — see {@link isMeteredByPlatformProxy}. */
+    modelId: string | null;
     /** Run's kickoff rate snapshot — prices the row and classifies it. */
     modelCost?: ModelCost | null;
   },
@@ -202,6 +213,10 @@ export async function writeRunnerLedgerRow(
     required?: boolean;
   } = {},
 ): Promise<void> {
+  // The proxy records every call from the provider's own response: those rows
+  // are this run's ledger, and a runner row beside them would count it twice.
+  if (isMeteredByPlatformProxy(row)) return;
+
   // Degenerate-event skip — nothing to bill or audit. Keyed on whichever input
   // this row's cost is DERIVED from: the usage snapshot on a platform run, the
   // reported `cost` on a remote-origin run. A platform run with tokens but no

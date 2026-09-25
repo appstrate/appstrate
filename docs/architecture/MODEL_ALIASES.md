@@ -178,6 +178,12 @@ the alias never reaches upstream. Two layers hide the backing from users:
      rewrites `model` alias→real on the request and real→alias on every
      response branch, including the cached body.
 
+   For a **system** alias the two paths chain: the sidecar re-originates in the
+   backing's protocol and sends that call to the gateway's run entry,
+   `/internal/llm-proxy/*`, which serves the run's pinned model and meters it.
+   The sidecar's Model keeps the backing's own base URL so pi-ai still derives
+   its dialect from it; only the transport points at the gateway.
+
 For an adaptive Anthropic backing, the sidecar's rebuilt Model takes
 `compat.forceAdaptiveThinking` and the effort mapping (`thinkingLevelMap`) from
 Pi's registry record for the real id; the agent-side session, which sees only

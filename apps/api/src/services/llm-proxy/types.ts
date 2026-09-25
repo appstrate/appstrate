@@ -9,10 +9,14 @@
  * one adapter per endpoint and hands it to the shared core.
  */
 
-/** Principal that minted the proxy call — mirrors credential-proxy. */
+/**
+ * Principal that minted the proxy call — mirrors credential-proxy. A `run` is a
+ * platform run's own sidecar, authenticated by its run token.
+ */
 export type LlmProxyPrincipal =
   | { kind: "api_key"; apiKeyId: string; orgId: string; userId: string }
-  | { kind: "jwt_user"; userId: string; orgId: string };
+  | { kind: "jwt_user"; userId: string; orgId: string }
+  | { kind: "run"; orgId: string };
 
 /**
  * Build the {@link LlmProxyPrincipal} from the resolved auth identity: an API

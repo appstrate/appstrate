@@ -76,6 +76,8 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #                                             subpath is pi-free (no pi-ai /
 #                                             pi-coding-agent imports) so the
 #                                             compiled binary stays minimal.
+#   - @appstrate/runner-pi/llm-proxy-routes   the platform LLM proxy's route table,
+#                                             for runs whose inference it serves.
 COPY packages/connect/src        packages/connect/src
 COPY packages/afps-runtime/src   packages/afps-runtime/src
 COPY packages/afps-shared/src    packages/afps-shared/src

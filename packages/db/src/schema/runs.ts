@@ -154,6 +154,11 @@ export const runs = pgTable(
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
     modelSource: text("model_source"),
+    // The model the run launched with — a system model id or an `org_models.id`,
+    // the same pointer as `packages.model_id`. The platform LLM proxy serves a
+    // run's own inference from it, never from a model the request names. NULL
+    // on a remote-origin run, which resolves no platform model.
+    modelId: text("model_id"),
     // Effective generation settings frozen at kickoff for reproducibility.
     generationConfig: jsonb("generation_config").$type<ModelGenerationSettings>(),
     // Raw invocation layer (manual run or schedule), before agent defaults.

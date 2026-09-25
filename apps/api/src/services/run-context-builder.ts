@@ -18,7 +18,7 @@ import { resolveProxy } from "./org-proxies.ts";
 import { clampToBackingLevel, resolveModel } from "./org-models.ts";
 import { extractManifestOutputSchema } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns, type DroppedIntegration } from "./integration-spawn-resolver.ts";
-import { appendRunLog } from "./state/runs.ts";
+import { appendRunLog, modelSourceOf } from "./state/runs.ts";
 import type { OrgScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import {
@@ -227,7 +227,7 @@ export async function buildRunContext(params: {
   const proxyUrl = proxyResult?.url ?? null;
   const proxyLabel = proxyResult?.label ?? null;
   const modelLabel = modelResult.label;
-  const modelSource = modelResult.isSystemModel ? "system" : "org";
+  const modelSource = modelSourceOf(modelResult);
   // The rates the run LAUNCHES with — the same object `buildRuntimePiEnv`
   // serialises into `MODEL_COST`. Persisted on `runs.model_cost` so the runner's
   // ledger row can be classified server-side: the container reports the cost, so

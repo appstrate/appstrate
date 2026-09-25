@@ -1713,7 +1713,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
 
     it("mixed rows: one `unpriced` runner row poisons an otherwise `priced` run", async () => {
       const runId = await seedRunWithSink(ctx, "@test/final-agent", {
-        modelSource: "system",
+        modelSource: "org",
         modelCost: null, // the model resolved no rates → runner row is `unpriced`
       });
       await seedProxyRow(runId, "priced", 0.01);
