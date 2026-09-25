@@ -86,22 +86,29 @@ session row needs none); two booleans ("list the space" / "allow listing"),
 whose fourth combination — listing on, listing tool off — cannot be enforced:
 `getSkill` and `listSkills` share `skills:read`.
 
-`PUT /api/chat/sessions/{id}/skills` `{ skill_mode, pinned_skills }` → 204, one
-upsert (`ensureSession` with the selection): it creates the row for a
-client-minted id, as the first turn does — so a picker write on a fresh
-conversation makes it appear in the sidebar with no messages, and the URL
-adopts its id on that first write, as on a first send — and it never bumps
-`updatedAt`. Every session DTO carries both fields. There is no chat-specific
-skill listing: the picker reads `GET /api/packages/skills`.
+The selection rides the turn: `POST /api/chat` takes `skill_mode` and
+`pinned_skills` (both or neither), and `ensureSession` writes them in the
+upsert that creates or claims the row, before the turn's grants are derived
+from them. Absent, the stored selection stands (`auto` for a new
+conversation). Nothing is written before the first message: choosing creates
+no conversation, no sidebar row, no navigation, and there is no write to wait
+for or to fail. A change made on an existing conversation and not followed by a
+message is lost on reload — as a model choice is. Every session DTO carries both
+fields. There is no chat-specific skill listing: the picker reads
+`GET /api/packages/skills`.
+
+Rejected: a `PUT /api/chat/sessions/{id}/skills` written on every click. It had
+to create the row for a fresh conversation (an empty sidebar entry, an URL
+change), make the send wait for it, and handle a write that fails before the
+chat exists — all for a choice the next turn carries anyway.
 
 UI: a picker in the composer — the mode as the model picker's tabs (one look
-across the composer) with the chosen mode's explanation, and one checkbox per skill, inert in `auto`. Mounted when `canPinSkills` holds
-(`chat:write` ∧ `skills:read`) and the session read succeeded — a failed read
-would let the first click write the defaults over the stored choice. The
-selection lives in local state seeded from the session detail; one write at a
-time (the controls are disabled while it is in flight, so writes never race),
-reverted on failure. A send waits for a selection write in flight, since the
-turn reads the selection off the row.
+across the composer) with the chosen mode's explanation, and one checkbox per
+skill, inert in `auto`. Mounted when `canPinSkills` holds (`chat:write` ∧
+`skills:read`) and the session read succeeded — a failed read would show the
+defaults, and a change would send them over the stored choice. The selection
+lives in local state seeded from the session detail; only what the user
+changed is sent.
 
 ## Out of scope
 
