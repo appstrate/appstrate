@@ -9,6 +9,7 @@ import {
   OauthProviderMissingCredentialError,
   OauthRunRequiresIsolationError,
   buildOauthSidecarLlm,
+  inferenceRouteOf,
 } from "../../../src/services/run-launcher/subscription-run-policy.ts";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import {
@@ -199,6 +200,12 @@ describe("resolveCredentialDelivery (oauth-class classification)", () => {
     expect(resolveCredentialDelivery({ providerId: "openai", credentialId: null })).toEqual({
       kind: "api_key",
     });
+  });
+
+  it("routes an oauth subscription to the sidecar and an api-key provider to the proxy", () => {
+    expect(inferenceRouteOf({ providerId: "claude-code" })).toBe("sidecar");
+    expect(inferenceRouteOf({ providerId: "codex" })).toBe("sidecar");
+    expect(inferenceRouteOf({ providerId: "openai" })).toBe("proxy");
   });
 
   it("throws rather than downgrading an oauth provider that resolved no credential id", () => {

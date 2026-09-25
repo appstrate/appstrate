@@ -21,7 +21,13 @@ import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { PricingStatus } from "../pricing-status.ts";
-import { runStatusEnum, llmUsageSourceEnum, runOriginEnum, credentialSourceEnum } from "./enums.ts";
+import {
+  runStatusEnum,
+  llmUsageSourceEnum,
+  runOriginEnum,
+  credentialSourceEnum,
+  inferenceRouteEnum,
+} from "./enums.ts";
 import { user } from "./auth.ts";
 import { spaces, endUsers } from "./spaces.ts";
 import { apiKeys, organizations, modelProviderCredentials } from "./organizations.ts";
@@ -159,6 +165,10 @@ export const runs = pgTable(
     // run's own inference from it, never from a model the request names. NULL
     // on a remote-origin run, which resolves no platform model.
     modelId: text("model_id"),
+    // Who serves the run's inference, decided at launch. NULL on a remote-origin
+    // run, which resolves no platform model, and on a run launched before the
+    // column existed — both report their own usage as a runner ledger row.
+    inferenceRoute: inferenceRouteEnum("inference_route"),
     // Effective generation settings frozen at kickoff for reproducibility.
     generationConfig: jsonb("generation_config").$type<ModelGenerationSettings>(),
     // Raw invocation layer (manual run or schedule), before agent defaults.
@@ -412,6 +422,8 @@ export const runs = pgTable(
       "runs_cost_pricing_status_valid",
       sql`cost_pricing_status IN ('priced', 'partial', 'unpriced')`,
     ),
+    // The proxy serves the run's pinned model, never one the request names.
+    check("runs_proxy_route_has_model", sql`inference_route <> 'proxy' OR model_id IS NOT NULL`),
   ],
 );
 

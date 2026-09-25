@@ -483,6 +483,7 @@ column runs.error text
 column runs.generation_config jsonb
 column runs.generation_config_override jsonb
 column runs.id text not null
+column runs.inference_route inference_route
 column runs.input jsonb
 column runs.last_event_sequence integer not null default 0
 column runs.last_heartbeat_at timestamp with time zone not null default now()
@@ -831,6 +832,7 @@ constraint runs runs_open_sink_has_secret CHECK (((sink_expires_at IS NULL) OR (
 constraint runs runs_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint runs runs_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE SET NULL
 constraint runs runs_pkey PRIMARY KEY (id)
+constraint runs runs_proxy_route_has_model CHECK (((inference_route <> 'proxy'::inference_route) OR (model_id IS NOT NULL)))
 constraint runs runs_schedule_id_package_schedules_id_fk FOREIGN KEY (schedule_id) REFERENCES package_schedules(id) ON DELETE SET NULL
 constraint runs runs_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint runs runs_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE SET NULL
@@ -888,6 +890,7 @@ constraint webhooks webhooks_pkey PRIMARY KEY (id)
 constraint webhooks webhooks_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 enum credential_source system,org
 enum file_purpose user_upload,agent_output
+enum inference_route proxy,sidecar
 enum invitation_status pending,accepted,expired,cancelled
 enum llm_usage_source proxy,runner
 enum org_role owner,admin,member,guest

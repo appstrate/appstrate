@@ -12,22 +12,16 @@ import type { ModelInputModality } from "@appstrate/core/module";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 /**
- * `MODEL_API_KEY` inside an ALIASED container.
+ * `MODEL_API_KEY` inside every container but an OAuth-subscription run's.
  *
- * Constant rather than derived, because the platform's own placeholder is not
- * vendor-neutral: `deriveKeyPlaceholder` deliberately preserves the key's
- * dash-separated prefix so the SDK's prefix-based behaviour keeps working, and
- * for a real key that prefix IS the vendor — `sk-ant-…`, `sk-proj-…`,
- * `sk-or-v1-…`. Emitting it would disclose the exact fact `MODEL_PROVIDER` is
- * withheld to hide, to code that can read its own environment.
- *
- * Safe to make constant: an aliased run always speaks {@link
- * ALIAS_CLIENT_API_SHAPE} to the sidecar, which authenticates with
- * `Authorization: Bearer <key>` and never inspects the value's shape. The
- * sidecar swaps in the real credential upstream, so nothing downstream of the
- * container reads this string either.
+ * Constant rather than derived from a credential: the sidecar authenticates
+ * upstream on its own and never reads this value, and pi-ai inspects a key's
+ * shape only to detect a subscription token. Vendor-neutral on purpose: an
+ * ALIASED container (never an OAuth run's) must not carry a vendor-shaped key
+ * (`sk-ant-…`, `sk-proj-…`), which would disclose the exact fact
+ * `MODEL_PROVIDER` is withheld to hide.
  */
-export const ALIAS_API_KEY_PLACEHOLDER = "appstrate-placeholder";
+export const API_KEY_PLACEHOLDER = "appstrate-placeholder";
 
 export interface RuntimePiModelConfig {
   /** Pi SDK `api` slug — e.g. `"anthropic-messages"`, `"openai-completions"`. */
@@ -35,10 +29,11 @@ export interface RuntimePiModelConfig {
   modelId: string;
   /** Pi provider key of the real upstream → `MODEL_PROVIDER`. Pass it even for an {@link aliased} run. */
   piProvider?: string | null;
-  /** The real LLM credential — never emitted; only compared with {@link apiKeyPlaceholder}. */
-  apiKey: string;
-  /** Stands in for the real apiKey inside the container → `MODEL_API_KEY`. Never equal to it. */
-  apiKeyPlaceholder: string;
+  /**
+   * `MODEL_API_KEY` of an OAuth-subscription run: shaped like its token, never
+   * the token. Absent otherwise → {@link API_KEY_PLACEHOLDER}.
+   */
+  oauthApiKeyPlaceholder?: string;
   input?: ReadonlyArray<ModelInputModality> | null;
   contextWindow?: number | null;
   maxTokens?: number | null;
@@ -156,17 +151,8 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.AGENT_TIMEOUT_SECONDS = String(opts.timeoutSeconds);
   }
 
-  // Fail closed: the sidecar injects the real credential upstream, so the
-  // container holds only the placeholder.
-  if (model.apiKeyPlaceholder === model.apiKey) {
-    throw new Error("buildRuntimePiEnv: model.apiKeyPlaceholder must differ from the real key");
-  }
   env.MODEL_BASE_URL = opts.sidecarProxyLlmUrl;
-  // An aliased run gets a vendor-neutral constant instead — see
-  // ALIAS_API_KEY_PLACEHOLDER for why the derived placeholder cannot be used.
-  // This is the same withholding the `MODEL_PROVIDER` line below performs,
-  // applied to the other env var that carries the vendor.
-  env.MODEL_API_KEY = model.aliased ? ALIAS_API_KEY_PLACEHOLDER : model.apiKeyPlaceholder;
+  env.MODEL_API_KEY = model.oauthApiKeyPlaceholder ?? API_KEY_PLACEHOLDER;
 
   // Which provider Pi is really talking to: MODEL_BASE_URL is the sidecar's,
   // erasing one of Pi's two detection inputs, and without this the container

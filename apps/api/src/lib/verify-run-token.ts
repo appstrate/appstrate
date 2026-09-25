@@ -3,7 +3,7 @@
 import type { Context } from "hono";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs } from "@appstrate/db/schema";
+import { runs, type InferenceRoute } from "@appstrate/db/schema";
 import { parseBearer } from "@appstrate/core/bearer";
 import { parseSignedToken } from "./run-token.ts";
 import { forbidden, notFound, unauthorized } from "./errors.ts";
@@ -27,6 +27,8 @@ export async function verifyRunToken(c: Context): Promise<{
     modelSource: string | null;
     /** The model the run launched with — see `runs.model_id`. */
     modelId: string | null;
+    /** Who serves the run's inference — see `runs.inference_route`. */
+    inferenceRoute: InferenceRoute | null;
     runOrigin: "platform" | "remote";
     /**
      * The agent definition the run executes — `"draft"` or a concrete semver
@@ -82,6 +84,7 @@ export async function verifyRunToken(c: Context): Promise<{
       modelCredentialId: runs.modelCredentialId,
       modelSource: runs.modelSource,
       modelId: runs.modelId,
+      inferenceRoute: runs.inferenceRoute,
       runOrigin: runs.runOrigin,
       versionRef: runs.versionRef,
       resolvedConnections: runs.resolvedConnections,
@@ -116,6 +119,7 @@ export async function verifyRunToken(c: Context): Promise<{
       modelCredentialId: run.modelCredentialId ?? null,
       modelSource: run.modelSource,
       modelId: run.modelId,
+      inferenceRoute: run.inferenceRoute,
       runOrigin: run.runOrigin,
       versionRef: run.versionRef ?? null,
       resolvedConnections: run.resolvedConnections ?? null,

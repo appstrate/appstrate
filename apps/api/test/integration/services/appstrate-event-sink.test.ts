@@ -195,6 +195,7 @@ describe("persistRunEvent", () => {
     return persist(event("appstrate.metric", { usage, cost }), {
       writeLedger: true,
       modelId: null,
+      inferenceRoute: null,
       modelSource: "org",
       modelCost: UPSERT_RATES,
     });
@@ -325,7 +326,7 @@ describe("persistRunEvent", () => {
       e: RunEvent,
       opts: { modelSource: string | null; modelCost: ModelCost | null },
     ) {
-      return persist(e, { writeLedger: true, modelId: null, ...opts });
+      return persist(e, { writeLedger: true, modelId: null, inferenceRoute: null, ...opts });
     }
 
     async function runnerRow() {
@@ -436,7 +437,7 @@ describe("persistRunEvent", () => {
       e: RunEvent,
       opts: { modelSource: string | null; modelCost: ModelCost | null },
     ) {
-      return persist(e, { writeLedger: true, modelId: null, ...opts });
+      return persist(e, { writeLedger: true, modelId: null, inferenceRoute: null, ...opts });
     }
 
     async function runnerRow() {
@@ -512,6 +513,7 @@ describe("persistRunEvent", () => {
             usage: { input_tokens: 1_000_000, output_tokens: 100_000 },
             modelSource: "org",
             modelId: null,
+            inferenceRoute: null,
             modelCost: tiered,
           },
           { required: true },
@@ -648,6 +650,7 @@ describe("persistRunEvent", () => {
               usage: { input_tokens: 300_000, output_tokens: 0 },
               modelSource: "org",
               modelId: null,
+              inferenceRoute: null,
               modelCost: { input: 3, output: 15 },
             },
             { required: true },
@@ -679,6 +682,7 @@ describe("persistRunEvent", () => {
               usage: { input_tokens: 100_000, output_tokens: 0 },
               modelSource: "org",
               modelId: null,
+              inferenceRoute: null,
               modelCost: { input: 3, output: 15 },
             },
             { required: true },
@@ -695,6 +699,7 @@ describe("persistRunEvent", () => {
               usage: { input_tokens: 500_000, output_tokens: 0 },
               modelSource: null,
               modelId: null,
+              inferenceRoute: null,
               modelCost: null,
             },
             { required: true },

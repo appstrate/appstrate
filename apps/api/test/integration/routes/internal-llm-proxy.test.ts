@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `/internal/llm-proxy/*` — the run's own inference entry. A platform run on a
- * platform-provided model reaches the metered llm-proxy through its sidecar,
- * authenticated by the run token, so the vendor key never leaves the API.
+ * `/internal/llm-proxy/*` — the run's own inference entry. A platform run on an
+ * API-key model — platform-provided or the org's own — reaches the metered
+ * llm-proxy through its sidecar, authenticated by the run token, so the vendor
+ * key never leaves the API.
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test";
@@ -15,7 +16,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedRun } from "../../helpers/seed.ts";
+import { seedOrgModel, seedOrgModelProviderKey, seedPackage, seedRun } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import { getLlmProxyLimits } from "../../../src/services/proxy-limits.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
@@ -60,6 +61,7 @@ function seedSystemRun(ctx: TestContext, overrides: Partial<Parameters<typeof se
     runOrigin: "platform",
     modelSource: "system",
     modelId: SYSTEM_PRESET,
+    inferenceRoute: "proxy",
     ...overrides,
   });
 }
@@ -229,17 +231,47 @@ describe("POST /internal/llm-proxy — a run's own inference", () => {
     expect(upstream).toHaveLength(0);
   });
 
-  it("refuses a run whose model is not platform-provided or not pinned, and a remote-origin run", async () => {
-    const byok = await seedSystemRun(ctx, { modelSource: "org" });
+  it("serves a run on the org's own API key, metered as org spend", async () => {
+    const providerKey = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      apiShape: "openai-completions",
+      baseUrl: "https://api.openai.test/v1",
+      apiKey: "sk-org-own-key",
+    });
+    const orgModel = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: providerKey.id,
+      modelId: "org-upstream-model",
+      enabled: true,
+    });
+    const run = await seedSystemRun(ctx, { modelSource: "org", modelId: orgModel.id });
+    const res = await call(signRunToken(run.id), {
+      model: SYSTEM_PRESET,
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    expect(res.status).toBe(200);
+    expect(upstream).toHaveLength(1);
+    expect(upstream[0]!.body.model).toBe("org-upstream-model");
+    expect(upstream[0]!.headers.get("authorization")).toBe("Bearer sk-org-own-key");
+    const rows = await ledgerRows(run.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ source: "proxy", credentialSource: "org", model: orgModel.id });
+  });
+
+  it("refuses a run its sidecar serves, and one with no recorded route", async () => {
+    // An OAuth subscription run keeps its inference on the sidecar.
+    const oauth = await seedSystemRun(ctx, { modelSource: "org", inferenceRoute: "sidecar" });
     // A remote run resolves no platform model: no source, no pinned model.
     const remote = await seedSystemRun(ctx, {
       runOrigin: "remote",
       modelSource: null,
       modelId: null,
+      inferenceRoute: null,
     });
-    // Deploy window: launched before migration 0072, its sidecar holds its own key.
-    const unpinned = await seedSystemRun(ctx, { modelId: null });
-    for (const run of [byok, remote, unpinned]) {
+    // Launched before the route was recorded.
+    const unrouted = await seedSystemRun(ctx, { inferenceRoute: null });
+    for (const run of [oauth, remote, unrouted]) {
       const res = await call(signRunToken(run.id), { model: SYSTEM_PRESET, messages: [] });
       expect({ run: run.id, status: res.status }).toEqual({ run: run.id, status: 403 });
     }
@@ -283,15 +315,30 @@ describe("POST /internal/llm-proxy — a run's own inference", () => {
     expect(rows[0]).toMatchObject({ credentialSource: "system", inputTokens: 12, outputTokens: 4 });
   });
 
-  it("does not re-quote the inference of a run admitted at launch", async () => {
+  it("does not re-quote the inference of a run admitted at launch, whoever's key it spends", async () => {
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances([gateModule(calls)], fakeInitCtx());
-    const run = await seedSystemRun(ctx);
-    const res = await call(signRunToken(run.id), {
-      model: SYSTEM_PRESET,
-      messages: [{ role: "user", content: "hi" }],
+    const providerKey = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      apiShape: "openai-completions",
+      baseUrl: "https://api.openai.test/v1",
     });
-    expect(res.status).toBe(200);
+    const orgModel = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: providerKey.id,
+      enabled: true,
+    });
+    const runs = [
+      await seedSystemRun(ctx),
+      await seedSystemRun(ctx, { modelSource: "org", modelId: orgModel.id }),
+    ];
+    for (const run of runs) {
+      const res = await call(signRunToken(run.id), {
+        model: SYSTEM_PRESET,
+        messages: [{ role: "user", content: "hi" }],
+      });
+      expect(res.status).toBe(200);
+    }
     expect(calls).toEqual([]);
   });
 });

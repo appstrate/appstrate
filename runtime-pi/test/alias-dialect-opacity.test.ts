@@ -116,8 +116,6 @@ function containerModelFor(
       api: backing.apiShape,
       modelId: aliased ? ALIAS_ID : backing.modelId,
       piProvider: backing.piProvider,
-      apiKey: "sk-real-key",
-      apiKeyPlaceholder: "sk-placeholder",
       input: ["text"],
       contextWindow: backing.contextWindow,
       maxTokens: backing.maxTokens,

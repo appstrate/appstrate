@@ -14,6 +14,7 @@
 
 // Type-only (erased at emit), so the "no runtime imports" rule above holds.
 import type { ModelCost } from "@appstrate/core/module";
+import type { InferenceRoute } from "@appstrate/db/schema";
 
 /**
  * Narrow projection of the `runs` row used for signature verification +
@@ -45,6 +46,8 @@ export interface RunSinkContext {
   modelSource: string | null;
   /** The model the run launched with (`runs.model_id`). */
   modelId: string | null;
+  /** Who serves the run's inference (`runs.inference_route`) — decides whether it has a runner ledger row. */
+  inferenceRoute: InferenceRoute | null;
   /**
    * Per-1M-token rates snapshotted at kickoff (`runs.model_cost`). The runner
    * reports its own cost, so this is the only platform-side fact from which its

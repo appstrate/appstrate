@@ -68,8 +68,6 @@ function containerModel(def: ModelProviderDefinition, modelId: string): Model<Ap
       api: def.apiShape,
       modelId,
       piProvider: piProviderOf(def),
-      apiKey: "sk-test",
-      apiKeyPlaceholder: "sk-placeholder",
       input: defaults.input,
       contextWindow: defaults.contextWindow,
       maxTokens: defaults.maxTokens,

@@ -11,8 +11,6 @@ function containerModel(aliased: boolean) {
       api: "openai-completions",
       modelId: "deepseek-v4-flash",
       piProvider: "opencode-go",
-      apiKey: "sk-real-key",
-      apiKeyPlaceholder: "sk-placeholder",
       input: ["text"],
       contextWindow: 128_000,
       maxTokens: 8_192,

@@ -16,16 +16,17 @@
  * docs/architecture/SUBSCRIPTION_COMPLIANCE.md).
  *
  * This module owns the two things that still differ for an OAuth run: the
- * credential is delivered via the sidecar `/llm` bearer-swap (not a static
- * placeholder→key substitution), and the run MUST execute under an isolating
- * orchestrator, the only kind that keeps the sidecar's credential apart from
- * the agent.
+ * credential is delivered via the sidecar `/llm` bearer-swap (an API-key run is
+ * served by the platform LLM proxy instead), and the run MUST execute under an
+ * isolating orchestrator, the only kind that keeps the sidecar's credential
+ * apart from the agent.
  */
 
 import type { LlmProxyOauthConfig } from "@appstrate/core/sidecar-types";
 import type { ExecutionMode } from "../../infra/mode.ts";
 import { orchestratorIsolatesWorkloads, isolatingOrchestratorIds } from "../orchestrator/index.ts";
 import { isOAuthModelProvider } from "../model-providers/registry.ts";
+import type { InferenceRoute } from "@appstrate/db/schema";
 
 /**
  * Thrown when a run resolves to an OAuth provider (`authMode: "oauth2"`) with
@@ -60,20 +61,29 @@ export class OauthProviderMissingCredentialError extends Error {
 type CredentialDelivery =
   /** Oauth-class credential — bearer swapped server-side by the sidecar `/llm` gateway. */
   | { readonly kind: "oauth"; readonly credentialId: string }
-  /** Static API-key provider — the placeholder is substituted for the real key inline. */
+  /** API-key provider — served by the platform LLM proxy, which holds the key. */
   | { readonly kind: "api_key" };
+
+/**
+ * Who serves a platform run's inference — `runs.inference_route`, stamped when
+ * the run is created. An OAuth subscription stays with the run's sidecar, whose
+ * bearer-swap keeps the provider's own request shape; every API-key model,
+ * platform-provided or the org's own, is served by the platform LLM proxy.
+ */
+export function inferenceRouteOf(model: { providerId: string }): InferenceRoute {
+  return isOAuthModelProvider(model.providerId) ? "sidecar" : "proxy";
+}
 
 /**
  * Single resolver for "what kind of credential is this and how is it delivered".
  *
- * Classification is by the provider's declared `authMode` FIRST: any provider
- * registered with `authMode: "oauth2"` is an oauth-class credential whose
- * bearer is swapped server-side by the sidecar `/llm` gateway — regardless of
- * whether a credential id happens to be present. An OAuth provider WITHOUT a
- * stored credential id is an invalid configuration and throws
- * {@link OauthProviderMissingCredentialError} (fail-closed — it must never be
- * downgraded to API-key handling, which cannot refresh the token). Everything else is a static API-key provider whose placeholder
- * is substituted for the real key inline.
+ * Classification is the run's {@link inferenceRouteOf} FIRST: a run its sidecar
+ * serves is an oauth-class credential whose bearer is swapped server-side by
+ * the sidecar `/llm` gateway — regardless of whether a credential id happens to
+ * be present. An OAuth provider WITHOUT a stored credential id is an invalid
+ * configuration and throws {@link OauthProviderMissingCredentialError}
+ * (fail-closed — it must never be downgraded to the proxy, which cannot use a
+ * subscription token). Everything else is an API-key provider.
  */
 export function resolveCredentialDelivery(params: {
   providerId: string;
@@ -81,7 +91,7 @@ export function resolveCredentialDelivery(params: {
   credentialId: string | null | undefined;
 }): CredentialDelivery {
   const { providerId, credentialId } = params;
-  if (!isOAuthModelProvider(providerId)) return { kind: "api_key" };
+  if (inferenceRouteOf({ providerId }) === "proxy") return { kind: "api_key" };
   if (!credentialId) throw new OauthProviderMissingCredentialError(providerId);
   return { kind: "oauth", credentialId };
 }

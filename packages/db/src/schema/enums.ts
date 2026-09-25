@@ -88,6 +88,15 @@ export const runOriginValues = ["platform", "remote"] as const;
 export const runOriginEnum = pgEnum("run_origin", runOriginValues);
 
 /**
+ * Which component reaches the model vendor for a platform run's inference —
+ * `proxy` for the platform LLM proxy (which then writes the run's ledger rows),
+ * `sidecar` for the run's own sidecar holding an OAuth subscription token.
+ */
+export const inferenceRouteValues = ["proxy", "sidecar"] as const;
+export const inferenceRouteEnum = pgEnum("inference_route", inferenceRouteValues);
+export type InferenceRoute = (typeof inferenceRouteValues)[number];
+
+/**
  * What a `files` row is: `user_upload` (a staged upload materialized into
  * durable storage when consumed by a run/chat session) or `agent_output` (a
  * deliverable an agent published from a run). Drives the `downloadable`

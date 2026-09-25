@@ -24,7 +24,8 @@ import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
 import { resolvePricingStatus } from "../pricing-provenance.ts";
 import { aggregatedCostUsd } from "../token-cost.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
-import { appendRunLog, isMeteredByPlatformProxy, updateRun } from "../state/runs.ts";
+import { appendRunLog, isServedByLlmProxy, updateRun } from "../state/runs.ts";
+import type { InferenceRoute } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenUsage } from "./types.ts";
@@ -49,6 +50,7 @@ export async function persistRunEvent(
         writeLedger: true;
         modelSource?: string | null;
         modelId: string | null;
+        inferenceRoute: InferenceRoute | null;
         modelCost?: ModelCost | null;
       } = {},
 ): Promise<string | null> {
@@ -154,6 +156,7 @@ export async function persistRunEvent(
             usage,
             modelSource: opts.modelSource,
             modelId: opts.modelId,
+            inferenceRoute: opts.inferenceRoute,
             modelCost: opts.modelCost,
           },
           { executor },
@@ -197,8 +200,10 @@ export async function writeRunnerLedgerRow(
     usage: TokenUsage | null;
     /** Run's model source — stamped as `credential_source`. */
     modelSource?: string | null;
-    /** Run's pinned model (`runs.model_id`) — see {@link isMeteredByPlatformProxy}. */
+    /** Run's pinned model (`runs.model_id`). */
     modelId: string | null;
+    /** Run's inference route — see {@link isServedByLlmProxy}. */
+    inferenceRoute: InferenceRoute | null;
     /** Run's kickoff rate snapshot — prices the row and classifies it. */
     modelCost?: ModelCost | null;
   },
@@ -215,7 +220,7 @@ export async function writeRunnerLedgerRow(
 ): Promise<void> {
   // The proxy records every call from the provider's own response: those rows
   // are this run's ledger, and a runner row beside them would count it twice.
-  if (isMeteredByPlatformProxy(row)) return;
+  if (isServedByLlmProxy(row)) return;
 
   // Degenerate-event skip — nothing to bill or audit. Keyed on whichever input
   // this row's cost is DERIVED from: the usage snapshot on a platform run, the
@@ -349,9 +354,9 @@ const REPORTED_COST_DIVERGENCE_USD = 1e-6;
  * remote-origin run (NULL `model_source`) is billed from it verbatim.
  *
  * Population: server-priced runs whose container reported a cost — in practice
- * org-credential (BYOK) runs. A platform-model run is metered by the LLM proxy
- * and writes no runner row; an aliased run gets no `MODEL_COST` and reports no
- * cost. The container prices at the base rate (`tiers` dropped from
+ * OAuth-subscription runs, the one platform route the LLM proxy does not serve
+ * (a proxy-served run writes no runner row); an aliased run gets no
+ * `MODEL_COST` and reports no cost. The container prices at the base rate (`tiers` dropped from
  * `MODEL_COST`), matching the server, so a tiered model raises no divergence.
  *
  * It is the only live check that `@appstrate/runner-pi` (also the CLI's remote

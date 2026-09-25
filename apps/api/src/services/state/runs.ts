@@ -36,6 +36,7 @@ import {
   fileLinks,
   chatSessions,
   type PricingStatus,
+  type InferenceRoute,
 } from "@appstrate/db/schema";
 import {
   activeRunStatusValues,
@@ -555,6 +556,8 @@ interface CreateRunParams {
   modelSource?: string;
   /** The model the run launched with — see `runs.model_id`. */
   modelId: string | null;
+  /** Who serves the run's inference — see `runs.inference_route`. Absent on a remote-origin run. */
+  inferenceRoute?: InferenceRoute;
   /**
    * Per-1M-token rates the run is launched with (the `MODEL_COST` the container
    * receives). Persisted so the runner's ledger row — whose `cost` the container
@@ -701,6 +704,7 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
       modelLabel: params.modelLabel,
       modelSource: params.modelSource,
       modelId: params.modelId,
+      inferenceRoute: params.inferenceRoute ?? null,
       modelCost: params.modelCost ?? null,
       generationConfig:
         params.generationConfig == null
@@ -929,15 +933,14 @@ export function modelSourceOf(model: { isSystemModel: boolean }): "system" | "or
 }
 
 /**
- * Whether a run's inference is served and metered by the platform LLM proxy —
- * routed there by the launcher, served by its run entry, no runner ledger row.
- * `modelId` covers the deploy window: a run launched before migration `0072`
- * has no pinned model and still holds its own credential.
+ * Whether the platform LLM proxy serves a run's inference — and so writes its
+ * ledger rows, leaving the runner none to report. `runs_proxy_route_has_model`
+ * guarantees such a run has a pinned model.
  */
-export function isMeteredByPlatformProxy<
-  T extends { modelSource?: string | null; modelId: string | null },
->(run: T): run is T & { modelId: string } {
-  return run.modelSource === "system" && run.modelId !== null;
+export function isServedByLlmProxy<
+  T extends { inferenceRoute: InferenceRoute | null; modelId: string | null },
+>(run: T): run is T & { inferenceRoute: "proxy"; modelId: string } {
+  return run.inferenceRoute === "proxy";
 }
 
 /** A run's attributable spend and how much of it is backed by real rates. */

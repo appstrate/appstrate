@@ -364,6 +364,9 @@ describe("Runs API", () => {
       const [row] = await db.select().from(runs).where(eq(runs.id, body.id!));
       expect(row!.modelLabel).toBe("Echo Default GPT");
       expect(row!.modelSource).toBe("org");
+      // The org's own API key is spent by the platform LLM proxy, on this pin.
+      expect(row!.inferenceRoute).toBe("proxy");
+      expect(row!.modelId).toBe(modelDbId);
       // Kickoff pricing snapshot (issue #1025 §C) — the platform-side fact the
       // run's runner ledger row is classified against, resolved here from Pi's
       // model registry (the org_models row carries no `cost` override). The
