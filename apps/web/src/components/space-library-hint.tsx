@@ -4,7 +4,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import type { PackageType } from "@appstrate/core/validation";
 import { usePermissions } from "../hooks/use-permissions";
-import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
+import { packagePermission } from "@appstrate/core/permissions";
 
 /**
  * Where the rest of the space's packages are, said on the screen that does not
@@ -29,7 +29,7 @@ import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
 export function SpaceLibraryHint({ type }: { type: PackageType }) {
   const { t } = useTranslation("common");
   const { can } = usePermissions();
-  if (!can(`${PACKAGE_PERMISSIONS[type].resource}:read`)) return null;
+  if (!can(packagePermission(type, "read"))) return null;
   return (
     <Trans
       t={t}

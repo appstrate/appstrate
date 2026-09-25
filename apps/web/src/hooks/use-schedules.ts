@@ -7,7 +7,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
-import { packageSightPermissions } from "../lib/package-permissions";
+import { packageSightPermissions } from "@appstrate/core/permissions";
 import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";

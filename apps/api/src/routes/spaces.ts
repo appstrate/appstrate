@@ -6,6 +6,7 @@ import type { Context, Next } from "hono";
 import { z } from "zod";
 import {
   makePermissionGuard,
+  packagePermission,
   SPACE_ROLE_PRESETS,
   SPACE_VISIBILITIES,
 } from "@appstrate/core/permissions";
@@ -66,7 +67,6 @@ import {
   assertCatalogPackageAccess,
   assertPackageShareAccess,
   isPackageReadableInSpace,
-  packagePermission,
   spacePackagePermission,
 } from "../lib/package-access.ts";
 import {

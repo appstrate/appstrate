@@ -12,7 +12,11 @@
  * the browser or the SPA's hooks.
  */
 
-import { RUNS_READ_PERMISSIONS, type CorePermission } from "@appstrate/core/permissions";
+import {
+  packageSightPermissions,
+  RUNS_READ_PERMISSIONS,
+  type CorePermission,
+} from "@appstrate/core/permissions";
 
 /** A permission as the API guard spells it; module strings ride the open arm. */
 type Permission = CorePermission | (string & {});
@@ -39,14 +43,15 @@ const HOME_SPACE_EDITOR: RouteAccess = {
 };
 const OWN_ACCOUNT: RouteAccess = { open: "the caller's own account; no org or space permission" };
 const WEBHOOKS_READ = ["webhooks:read", "org-webhooks:read"] as const;
+const AGENT_SIGHT = packageSightPermissions("agent");
 
 export const ROUTE_ACCESS = {
   "/": { open: "the fallback route: renders for any principal, its sections gate themselves" },
 
-  "/agents": { anyOf: ["agents:read", "agents:run"], operations: ["listAgents"] },
+  "/agents": { anyOf: AGENT_SIGHT, operations: ["listAgents"] },
   "/agents/new": { anyOf: ["agents:write"], operations: ["createAgent"] },
   "/agents/:scope/:name/edit": HOME_SPACE_EDITOR,
-  "/agents/:scope/:name": { anyOf: ["agents:read", "agents:run"], operations: ["getAgentPackage"] },
+  "/agents/:scope/:name": { anyOf: AGENT_SIGHT, operations: ["getAgentPackage"] },
   // A version is the full manifest; `agents:run` reads only the summary (RBAC spec §3.4).
   "/agents/:scope/:name/:version": {
     anyOf: ["agents:read"],

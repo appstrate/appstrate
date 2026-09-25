@@ -83,6 +83,7 @@ import {
 import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
+import { canAuthorAgents } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -150,8 +151,6 @@ export interface ChatPageProps {
   useFileImageSrc: UseFileImageSrc;
   uploadFile: UploadFile;
   t: ChatTranslate;
-  /** Whether the caller may create agents, resolved by the shell: the module resolves no RBAC. */
-  canAuthorAgents: boolean;
   /** The caller's grants (see `ChatCan`). Pass a stable function. */
   can: ChatCan;
 }
@@ -168,7 +167,6 @@ export function ChatPage({
   useFileImageSrc,
   uploadFile,
   t,
-  canAuthorAgents,
   can,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
@@ -289,10 +287,11 @@ export function ChatPage({
   // `Conversation` a new prop each time and defeat its `memo` below. The
   // setters are stable module functions, so the deps are exactly the values
   // the picker displays.
+  const authorsAgents = canAuthorAgents(can);
   const composerSlot = useMemo(
     () => (
       <div className="flex items-center gap-2">
-        {canAuthorAgents ? <AgentAuthoringToggle /> : null}
+        {authorsAgents ? <AgentAuthoringToggle /> : null}
         <ModelSelect
           models={models}
           selectedId={selectedModel}
@@ -303,7 +302,7 @@ export function ChatPage({
         {composerActions}
       </div>
     ),
-    [canAuthorAgents, models, selectedModel, generation, composerActions],
+    [authorsAgents, models, selectedModel, generation, composerActions],
   );
 
   // The server's view of the ACTIVE conversation, reduced to two primitives so

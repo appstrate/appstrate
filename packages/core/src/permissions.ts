@@ -37,6 +37,7 @@
  */
 
 import { z } from "zod";
+import type { PackageType } from "./validation.ts";
 
 // ---------------------------------------------------------------------------
 // Core resource catalog (static — owned by the platform)
@@ -161,6 +162,45 @@ export const RUNS_READ_PERMISSIONS = [
 
 export function canReadRuns(has: (permission: CorePermission) => boolean): boolean {
   return RUNS_READ_PERMISSIONS.some((permission) => has(permission));
+}
+
+/**
+ * The permission resource each package family's routes guard on. Declared, not
+ * derived from `PACKAGE_TYPE_ROUTE_SEGMENT`: a URL segment and an RBAC resource
+ * are two vocabularies that merely agree today.
+ */
+const PACKAGE_RESOURCES = {
+  agent: "agents",
+  skill: "skills",
+  integration: "integrations",
+  "mcp-server": "mcp-servers",
+} as const satisfies Record<PackageType, CoreResource>;
+
+/**
+ * Permissions BEYOND `<resource>:read` that also let a caller SEE a package of
+ * this type (RBAC spec §3.4) — a table, because it is a fact of the permission
+ * catalogue and not a branch of behaviour.
+ *
+ * `agents:run` is the one entry: it opens the list, the detail and the resolved
+ * model the launch form reads, in a summary projection. So a `runner` reaches
+ * an agent, and every predicate asking "may this caller know this package
+ * exists" — the API's route guard and its 403-vs-404 decision, the SPA's route
+ * gate and query gates — reads {@link packageSightPermissions}. A type absent
+ * from it has exactly one read permission.
+ */
+const PACKAGE_EXTRA_SIGHT_PERMISSIONS: { readonly [T in PackageType]?: readonly CorePermission[] } =
+  { agent: ["agents:run"] };
+
+export function packagePermission(
+  type: PackageType,
+  action: "read" | "write" | "delete" | "share",
+): CorePermission {
+  return `${PACKAGE_RESOURCES[type]}:${action}`;
+}
+
+/** Which permissions let a caller SEE a package of this type (any one suffices). */
+export function packageSightPermissions(type: PackageType): readonly CorePermission[] {
+  return [packagePermission(type, "read"), ...(PACKAGE_EXTRA_SIGHT_PERMISSIONS[type] ?? [])];
 }
 
 /** Launch AND read back: a run nobody can poll still bills. */

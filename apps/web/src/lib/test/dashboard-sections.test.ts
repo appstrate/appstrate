@@ -9,16 +9,17 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { dashboardSections, hasAnyDashboardSection } from "../dashboard-sections.ts";
-import { packageReadPermission, packageSightPermissions } from "../package-permissions.ts";
+import { dashboardSections } from "../dashboard-sections.ts";
 
 const can = (granted: string[]) => (permission: string) => granted.includes(permission);
 
 describe("dashboardSections", () => {
   it("shows nothing to an empty role", () => {
-    const sections = dashboardSections(can([]));
-    expect(sections).toEqual({ schedules: false, recentAgents: false, recentRuns: false });
-    expect(hasAnyDashboardSection(sections)).toBe(false);
+    expect(dashboardSections(can([]))).toEqual({
+      schedules: false,
+      recentAgents: false,
+      recentRuns: false,
+    });
   });
 
   it("shows a runner its agents and runs, but no schedules", () => {
@@ -44,15 +45,6 @@ describe("dashboardSections", () => {
   it("keeps recent agents behind the runs read", () => {
     const sections = dashboardSections(can(["agents:read", "schedules:read"]));
     expect(sections.recentAgents).toBe(false);
-    expect(hasAnyDashboardSection(sections)).toBe(true);
-  });
-});
-
-describe("package read permissions", () => {
-  it("lets `agents:run` see an agent, and nothing else of a package family", () => {
-    expect(packageSightPermissions("agent")).toEqual(["agents:read", "agents:run"]);
-    expect(packageSightPermissions("skill")).toEqual(["skills:read"]);
-    expect(packageReadPermission("agent")).toBe("agents:read");
-    expect(packageReadPermission("mcp-server")).toBe("mcp-servers:read");
+    expect(sections.schedules).toBe(true);
   });
 });

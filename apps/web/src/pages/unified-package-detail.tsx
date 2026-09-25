@@ -18,8 +18,7 @@ import {
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { SchemaWrapper } from "@appstrate/core/form";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
-import { canReadRuns } from "@appstrate/core/permissions";
-import { packageSightPermissions } from "../lib/package-permissions";
+import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
 import { usePackageActivationState, useSetPackageActive } from "../hooks/use-library";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { LoadingState, ErrorState } from "../components/page-states";

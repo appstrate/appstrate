@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { canReadRuns } from "@appstrate/core/permissions";
+import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
 import type { GateablePermission } from "../hooks/use-permissions";
-import { packageSightPermissions } from "./package-permissions";
 
 /** Which dashboard sections the caller can read — each one is its own read. */
 export interface DashboardSections {
@@ -26,8 +25,4 @@ export function dashboardSections(
     recentAgents: runs && packageSightPermissions("agent").some(can),
     recentRuns: runs,
   };
-}
-
-export function hasAnyDashboardSection(sections: DashboardSections): boolean {
-  return sections.schedules || sections.recentAgents || sections.recentRuns;
 }

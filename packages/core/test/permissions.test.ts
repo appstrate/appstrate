@@ -9,6 +9,8 @@ import {
   agentCapabilities,
   canReadRuns,
   canRunAgents,
+  packagePermission,
+  packageSightPermissions,
   reaches,
   CORE_RESOURCE_ACTIONS,
   CORE_RESOURCE_LEVELS,
@@ -331,6 +333,21 @@ describe("canReadRuns / canRunAgents", () => {
   it("both together is, under either read form", () => {
     expect(canRunAgents(has("agents:run", "runs:read"))).toBe(true);
     expect(canRunAgents(has("agents:run", "runs:read-all"))).toBe(true);
+  });
+});
+
+describe("packagePermission / packageSightPermissions", () => {
+  it("spells each family's permission on its own resource", () => {
+    expect(packagePermission("agent", "read")).toBe("agents:read");
+    expect(packagePermission("mcp-server", "write")).toBe("mcp-servers:write");
+    expect(packagePermission("integration", "share")).toBe("integrations:share");
+  });
+
+  it("lets `agents:run` see an agent, and nothing else of a package family", () => {
+    expect(packageSightPermissions("agent")).toEqual(["agents:read", "agents:run"]);
+    expect(packageSightPermissions("skill")).toEqual(["skills:read"]);
+    expect(packageSightPermissions("integration")).toEqual(["integrations:read"]);
+    expect(packageSightPermissions("mcp-server")).toEqual(["mcp-servers:read"]);
   });
 });
 

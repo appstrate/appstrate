@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { turnCapabilities } from "../src/capabilities.ts";
+import { canAuthorAgents, turnCapabilities } from "../src/capabilities.ts";
 
 describe("turnCapabilities", () => {
   it("puts `invokes` in every level: no MCP pair, no run level and no authoring", () => {
@@ -31,5 +31,18 @@ describe("turnCapabilities", () => {
       runLevel: "compose",
       authors: true,
     });
+  });
+});
+
+describe("canAuthorAgents", () => {
+  const authoring = ["mcp:read", "mcp:invoke", "agents:write"];
+
+  it("needs the turn itself (`chat:write`) on top of authoring", () => {
+    const held = (extra: string[]) => {
+      const set = new Set([...authoring, ...extra]);
+      return (p: string) => set.has(p);
+    };
+    expect(canAuthorAgents(held(["chat:write"]))).toBe(true);
+    expect(canAuthorAgents(held([]))).toBe(false);
   });
 });

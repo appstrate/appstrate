@@ -12,11 +12,8 @@ import {
 } from "@appstrate/db/schema";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
-import {
-  homeWireForCaller,
-  packageAccessSpaces,
-  packagePermission,
-} from "../lib/package-access.ts";
+import { packagePermission } from "@appstrate/core/permissions";
+import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { isActiveHere } from "./package-activation.ts";
 import { sharerView } from "./package-shares.ts";
 import type { PackageType } from "@appstrate/core/validation";

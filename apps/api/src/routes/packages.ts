@@ -2,7 +2,11 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
+import {
+  makePermissionGuard,
+  packagePermission,
+  reportPermissionDenial,
+} from "@appstrate/core/permissions";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
@@ -92,7 +96,6 @@ import {
   isPackageReadableInSpace,
   packageAccessSpaces,
   holdsHomeAuthority,
-  packagePermission,
   requireAgentRead,
   resolvePackageHome,
 } from "../lib/package-access.ts";

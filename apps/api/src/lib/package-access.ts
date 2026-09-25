@@ -24,10 +24,15 @@ import { getLatestVersionId } from "../services/package-versions.ts";
 import { isPackageActiveHere } from "../services/space-packages.ts";
 import { activeHereSql } from "../services/package-activation.ts";
 import { parsePackageIdentity, type Bundle } from "@appstrate/afps-runtime/bundle";
-import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
+import {
+  makePermissionGuard,
+  packagePermission,
+  packageSightPermissions,
+  reportPermissionDenial,
+} from "@appstrate/core/permissions";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { getOrgMember, getOrgSettings } from "../services/organizations.ts";
-import type { PackageType } from "@appstrate/core/validation";
+import { packageTypeEnum, type PackageType } from "@appstrate/core/validation";
 import type { PackageHome } from "@appstrate/shared-types";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
@@ -52,55 +57,16 @@ import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
 import { placementRowJoin, placementShareJoin } from "../services/package-placement.ts";
 
-const PACKAGE_RESOURCES = {
-  agent: "agents",
-  skill: "skills",
-  integration: "integrations",
-  "mcp-server": "mcp-servers",
-} as const;
-
-/**
- * Permissions BEYOND `<resource>:read` that also let a caller SEE a package of
- * this type (RBAC spec §3.4) — a table, because it is a fact of the permission
- * catalogue and not a branch of behaviour.
- *
- * `agents:run` is the one entry: it opens the list, the detail and the resolved
- * model the launch form reads, in a summary projection. So a `runner` reaches
- * an agent, and every predicate that asks "may this caller know this package
- * exists" — {@link requireAgentRead} as a route guard,
- * {@link assertPackageIsReachable} as the 403-vs-404 decision — reads this same
- * table. A type absent from it has exactly one read permission.
- */
-const PACKAGE_EXTRA_READ_PERMISSIONS: Partial<Record<PackageType, readonly Permission[]>> = {
-  agent: ["agents:run"],
-};
-
-export function packagePermission(
-  type: PackageType,
-  action: "read" | "write" | "delete" | "share",
-): Permission {
-  return `${PACKAGE_RESOURCES[type]}:${action}`;
-}
-
-export const PACKAGE_WRITE_PERMISSIONS = Object.values(PACKAGE_RESOURCES).map(
-  (resource) => `${resource}:write` as Permission,
+export const PACKAGE_WRITE_PERMISSIONS = packageTypeEnum.options.map((type) =>
+  packagePermission(type, "write"),
 );
-
-/**
- * Which permissions let a caller SEE a package of this type — the one statement
- * of that rule (RBAC spec §3.4), read off
- * {@link PACKAGE_EXTRA_READ_PERMISSIONS} so the disjunction is data.
- */
-function packageReadPermissions(type: PackageType): readonly Permission[] {
-  return [packagePermission(type, "read"), ...(PACKAGE_EXTRA_READ_PERMISSIONS[type] ?? [])];
-}
 
 /**
  * The read guard of the three agent routes `agents:run` also opens: the list,
  * the detail, and the resolved model the launch form reads (RBAC spec §3.4).
  * Every other agent surface keeps its `agents:read` / `agents:write` guard.
  */
-export const requireAgentRead = requireAnyPermission(packageReadPermissions("agent"));
+export const requireAgentRead = requireAnyPermission(packageSightPermissions("agent"));
 
 /**
  * `agents:run` without `agents:read` — the caller sees what the launch form
@@ -514,7 +480,7 @@ function assertPackageIsReachable(
 
 /**
  * Every space of the caller's reach this package is READ from — the type's
- * read permission held there ({@link packageReadPermissions}) and the placement
+ * sight permission held there (`packageSightPermissions`) and the placement
  * granting it there ({@link placementGrantsRead}); every such space for a
  * system package, which the platform places everywhere. Reachable = non-empty.
  */
@@ -523,7 +489,7 @@ function packageReadSpaces(
   sharedIn: readonly string[],
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): PackageAccessSpace[] {
-  const opens = packageReadPermissions(pkg.type);
+  const opens = packageSightPermissions(pkg.type);
   return accessible.filter(
     (space) =>
       opens.some((permission) => space.permissions.has(permission)) &&

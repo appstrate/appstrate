@@ -9,7 +9,7 @@ import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
-import { dashboardSections, hasAnyDashboardSection } from "../lib/dashboard-sections";
+import { dashboardSections } from "../lib/dashboard-sections";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
 import { ScheduleCard } from "../components/schedule-card";
@@ -95,7 +95,7 @@ export function DashboardPage() {
       <h1 className="text-3xl font-bold">
         {t("dashboard.welcome", { name: firstName, ns: "common" })}
       </h1>
-      {!hasAnyDashboardSection(sections) && (
+      {!Object.values(sections).some(Boolean) && (
         <EmptyState
           message={t("dashboard.nothingReadable")}
           hint={t("dashboard.nothingReadableHint")}

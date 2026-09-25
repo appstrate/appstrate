@@ -8,7 +8,7 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
-import { packageSightPermissions } from "../lib/package-permissions";
+import { packageSightPermissions } from "@appstrate/core/permissions";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { ModelFormSubmission, ModelFormSubmitOutcome } from "../lib/model-form-payload";
 import { submitModelForm } from "../lib/model-form-submit";

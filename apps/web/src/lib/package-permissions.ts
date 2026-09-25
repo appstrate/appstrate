@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PackageType } from "@appstrate/core/validation";
-import type { CoreResource } from "@appstrate/core/permissions";
 import type { GateablePermission } from "../hooks/use-permissions";
 
 /**
- * Per package family: the permission resource its own routes guard on, and the
- * two activation grants — the same table the API enforces
- * (`spacePackagePermission`, `apps/api/src/lib/package-access.ts`).
+ * Per package family: the two activation grants — the same table the API
+ * enforces (`spacePackagePermission`, `apps/api/src/lib/package-access.ts`).
+ * The family's own read/write/delete/share strings are `packagePermission`
+ * (`@appstrate/core/permissions`).
  * `agents:configure` rather than `agents:write`: activating chooses which space
  * runs an agent, it does not author one. The strings themselves still read
  * `integrations:install` / `integrations:uninstall` because they are ROLE DATA
@@ -15,36 +15,13 @@ import type { GateablePermission } from "../hooks/use-permissions";
  */
 export const PACKAGE_PERMISSIONS: Record<
   PackageType,
-  { resource: CoreResource; activate: GateablePermission; deactivate: GateablePermission }
+  { activate: GateablePermission; deactivate: GateablePermission }
 > = {
-  agent: { resource: "agents", activate: "agents:configure", deactivate: "agents:configure" },
-  skill: { resource: "skills", activate: "skills:write", deactivate: "skills:write" },
-  "mcp-server": {
-    resource: "mcp-servers",
-    activate: "mcp-servers:write",
-    deactivate: "mcp-servers:write",
-  },
-  integration: {
-    resource: "integrations",
-    activate: "integrations:install",
-    deactivate: "integrations:uninstall",
-  },
+  agent: { activate: "agents:configure", deactivate: "agents:configure" },
+  skill: { activate: "skills:write", deactivate: "skills:write" },
+  "mcp-server": { activate: "mcp-servers:write", deactivate: "mcp-servers:write" },
+  integration: { activate: "integrations:install", deactivate: "integrations:uninstall" },
 };
-
-/** The one read permission of a package family: its list, versions and files. */
-export function packageReadPermission(type: PackageType): GateablePermission {
-  return `${PACKAGE_PERMISSIONS[type].resource}:read`;
-}
-
-/**
- * Who may SEE a package of this type — its detail, and for agents the index
- * `GET /api/agents` too. The API's `packageReadPermissions` (RBAC spec §3.4):
- * `agents:run` opens an agent in the summary projection its launch form reads.
- */
-export function packageSightPermissions(type: PackageType): readonly GateablePermission[] {
-  const read = packageReadPermission(type);
-  return type === "agent" ? [read, "agents:run"] : [read];
-}
 
 /** One row of `GET /api/spaces`, narrowed to what the verdict below reads. */
 export interface SpaceGrant {

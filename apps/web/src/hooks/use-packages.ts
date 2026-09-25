@@ -14,7 +14,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
-import { packageReadPermission, packageSightPermissions } from "../lib/package-permissions";
+import { packagePermission, packageSightPermissions } from "@appstrate/core/permissions";
 import { ApiError } from "../api/errors";
 import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
 import type {
@@ -39,7 +39,7 @@ import type {
 // only incidentally must not fire a request the server is bound to refuse.
 function useCanReadPackages(type: PackageType): boolean {
   const { can } = usePermissions();
-  return can(packageReadPermission(type));
+  return can(packagePermission(type, "read"));
 }
 
 function useCanSeePackage(type: PackageType): boolean {
