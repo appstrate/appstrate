@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Live model search backends, by provider id. A provider with one serves more
+ * Live model search, served for OpenRouter only. That provider serves more
  * models than Pi's registry records, so a model bound to it may be any id it
  * serves, not only its offer.
  */
@@ -21,12 +21,10 @@ export interface SearchedModel {
   cost: ModelCost | null;
 }
 
-const SEARCH_BACKENDS: Readonly<Record<string, (query: string) => Promise<SearchedModel[]>>> = {
-  openrouter: searchOpenRouterModels,
-};
+const LIVE_SEARCH_PROVIDER_ID = "openrouter";
 
 export function hasLiveModelSearch(providerId: string): boolean {
-  return Object.hasOwn(SEARCH_BACKENDS, providerId);
+  return providerId === LIVE_SEARCH_PROVIDER_ID;
 }
 
 /** OpenRouter's models matching `query` (id or name), at most 50. */
