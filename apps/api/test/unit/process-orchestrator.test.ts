@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -117,7 +117,7 @@ describe("ProcessOrchestrator", () => {
     });
 
     it("advertises coherent loopback sidecar endpoints at boundary creation", async () => {
-      // The sidecar port pair is allocated when the BOUNDARY is created (not
+      // The sidecar's two ports are allocated when the BOUNDARY is created (not
       // lazily in createSidecar) so pi.ts can bake the URLs into the agent
       // env before the sidecar exists — the parallel-boot ordering fix.
       orchestrator = new ProcessOrchestrator();
@@ -128,7 +128,9 @@ describe("ProcessOrchestrator", () => {
       const port = Number(new URL(sidecarUrl).port);
       expect(port).toBeGreaterThan(0);
       expect(llmProxyUrl).toBe(`${sidecarUrl}/llm`);
-      expect(new URL(forwardProxyUrl).port).toBe(String(port + 1));
+      const forwardProxyPort = Number(new URL(forwardProxyUrl).port);
+      expect(forwardProxyPort).toBeGreaterThan(0);
+      expect(forwardProxyPort).not.toBe(port);
       expect(noProxy).toContain("localhost");
 
       await orchestrator.removeIsolationBoundary(boundary);
@@ -415,19 +417,40 @@ describe("ProcessOrchestrator", () => {
     });
   });
 
-  describe("findAvailablePort (via createSidecar)", () => {
-    it("allocates a port", async () => {
-      orchestrator = new ProcessOrchestrator();
+  describe("findAvailablePorts", () => {
+    type PortFinder = {
+      findAvailablePorts: () => Promise<{ sidecar: number; forwardProxy: number }>;
+    };
 
-      // We test the port allocation indirectly — findAvailablePort is private,
-      // but we can verify it works by checking the sidecar doesn't throw on port binding.
-      // Since we can't easily test createSidecar without the sidecar binary,
-      // we verify the port finder works standalone via reflection.
-      const port = await (
-        orchestrator as unknown as { findAvailablePort: () => Promise<number> }
-      ).findAvailablePort();
-      expect(port).toBeGreaterThan(0);
-      expect(port).toBeLessThan(65536);
+    it("allocates two distinct ports", async () => {
+      orchestrator = new ProcessOrchestrator();
+      const ports = await (orchestrator as unknown as PortFinder).findAvailablePorts();
+      for (const port of [ports.sidecar, ports.forwardProxy]) {
+        expect(port).toBeGreaterThan(0);
+        expect(port).toBeLessThan(65536);
+      }
+      expect(ports.forwardProxy).not.toBe(ports.sidecar);
+    });
+
+    it("succeeds on a host where no explicitly requested port is ever free", async () => {
+      // The old finder probed port 0, then bound `port + 1` explicitly, and
+      // threw after 5 draws whenever that neighbour was taken — CI's
+      // `Failed to find available port after retries`. Refusing every
+      // explicit port makes that host deterministic.
+      const realServe = Bun.serve.bind(Bun);
+      const serve = spyOn(Bun, "serve").mockImplementation(((
+        options: Parameters<typeof Bun.serve>[0],
+      ) => {
+        if ((options as { port?: number }).port !== 0) throw new Error("EADDRINUSE");
+        return realServe(options);
+      }) as typeof Bun.serve);
+      try {
+        orchestrator = new ProcessOrchestrator();
+        const ports = await (orchestrator as unknown as PortFinder).findAvailablePorts();
+        expect(ports.forwardProxy).not.toBe(ports.sidecar);
+      } finally {
+        serve.mockRestore();
+      }
     });
   });
 

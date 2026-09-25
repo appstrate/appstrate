@@ -1340,6 +1340,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       spec,
       baseEnv: pickOperatorSidecarEnv(),
       port: "8080",
+      forwardProxyPort: "8081",
       runId,
       platformApiUrl: await this.resolvePlatformApiUrl(),
       workspace: boundary.workspace,

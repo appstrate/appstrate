@@ -322,6 +322,7 @@ export class DockerOrchestrator implements RunOrchestrator {
       spec,
       baseEnv: pickOperatorSidecarEnv(),
       port: "8080",
+      forwardProxyPort: "8081",
       // Phase 1.4 — RUN_ID lets the sidecar stamp `appstrate.run=<runId>`
       // on the integration runner containers it spawns, letting the
       // platform's orphan reaper match them back to the parent run.

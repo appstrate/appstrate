@@ -217,7 +217,7 @@ const cookieJar = new Map<string, string[]>();
 let peerAttribution: PeerAttribution | null = null;
 const proxy = createForwardProxy({
   config,
-  listenPort: env.port + 1,
+  listenPort: env.forwardProxyPort,
   isPeerAllowed: (ip) => admitsAgentProxyPeer(peerAttribution, ip),
 });
 // One cache per sidecar process — a sidecar serves a single run, so
