@@ -22,6 +22,7 @@ import { modelProviderCredentials } from "@appstrate/db/schema";
 import {
   listOrgModels,
   loadModel,
+  resolveModel,
   setDefaultModel,
   modelNeedsReconnection,
 } from "../../../src/services/org-models.ts";
@@ -175,6 +176,21 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     expect((err as ApiError).status).toBe(409);
     expect((err as ApiError).code).toBe("model_provider_unregistered");
     expect((err as ApiError).message).toContain("'google-ai'");
+  });
+
+  it("refuses to resolve an org default bound to an unregistered provider", async () => {
+    const { cred, model } = await seedApiKeyModel();
+    await setDefaultModel(ctx.orgId, model.id);
+    await db
+      .update(modelProviderCredentials)
+      .set({ providerId: "google-ai" })
+      .where(eq(modelProviderCredentials.id, cred.id));
+
+    // The org default must not cascade on to the system default.
+    const err = await resolveModel(ctx.orgId, "@acme/agent", null).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(409);
+    expect((err as ApiError).code).toBe("model_provider_unregistered");
   });
 
   it("refuses to make a dead model the org default (409 model_needs_reconnection)", async () => {

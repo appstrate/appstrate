@@ -264,9 +264,10 @@ differently — and neither does it by "letting the headers flow".**
   transaction, not the vendor) — and why the ALIAS, which does not, is kept out
   of that same string.
 
-Non-aliased models keep the upstream's error bodies verbatim, relayed by the
-platform LLM proxy — a run still reaches only that proxy's inference endpoint,
-and the sidecar still cuts response headers to `LLM_PASSTHROUGH_RESPONSE_HEADERS`.
+Non-aliased models keep the upstream's error bodies verbatim: relayed by the
+platform LLM proxy for an API-key run, which reaches only that proxy's inference
+endpoint, or passed through from the subscription provider for an OAuth run.
+Either way the sidecar cuts response headers to `LLM_PASSTHROUGH_RESPONSE_HEADERS`.
 The synthesized-error cost applies only to aliases, whose contract is precisely
 that opacity. The trade-off: aliased callers lose upstream error detail (e.g. a
 provider's "max_tokens too large" prose); the detail remains in server logs.
@@ -280,7 +281,10 @@ provider's "max_tokens too large" prose); the detail remains in server logs.
   boot (`isAliasBackingShape`). It admits exactly `anthropic-messages`,
   `openai-completions`, `openai-responses`, `openai-codex-responses`,
   `mistral-conversations` (every `ModelApiShape` but the client dialect) — every vendor protocol the platform maps, each carrying the
-  model id in the body. `pi-messages` is
+  model id in the body. Of these, `openai-codex-responses` never backs an alias
+  in practice: it is an OAuth-subscription shape (see the next constraint) and
+  the platform LLM proxy does not serve it, so the real backing set is four.
+  `pi-messages` is
   **not** a backing shape: it is the CLIENT dialect, matched by the separate
   `isAliasClientShape` / `ALIAS_CLIENT_API_SHAPE`. Because sidecar boot pins
   `clientApiShape` to that dialect, the inference allowlist is a single path
@@ -696,15 +700,16 @@ masking costs something real and buys nothing measurable:
   purpose by the read projection.
 
 Five fields of the response body are **known residuals** — on the list because
-they must be, not because they are neutral:
+they must be, not because they are neutral. Each is measured against the four
+shapes that can actually back an alias (§ Constraints):
 
-| field                           | emitted by                                                                                      | narrows the backing to                                 |
-| ------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `thinking_end.redacted`         | the Anthropic adapter alone — it is how safety-filtered thinking travels as `redacted_thinking` | `anthropic-messages` (1 of 5)                          |
-| `toolCall.thoughtSignature`     | `openai-completions`                                                                            | `openai-completions` (1 of 5)                          |
-| `text_end.contentSignature`     | the shared openai-responses adapter                                                             | `openai-responses` / `openai-codex-responses` (2 of 5) |
-| `toolCall.namespace`            | the same adapter                                                                                | the same two (2 of 5)                                  |
-| `thinking_end.contentSignature` | every backing shape but `mistral-conversations`                                                 | 4 of 5 — here the tell is its absence                  |
+| field                           | emitted by                                                                                      | narrows the backing to                |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `thinking_end.redacted`         | the Anthropic adapter alone — it is how safety-filtered thinking travels as `redacted_thinking` | `anthropic-messages` (1 of 4)         |
+| `toolCall.thoughtSignature`     | `openai-completions`                                                                            | `openai-completions` (1 of 4)         |
+| `text_end.contentSignature`     | the shared openai-responses adapter                                                             | `openai-responses` (1 of 4)           |
+| `toolCall.namespace`            | the same adapter                                                                                | the same one (1 of 4)                 |
+| `thinking_end.contentSignature` | every backing shape but `mistral-conversations`                                                 | 3 of 4 — here the tell is its absence |
 
 Their VALUES are opaque blobs and nothing is read out of them; it is their mere
 PRESENCE that narrows the candidate vendor. That is the same argument by which

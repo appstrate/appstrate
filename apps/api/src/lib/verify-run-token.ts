@@ -23,8 +23,6 @@ export async function verifyRunToken(c: Context): Promise<{
     spaceId: string;
     status: string;
     modelCredentialId: string | null;
-    /** `runs.model_source` — `"system"` when the run spends a platform-provided credential. */
-    modelSource: string | null;
     /** The model the run launched with — see `runs.model_id`. */
     modelId: string | null;
     /** Who serves the run's inference — see `runs.inference_route`. */
@@ -82,7 +80,6 @@ export async function verifyRunToken(c: Context): Promise<{
       spaceId: runs.spaceId,
       status: runs.status,
       modelCredentialId: runs.modelCredentialId,
-      modelSource: runs.modelSource,
       modelId: runs.modelId,
       inferenceRoute: runs.inferenceRoute,
       runOrigin: runs.runOrigin,
@@ -117,7 +114,6 @@ export async function verifyRunToken(c: Context): Promise<{
       spaceId: run.spaceId,
       status: run.status,
       modelCredentialId: run.modelCredentialId ?? null,
-      modelSource: run.modelSource,
       modelId: run.modelId,
       inferenceRoute: run.inferenceRoute,
       runOrigin: run.runOrigin,

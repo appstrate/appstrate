@@ -232,7 +232,7 @@ describe("ALL /llm/* — basic routing", () => {
     expect(url).toBe(`${PROXY_INFERENCE_URL}?stream=true`);
   });
 
-  it("returns 502 naming the platform host when the proxy fetch fails", async () => {
+  it("returns 502 without naming the platform host when the proxy fetch fails", async () => {
     const fetchFn = mock(async () => {
       throw new Error("ECONNREFUSED");
     });
@@ -243,7 +243,8 @@ describe("ALL /llm/* — basic routing", () => {
     expect(res.status).toBe(502);
     const body = (await res.json()) as LlmErrorBody;
     expect(body.type).toBe("error");
-    expect(body.error.message).toContain("(mock)");
+    // The agent must not learn PLATFORM_API_URL.
+    expect(body.error.message).toBe("LLM request failed");
   });
 
   it("forwards upstream error status transparently", async () => {

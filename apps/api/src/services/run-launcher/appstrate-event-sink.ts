@@ -49,7 +49,6 @@ export async function persistRunEvent(
     | {
         writeLedger: true;
         modelSource?: string | null;
-        modelId: string | null;
         inferenceRoute: InferenceRoute | null;
         modelCost?: ModelCost | null;
       } = {},
@@ -155,7 +154,6 @@ export async function persistRunEvent(
             cost,
             usage,
             modelSource: opts.modelSource,
-            modelId: opts.modelId,
             inferenceRoute: opts.inferenceRoute,
             modelCost: opts.modelCost,
           },
@@ -200,8 +198,6 @@ export async function writeRunnerLedgerRow(
     usage: TokenUsage | null;
     /** Run's model source — stamped as `credential_source`. */
     modelSource?: string | null;
-    /** Run's pinned model (`runs.model_id`). */
-    modelId: string | null;
     /** Run's inference route — see {@link isServedByLlmProxy}. */
     inferenceRoute: InferenceRoute | null;
     /** Run's kickoff rate snapshot — prices the row and classifies it. */

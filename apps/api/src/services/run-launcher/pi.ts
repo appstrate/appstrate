@@ -171,16 +171,8 @@ async function runPlatformContainerImpl(
 
   const { llmConfig } = plan;
 
-  // Classified by `inferenceRouteOf`, the function the pipeline also stamps
-  // `runs.inference_route` from: an oauth-class credential is delivered via
-  // the sidecar `/llm` bearer-swap; everything else is served by the platform
-  // LLM proxy. Fail-closed: an OAuth provider that resolved WITHOUT a stored
-  // credential id throws here (invalid configuration — it must never downgrade
-  // to the proxy, which cannot use a subscription token).
-  const delivery = resolveCredentialDelivery({
-    providerId: llmConfig.providerId,
-    credentialId: llmConfig.credentialId,
-  });
+  // The same route the pipeline stamped on `runs.inference_route`.
+  const delivery = resolveCredentialDelivery(llmConfig);
 
   const prompt = await buildPlatformSystemPrompt(context, plan);
   // The container's MODEL_ID is the PUBLIC id: the alias for a model alias, the
@@ -209,7 +201,7 @@ async function runPlatformContainerImpl(
     // orchestrator (docker, firecracker) keeps apart from the agent. API-key
     // providers are unaffected.
     assertOauthRunIsolation({
-      isOauthCredential: delivery.kind === "oauth",
+      isOauthCredential: delivery.route === "sidecar",
       providerId: llmConfig.providerId,
       orchestratorMode: getExecutionMode(),
     });
@@ -218,7 +210,7 @@ async function runPlatformContainerImpl(
     // Alias creation already rejects oauth credentials; fail-closed here for
     // any row predating that rule.
     assertOauthRunNotAliased({
-      isOauthCredential: delivery.kind === "oauth",
+      isOauthCredential: delivery.route === "sidecar",
       aliased: !!llmConfig.aliased,
       providerId: llmConfig.providerId,
     });
@@ -271,10 +263,6 @@ async function runPlatformContainerImpl(
         }
       : undefined;
 
-    // Narrowing `delivery` (rather than carrying a boolean) is what supplies
-    // `credentialId` here: `resolveCredentialDelivery` refused to build an
-    // `oauth` delivery without one, so there is nothing left to re-assert.
-    //
     // OAuth subscription: the Pi SDK signs the subscription request shape
     // itself, so the sidecar just swaps the placeholder bearer for the real
     // token — no forging, no modelSwap (aliases rejected above).
@@ -288,7 +276,7 @@ async function runPlatformContainerImpl(
     // run, whose container never sees a `retry-after` header — the sidecar's
     // own provider-level budget in `runtime-pi/sidecar/pi-messages-backend.ts`.
     const sidecarLlm: LlmProxyConfig =
-      delivery.kind === "oauth"
+      delivery.route === "sidecar"
         ? buildOauthSidecarLlm({ baseUrl: llmConfig.baseUrl, credentialId: delivery.credentialId })
         : {
             authMode: "platform",
@@ -356,7 +344,7 @@ async function runPlatformContainerImpl(
         piProvider: llmConfig.piProvider,
         // pi-ai reads a subscription's identity from the key's shape; every
         // other run gets a constant.
-        ...(delivery.kind === "oauth"
+        ...(delivery.route === "sidecar"
           ? {
               oauthApiKeyPlaceholder: deriveOauthPlaceholder(
                 llmConfig.apiKey,

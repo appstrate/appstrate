@@ -165,7 +165,7 @@ describe("sidecar control surface — agent authentication", () => {
     expect((await app.request("/health")).status).toBe(200);
   });
 
-  it("never forwards the token upstream on the /llm/* passthrough", async () => {
+  it("never forwards the token to the platform LLM proxy", async () => {
     // The token authenticates the agent to THIS sidecar only: the shared LLM
     // header policy drops every `x-appstrate-*` header.
     let forwarded: Headers | undefined;

@@ -43,7 +43,7 @@ function makeDeps(fetchFn: typeof fetch): AppDeps {
 }
 
 describe("/llm/* upstream failure (no alias)", () => {
-  it("names the platform host in a fetch-level 502 when NO swap is configured", async () => {
+  it("keeps the platform host out of a fetch-level 502 when NO swap is configured", async () => {
     const fetchFn = mock(async () => {
       throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ConnectionRefused" });
     }) as unknown as typeof fetch;
@@ -58,9 +58,10 @@ describe("/llm/* upstream failure (no alias)", () => {
     });
     expect(res.status).toBe(502);
     const text = await res.text();
-    // No alias to protect, and the host dialed is the platform API's.
+    // The error code survives; the host dialed is the platform API's, which
+    // the agent must not learn.
     expect(text).toContain("ConnectionRefused");
-    expect(text).toContain("(mock)");
+    expect(text).not.toContain("mock");
   });
 });
 

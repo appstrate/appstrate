@@ -278,6 +278,14 @@ describe("POST /internal/llm-proxy — a run's own inference", () => {
     expect(upstream).toHaveLength(0);
   });
 
+  it("cannot record a proxy-served run without a pinned model", async () => {
+    const error = await seedSystemRun(ctx, { modelId: null }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
+    const text = `${(error as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`;
+    expect(text).toContain("runs_proxy_route_has_model");
+  });
+
   it("refuses another protocol's endpoint without an upstream call", async () => {
     const run = await seedSystemRun(ctx);
     const res = await app.request("/internal/llm-proxy/anthropic-messages/v1/messages", {

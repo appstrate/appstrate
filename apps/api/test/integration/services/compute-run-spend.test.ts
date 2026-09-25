@@ -347,7 +347,6 @@ describe("runner ledger row — the run's inference route decides", () => {
       cost: 1,
       usage: USAGE,
       modelSource,
-      modelId: "pinned-preset",
       inferenceRoute: run.inferenceRoute,
       modelCost: RATES,
     };

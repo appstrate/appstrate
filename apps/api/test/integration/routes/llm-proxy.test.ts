@@ -31,7 +31,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { llmUsage } from "@appstrate/db/schema";
+import { llmUsage, modelProviderCredentials } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -314,6 +314,27 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
       }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("surfaces 409 model_provider_unregistered for a preset whose provider is not registered", async () => {
+    const h = await buildHarness();
+    await db
+      .update(modelProviderCredentials)
+      .set({ providerId: "@gone/provider" })
+      .where(eq(modelProviderCredentials.id, h.credentialId));
+    let upstreamCalled = false;
+    mockUpstream(async () => {
+      upstreamCalled = true;
+      return new Response("should not be called", { status: 599 });
+    });
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+    });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("model_provider_unregistered");
+    expect(upstreamCalled).toBe(false);
   });
 
   it("returns 400 when the preset uses a different protocol family", async () => {

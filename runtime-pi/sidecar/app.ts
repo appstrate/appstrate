@@ -397,17 +397,15 @@ async function logOauthLlmResponse(
   return upstream;
 }
 
-function llmFetchErrorResponse(targetUrl: string, err: unknown): Response {
+/**
+ * `hintUrl` names the host dialed, and is passed only for a subscription
+ * provider: in platform mode the host is the platform API's, which the agent
+ * must not learn (SECURITY.md).
+ */
+function llmFetchErrorResponse(err: unknown, hintUrl?: string): Response {
   const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
-  let domain: string | undefined;
-  try {
-    domain = new URL(targetUrl).hostname;
-  } catch {
-    // Not a parseable URL — omit the hostname hint rather than fail.
-  }
+  const domain = hintUrl ? URL.parse(hintUrl)?.hostname : undefined;
   const suffix = code ? `: ${code}` : "";
-  // The host dialed: the platform API (platform mode) or the subscription
-  // provider (oauth) — never an aliased backing, which pi-ai dials itself.
   const domainHint = domain ? ` (${domain})` : "";
   return llmProxyError(502, "api_error", `LLM request failed${suffix}${domainHint}`);
 }
@@ -733,11 +731,7 @@ export function createApp(deps: AppDeps): Hono {
   //     stream through zero-copy; the Pi SDK retries 429/5xx natively.
   app.all("/llm/*", async (c) => {
     const llm = config.llm;
-    if (!llm) {
-      return llmProxyError(503, "api_error", "LLM proxy not configured");
-    }
-
-    if (llm.authMode === "oauth") {
+    if (llm?.authMode === "oauth") {
       if (isBlockedEgressUrl(llm.baseUrl)) {
         return llmProxyError(
           403,
@@ -748,9 +742,10 @@ export function createApp(deps: AppDeps): Hono {
       return handleOauthLlmRequest(c, llm);
     }
 
-    // Built by `createApp` for every platform config (it throws otherwise).
-    const upstreamLlm = platformUpstream!;
-    const { targetUrl, method, path } = deriveLlmTarget(c, upstreamLlm.baseUrl);
+    if (!llm || !platformUpstream) {
+      return llmProxyError(503, "api_error", "LLM proxy not configured");
+    }
+    const { targetUrl, method, path } = deriveLlmTarget(c, platformUpstream.baseUrl);
 
     // ALIASED runs get a narrowed `/llm/*` surface — the pi-messages inference
     // call only — refused HERE, before any upstream call.
@@ -784,7 +779,7 @@ export function createApp(deps: AppDeps): Hono {
       if (buffered instanceof Response) return buffered;
       return handlePiMessagesRequest(
         {
-          upstream: upstreamLlm.pi,
+          upstream: platformUpstream.pi,
           swap,
           // Token limits the backend needs to size the upstream call.
           limits: {
@@ -804,13 +799,13 @@ export function createApp(deps: AppDeps): Hono {
       );
     }
 
-    if (method !== "POST" || path !== upstreamLlm.inferencePath) {
+    if (method !== "POST" || path !== platformUpstream.inferencePath) {
       logger.warn("llm: non-inference request refused", { method, path });
       return llmProxyError(404, "not_found_error", "Not an inference endpoint");
     }
 
     // Shared LLM header policy, plus this upstream's auth.
-    const forwardedHeaders = upstreamLlm.headers(c.req.header());
+    const forwardedHeaders = platformUpstream.headers(c.req.header());
 
     // Zero-copy body forward — nothing here rewrites the request.
     const body = c.req.raw.body ?? undefined;
@@ -846,7 +841,7 @@ export function createApp(deps: AppDeps): Hono {
         ...(body instanceof ReadableStream ? { duplex: "half" } : {}),
       });
     } catch (err) {
-      return llmFetchErrorResponse(targetUrl, err);
+      return llmFetchErrorResponse(err);
     } finally {
       // Headers are in (or the call already failed) — the upstream has proven
       // it is alive, so the TTFB timer must stop before it can abort the body.
@@ -952,7 +947,7 @@ export function createApp(deps: AppDeps): Hono {
         targetUrl,
         error: err instanceof Error ? err.message : String(err),
       });
-      return llmFetchErrorResponse(targetUrl, err);
+      return llmFetchErrorResponse(err, targetUrl);
     }
 
     upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, method, upstream);

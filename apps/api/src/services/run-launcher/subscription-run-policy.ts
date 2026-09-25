@@ -49,51 +49,26 @@ export class OauthProviderMissingCredentialError extends Error {
 }
 
 /**
- * How a run's model credential reaches the upstream provider.
- *
- * A discriminated union, not a boolean flag: the `oauth` arm CARRIES the
- * credential id, so a caller that takes the oauth branch has the id in hand by
- * construction. The previous shape (`{ isOauthCredential: boolean }`) forced
- * every consumer to re-derive "oauth implies a credential id" — in practice
- * with a re-check plus a non-null assertion at the point of use, duplicating
- * the invariant this resolver already enforces.
- */
-type CredentialDelivery =
-  /** Oauth-class credential — bearer swapped server-side by the sidecar `/llm` gateway. */
-  | { readonly kind: "oauth"; readonly credentialId: string }
-  /** API-key provider — served by the platform LLM proxy, which holds the key. */
-  | { readonly kind: "api_key" };
-
-/**
- * Who serves a platform run's inference — `runs.inference_route`, stamped when
- * the run is created. An OAuth subscription stays with the run's sidecar, whose
- * bearer-swap keeps the provider's own request shape; every API-key model,
- * platform-provided or the org's own, is served by the platform LLM proxy.
+ * `runs.inference_route`: an OAuth subscription keeps its own request shape
+ * through the sidecar bearer-swap.
  */
 export function inferenceRouteOf(model: { providerId: string }): InferenceRoute {
   return isOAuthModelProvider(model.providerId) ? "sidecar" : "proxy";
 }
 
 /**
- * Single resolver for "what kind of credential is this and how is it delivered".
- *
- * Classification is the run's {@link inferenceRouteOf} FIRST: a run its sidecar
- * serves is an oauth-class credential whose bearer is swapped server-side by
- * the sidecar `/llm` gateway — regardless of whether a credential id happens to
- * be present. An OAuth provider WITHOUT a stored credential id is an invalid
- * configuration and throws {@link OauthProviderMissingCredentialError}
- * (fail-closed — it must never be downgraded to the proxy, which cannot use a
- * subscription token). Everything else is an API-key provider.
+ * The run's {@link inferenceRouteOf}, with the stored credential a sidecar run
+ * swaps in. An OAuth provider without one throws rather than falling to the
+ * proxy, which cannot use a subscription token.
  */
-export function resolveCredentialDelivery(params: {
+export function resolveCredentialDelivery(model: {
   providerId: string;
-  /** The stored credential id the run resolved, if any. */
-  credentialId: string | null | undefined;
-}): CredentialDelivery {
-  const { providerId, credentialId } = params;
-  if (inferenceRouteOf({ providerId }) === "proxy") return { kind: "api_key" };
-  if (!credentialId) throw new OauthProviderMissingCredentialError(providerId);
-  return { kind: "oauth", credentialId };
+  credentialId?: string | null;
+}): { readonly route: "proxy" } | { readonly route: "sidecar"; readonly credentialId: string } {
+  const route = inferenceRouteOf(model);
+  if (route === "proxy") return { route };
+  if (!model.credentialId) throw new OauthProviderMissingCredentialError(model.providerId);
+  return { route, credentialId: model.credentialId };
 }
 
 /**

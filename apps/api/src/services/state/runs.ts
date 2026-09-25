@@ -937,9 +937,7 @@ export function modelSourceOf(model: { isSystemModel: boolean }): "system" | "or
  * ledger rows, leaving the runner none to report. `runs_proxy_route_has_model`
  * guarantees such a run has a pinned model.
  */
-export function isServedByLlmProxy<
-  T extends { inferenceRoute: InferenceRoute | null; modelId: string | null },
->(run: T): run is T & { inferenceRoute: "proxy"; modelId: string } {
+export function isServedByLlmProxy(run: { inferenceRoute: InferenceRoute | null }): boolean {
   return run.inferenceRoute === "proxy";
 }
 

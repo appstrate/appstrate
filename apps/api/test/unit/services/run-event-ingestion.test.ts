@@ -44,7 +44,6 @@ function makeRun(overrides: Partial<RunSinkContext> = {}): RunSinkContext {
     startedAt: new Date(),
     versionRef: "draft",
     modelSource: null,
-    modelId: null,
     inferenceRoute: null,
     modelCost: null,
     ...overrides,

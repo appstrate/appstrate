@@ -17,6 +17,7 @@ import {
   seedAgent,
   seedApiKey,
   seedEndUser,
+  seedOrgModelProviderOAuth,
   seedPackageShare,
   seedRun,
   seedRunLog,
@@ -414,6 +415,33 @@ describe("Runs API", () => {
       };
       expect(body.model_label).toBe("Echo Pinned GPT");
       expect(body.model_source).toBe("org");
+
+      await waitForRunPipelineSettled();
+    });
+
+    it("leaves an OAuth subscription run's inference with its sidecar", async () => {
+      await seedRunnableAgent();
+      const credential = await seedOrgModelProviderOAuth({ orgId: ctx.orgId });
+      const modelDbId = await createOrgModel(
+        ctx.orgId,
+        "Echo Subscription",
+        "gpt-5.5",
+        ctx.user.id,
+        credential.id,
+      );
+      await setDefaultModel(ctx.orgId, modelDbId);
+
+      const res = await app.request("/api/agents/@runorg/echo-agent/run?version=draft", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: {} }),
+      });
+
+      expect(res.status).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      const [row] = await db.select().from(runs).where(eq(runs.id, id));
+      expect(row!.inferenceRoute).toBe("sidecar");
+      expect(row!.modelId).toBe(modelDbId);
 
       await waitForRunPipelineSettled();
     });

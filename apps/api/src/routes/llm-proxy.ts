@@ -130,7 +130,7 @@ export function createRunLlmProxyRouter() {
   for (const apiShape of PROXIED_API_SHAPES) {
     router.post(llmProxyUrlPath(apiShape), async (c) => {
       const { runId, run } = await verifyRunToken(c);
-      if (!isServedByLlmProxy(run)) {
+      if (!isServedByLlmProxy(run) || run.modelId === null) {
         throw forbidden("This run's inference is not served by the platform LLM proxy");
       }
       const orgId = run.orgId;

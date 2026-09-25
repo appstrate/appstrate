@@ -925,8 +925,7 @@ async function loadModelFromDb(orgId: string, modelDbId: string): Promise<Resolv
   // raise `invalid input syntax for type uuid` rather than returning no rows.
   // Normalise that one cast failure into "not found" (null) so callers see a
   // clean 4xx instead of a 500; rethrow any other error (e.g. a real DB outage)
-  // rather than masking it as a missing model. Same hazard handled in
-  // `llm-proxy/core.ts`.
+  // rather than masking it as a missing model.
   let row: (DbOrgModelRow & { enabled: boolean; providerId: string }) | undefined;
   try {
     [row] = await db
@@ -1156,8 +1155,6 @@ export function buildModelTestRequest(config: {
       url = `${base}/v1/models`;
       headers["Authorization"] = `Bearer ${config.apiKey}`;
       break;
-    case "openai-completions":
-    case "openai-responses":
     default:
       url = `${base}/models`;
       headers["Authorization"] = `Bearer ${config.apiKey}`;

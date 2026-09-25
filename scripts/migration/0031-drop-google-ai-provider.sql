@@ -7,8 +7,9 @@
 -- `model_provider_unregistered`) rather than falling through to another model.
 -- Run INSIDE the deploy window, platform stopped, before the new image boots
 -- (the scheduler reloads a schedule's model override from the table only at
--- boot). Rows: UNMEASURED — rehearse on a restored dump first (README
--- requirement 4) and record the "before" counts here.
+-- boot). Rows: 0 — rehearsed 2026-09-25 on a restored production dump
+-- (PostgreSQL 16.15, drizzle 0068 + 0069–0073): every "before" count 0 (no
+-- `google-ai` credential in production), COMMIT in 214 ms, a rerun a no-op.
 --
 -- `org_models.id` is named by three pointer columns, none of them a foreign
 -- key (they also accept a SYSTEM model slug) — all set to NULL, so nothing is
@@ -19,10 +20,12 @@
 --   package_schedules.model_id_override   → the agent's model
 --
 -- Left alone, as history: `runs.model_id` and `llm_usage.model` (the ledger).
--- One FK does move: `runs.model_credential_id` is `ON DELETE SET NULL`, so the
--- runs that ran on a deleted credential lose that attribution — counted below
--- as `runs_losing_credential_id`. `org_models.credential_id` is
--- `ON DELETE RESTRICT`, which is why the models go before the credentials.
+-- Two FKs are `ON DELETE SET NULL`. `runs.model_credential_id`: the runs that
+-- ran on a deleted credential lose that attribution — counted below as
+-- `runs_losing_credential_id`. `model_provider_pairings.credential_id`: a
+-- pairing only ever names an OAuth credential, so no `google-ai` one moves.
+-- `org_models.credential_id` is `ON DELETE RESTRICT`, which is why the models
+-- go before the credentials.
 --
 -- Idempotent: every WHERE is "provider_id = 'google-ai'" or a pointer to a
 -- model bound to such a credential — a second run matches zero rows. One

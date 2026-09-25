@@ -142,7 +142,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     be reachable from the API's own network (`localhost` is the API's
     loopback), and still needs `EGRESS_ALLOW_INTERNAL_HOSTS`. The launch-time
     check is literal (no DNS lookup): a host that only resolves to a blocked
-    range is refused by the proxy on the run's first model call;
+    range is refused by the proxy on the run's first model call. The same
+    holds for any model endpoint: one reachable only from the runner network
+    must now be reachable from the API process;
+  - these runs' model calls count against the per-run `/internal/*` rate
+    limit (200 requests per minute per run token), shared with the run's
+    other internal calls;
   - the sidecar's `api_key` LLM mode is gone (`PI_API_KEY` and `PI_PLACEHOLDER`
     are no longer read; a sidecar serves `platform` or `oauth` only), so the
     API, `PI_IMAGE`, `SIDECAR_IMAGE` and the Firecracker runner daemon must be
@@ -682,12 +687,12 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
 - **BREAKING (API, operators): the `google-ai` model provider is removed**
   (#1568). Its API shape, `google-generative-ai`, is one the LLM proxy does not
   serve, and every API-key run is served by it; Gemini models stay reachable
-  through OpenRouter. The provider listing's `apiShape` enum drops
-  `google-generative-ai`, `google-vertex`, `azure-openai-responses` and
-  `bedrock-converse-stream`, which no provider declares; for the same reason
-  `appstrate run --model-source env` no longer accepts them as `--model-api`
-  (`google-generative-ai`, `google-vertex`, `azure-openai-responses`,
-  `bedrock-converse-stream`). Run
+  through OpenRouter. The shared API-shape list drops `google-generative-ai`,
+  `google-vertex`, `azure-openai-responses` and `bedrock-converse-stream`,
+  which no provider declares. The provider listing's `apiShape` enum loses
+  them, and so does `appstrate run --model-source env`'s `--model-api`: that
+  mode calls the vendor directly, but its api→provider table is keyed by the
+  same list. Run
   `scripts/migration/0031-drop-google-ai-provider.sql` inside the deploy window,
   before the new image boots: it deletes the `google-ai` credentials and their
   org models, clearing the org default, space pin or schedule override that
