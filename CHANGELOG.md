@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`appstrate packages sync` installs the pinned space's agents as Claude Code
+  commands** (#1268). Each agent active in the pinned space becomes
+  `/appstrate:run-<agent>` in the plugin: Claude builds the input from your
+  request, uploads local files and launches the agent with the plugin MCP
+  server's `run_and_wait`, whose permission prompt shows the input first. The
+  command follows the space's prompted / prefilled / locked fields, never
+  writes a stored value, and pins the agent's version. Needs `agents:run`,
+  `runs:read` (or `runs:read-all`) and `mcp:invoke` in that space. Plugin
+  target only; no server change.
 - **The conformance monitor now probes the provider API of seven
   credential-only integrations without a credential** (`auth-reject`, tier
   `mcp`). A 401 alone proves little — most providers answer 401 with or

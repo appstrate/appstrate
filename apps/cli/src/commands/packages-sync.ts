@@ -2,7 +2,8 @@
 
 /**
  * `appstrate packages sync` — the skills of every space this profile is a member
- * of, as Agent Skills directories, run by a *machine*: a marketplace `command`
+ * of, as Agent Skills directories, plus one command per agent active in the
+ * pinned space (plugin only), run by a *machine*: a marketplace `command`
  * source re-runs it once per session in the background. So `--print-path` writes
  * exactly one stdout line and only on success, and a per-skill failure must
  * NOT fail the process — Claude Code discards a run that exits non-zero, which
@@ -10,26 +11,35 @@
  */
 
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
+import { agentCapabilities, reaches } from "@appstrate/core/permissions";
 import { resolveActiveProfile, syncSpaceIds, type Profile } from "../lib/config.ts";
 import { ApiError } from "../lib/api.ts";
 import { listSpaces, resolveSpaceRef, type Space } from "../lib/spaces.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
 import { checkSkillMarkdown } from "@appstrate/afps-shared/companion-files";
-import { materializeSkill, SKILL_ENTRY } from "../lib/skills-sync/materialize.ts";
+import {
+  materializeSkill,
+  SKILL_ENTRY,
+  type AgentLaunchView,
+} from "../lib/skills-sync/materialize.ts";
 import { withSyncLock } from "../lib/skills-sync/lock.ts";
 import {
   assignSlugs,
   diffTarget,
   fetchSkillFiles,
+  isDraftRefusal,
+  listSyncableAgents,
   listSyncableSkills,
   MAX_CONCURRENCY,
   ownedLedger,
+  resolveAgent,
   resolveSkill,
+  targetCarries,
   type Catalogue,
-  type PlannedSkill,
+  type EntriesBySlug,
+  type PlannedEntry,
   type ResolvedSkill,
-  type SkillsBySlug,
   type SkillSource,
   type TargetPlan,
 } from "../lib/skills-sync/plan.ts";
@@ -49,6 +59,7 @@ import {
   removeManagedDir,
   setupPluginFiles,
   skillDir,
+  SYNC_TARGETS,
   targetRoot,
   writePluginTree,
   writeSetupPlugin,
@@ -153,20 +164,33 @@ export async function packagesSyncCommand(
             throw new Error("Active sync context changed; run `appstrate packages sync` again.");
           }
         };
-        const spaceIds = await selectedSpaces(profileName, profile!, opts.space, report);
+        const sources = await selectSources(
+          profileName,
+          profile!,
+          opts.space,
+          targets.includes("claude-plugin"),
+          report,
+        );
         const catalogue = await resolveAll(
           profileName,
           source,
           state,
           targets,
           report,
-          spaceIds,
+          sources,
           context,
         );
         const plans = await Promise.all(
           targets.map((target) => diffTarget(target, catalogue, state, source, context)),
         );
-        if (plans.some((plan) => plan.contextChanged) && catalogue.unresolved.size > 0) {
+        const unresolvedKinds = [...catalogue.unresolved.values()];
+        if (
+          plans.some(
+            (plan) =>
+              plan.contextChanged &&
+              unresolvedKinds.some((kind) => targetCarries(plan.target, kind)),
+          )
+        ) {
           throw new Error(
             "Could not resolve the new context completely; previous installation preserved.",
           );
@@ -260,8 +284,9 @@ async function bootstrapPlugin(
 }
 
 /**
- * List the selected spaces' skills, pin each to an artifact, and assign
- * directory names. A skill with no published version is a note, not a failure.
+ * List the selected spaces' skills and the pinned space's agents, pin each to a
+ * version, and assign directory names. A package with no published version is
+ * a note, not a failure.
  */
 async function resolveAll(
   profileName: string,
@@ -269,7 +294,7 @@ async function resolveAll(
   state: SyncState,
   targets: SyncTarget[],
   report: Report,
-  spaceIds: string[],
+  { skillSpaces: spaceIds, agentSpace }: SyncSources,
   context: SyncContext,
 ): Promise<Catalogue> {
   // A package is an ORG row that `space_packages` attributes to zero or more
@@ -285,50 +310,86 @@ async function resolveAll(
       if (!origins.has(packageId)) origins.set(packageId, spaceId);
     }
   });
-  const packageIds = [...origins.keys()].sort();
-  const resolutions = await mapWithConcurrency(packageIds, MAX_CONCURRENCY, async (packageId) => {
+  const agents = agentSpace ? await listSyncableAgents(profileName, agentSpace) : [];
+  // One queue for both kinds, so the cap holds across them. `null` = nothing to sync.
+  type Resolved =
+    { kind: "skill"; value: ResolvedSkill } | { kind: "agent"; value: AgentLaunchView } | null;
+  interface Job {
+    packageId: string;
+    kind: PlannedEntry["kind"];
+    source: SkillSource;
+  }
+  const jobs: Job[] = [
+    ...[...origins.keys()]
+      .sort()
+      .map((packageId) => ({ packageId, kind: "skill" as const, source })),
+    // A system agent has no draft: `?version=draft` is refused to everyone.
+    ...agents.map(({ packageId, system }) => ({
+      packageId,
+      kind: "agent" as const,
+      source: system ? ("published" as const) : source,
+    })),
+  ];
+  const resolve = async (job: Job): Promise<Resolved> => {
+    if (job.kind === "skill") {
+      const origin = origins.get(job.packageId);
+      const value = await resolveSkill(profileName, job.packageId, job.source, origin);
+      return value && { kind: "skill", value };
+    }
+    const value = await resolveAgent(profileName, job.packageId, job.source, agentSpace!);
+    return value && { kind: "agent", value };
+  };
+  const resolutions = await mapWithConcurrency(jobs, MAX_CONCURRENCY, async (job) => {
     try {
-      return {
-        packageId,
-        skill: await resolveSkill(profileName, packageId, source, origins.get(packageId)),
-      };
+      return { job, resolved: await resolve(job) };
     } catch (err) {
-      return { packageId, error: err };
+      return { job, error: err };
     }
   });
 
-  const resolved: ResolvedSkill[] = [];
-  const unresolved = new Set<string>();
+  const skills: ResolvedSkill[] = [];
+  const views: AgentLaunchView[] = [];
+  const unresolved: Catalogue["unresolved"] = new Map();
   for (const entry of resolutions) {
+    const { packageId, kind } = entry.job;
     if ("error" in entry) {
-      unresolved.add(entry.packageId);
-      report.skill(`Skipped ${entry.packageId}: ${formatError(entry.error)}`);
-    } else if (!entry.skill) {
-      const what = source === "draft" ? "draft" : "published version";
-      report.note(`Skipped ${entry.packageId}: no ${what} available.`);
+      // A refused draft is refused again next run: it goes, like a failed render.
+      if (!isDraftRefusal(entry.error)) unresolved.set(packageId, kind);
+      report.skill(`Skipped ${packageId}: ${formatError(entry.error)}`);
+    } else if (!entry.resolved) {
+      const what = entry.job.source === "draft" ? "draft" : "published version";
+      report.note(`Skipped ${packageId}: no ${what} available.`);
+    } else if (entry.resolved.kind === "skill") {
+      skills.push(entry.resolved.value);
     } else {
-      resolved.push(entry.skill);
+      views.push(entry.resolved.value);
     }
   }
 
-  // A slug the ledger assigns to a package that failed to resolve stays
-  // reserved: handing `/appstrate:<slug>` to another skill would be a rename
-  // caused by nothing but a transient error.
-  const reserved = new Set<string>();
-  for (const target of targets) {
-    for (const [slug, managed] of Object.entries(
-      ownedLedger(target, state, source, context).managed,
-    )) {
-      if (unresolved.has(managed.packageId)) reserved.add(slug);
+  // Installed names of the packages still wanted; the first ledger in `SYNC_TARGETS` wins.
+  const wanted = new Set([
+    ...unresolved.keys(),
+    ...[...skills, ...views].map((resolved) => resolved.packageId),
+  ]);
+  const incumbents = new Map<string, string>();
+  for (const target of SYNC_TARGETS.filter((target) => targets.includes(target))) {
+    const { managed } = ownedLedger(target, state, source, context);
+    for (const [slug, { packageId }] of Object.entries(managed)) {
+      if (wanted.has(packageId) && !incumbents.has(slug)) incumbents.set(slug, packageId);
     }
   }
 
-  const bySlug = new Map<string, PlannedSkill>();
-  for (const skill of assignSlugs(resolved, reserved)) {
-    bySlug.set(skill.slug, skill);
-    if (skill.renamedFrom) {
+  const { planned, failed } = assignSlugs(skills, views, incumbents);
+  // Not `unresolved`: the next run fails the same way, so an installed copy goes.
+  for (const { packageId, error } of failed) {
+    report.skill(`Skipped ${packageId}: ${formatError(error)}`);
+  }
+  const bySlug = new Map<string, PlannedEntry>();
+  for (const entry of planned) {
+    bySlug.set(entry.slug, entry);
+    if (entry.renamedFrom) {
       report.note(
-        `Renamed ${skill.packageId} to "${skill.slug}" — "${skill.renamedFrom}" is already taken.`,
+        `Renamed ${entry.packageId} to "${entry.slug}" — "${entry.renamedFrom}" is already taken.`,
       );
     }
   }
@@ -341,7 +402,7 @@ async function executePlans(
   source: SkillSource,
   plans: TargetPlan[],
   state: SyncState,
-  bySlug: SkillsBySlug,
+  bySlug: EntriesBySlug,
   fixedFiles: Record<string, Uint8Array>,
   report: Report,
   context: SyncContext,
@@ -416,31 +477,31 @@ async function executePlans(
   return pluginOk;
 }
 
-/** Download + materialize, reporting each failure and dropping that skill. */
+/** Download + materialize (agents come rendered), reporting each failure and dropping it. */
 async function fetchTrees(
   profileName: string,
   source: SkillSource,
   slugs: string[],
-  bySlug: SkillsBySlug,
+  bySlug: EntriesBySlug,
   report: Report,
 ): Promise<Map<string, SkillTree>> {
   const trees = new Map<string, SkillTree>();
   const results = await mapWithConcurrency(slugs, MAX_CONCURRENCY, async (slug) => {
-    const skill = bySlug.get(slug)!;
+    const entry = bySlug.get(slug)!;
     try {
-      const files = materializeSkill({
-        slug,
-        files: await fetchSkillFiles(profileName, skill, source),
-      });
-      return { skill, tree: { slug, files } };
+      const files =
+        entry.kind === "agent"
+          ? entry.files
+          : materializeSkill({ slug, files: await fetchSkillFiles(profileName, entry, source) });
+      return { entry, tree: { slug, files } };
     } catch (err) {
-      return { skill, error: err };
+      return { entry, error: err };
     }
   });
   const decoder = new TextDecoder();
   for (const result of results) {
     if ("error" in result) {
-      report.skill(`Failed ${result.skill.packageId}: ${formatError(result.error)}`);
+      report.skill(`Failed ${result.entry.packageId}: ${formatError(result.error)}`);
       continue;
     }
     trees.set(result.tree.slug, result.tree);
@@ -449,7 +510,7 @@ async function fetchTrees(
     const violation = checkSkillMarkdown(decoder.decode(result.tree.files[SKILL_ENTRY]!));
     if (violation) {
       report.note(
-        `Note: ${result.skill.packageId} does not pass the skill frontmatter rule (${violation.message}); Claude Code and Codex may not load it — republish it from Appstrate.`,
+        `Note: ${result.entry.packageId} does not pass the skill frontmatter rule (${violation.message}); Claude Code and Codex may not load it — republish it from Appstrate.`,
       );
     }
   }
@@ -536,8 +597,8 @@ async function applySharedPlan(
   return { placed, retained, ok: true };
 }
 
-function ledgerEntry(skill: PlannedSkill): ManagedSkill {
-  return { packageId: skill.packageId, version: skill.version, integrity: skill.integrity };
+function ledgerEntry(entry: PlannedEntry): ManagedSkill {
+  return { packageId: entry.packageId, version: entry.version, integrity: entry.integrity };
 }
 
 function reportPlans(plans: TargetPlan[], sink: LineSink): void {
@@ -579,6 +640,12 @@ function suppliesSkills(space: Space): boolean {
   return space.access === "member" && space.permissions.includes(SKILLS_READ);
 }
 
+/** The grant the MCP server itself exposes `run_and_wait` on (D19). */
+function suppliesAgents(space: Space): boolean {
+  const has = (permission: string): boolean => space.permissions.includes(permission);
+  return reaches(agentCapabilities(has, has("mcp:invoke")).runLevel, "run");
+}
+
 /** Why `suppliesSkills` said no — the half of the answer a user can act on. */
 function unusableReason(space: Space): string {
   return space.access === "member"
@@ -607,10 +674,54 @@ async function reachableSpaces(
   } catch (err) {
     if (!(err instanceof ApiError) || err.status !== 403) throw err;
     report.note(
-      `Organization "${profile.orgId}" no longer grants this profile access to its spaces (403) — removing every skill synced from it. Run: appstrate org switch`,
+      `Organization "${profile.orgId}" no longer grants this profile access to its spaces (403) — removing every skill and agent command synced from it. Run: appstrate org switch`,
     );
     return null;
   }
+}
+
+interface SyncSources {
+  skillSpaces: string[];
+  agentSpace?: string;
+}
+
+/** Agents come from the pinned space alone (D19), whatever selects the skill sources. */
+async function selectSources(
+  profileName: string,
+  profile: Profile,
+  explicit: string[] | undefined,
+  withAgents: boolean,
+  report: Report,
+): Promise<SyncSources> {
+  const spaces = await reachableSpaces(profileName, profile, report);
+  if (!spaces) {
+    // Typed just now, so it gets immediate feedback rather than a silent drop —
+    // the same rule `selectedSpaces` applies to an unusable space.
+    if (explicit)
+      throw new Error(
+        "Cannot select spaces: this organization no longer grants this profile access to them. Run: appstrate org switch",
+      );
+    // Otherwise the revocation stands on its own: no space supplies skills any
+    // more, so the ordinary removal plan takes every one of them off the disk.
+    return { skillSpaces: [] };
+  }
+  // Skill sources no longer depend on the pin, so a pin that died would sync
+  // clean and leave `.mcp.json` naming a space the server will refuse. Nothing
+  // else notices any more: say it here, where the space list is already in hand.
+  // Listed-but-not-joined is the same refusal as absent — the MCP request sends
+  // the header either way — so membership, not presence in the list, is the test.
+  const pinned = spaces.find((space) => space.id === profile.spaceId);
+  if (profile.spaceId && (!pinned || pinned.access === "none"))
+    report.note(
+      `Pinned space "${profile.spaceId}" is not accessible in the active organization — the plugin's MCP server will be refused. Run: appstrate space switch`,
+    );
+  const skillSpaces = selectedSpaces(profileName, profile, spaces, explicit, report);
+  if (!withAgents || pinned?.access !== "member") return { skillSpaces };
+  if (suppliesAgents(pinned)) return { skillSpaces, agentSpace: pinned.id };
+  report.note(
+    `Agent commands not synced: your role in pinned space "${pinned.name}" cannot launch agents through the MCP server there (needs agents:run, runs:read and mcp:invoke).`,
+  );
+  return { skillSpaces };
 }
 
 /**
@@ -623,34 +734,13 @@ async function reachableSpaces(
  *
  * `--space` and `syncSpaces` NARROW that set; they never widen it.
  */
-async function selectedSpaces(
+function selectedSpaces(
   profileName: string,
   profile: Profile,
+  spaces: Space[],
   explicit: string[] | undefined,
   report: Report,
-): Promise<string[]> {
-  const spaces = await reachableSpaces(profileName, profile, report);
-  if (!spaces) {
-    // Typed just now, so it gets immediate feedback rather than a silent drop —
-    // the same rule the explicit branch below applies to an unusable space.
-    if (explicit)
-      throw new Error(
-        "Cannot select spaces: this organization no longer grants this profile access to them. Run: appstrate org switch",
-      );
-    // Otherwise the revocation stands on its own: no space supplies skills any
-    // more, so the ordinary removal plan takes every one of them off the disk.
-    return [];
-  }
-  // Skill sources no longer depend on the pin, so a pin that died would sync
-  // clean and leave `.mcp.json` naming a space the server will refuse. Nothing
-  // else notices any more: say it here, where the space list is already in hand.
-  // Listed-but-not-joined is the same refusal as absent — the MCP request sends
-  // the header either way — so membership, not presence in the list, is the test.
-  const pinned = spaces.find((space) => space.id === profile.spaceId);
-  if (profile.spaceId && (!pinned || pinned.access === "none"))
-    report.note(
-      `Pinned space "${profile.spaceId}" is not accessible in the active organization — the plugin's MCP server will be refused. Run: appstrate space switch`,
-    );
+): string[] {
   if (explicit) {
     const chosen = explicit.map((ref) => explicitSpace(spaces, ref));
     // Typed just now, so it gets immediate feedback rather than a silent drop.

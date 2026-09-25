@@ -2,16 +2,20 @@
 
 /**
  * Unit tests for the shared input resolution: the layer merge, the single
- * overlay whose origin lets a host declare which source it has, and the
- * host-injected refusal.
+ * overlay whose origin lets a host declare which source it has, the
+ * host-injected refusal, and the launch contract (locked / prefilled /
+ * prompted) the web launch form and the CLI both read.
  */
 
 import { describe, it, expect } from "bun:test";
-import type { JSONSchemaObject } from "../src/form.ts";
+import type { JSONSchemaObject, SchemaWrapper } from "../src/form.ts";
 import {
   assertFieldsUnlocked,
+  partitionInputFields,
   resolveEffectiveInput,
+  resolvedInputDefaults,
   withoutLockedFields,
+  type AgentInputSettings,
   type InputOverlayOrigin,
 } from "../src/input-resolution.ts";
 
@@ -172,5 +176,79 @@ describe("withoutLockedFields", () => {
     const values = { a: 1 };
     expect(withoutLockedFields(values, [])).toBe(values);
     expect(withoutLockedFields(values, undefined)).toBe(values);
+  });
+});
+
+describe("launch contract", () => {
+  const WRAPPER: SchemaWrapper = {
+    schema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        folder: { type: "string", default: "inbox" },
+        limit: { type: "number" },
+        tone: { type: "string" },
+      },
+      required: ["query", "folder"],
+    },
+    property_order: ["folder", "query", "limit", "tone"],
+  };
+
+  function settings(over: Partial<AgentInputSettings> = {}): AgentInputSettings {
+    return { values: {}, locked_fields: [], ...over };
+  }
+
+  describe("resolvedInputDefaults", () => {
+    it("overlays the stored value on the author default", () => {
+      expect(resolvedInputDefaults(WRAPPER, settings({ values: { folder: "archive" } }))).toEqual({
+        folder: "archive",
+      });
+    });
+
+    it("leaves a field no layer supplies absent rather than null", () => {
+      const resolved = resolvedInputDefaults(WRAPPER, settings());
+      expect(resolved).toEqual({ folder: "inbox" });
+      expect("query" in resolved).toBe(false);
+    });
+  });
+
+  describe("partitionInputFields", () => {
+    it("sorts each field into exactly one launch state, in presentation order", () => {
+      const partition = partitionInputFields(
+        WRAPPER,
+        settings({ values: { limit: 10 }, locked_fields: ["tone"] }),
+      );
+      // `folder` has an author default, `limit` a stored value → both pre-filled.
+      expect(partition).toEqual({
+        locked: ["tone"],
+        prefilled: ["folder", "limit"],
+        prompted: ["query"],
+      });
+    });
+
+    it("keeps a locked field locked even when it also has a value", () => {
+      const partition = partitionInputFields(WRAPPER, settings({ locked_fields: ["folder"] }));
+      expect(partition.locked).toEqual(["folder"]);
+      expect(partition.prefilled).not.toContain("folder");
+    });
+
+    it("prompts everything when nothing is decided", () => {
+      const bare: SchemaWrapper = {
+        schema: { type: "object", properties: { a: { type: "string" }, b: { type: "string" } } },
+      };
+      expect(partitionInputFields(bare, settings())).toEqual({
+        locked: [],
+        prefilled: [],
+        prompted: ["a", "b"],
+      });
+    });
+
+    it("returns three empty lists for an agent with no parameters", () => {
+      expect(partitionInputFields(undefined, settings())).toEqual({
+        locked: [],
+        prefilled: [],
+        prompted: [],
+      });
+    });
   });
 });
