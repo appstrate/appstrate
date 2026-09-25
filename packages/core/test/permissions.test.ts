@@ -9,6 +9,7 @@ import {
   agentCapabilities,
   canReadRuns,
   canRunAgents,
+  PACKAGE_WRITE_PERMISSIONS,
   packagePermission,
   packageSightPermissions,
   reaches,
@@ -349,6 +350,15 @@ describe("packagePermission / packageSightPermissions", () => {
     expect(packageSightPermissions("skill")).toEqual(["skills:read"]);
     expect(packageSightPermissions("integration")).toEqual(["integrations:read"]);
     expect(packageSightPermissions("mcp-server")).toEqual(["mcp-servers:read"]);
+  });
+
+  it("lists every family's write, and only writes, for the type-agnostic doors", () => {
+    expect([...PACKAGE_WRITE_PERMISSIONS].sort()).toEqual([
+      "agents:write",
+      "integrations:write",
+      "mcp-servers:write",
+      "skills:write",
+    ]);
   });
 });
 

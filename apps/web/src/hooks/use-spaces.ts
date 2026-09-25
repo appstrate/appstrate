@@ -23,13 +23,20 @@ export function useSpaces(enabled = true) {
 /**
  * Start the listing at boot (`main.tsx`): every space-scoped request waits on it,
  * so waiting for the layout to mount would cost each a round trip. Keyed on the
- * remembered org; a failure is not cached, `useSpaces` refetches on mount.
+ * remembered org, and only once the boot org list still names it: a caller
+ * removed from that org would otherwise open the app on a 403. A failure is not
+ * cached, `useSpaces` refetches on mount.
  */
-export function primeSpaceList(): void {
-  const orgId = getCurrentOrgId();
-  if (!orgId) return;
-  void queryClient.prefetchQuery(
-    $api.queryOptions("get", "/api/spaces", spacesListInit(orgOnlyHeader(orgId))),
+export function primeSpaceList(orgs: Promise<readonly { id: string }[]>): void {
+  orgs.then(
+    (list) => {
+      const orgId = getCurrentOrgId();
+      if (!orgId || !list.some((org) => org.id === orgId)) return;
+      void queryClient.prefetchQuery(
+        $api.queryOptions("get", "/api/spaces", spacesListInit(orgOnlyHeader(orgId))),
+      );
+    },
+    () => {},
   );
 }
 

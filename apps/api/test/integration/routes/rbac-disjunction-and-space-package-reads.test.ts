@@ -119,7 +119,7 @@ describe("a disjunction denial records every alternative", () => {
     });
 
     expect(refused.status).toBe(403);
-    expect(denials).toEqual(["agents:write|skills:write|mcp-servers:write|integrations:write"]);
+    expect(denials).toEqual(["agents:write|skills:write|integrations:write|mcp-servers:write"]);
   });
 });
 

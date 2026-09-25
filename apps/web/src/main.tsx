@@ -53,11 +53,11 @@ window.addEventListener("vite:preloadError", (event) => {
 // Kicking them here, before `i18nReady` resolves and before React mounts,
 // collapses those three round-trips into one and takes them off the locale
 // fetch's tail. `GET /api/spaces` needs the selected org id, which a
-// returning user already has persisted: it starts here too, and every
-// space-scoped read waits on it (`useSpaceResolver`).
+// returning user already has persisted: it starts as soon as the org list
+// confirms that membership, still ahead of the layout, and every space-scoped
+// read waits on it (`useSpaceResolver`).
 startAuthBootstrap();
-primeOrgList();
-primeSpaceList();
+primeSpaceList(primeOrgList());
 
 // Warm the chat route's chunk on the same idle window. `ChatModulePage` is
 // `lazy()`, so its download only STARTS once the route element renders — which

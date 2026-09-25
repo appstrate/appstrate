@@ -198,6 +198,11 @@ export function packagePermission(
   return `${PACKAGE_RESOURCES[type]}:${action}`;
 }
 
+/** Any one opens the type-agnostic authoring doors (import, fork); the door re-checks the actual type. */
+export const PACKAGE_WRITE_PERMISSIONS: readonly CorePermission[] = (
+  Object.keys(PACKAGE_RESOURCES) as PackageType[]
+).map((type) => packagePermission(type, "write"));
+
 /** Which permissions let a caller SEE a package of this type (any one suffices). */
 export function packageSightPermissions(type: PackageType): readonly CorePermission[] {
   return [packagePermission(type, "read"), ...(PACKAGE_EXTRA_SIGHT_PERMISSIONS[type] ?? [])];

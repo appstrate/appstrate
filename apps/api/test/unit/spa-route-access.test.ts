@@ -9,7 +9,9 @@
 import { describe, it, expect } from "bun:test";
 import { registerTestPlatformApp } from "../helpers/platform-app.ts";
 import { getPlatformOperations } from "../../src/lib/platform-app.ts";
+import type { AppstrateModule } from "@appstrate/core/module";
 import { getModules } from "../../src/lib/modules/module-loader.ts";
+import { getDeclinedModuleEntries } from "../helpers/test-modules.ts";
 import { ROUTE_ACCESS } from "../../../web/src/lib/route-access.ts";
 
 await registerTestPlatformApp();
@@ -22,8 +24,17 @@ const HANDLER_GUARDED: Record<string, string> = {
 
 const operations = new Map(getPlatformOperations().operations.map((op) => [op.operationId, op]));
 
-const loadedFeatures = new Set(
-  [...getModules().values()].flatMap((mod) => Object.keys(mod.features ?? {})),
+const featuresOf = (mods: Iterable<AppstrateModule | undefined>) =>
+  new Set([...mods].flatMap((mod) => Object.keys(mod?.features ?? {})));
+
+const loadedFeatures = featuresOf(getModules().values());
+// Imported, never initialised: `features` is a static field of the export.
+const declinedFeatures = featuresOf(
+  await Promise.all(
+    getDeclinedModuleEntries().map(
+      async (entry) => ((await import(entry)) as { default?: AppstrateModule }).default,
+    ),
+  ),
 );
 
 type Declaration = {
@@ -42,10 +53,9 @@ describe("SPA route declarations ↔ API guards", () => {
   it("declares a module flag the harness knows, or names the one it could not load", () => {
     const flags = new Set(gated.flatMap((route) => (route.feature ? [route.feature] : [])));
     expect(flags.size).toBeGreaterThan(0);
-    // module-ee needs a real PostgreSQL (its `test/requirements.ts`), so the
-    // tier-0 harness does not load it; every other module's flag must be live.
-    const missing = [...flags].filter((flag) => !loadedFeatures.has(flag));
-    expect(missing).toEqual(process.env.TEST_TIER === "0" ? ["billing"] : []);
+    // Only a module the harness declined for its tier may leave a flag unloaded.
+    const missing = [...flags].filter((flag) => !loadedFeatures.has(flag)).sort();
+    expect(missing).toEqual([...flags].filter((flag) => declinedFeatures.has(flag)).sort());
   });
 
   for (const route of gated) {

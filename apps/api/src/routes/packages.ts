@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   makePermissionGuard,
+  PACKAGE_WRITE_PERMISSIONS,
   packagePermission,
   reportPermissionDenial,
 } from "@appstrate/core/permissions";
@@ -88,7 +89,6 @@ import {
   authorizeBundlePackages,
   assertExistingPackageActivationAccess,
   defaultDefinitionSelector,
-  PACKAGE_WRITE_PERMISSIONS,
   assertPackageMutationAccess,
   assertPackageShareAccess,
   holdsPackageShareAuthority,

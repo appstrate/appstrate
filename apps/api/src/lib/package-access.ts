@@ -33,7 +33,7 @@ import {
 } from "@appstrate/core/permissions";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { getOrgMember, getOrgSettings } from "../services/organizations.ts";
-import { packageTypeEnum, type PackageType } from "@appstrate/core/validation";
+import type { PackageType } from "@appstrate/core/validation";
 import type { PackageHome } from "@appstrate/shared-types";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
@@ -57,10 +57,6 @@ import {
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
 import { placementRowJoin, placementShareJoin } from "../services/package-placement.ts";
-
-export const PACKAGE_WRITE_PERMISSIONS = packageTypeEnum.options.map((type) =>
-  packagePermission(type, "write"),
-);
 
 /**
  * The read guard of the three agent routes `agents:run` also opens: the list,
