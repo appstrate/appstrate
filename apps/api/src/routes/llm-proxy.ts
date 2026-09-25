@@ -4,11 +4,12 @@
  * `/api/llm-proxy/<api>/*` — server-side LLM model injection for
  * remote-backed AFPS runs.
  *
- * Three protocol families ship today. Each shape's path mirrors the upstream
+ * Four protocol families ship today. Each shape's path mirrors the upstream
  * SDK's own convention, so a stored `baseUrl` produces the same final URL
  * whether pi-ai calls the upstream directly or via this proxy:
  *
  *   - `openai-completions`   → `/v1/chat/completions`
+ *   - `openai-responses`     → `/v1/responses`
  *   - `anthropic-messages`   → `/v1/messages`
  *   - `mistral-conversations` → `/v1/chat/completions`
  *
@@ -67,6 +68,7 @@ import {
   LlmProxyUnsupportedSubscriptionError,
 } from "../services/llm-proxy/core.ts";
 import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
+import { openaiResponsesAdapter } from "../services/llm-proxy/openai-responses.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/types.ts";
@@ -87,6 +89,7 @@ export function createLlmProxyRouter() {
   // is bound here.
   const adapters: Record<ProxiedApiShape, LlmProxyAdapter> = {
     "openai-completions": openaiCompletionsAdapter,
+    "openai-responses": openaiResponsesAdapter,
     "anthropic-messages": anthropicMessagesAdapter,
     "mistral-conversations": mistralConversationsAdapter,
   };
@@ -226,6 +229,7 @@ async function handleProxy(
       principal,
       runId,
       chatSessionId,
+      requestId: c.get("requestId"),
       upstreamPath,
       incomingHeaders: c.req.raw.headers,
       rawBody,

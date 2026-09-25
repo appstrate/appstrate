@@ -17,19 +17,22 @@ import { catalogValues, type CatalogModelValues } from "./row-overrides-catalog"
 export type ModelSource = "catalog" | "discover" | "search";
 
 /**
- * Which listing answers for a provider. `search` is OpenRouter alone: its live
- * search returns the billing rate, which `POST /discover` never does. `catalog`
- * covers every entry the vendored catalog describes and every oauth2 one (a
- * subscription's listing is what the plan serves, and discovery refuses to
- * spend a subscription token). `discover` is the rest.
+ * Which listing answers for a provider. `search` is a provider declaring
+ * `live_model_search`: its live search returns the billing rate, which
+ * `POST /discover` never does. `catalog` covers every entry Pi's registry
+ * describes and every oauth2 one (a subscription's listing is what the plan
+ * serves, and discovery refuses to spend a subscription token). `discover` is
+ * the rest.
  */
 export function modelSource(
   provider:
-    | (Pick<ProviderRegistryEntry, "providerId" | "authMode"> & { models: readonly unknown[] })
+    | (Pick<ProviderRegistryEntry, "authMode" | "live_model_search"> & {
+        models: readonly unknown[];
+      })
     | undefined,
 ): ModelSource | null {
   if (!provider) return null;
-  if (provider.providerId === "openrouter") return "search";
+  if (provider.live_model_search) return "search";
   if (provider.authMode === "oauth2" || provider.models.length > 0) return "catalog";
   return "discover";
 }
@@ -86,11 +89,6 @@ export function catalogRows(entries: readonly CatalogModelEntry[]): ModelPickRow
       featured: m.featured,
     }),
   );
-}
-
-/** A served id the catalog never heard of: nothing describes it but its id. */
-export function idOnlyRow(id: string): ModelPickRow {
-  return pickRow({ id, origin: "catalog" });
 }
 
 export function discoveredRows(models: readonly DiscoveredModel[]): ModelPickRow[] {

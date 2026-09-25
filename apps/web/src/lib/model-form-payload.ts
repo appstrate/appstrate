@@ -32,7 +32,7 @@ export interface ModelFormFields {
 
 /**
  * Catalog-derivable overrides. Sent only when the operator answered for them,
- * so the server keeps resolving the rest from the vendored catalog.
+ * so the server keeps resolving the rest from the model catalog (Pi's registry).
  */
 interface ModelCapabilityOverrides {
   input?: ModelInputModality[];
@@ -130,7 +130,7 @@ export interface ModelFormPayloadInput {
   /**
    * The catalog's own values for the submitted id. An edit form opens on them,
    * so a field still equal to them is not an answer: shipping it would freeze it
-   * as an override and cut the row off from the catalog refresh.
+   * as an override and cut the row off from catalog updates.
    */
   catalogEntry?: CatalogModelValues;
   provider: ModelFormProvider | undefined;

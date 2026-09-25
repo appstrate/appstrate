@@ -4,12 +4,14 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
-import { lookupCatalogModel } from "./pricing-catalog.ts";
+import { listCatalogModels, lookupCatalogModel, piProviderOf } from "./model-catalog.ts";
+import { buildPiModel, clampPiReasoningLevel } from "@appstrate/runner-pi/pi-model";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
   MODEL_INPUT_MODALITIES,
   type ModelCost,
   type ModelInputModality,
+  type ModelProviderDefinition,
 } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
@@ -31,14 +33,15 @@ import {
 } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
+import { listedModelIds } from "./model-providers/model-listing.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import {
-  applyModelGenerationCapabilitiesOverride,
   ModelGenerationError,
   resolveModelGenerationSettings,
   UNKNOWN_MODEL_GENERATION_CAPABILITIES,
   type ModelGenerationCapabilities,
   type ModelGenerationSettings,
+  type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 
 // --- Metadata projection ---
@@ -46,7 +49,7 @@ import {
 /**
  * Project the 6 metadata fields (label + 5 capability/cost fields) by
  * cascading source → catalog defaults → final fallback. This is the single
- * authoritative place where overrides beat the vendored catalog — cost-shape
+ * authoritative place where overrides beat the catalog — cost-shape
  * changes touch exactly one function.
  *
  * Used by every site that reads {@link ModelMetadata}: the wire-shape
@@ -91,37 +94,36 @@ const defaultModel = createDefaultPointer({
 // --- Model-alias projection (Threat A: dashboard user) ---
 
 /**
- * Strip the real binding from a model alias before it reaches a user-facing
- * surface. For `aliased` entries the public `id`/`label` survive (the user
- * selected the alias) but the backing — provider/protocol (`apiShape`),
- * endpoint (`baseUrl`), upstream id (`modelId`), credential, and every
- * capability/cost field — is nulled. Backing-derived capability/cost fields are
- * dropped too (not just the ids): a distinctive context window or price could
- * identify the real model. The exception is the normalized, portable generation
- * contract required to render safe temperature/reasoning controls. Provider-
- * native mappings and adaptive transport details remain private. Non-aliased
- * models pass through.
- *
- * Applied at the user-facing read boundary (`GET /api/models`, the effective-
- * default response) — NOT inside {@link listOrgModels}, so the operator
- * create/update handlers (which re-project via {@link getOrgModel}) still see
- * the full resource they just configured. Resolution (`resolveModel` /
- * `loadModel`) is unaffected — the run executor always gets the real binding.
+ * What an alias accepts, whatever its backing: a backing's own level set
+ * fingerprints its family. Pi's default set — `xhigh`/`max` exist only where a
+ * record maps them — and a run clamps the chosen level to the backing's
+ * nearest (`clampToBackingLevel`).
+ */
+const ALIAS_REASONING_LEVELS: readonly ModelReasoningLevel[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+];
+
+/**
+ * An alias's public generation contract. Applied by {@link generationOf}, so
+ * `listOrgModels` and `ResolvedModel` both carry it: settings are validated
+ * against it, then {@link clampToBackingLevel} maps the level to the backing.
  */
 function projectAliasedGenerationCapabilities(
   capabilities: ModelGenerationCapabilities | null,
 ): ModelGenerationCapabilities {
   const levels = Object.fromEntries(
-    Object.entries(capabilities?.reasoning.levels ?? {}).filter(
-      ([, support]) => support === "supported",
-    ),
+    ALIAS_REASONING_LEVELS.map((level) => [level, "supported"]),
   ) as ModelGenerationCapabilities["reasoning"]["levels"];
   const temperatureSupported = capabilities?.temperature === "supported";
   const reasoningSupported = capabilities?.reasoning.supported === "supported";
 
   // Alias callers cannot inspect the backing model to compensate for an
-  // unknown capability. Expose only catalog-confirmed support and fail closed
-  // for unknowns. The runtime still resolves the full, unprojected contract.
+  // unknown capability: expose only catalog-confirmed support, fail closed on
+  // unknowns.
   return {
     temperature: temperatureSupported ? "supported" : "unsupported",
     reasoning: {
@@ -140,6 +142,20 @@ function projectAliasedGenerationCapabilities(
   };
 }
 
+/**
+ * Strip the real binding from a model alias before it reaches a user-facing
+ * surface. For `aliased` entries the public `id`/`label` survive (the user
+ * selected the alias) but the backing — provider/protocol (`apiShape`),
+ * endpoint (`baseUrl`), upstream id (`modelId`), credential, and every
+ * capability/cost field — is nulled: a distinctive context window or price
+ * could identify the real model. `generation` is already the alias's public
+ * contract (re-projecting it is idempotent). Non-aliased models pass through.
+ *
+ * Applied at the user-facing read boundary (`GET /api/models`, the effective-
+ * default response), not inside {@link listOrgModels}, so the operator
+ * create/update handlers still see the binding they configured. Resolution
+ * (`resolveModel` / `loadModel`) keeps the real binding.
+ */
 export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
   if (!model.aliased) return model;
   // Allowlist, NOT a denylist (`{ ...model, field: null }`): build the public
@@ -175,12 +191,13 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
     apiShape: null,
     providerId: null,
     provider_name: null,
+    pi_provider: null,
     base_url: null,
     modelId: null,
     credentialId: null,
     // Capability/cost — identifying catalog metadata stays private. Generation
-    // exposes only the portable support vector needed by the controls; native
-    // mappings and adaptive transport semantics stay on the resolved model.
+    // exposes only the portable support vector needed by the controls; adaptive
+    // transport semantics stay on the resolved model.
     contextWindow: null,
     maxTokens: null,
     input: null,
@@ -265,12 +282,14 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         def.modelId,
         resolveCatalogDefaults(def.providerId, def.modelId),
       ),
-      generation:
-        resolveCatalogDefaults(def.providerId, def.modelId).generation ??
-        UNKNOWN_MODEL_GENERATION_CAPABILITIES,
+      generation: generationOf(
+        resolveCatalogDefaults(def.providerId, def.modelId),
+        def.aliased === true,
+      ),
       apiShape: def.apiShape,
       providerId: def.providerId,
       provider_name: getModelProvider(def.providerId)?.displayName ?? null,
+      pi_provider: resolvePiProvider(def.providerId),
       base_url: def.baseUrl,
       modelId: def.modelId,
       enabled: def.enabled !== false,
@@ -295,12 +314,14 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
           row.modelId,
           resolveCatalogDefaults(creds.providerId, row.modelId),
         ),
-        generation:
-          resolveCatalogDefaults(creds.providerId, row.modelId).generation ??
-          UNKNOWN_MODEL_GENERATION_CAPABILITIES,
+        generation: generationOf(
+          resolveCatalogDefaults(creds.providerId, row.modelId),
+          row.aliased,
+        ),
         apiShape: creds.apiShape,
         providerId: creds.providerId,
         provider_name: getModelProvider(creds.providerId)?.displayName ?? null,
+        pi_provider: resolvePiProvider(creds.providerId),
         base_url: creds.baseUrl,
         modelId: row.modelId,
         enabled: row.enabled,
@@ -596,8 +617,8 @@ export async function seedOrgModelsForCredential(
     }
 
     // Store catalog-derivable columns as null — read path falls back to
-    // the live catalog via `resolveCatalogDefaults`, so a weekly catalog
-    // refresh propagates to these rows without a backfill migration.
+    // the catalog via `resolveCatalogDefaults`, so a Pi registry bump
+    // propagates to these rows without a backfill migration.
     // Only `label` is materialised (DB column is NOT NULL); explicit
     // user-side renames remain stable across catalog bumps.
     const inserted = await tx
@@ -690,7 +711,12 @@ export interface ResolvedModel extends Pick<
   | "reasoning"
   | "cost"
 > {
-  /** Request controls supported by the backing model in the vendored catalog. */
+  /**
+   * Pi builtin provider key of {@link providerId} (`piProviderOf`), `null` for
+   * a gateway. The key every runtime channel carries — never the Appstrate id.
+   */
+  piProvider: string | null;
+  /** Request controls supported by the backing model in the catalog. */
   generation?: ModelGenerationCapabilities;
   /**
    * Always set — the builders fall back to the catalog and finally `modelId`
@@ -753,12 +779,12 @@ interface DbModelCredentials {
  * Catalog-derived defaults for `(providerId, modelId)`. Each `org_models`
  * column is an *optional override* — when the row stores null, the catalog
  * value flows through here. Storing nulls instead of frozen catalog values
- * lets the weekly `refresh-pricing-catalog.ts` bump propagate to existing
- * rows. Honors `catalogProviderId` so OAuth wrappers (codex → openai,
- * claude-code → anthropic) hit the right catalog file.
+ * lets a Pi registry bump propagate to existing rows. Reads the provider's
+ * offer (`catalogProviderId ?? providerId` on its `apiShape`).
  *
- * Returns `{}` on any miss (unmapped provider, unknown model id, dropped
- * entry). Callers fall through to row values or final defaults.
+ * Returns `{}` on any miss (unknown provider, id outside the offer) and no
+ * `cost` for a model the catalog leaves unpriced. Callers fall through to
+ * row values or final defaults.
  */
 export interface CatalogDefaults {
   label?: string;
@@ -772,30 +798,28 @@ export interface CatalogDefaults {
 
 export function resolveCatalogDefaults(providerId: string, modelId: string): CatalogDefaults {
   const provider = getModelProvider(providerId);
-  const catalogKey = provider?.catalogProviderId ?? providerId;
-  const entry = lookupCatalogModel(catalogKey, modelId);
-  if (!entry) {
-    return provider?.generationOverride
-      ? {
-          generation: applyModelGenerationCapabilitiesOverride(
-            UNKNOWN_MODEL_GENERATION_CAPABILITIES,
-            provider.generationOverride,
-          ),
-        }
-      : {};
-  }
+  const entry = provider ? lookupCatalogModel(provider, modelId) : null;
+  if (!entry) return {};
   return {
     label: entry.label,
     input: MODEL_INPUT_MODALITIES.filter((m) => entry.capabilities.includes(m)),
     contextWindow: entry.contextWindow,
     maxTokens: entry.maxTokens,
     reasoning: entry.capabilities.includes("reasoning"),
-    cost: entry.cost,
-    generation: applyModelGenerationCapabilitiesOverride(
-      entry.generation ?? UNKNOWN_MODEL_GENERATION_CAPABILITIES,
-      provider?.generationOverride,
-    ),
+    ...(entry.cost ? { cost: entry.cost } : {}),
+    generation: entry.generation,
   };
+}
+
+/** The controls a caller may set: an alias's are its public contract, never its backing's. */
+function generationOf(defaults: CatalogDefaults, aliased: boolean): ModelGenerationCapabilities {
+  const generation = defaults.generation ?? UNKNOWN_MODEL_GENERATION_CAPABILITIES;
+  return aliased ? projectAliasedGenerationCapabilities(generation) : generation;
+}
+
+function resolvePiProvider(providerId: string): string | null {
+  const def = getModelProvider(providerId);
+  return def ? piProviderOf(def) : null;
 }
 
 /** Build a `ResolvedModel` from a system `ModelDefinition` (env-driven). */
@@ -803,12 +827,13 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
   const defaults = resolveCatalogDefaults(def.providerId, def.modelId);
   return {
     providerId: def.providerId,
+    piProvider: resolvePiProvider(def.providerId),
     apiShape: def.apiShape,
     baseUrl: def.baseUrl,
     modelId: def.modelId,
     apiKey: def.apiKey,
     ...resolveModelMetadata(def, def.modelId, defaults),
-    generation: defaults.generation ?? UNKNOWN_MODEL_GENERATION_CAPABILITIES,
+    generation: generationOf(defaults, def.aliased === true),
     isSystemModel: true,
     aliased: def.aliased === true,
     aliasId: def.id,
@@ -821,19 +846,19 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
  * service resolves them from the registry by `providerId` (with the per-row
  * `baseUrlOverride` honored when `baseUrlOverridable: true`). Every catalog-
  * derivable column on `org_models` is an optional override that defers to
- * the catalog on null — so a weekly catalog refresh propagates to existing
- * rows.
+ * the catalog on null — so a Pi registry bump propagates to existing rows.
  */
 function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): ResolvedModel {
   const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
   return {
     providerId: creds.providerId,
+    piProvider: resolvePiProvider(creds.providerId),
     apiShape: creds.apiShape,
     baseUrl: creds.baseUrl,
     modelId: row.modelId,
     apiKey: creds.apiKey,
     ...resolveModelMetadata(row, row.modelId, defaults),
-    generation: defaults.generation ?? UNKNOWN_MODEL_GENERATION_CAPABILITIES,
+    generation: generationOf(defaults, row.aliased),
     isSystemModel: false,
     aliased: row.aliased,
     aliasId: row.id,
@@ -1062,6 +1087,29 @@ export function validateGenerationOverride(
   }
 }
 
+/**
+ * The settings a run sends upstream: its reasoning level mapped to what the
+ * model really takes (Pi's clamp). A no-op on a strictly validated model; an
+ * alias's public level lands on its backing's nearest, since the container of
+ * an aliased run never learns the backing.
+ */
+export function clampToBackingLevel(
+  model: ResolvedModel,
+  settings: ModelGenerationSettings,
+): ModelGenerationSettings {
+  const level = settings.reasoning_level;
+  if (level == null) return settings;
+  const piModel = buildPiModel({
+    id: model.modelId,
+    registryModelId: model.modelId,
+    apiShape: model.apiShape,
+    piProvider: model.piProvider,
+    baseUrl: model.baseUrl,
+    reasoning: model.reasoning,
+  });
+  return { ...settings, reasoning_level: clampPiReasoningLevel(piModel, level) };
+}
+
 // --- Connection test ---
 
 /**
@@ -1118,7 +1166,7 @@ export function buildModelTestRequest(config: {
 }
 
 /** A delivered response, or the structured failure that stopped it from being one. */
-type ModelListingFetchResult =
+type ProviderFetchResult =
   { ok: true; res: Response; latency: number } | (TestResult & { ok: false });
 
 /**
@@ -1140,12 +1188,25 @@ export async function fetchModelListing(
     providerId?: string;
   },
   pageQuery?: { name: string; value: string },
-): Promise<ModelListingFetchResult> {
+): Promise<ProviderFetchResult> {
+  const { url: firstPageUrl, headers } = buildModelTestRequest(config);
+  const url = pageQuery
+    ? `${firstPageUrl}${firstPageUrl.includes("?") ? "&" : "?"}${pageQuery.name}=${encodeURIComponent(pageQuery.value)}`
+    : firstPageUrl;
+  return guardedProviderFetch(config.baseUrl, url, { headers });
+}
+
+/** Every provider request: {@link fetchModelListing}, {@link validateKeyByInference}. */
+async function guardedProviderFetch(
+  baseUrl: string,
+  url: string,
+  init: Omit<RequestInit, "signal">,
+): Promise<ProviderFetchResult> {
   // Canonical egress guard (parse + scheme floor + allowlist-aware literal +
   // DNS-rebind host gate) before the fetch: a public hostname resolving to a
   // private/loopback/link-local address is refused, fail-closed, with the same
   // BLOCKED_URL result (the resolution reason is never surfaced).
-  const egress = await checkEgressUrl(config.baseUrl);
+  const egress = await checkEgressUrl(baseUrl);
   if (!egress.ok) {
     return {
       ok: false,
@@ -1154,11 +1215,6 @@ export async function fetchModelListing(
       message: "URL targets a blocked network",
     };
   }
-
-  const { url: firstPageUrl, headers } = buildModelTestRequest(config);
-  const url = pageQuery
-    ? `${firstPageUrl}${firstPageUrl.includes("?") ? "&" : "?"}${pageQuery.name}=${encodeURIComponent(pageQuery.value)}`
-    : firstPageUrl;
 
   const start = performance.now();
   try {
@@ -1171,10 +1227,7 @@ export async function fetchModelListing(
     // key elsewhere, so refuse to follow rather than follow-and-strip.
     const res = await egressGuardedFetch(
       url,
-      {
-        headers,
-        signal: AbortSignal.timeout(10_000),
-      },
+      { ...init, signal: AbortSignal.timeout(10_000) },
       { maxRedirects: 0, logger },
     );
     return { ok: true, res, latency: Math.round(performance.now() - start) };
@@ -1199,6 +1252,81 @@ export async function fetchModelListing(
     }
     return { ...mapFetchErrorToTestResult(err, latency), ok: false };
   }
+}
+
+function buildInferenceProbeRequest(config: { baseUrl: string; apiKey: string; modelId: string }): {
+  url: string;
+  init: Omit<RequestInit, "signal">;
+} {
+  return {
+    url: `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`,
+    init: {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: config.modelId,
+        messages: [{ role: "user", content: "ping" }],
+        max_tokens: 1,
+        stream: false,
+      }),
+    },
+  };
+}
+
+/** A provider status that failed the test: the key refused, throttled, or the provider erred. */
+export function statusFailure(status: number, latency: number): TestResult & { ok: false } {
+  if (status === 401 || status === 403) {
+    return { ok: false, latency, error: "AUTH_FAILED", message: "Authentication failed", status };
+  }
+  if (status === 429) {
+    return { ok: false, latency, error: "RATE_LIMITED", message: "Rate limited", status };
+  }
+  return {
+    ok: false,
+    latency,
+    error: "PROVIDER_ERROR",
+    message: `Provider returned ${status}`,
+    status,
+  };
+}
+
+/**
+ * Model the key probe calls: the first id of the live listing that the offer
+ * serves (a model the vendor retired must not fail every key), else the first
+ * featured id, else the first offered one.
+ */
+function probeModelId(def: ModelProviderDefinition, listedIds: readonly string[] | null): string {
+  const offered = listCatalogModels(def).map((m) => m.id);
+  const offeredSet = new Set(offered);
+  return listedIds?.find((id) => offeredSet.has(id)) ?? def.featuredModels[0] ?? offered[0]!;
+}
+
+/**
+ * Key check of a `publicModelListing` provider: one minimal chat completion on
+ * {@link probeModelId}. `listedIds` is the listing already read, if any. Any
+ * status below 500 but 401/403/429 passes (a model may 400 `max_tokens: 1`).
+ */
+export async function validateKeyByInference(
+  def: ModelProviderDefinition,
+  config: { baseUrl: string; apiKey: string },
+  listedIds?: readonly string[],
+): Promise<TestResult> {
+  const listed =
+    listedIds ??
+    (await listedModelIds({ ...config, apiShape: def.apiShape, providerId: def.providerId }));
+  const { url, init } = buildInferenceProbeRequest({
+    ...config,
+    modelId: probeModelId(def, listed),
+  });
+  const reply = await guardedProviderFetch(config.baseUrl, url, init);
+  if (!reply.ok) return reply;
+  const { res, latency } = reply;
+  await res.body?.cancel();
+  const accepted = ![401, 403, 429].includes(res.status) && res.status < 500;
+  return accepted ? { ok: true, latency, status: res.status } : statusFailure(res.status, latency);
 }
 
 /** Test a model config directly (no DB lookup). */
@@ -1230,28 +1358,12 @@ export async function testModelConfig(config: {
       ? { ok: true, latency: 0 }
       : { ok: false, latency: 0, error: result.error, message: result.message };
   }
-
-  const listing = await fetchModelListing(config);
-  if (!listing.ok) return listing;
-
-  const { res, latency } = listing;
-  if (res.ok) return { ok: true, latency, status: res.status };
-  if (res.status === 401 || res.status === 403) {
-    return {
-      ok: false,
-      latency,
-      error: "AUTH_FAILED",
-      message: "Authentication failed",
-      status: res.status,
-    };
-  }
-  return {
-    ok: false,
-    latency,
-    error: "PROVIDER_ERROR",
-    message: `Provider returned ${res.status}`,
-    status: res.status,
-  };
+  // A listing that answers any key cannot test one.
+  if (provider?.publicModelListing) return validateKeyByInference(provider, config);
+  const reply = await fetchModelListing(config);
+  if (!reply.ok) return reply;
+  const { res, latency } = reply;
+  return res.ok ? { ok: true, latency, status: res.status } : statusFailure(res.status, latency);
 }
 
 /** Test a saved model by ID (loads from DB/system registry then delegates to testModelConfig). */

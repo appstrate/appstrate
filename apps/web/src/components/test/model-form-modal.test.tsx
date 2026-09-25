@@ -31,6 +31,7 @@ import type {
   ProviderRegistryEntry,
 } from "../../hooks/use-model-provider-credentials.ts";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
+import { UNKNOWN_MODEL_GENERATION_CAPABILITIES } from "@appstrate/core/model-generation";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -56,6 +57,7 @@ const OPENAI_COMPATIBLE: ProviderRegistryEntry = {
   baseUrlOverridable: true,
   authMode: "api_key",
   featured: false,
+  live_model_search: false,
   models: [],
 };
 
@@ -67,6 +69,7 @@ const SONNET = {
   contextWindow: 200000,
   maxTokens: 64000,
   capabilities: ["text", "image", "reasoning"],
+  generation: UNKNOWN_MODEL_GENERATION_CAPABILITIES,
   cost: { input: 3, output: 15 },
 };
 
@@ -81,6 +84,7 @@ const ANTHROPIC: ProviderRegistryEntry = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
+  live_model_search: false,
   models: [SONNET],
 };
 
@@ -99,6 +103,7 @@ function model(overrides: Partial<OrgModelInfo>): OrgModelInfo {
     apiShape: "openai-completions",
     providerId: "openai-compatible",
     provider_name: "OpenAI-compatible (custom)",
+    pi_provider: null,
     base_url: "http://localhost:11434/v1",
     modelId: "qwen3:8b",
     generation: null,
@@ -123,6 +128,7 @@ function catalogued(overrides: Partial<OrgModelInfo> = {}): OrgModelInfo {
     apiShape: "anthropic-messages",
     providerId: "anthropic",
     provider_name: "Anthropic",
+    pi_provider: "anthropic",
     base_url: "https://api.anthropic.com",
     modelId: SONNET.id,
     credentialId: "cred_ant",
@@ -333,7 +339,7 @@ describe("ModelFormBody — editing a catalogued row that overrides nothing", ()
   it("leaves the capabilities toggle off, because the row equals its catalog entry", () => {
     // `GET /api/models` resolves these from the catalog, so reading "carries a
     // number" as "overrides" would freeze the catalog's own values on the next
-    // save and stop the weekly refresh reaching the row.
+    // save and stop a catalog update (a Pi bump) reaching the row.
     expect(checkedState(html, "mdl-capabilities-explicit")).toBe("false");
     expect(html).toContain(settingsFr["models.form.capabilitiesAuto"]);
     expect(html).not.toContain('id="mdl-ctx"');

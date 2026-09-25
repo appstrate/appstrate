@@ -9,11 +9,7 @@
 import { createLogger } from "@appstrate/core/logger";
 import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
 import type { ModelInputModality } from "@appstrate/core/module";
-import type {
-  ModelGenerationSettings,
-  ModelNativeReasoningLevel,
-  ModelReasoningLevel,
-} from "@appstrate/core/model-generation";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 /**
  * `MODEL_API_KEY` inside an ALIASED container.
@@ -38,8 +34,8 @@ export interface RuntimePiModelConfig {
   api: string;
   modelId: string;
   baseUrl: string;
-  /** Real upstream provider id → `MODEL_PROVIDER`. Pass it even for an {@link aliased} run. */
-  providerId?: string | null;
+  /** Pi provider key of the real upstream → `MODEL_PROVIDER`. Pass it even for an {@link aliased} run. */
+  piProvider?: string | null;
   /** LLM API key. When unset, MODEL_API_KEY / MODEL_BASE_URL are not emitted. */
   apiKey?: string;
   /** Stands in for the real apiKey inside the container. Required when LLM traffic is proxied. */
@@ -48,7 +44,6 @@ export interface RuntimePiModelConfig {
   contextWindow?: number | null;
   maxTokens?: number | null;
   reasoning?: boolean | null;
-  reasoningLevelMap?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
   cost?: unknown | null;
   /**
    * This run's model is a platform ALIAS (`docs/architecture/MODEL_ALIASES.md`).
@@ -224,11 +219,11 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   // and without this the container emits plain-OpenAI shape at every provider.
   // An ALIASED run never emits it — naming the vendor is the leak, and there is
   // nothing left to configure, `pi-messages` having one request shape.
-  if (model.providerId && !model.aliased) env.MODEL_PROVIDER = model.providerId;
+  if (model.piProvider && !model.aliased) env.MODEL_PROVIDER = model.piProvider;
 
   // --- Model-alias masking: the one place the alias policy touches the container
-  // env contract. An alias withholds `MODEL_PROVIDER`, `MODEL_REASONING_LEVEL_MAP`
-  // and `MODEL_COST`, and replaces `MODEL_API` with the canonical dialect.
+  // env contract. An alias withholds `MODEL_PROVIDER` and `MODEL_COST`, and
+  // replaces `MODEL_API` with the canonical dialect.
   // `MODEL_INPUT` and the two token limits go out unchanged: the container needs
   // them — dropping `MODEL_INPUT` silently disables image input — and the exact
   // `usage.input` count it reports out-tells what withholding them could hide.
@@ -236,17 +231,6 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   if (model.contextWindow != null) env.MODEL_CONTEXT_WINDOW = String(model.contextWindow);
   if (model.maxTokens != null) env.MODEL_MAX_TOKENS = String(model.maxTokens);
   if (model.reasoning != null) env.MODEL_REASONING = model.reasoning ? "true" : "false";
-  // The native mapping is the VENDOR's own effort vocabulary, and nothing in an
-  // aliased container reads it: the portable level crosses the wire as
-  // `options.reasoning`, and the sidecar applies the backing's mapping. Sibling
-  // `MODEL_REASONING` stays — a container that cannot reason sends no level.
-  if (
-    !model.aliased &&
-    model.reasoningLevelMap &&
-    Object.keys(model.reasoningLevelMap).length > 0
-  ) {
-    env.MODEL_REASONING_LEVEL_MAP = JSON.stringify(model.reasoningLevelMap);
-  }
   if (opts.generation?.temperature != null) {
     env.MODEL_TEMPERATURE = String(opts.generation.temperature);
   }

@@ -9,7 +9,8 @@
  * reassembly/retention in isolation.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn, beforeEach, afterEach, type Mock } from "bun:test";
+import { logger } from "../../src/lib/logger.ts";
 import {
   computeCostUsd,
   tapSseUsage,
@@ -17,6 +18,7 @@ import {
   forwardMeteredResponse,
   recordProxyUsage,
   UNPARSED_USAGE_REQUEST_ID_PREFIX,
+  UPSTREAM_ERROR_LOG_CHARS,
   type MeteredForwardContext,
   type RecordUsageInputs,
 } from "../../src/services/llm-proxy/metering.ts";
@@ -98,6 +100,100 @@ describe("computeCostUsd", () => {
   });
 });
 
+// A terminal frame above the buffer bound is metered from a bounded skeleton
+// (arrays and deep objects emptied, long strings blanked), never dropped: a
+// caller who inflates the echo must not get the call for free.
+describe("tapSseUsage — terminal frame above the buffer bound", () => {
+  const big = "é\n".repeat(400_000);
+  const options = { maxFrameChars: 100_000 };
+  const chunked = (text: string, size = 65_536): string[] => {
+    const out: string[] = [];
+    for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
+    return out;
+  };
+
+  it("chat completions: meters the usage of an oversized final frame", async () => {
+    const frame = `data: ${JSON.stringify({
+      id: "c",
+      choices: [{ index: 0, delta: { content: big }, finish_reason: "stop" }],
+      usage: {
+        prompt_tokens: 900,
+        completion_tokens: 70,
+        prompt_tokens_details: { cached_tokens: 100 },
+      },
+    })}\n\ndata: [DONE]\n\n`;
+    expect(frame.length).toBeGreaterThan(options.maxFrameChars * 5);
+    const usage = await tapSseUsage(streamFrom(chunked(frame)), openaiCompletionsAdapter, options);
+    expect(usage).toEqual({ inputTokens: 800, outputTokens: 70, cacheReadTokens: 100 });
+  });
+
+  it("anthropic: meters an oversized message_delta", async () => {
+    const frame = `event: message_delta\ndata: ${JSON.stringify({
+      type: "message_delta",
+      delta: { stop_reason: "end_turn", padding: big },
+      usage: { output_tokens: 42 },
+    })}\n\n`;
+    const usage = await tapSseUsage(streamFrom(chunked(frame)), anthropicMessagesAdapter, options);
+    expect(usage).toEqual({ inputTokens: 0, outputTokens: 42 });
+  });
+
+  it("ignores a `usage` key nested in echoed caller content or inside strings", async () => {
+    const decoy = { usage: { prompt_tokens: 1, completion_tokens: 1 } };
+    const frame = `data: ${JSON.stringify({
+      choices: [{ delta: { content: big, tool_calls: [decoy] } }],
+      usage: { prompt_tokens: 900, completion_tokens: 70 },
+      echo: { nested: { deeper: { deepest: decoy } } },
+      note: JSON.stringify(decoy) + big,
+    })}\n\n`;
+    const usage = await tapSseUsage(streamFrom(chunked(frame)), openaiCompletionsAdapter, options);
+    expect(usage).toEqual({ inputTokens: 900, outputTokens: 70 });
+  });
+
+  // The skeleton itself is bounded: past its cap the frame yields no usage and
+  // the call is metered as an unparsed (unpriced) row, never a crash.
+  it("meters a frame whose skeleton exceeds its cap as unparsed", async () => {
+    const wide = Object.fromEntries(
+      Array.from({ length: 120_000 }, (_, i) => [`k${String(i).padStart(6, "0")}`, 1]),
+    );
+    const frame = `data: ${JSON.stringify({
+      usage: { prompt_tokens: 900, completion_tokens: 70 },
+      echo: wide,
+    })}\n\n`;
+    expect(frame.length).toBeGreaterThan(1024 * 1024);
+    expect(await tapSseUsage(streamFrom(chunked(frame)), openaiCompletionsAdapter, options)).toBe(
+      null,
+    );
+
+    const { calls, recordUsage } = collectUsage();
+    const res = await forwardMeteredResponse(
+      new Response(streamFrom(chunked(frame)), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+      openaiCompletionsAdapter,
+      makeCtx(),
+      { recordUsage, maxFrameChars: options.maxFrameChars },
+    );
+    await readAll(res.body!);
+    for (let i = 0; i < 100 && calls.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(calls.map((c) => c.usage)).toEqual([null]);
+  });
+
+  it("returns null for an oversized frame without usage, and meters a later one", async () => {
+    const over = `data: ${JSON.stringify({ choices: [{ delta: { content: big } }] })}\n\n`;
+    expect(
+      await tapSseUsage(streamFrom(chunked(over)), openaiCompletionsAdapter, options),
+    ).toBeNull();
+    const next = `data: {"usage":{"prompt_tokens":5,"completion_tokens":3}}\n\n`;
+    const usage = await tapSseUsage(
+      streamFrom([over.slice(0, -1), over.slice(-1) + next]),
+      openaiCompletionsAdapter,
+      options,
+    );
+    expect(usage).toEqual({ inputTokens: 5, outputTokens: 3 });
+  });
+});
+
 describe("tapSseUsage (anthropic-messages)", () => {
   it("reassembles a usage frame split across two chunks and merges start+delta", async () => {
     // The message_start frame straddles the chunk boundary; the second chunk
@@ -156,7 +252,7 @@ describe("tapSseUsage (anthropic-messages)", () => {
         // Never closes, never speaks again.
       },
     });
-    const usage = await tapSseUsage(source, anthropicMessagesAdapter, 25);
+    const usage = await tapSseUsage(source, anthropicMessagesAdapter, { idleTimeoutMs: 25 });
     expect(usage?.inputTokens).toBe(11);
   });
 
@@ -179,7 +275,10 @@ describe("tapSseUsage (anthropic-messages)", () => {
     const [clientBranch, tapBranch] = source.tee();
     const seen: unknown[] = [];
     const guarded = guardSseTeardown(clientBranch, (e) => seen.push(e), 25);
-    await Promise.all([tapSseUsage(tapBranch, anthropicMessagesAdapter, 25), readAll(guarded)]);
+    await Promise.all([
+      tapSseUsage(tapBranch, anthropicMessagesAdapter, { idleTimeoutMs: 25 }),
+      readAll(guarded),
+    ]);
     // Both cancels are fired as detached promises; let them settle.
     await new Promise((r) => setTimeout(r, 10));
     expect(cancelled).toBe(true);
@@ -231,6 +330,7 @@ function makeCtx(overrides: Partial<MeteredForwardContext> = {}): MeteredForward
       apiShape: "anthropic-messages",
     } as unknown as ResolvedModel,
     started: 0,
+    requestId: "req_test",
     ...overrides,
   };
 }
@@ -681,10 +781,8 @@ describe("forwardMeteredResponse — a paid 2xx never escapes the ledger", () =>
 /**
  * Pricing provenance on the proxy row (issue #1025 §B). `cost_usd = 0` is
  * unattributable on its own; these pin which of the three verdicts each shape
- * of (rates × usage) produces, and — critically — that the PARSE gap and the
- * PRICING gap stay independent: the `usage-unparsed:` marker lives on
- * `request_id`, so `pricing_status` keeps answering only "did the platform have
- * rates for this model".
+ * of (rates × usage) produces. A row whose usage could not be parsed is
+ * `unpriced`: its $0 prices nothing the vendor billed.
  */
 describe("recordProxyUsage — pricing provenance", () => {
   async function entryFor(
@@ -735,16 +833,184 @@ describe("recordProxyUsage — pricing provenance", () => {
     expect(entry.pricingStatus).toBe("partial");
   });
 
-  it("keeps the parse gap and the pricing gap separable on an unparseable-usage row", async () => {
-    // Same zero-token row, two different models: the marker on `request_id`
-    // reports the parse failure in BOTH, while `pricing_status` reports only
-    // whether rates existed. Folding one into the other would lose a signal.
-    const priced = await entryFor({ cost: { input: 3, output: 15 } }, null);
-    expect(priced.requestId?.startsWith(UNPARSED_USAGE_REQUEST_ID_PREFIX)).toBe(true);
-    expect(priced.pricingStatus).toBe("priced");
+  describe("one row per upstream request → Pi's price tiers apply exactly", () => {
+    // Pi's `openai/gpt-5.4` rate card, copied by hand.
+    const tiered = {
+      input: 2.5,
+      output: 15,
+      cacheRead: 0.25,
+      cacheWrite: 0,
+      tiers: [{ inputTokensAbove: 272_000, input: 5, output: 22.5, cacheRead: 0.5, cacheWrite: 0 }],
+    };
 
-    const unpriced = await entryFor({ cost: null }, null);
-    expect(unpriced.requestId?.startsWith(UNPARSED_USAGE_REQUEST_ID_PREFIX)).toBe(true);
-    expect(unpriced.pricingStatus).toBe("unpriced");
+    it("prices a 300k-input request at the tier rate", async () => {
+      const entry = await entryFor(
+        { cost: tiered },
+        { inputTokens: 300_000, outputTokens: 10_000 },
+      );
+      // 0.3M×5 + 0.01M×22.5 = 1.5 + 0.225
+      expect(entry.costUsd).toBeCloseTo(1.725, 12);
+    });
+
+    it("prices a 200k-input request at the base rate", async () => {
+      const entry = await entryFor(
+        { cost: tiered },
+        { inputTokens: 200_000, outputTokens: 10_000 },
+      );
+      // 0.2M×2.5 + 0.01M×15 = 0.5 + 0.15
+      expect(entry.costUsd).toBeCloseTo(0.65, 12);
+    });
+
+    it("counts cached input toward the threshold", async () => {
+      const entry = await entryFor(
+        { cost: tiered },
+        { inputTokens: 200_000, outputTokens: 10_000, cacheReadTokens: 100_000 },
+      );
+      // 200k + 100k cached > 272k: 0.2M×5 + 0.01M×22.5 + 0.1M×0.5 = 1 + 0.225 + 0.05
+      expect(entry.costUsd).toBeCloseTo(1.275, 12);
+    });
+  });
+
+  it("stamps `unpriced` on an unparseable-usage row, whatever the model's rates", async () => {
+    // The row's $0 is not a price of what the vendor billed: the tokens are unknown.
+    for (const cost of [{ input: 3, output: 15 }, null]) {
+      const entry = await entryFor({ cost }, null);
+      expect(entry.requestId?.startsWith(UNPARSED_USAGE_REQUEST_ID_PREFIX)).toBe(true);
+      expect(entry.pricingStatus).toBe("unpriced");
+    }
+  });
+});
+
+describe("forwardMeteredResponse — upstream error body is logged server-side", () => {
+  let warnSpy: Mock<typeof logger.warn>;
+  beforeEach(() => {
+    warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  const upstreamErrorLogs = () =>
+    warnSpy.mock.calls.filter(([msg]) => msg.startsWith("llm-proxy: upstream error"));
+
+  it("logs one excerpt of a non-2xx body and forwards it untouched", async () => {
+    const body = JSON.stringify({ error: { message: "unknown variant developer" } });
+    const upstream = new Response(body, {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+
+    const res = await forwardMeteredResponse(
+      upstream,
+      openaiCompletionsAdapter,
+      makeCtx({ requestId: "req_1549", runId: "run_1" }),
+      { recordUsage: collectUsage().recordUsage },
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.text()).toBe(body);
+    const logs = upstreamErrorLogs();
+    expect(logs).toHaveLength(1);
+    expect(logs[0]![1]).toMatchObject({
+      requestId: "req_1549",
+      apiShape: "openai-completions",
+      status: 400,
+      runId: "run_1",
+      orgId: "o",
+    });
+    expect(logs[0]![1]!.errorMessage).toBe("unknown variant developer");
+    expect(logs[0]![1]!.bodySample).toBeUndefined();
+  });
+
+  // A vendor 400 can echo the prompt: log the error's identity and a bounded
+  // message, never the rest of the body.
+  it("logs the parsed error type, code and a truncated message, not the body", async () => {
+    const message = `Invalid 'input[3]': ${"m".repeat(1_000)}`;
+    const body = JSON.stringify({
+      error: { type: "invalid_request_error", code: "invalid_value", message, param: "input" },
+      echo: "SECRET PROMPT FRAGMENT",
+    });
+    await forwardMeteredResponse(
+      new Response(body, { status: 400 }),
+      openaiCompletionsAdapter,
+      makeCtx(),
+      {},
+    );
+    const fields = upstreamErrorLogs()[0]![1]!;
+    expect(fields.errorType).toBe("invalid_request_error");
+    expect(fields.errorCode).toBe("invalid_value");
+    expect(fields.errorMessage).toBe(message.slice(0, UPSTREAM_ERROR_LOG_CHARS));
+    expect(JSON.stringify(fields)).not.toContain("SECRET PROMPT FRAGMENT");
+  });
+
+  it("reads Anthropic's and Mistral's error shapes", async () => {
+    for (const [body, expected] of [
+      [
+        { type: "error", error: { type: "overloaded_error", message: "Overloaded" } },
+        { errorType: "overloaded_error", errorMessage: "Overloaded" },
+      ],
+      [
+        { object: "error", type: "invalid_request_error", code: "3051", message: "bad" },
+        { errorType: "invalid_request_error", errorCode: "3051", errorMessage: "bad" },
+      ],
+    ] as const) {
+      warnSpy.mockClear();
+      await forwardMeteredResponse(
+        new Response(JSON.stringify(body), { status: 400 }),
+        anthropicMessagesAdapter,
+        makeCtx(),
+        {},
+      );
+      expect(upstreamErrorLogs()[0]![1]).toMatchObject(expected);
+    }
+  });
+
+  it("logs the excerpt once on an aliased model, which still never reaches the client", async () => {
+    const upstream = new Response(
+      JSON.stringify({ error: { message: "deepseek-SECRET refused" } }),
+      {
+        status: 400,
+      },
+    );
+    const swap = {
+      alias: "appstrate-medium",
+      real: "deepseek-SECRET",
+      clientApiShape: "anthropic-messages" as const,
+      backingApiShape: "anthropic-messages" as const,
+    };
+    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
+      swap,
+    });
+    expect(await res.text()).not.toContain("deepseek-SECRET");
+    const logs = upstreamErrorLogs();
+    expect(logs).toHaveLength(1);
+    expect(logs[0]![1]!.errorMessage).toBe("deepseek-SECRET refused");
+  });
+
+  it("logs a truncated raw excerpt of a non-JSON body", async () => {
+    const upstream = new Response("x".repeat(100_000), { status: 500 });
+    const res = await forwardMeteredResponse(upstream, openaiCompletionsAdapter, makeCtx(), {});
+    expect((await res.text()).length).toBe(100_000);
+    const sample = String(upstreamErrorLogs()[0]![1]!.bodySample);
+    expect(sample.length).toBe(UPSTREAM_ERROR_LOG_CHARS);
+  });
+
+  it("logs nothing for a 2xx, JSON or SSE", async () => {
+    const json = new Response(JSON.stringify({ id: "cmpl_1", choices: [] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+    await forwardMeteredResponse(json, openaiCompletionsAdapter, makeCtx(), {
+      recordUsage: collectUsage().recordUsage,
+    });
+    const sse = new Response(streamFrom([`data: {"choices":[]}\n\n`, "data: [DONE]\n\n"]), {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+    const res = await forwardMeteredResponse(sse, openaiCompletionsAdapter, makeCtx(), {
+      recordUsage: collectUsage().recordUsage,
+    });
+    await readAll(res.body!);
+    expect(upstreamErrorLogs()).toEqual([]);
   });
 });

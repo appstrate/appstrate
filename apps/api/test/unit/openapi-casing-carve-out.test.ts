@@ -116,6 +116,7 @@ export const CAMEL_CASE_CARVE_OUTS: Record<string, CarveOut> = {
   maxTokens: "4e model-provider registry",
   cacheRead: "4e model-provider registry (cost)",
   cacheWrite: "4e model-provider registry (cost)",
+  inputTokensAbove: "4e model-provider registry (cost tiers)",
 
   durationMs: "4i canonical run events (runner finalize body)",
 

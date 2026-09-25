@@ -4,8 +4,7 @@
  * Tests for `parseServedModels` — the pure half of model listing — plus the
  * one `listServedModels` verdict reachable without a network: a base URL the
  * egress guard refuses. The rest of the network half is covered where it is
- * used, through the injected `listModels` dependency of
- * `discoverAvailableModels`.
+ * used, by the `POST /api/model-provider-credentials/discover` route tests.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -249,6 +248,7 @@ describe("listServedModels", () => {
       apiShape: "openai-responses",
       baseUrl: "http://169.254.169.254/v1",
       apiKey: "k",
+      providerId: "openai",
     });
 
     expect(result.ok).toBe(false);
@@ -265,6 +265,7 @@ describe("listServedModels", () => {
         apiShape: "openai-responses",
         baseUrl: `http://127.0.0.1:${server.port}/v1`,
         apiKey: "k",
+        providerId: "openai",
       });
     } finally {
       await server.stop(true);

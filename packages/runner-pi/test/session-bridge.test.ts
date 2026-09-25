@@ -17,6 +17,7 @@ import {
   truncateToolResult,
   type InternalSink,
 } from "../src/pi-runner.ts";
+import { DEFAULT_CONTEXT_WINDOW } from "../src/pi-model.ts";
 import { loadPiCodingAgentSdk } from "../src/pi-sdk.ts";
 import { createFakeSession, createInternalCapture } from "./helpers.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
@@ -1482,6 +1483,6 @@ describe("installSessionBridge — per-turn context breadcrumb", () => {
 
     settleTurn(session, { input: 1, output: 1 });
 
-    expect(turns(sink)[0]?.contextWindow).toBe(200_000);
+    expect(turns(sink)[0]?.contextWindow).toBe(DEFAULT_CONTEXT_WINDOW);
   });
 });

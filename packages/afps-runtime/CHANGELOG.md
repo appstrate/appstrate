@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — `computeTokenCost` (BREAKING)
+
+- `computeTokenCost` is no longer exported from `@appstrate/afps-runtime/runner`.
+  The platform prices token usage with Pi's `calculateCost`, which honours the
+  model's price tiers. `classifyTokenPricing` and `TokenCost` stay.
+
 ### Added — runner egress policy
 
 - `compileEgressPolicy({ authorizedUris, allowAllUris })` and the

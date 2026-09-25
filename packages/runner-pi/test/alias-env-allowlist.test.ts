@@ -58,7 +58,7 @@ const RUN: RuntimePiEnvOptions = {
     // flag and the output difference is therefore the alias policy itself.
     modelId: "appstrate-medium",
     baseUrl: "https://api.deepseek.com/v1",
-    providerId: "deepseek",
+    piProvider: "deepseek",
     apiKey: "sk-real-backing-key",
     // Vendor-REVEALING on purpose. The launcher derives this with
     // `deriveKeyPlaceholder`, which preserves the key's dash-separated prefix so
@@ -72,7 +72,6 @@ const RUN: RuntimePiEnvOptions = {
     contextWindow: 200_000,
     maxTokens: 64_000,
     reasoning: true,
-    reasoningLevelMap: { high: "xhigh" },
     cost: { input: 0.28, output: 0.42, cacheRead: 0.028 },
     aliased: true,
   },
@@ -171,12 +170,11 @@ const ALIASED_CONTAINER_ENV_KEYS = [
 
 /**
  * What a NON-aliased run gets on top: the whole of what an alias withholds, each
- * naming the backing — `MODEL_PROVIDER` is the vendor key itself,
- * `MODEL_REASONING_LEVEL_MAP` its own effort vocabulary (a fingerprint), and
+ * naming the backing — `MODEL_PROVIDER` is the vendor key itself, and
  * `MODEL_COST` the published rate card, one catalog lookup from a name. A BYOK
- * model the org configured itself has nothing to hide, so it keeps all three.
+ * model the org configured itself has nothing to hide, so it keeps both.
  */
-const ALIAS_WITHHELD_KEYS = ["MODEL_COST", "MODEL_PROVIDER", "MODEL_REASONING_LEVEL_MAP"] as const;
+const ALIAS_WITHHELD_KEYS = ["MODEL_COST", "MODEL_PROVIDER"] as const;
 
 /**
  * Shared keys whose VALUE is masked rather than the key withheld. The key-set

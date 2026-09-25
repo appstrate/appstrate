@@ -28,6 +28,8 @@ export type ModelPreset = Pick<
   | "needs_reconnection"
   | "source"
   | "providerId"
+  | "pi_provider"
+  | "modelId"
   | "contextWindow"
   | "maxTokens"
   | "reasoning"
@@ -47,11 +49,11 @@ export async function listModelPresets(profileName: string): Promise<ModelPreset
 /**
  * Protocol families the **CLI** can route through `/api/llm-proxy/*`.
  *
- * Three families wired today: `openai-completions`, `anthropic-messages`,
- * and `mistral-conversations`. Despite its name, `mistral-conversations`
+ * Families wired today: `openai-completions`, `openai-responses`,
+ * `anthropic-messages` and `mistral-conversations`. Despite its name, `mistral-conversations`
  * (from pi-ai's registry) targets Mistral's OpenAI-compatible
  * `/v1/chat/completions` endpoint — NOT the Beta `/v1/conversations`
- * agentic API. Auth is `Authorization: Bearer` for OpenAI and Mistral.
+ * agentic API. Auth is `Authorization: Bearer` for both OpenAI shapes and Mistral.
  *
  * Derived from `LLM_PROXY_ROUTES` rather than restated. This paragraph used to
  * argue the opposite — "NOT a shared constant, and deliberately so", the set

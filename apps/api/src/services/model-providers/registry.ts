@@ -25,11 +25,8 @@
  * `registerModelProvider()` directly.
  */
 
-import { isCatalogModelSelector } from "@appstrate/core/module";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
-import { logger } from "../../lib/logger.ts";
-import { hasCatalog, lookupCatalogModel } from "../pricing-catalog.ts";
-import { resolveFeaturedModels } from "./model-selection.ts";
+import { listCatalogModels, lookupCatalogModel, piProviderOf } from "../model-catalog.ts";
 
 // ---------------------------------------------------------------------------
 // Singleton state
@@ -62,6 +59,7 @@ export function registerModelProvider(def: ModelProviderDefinition): void {
   }
   assertSubscriptionNeverEnumerated(def);
   validateCatalogReferences(def);
+  assertInferenceProbeable(def);
   _byId.set(def.providerId, def);
 }
 
@@ -82,85 +80,38 @@ function assertSubscriptionNeverEnumerated(def: ModelProviderDefinition): void {
   }
 }
 
+/** `validateKeyByInference` speaks `openai-completions` and calls a model of the offer. */
+function assertInferenceProbeable(def: ModelProviderDefinition): void {
+  if (!def.publicModelListing) return;
+  if (def.apiShape !== "openai-completions") {
+    throw new Error(
+      `Model provider ${JSON.stringify(def.providerId)} declares publicModelListing on ` +
+        `apiShape ${JSON.stringify(def.apiShape)}; the inference probe that replaces the listing ` +
+        `speaks openai-completions only.`,
+    );
+  }
+  if (listCatalogModels(def).length === 0) {
+    throw new Error(
+      `Model provider ${JSON.stringify(def.providerId)} declares publicModelListing but its ` +
+        `offer is empty; the inference probe needs a model to call.`,
+    );
+  }
+}
+
 /**
- * Boot-time check that every id declared in `featuredModels` exists in the
- * resolved catalog (`catalogProviderId ?? providerId`). The vendored pricing
- * catalog is the single source of truth for per-model metadata — a typo or
- * stale id here would silently render with `contextWindow: 0` and
- * `cost: null`.
- *
- * Providers with no own catalog AND no `catalogProviderId` are allowed
- * IFF `featuredModels` is empty (openrouter, openai-compatible).
- *
- * The check runs on RESOLVED ids, so "resolved to nothing" needs one arm per
- * selection shape — and the severity of the two failures is DELIBERATELY
- * ASYMMETRIC, because their causes are:
- *
- *   - EMPTY ARRAY — a deliberate declaration ("this provider features
- *     nothing": openrouter is live-search, openai-compatible is Custom-only).
- *     Allowed, with or without a catalog. Silent.
- *   - SELECTOR over a catalog that does NOT EXIST — THROWS. `catalogProviderId`
- *     is source code and the catalog set is source code; no data refresh can
- *     produce this, only a bad declaration a human just wrote. Failing at
- *     registration is also the only way to reach this case at all: resolution
- *     returns `[]` for an unknown catalog rather than throwing, so the
- *     `length > 0 && !catalogExists` guard below can never fire for a selector.
- *   - SELECTOR over an EXISTING catalog resolving to nothing — LOGS, does not
- *     throw. Still a misconfiguration (a family name is wrong, or the vendor
- *     renamed one), but the input that produces it is machine-refreshed:
- *     `src/data/pricing/*.json` is rewritten weekly by a bot PR, and Anthropic
- *     publishes a second naming convention (`claude-3-5-sonnet-latest`) the
- *     family matcher does not match. Registration happens inside
- *     `bootCritical()`, which `index.ts` awaits with no `try` — so throwing
- *     here would turn one upstream family rename into a crash-loop of the whole
- *     API, every feature down, not just the model picker. An empty picker is a
- *     bad day; an outage triggered by a third party's release notes is not a
- *     trade we make. The `logger.error` is the alarm.
- *
- * Registration therefore requires the catalog to already be registered —
- * production catalogs are registered at `pricing-catalog.ts` import time, and
- * test fixtures must call `registerCatalog()` before `registerModelProvider()`.
+ * Boot-time check that every featured id is in the provider's offer (Pi's
+ * records of its Pi provider on its `apiShape`). Pi's registry is pinned with
+ * the SDK version, so a failure here is a declaration error (or a deliberate
+ * Pi bump dropping a model), never refreshed data.
  */
 function validateCatalogReferences(def: ModelProviderDefinition): void {
-  const catalogKey = def.catalogProviderId ?? def.providerId;
-  const catalogExists = hasCatalog(catalogKey);
-  const featured = resolveFeaturedModels(def);
-
-  if (isCatalogModelSelector(def.featuredModels) && featured.length === 0) {
-    if (!catalogExists) {
+  for (const modelId of def.featuredModels) {
+    if (!lookupCatalogModel(def, modelId)) {
       throw new Error(
-        `Model provider ${JSON.stringify(def.providerId)} declares a featuredModels catalog ` +
-          `selector but no such catalog is registered: ${JSON.stringify(catalogKey)}. ` +
-          `Fix catalogProviderId — the catalog set is source code, not refreshed data.`,
+        `Model provider ${JSON.stringify(def.providerId)} features ${JSON.stringify(modelId)}, ` +
+          `which is not in its offer (Pi provider ${JSON.stringify(piProviderOf(def))} on ` +
+          `${JSON.stringify(def.apiShape)}). Featured ids must be offered — drop the entry.`,
       );
-    }
-    logger.error(
-      "model provider features no model — catalog selector matched nothing, picker will be empty",
-      {
-        providerId: def.providerId,
-        catalogProviderId: catalogKey,
-        catalogFamilies: def.featuredModels.catalogFamilies,
-      },
-    );
-  }
-
-  if (featured.length > 0 && !catalogExists) {
-    throw new Error(
-      `Model provider ${JSON.stringify(def.providerId)} declares featuredModels ` +
-        `but no catalog exists for ${JSON.stringify(catalogKey)}. ` +
-        `Either drop the featured list or set catalogProviderId to a catalogued provider.`,
-    );
-  }
-
-  if (catalogExists) {
-    for (const modelId of featured) {
-      if (!lookupCatalogModel(catalogKey, modelId)) {
-        throw new Error(
-          `Model provider ${JSON.stringify(def.providerId)} features ` +
-            `${JSON.stringify(modelId)} which is not in the ${catalogKey} catalog. ` +
-            `Featured ids must exist in the catalog — drop the entry or add it via the refresh script.`,
-        );
-      }
     }
   }
 }

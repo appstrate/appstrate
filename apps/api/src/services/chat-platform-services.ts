@@ -23,9 +23,9 @@
 import type { ChatUsageRecord, ChatModelResolution } from "@appstrate/core/chat-contract";
 import type { UsageRejection } from "@appstrate/core/module";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { computeTokenCost } from "@appstrate/afps-runtime/runner";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { resolvePricingStatus } from "./pricing-provenance.ts";
+import { aggregatedCostUsd } from "./token-cost.ts";
 import { loadModel, modelNeedsReconnection } from "./org-models.ts";
 import { isSystemModel } from "./model-registry.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
@@ -111,7 +111,6 @@ export async function resolveChatModel(
       contextWindow: resolved.contextWindow ?? null,
       maxTokens: resolved.maxTokens ?? null,
       reasoning: resolved.reasoning ?? false,
-      reasoningLevelMap: resolved.generation?.reasoning.native_levels,
       input: resolved.input ?? null,
       accessToken: token.accessToken,
     },
@@ -127,8 +126,8 @@ export async function resolveChatModel(
  * The subscription chat path spends the user's OWN provider subscription
  * (oauth2 claude-code/codex), so the row is always stamped
  * `credentialSource="org"`. Cost is derived here from the token counts + the
- * model's catalog rates with the shared `computeTokenCost` formula — the same
- * source and arithmetic as the proxy/runner rows.
+ * model's catalog rates with Pi's `calculateCost`, like the proxy/runner rows.
+ * Priced at the base rate, like the runner row (RUN_COST.md).
  *
  * KNOWN LABELLING GAP — `source: "proxy"` is inaccurate for this producer. The
  * turn runs on the IN-PROCESS Pi engine and never traverses `/api/llm-proxy/*`,
@@ -193,7 +192,7 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
         outputTokens,
         cacheReadTokens,
         cacheWriteTokens,
-        costUsd: computeTokenCost(usage, record.cost),
+        costUsd: aggregatedCostUsd(usage, record.cost),
         pricingStatus,
         durationMs: record.durationMs,
         // Stable across durable retries; the partial unique index makes an

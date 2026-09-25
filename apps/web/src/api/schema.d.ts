@@ -1796,7 +1796,7 @@ export interface paths {
         put?: never;
         /**
          * Anthropic Messages — with server-side model injection
-         * @description Wire-compatible with the Anthropic `/v1/messages` endpoint. The caller supplies `body.model` as an Appstrate **model preset id**; the platform resolves the preset, substitutes the real upstream model id, injects the `x-api-key` server-side, and forwards the request. `cache_control` blocks, extended-thinking, tool use — all pass through untouched. The `anthropic-version` and `anthropic-beta` request headers are forwarded to upstream; `anthropic-version` defaults to `2023-06-01` when the caller omits it.
+         * @description Wire-compatible with the Anthropic `/v1/messages` endpoint. The caller supplies `body.model` as an Appstrate **model preset id**; the platform resolves the preset, substitutes the real upstream model id, injects the `x-api-key` server-side, and forwards the request. `cache_control` blocks, extended-thinking, custom tool use — all pass through untouched. Features billed outside the reported tokens are refused with a 400: `fallbacks` and Anthropic-defined (server) tools. `anthropic-version` is forwarded and defaults to `2023-06-01`; `anthropic-beta` keeps only the betas the Pi SDK sends.
          *
          *     Streaming responses pass through unchanged; usage is tapped in parallel (merging `message_start` + `message_delta` frames) for accounting.
          *
@@ -1849,6 +1849,30 @@ export interface paths {
          *     Authentication: bearer only — API key with the `llm-proxy:call` scope (headless) or an OIDC-issued JWT (interactive CLI device-flow, dashboard access token). Cookie sessions are rejected.
          */
         post: operations["llmProxyOpenaiChatCompletions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm-proxy/openai-responses/v1/responses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * OpenAI Responses — with server-side model injection
+         * @description Wire-compatible with the OpenAI `/v1/responses` endpoint (also spoken by xAI). The caller supplies `body.model` as an Appstrate **model preset id**; the platform resolves the preset, substitutes the real upstream model id, injects the upstream API key as `Authorization: Bearer`, and forwards the request. All other fields (`input`, `instructions`, `tools`, `reasoning`, `stream`, …) pass through untouched.
+         *
+         *     Streaming responses pass through unchanged; usage is read from the terminal `response.completed` (or `response.incomplete`) event for accounting.
+         *
+         *     Authentication: bearer only — API key with the `llm-proxy:call` scope (headless) or an OIDC-issued JWT (interactive CLI device-flow, dashboard access token). Cookie sessions are rejected.
+         */
+        post: operations["llmProxyOpenaiResponses"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2042,7 +2066,7 @@ export interface paths {
         put?: never;
         /**
          * Enumerate the models an endpoint serves
-         * @description Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `providerId` + `api_key` inline — and it **persists no model state**: no credential is created, no `available_model_ids` is written (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.
+         * @description Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the model catalog (Pi's pinned registry) otherwise; `source` says which described a given model. `label` always comes from the catalog. It works BEFORE a credential exists — the operator supplies `providerId` + `api_key` inline, or names a stored `credentialId` — and it **persists nothing**: no credential is created (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A provider whose listing is unauthenticated has its key checked first by one minimal chat completion, so a rejected key answers `auth_failed` instead of a listing it did not unlock. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.
          */
         post: operations["discoverModelProviderCredentialModels"];
         delete?: never;
@@ -2082,7 +2106,7 @@ export interface paths {
         put?: never;
         /**
          * Test model provider credential configuration inline
-         * @description Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId` to fall back to its stored API key when `api_key` is omitted. Rate limited to 5 requests per minute.
+         * @description Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId`: its provider, API shape and base URL are used, and its stored API key when `api_key` is omitted. `base_url` must then equal the credential's, unless `api_key` is supplied for a provider accepting a base URL override; a built-in (system) credential is refused with 403. Without a stored credential, the provider's own API shape is used and `base_url` must be its default unless it accepts an override. The test follows the provider's definition: a provider whose model listing is unauthenticated is tested with one minimal chat completion instead of `GET <base_url>/models`. Rate limited to 5 requests per minute.
          */
         post: operations["testModelProviderCredentialInline"];
         delete?: never;
@@ -2113,26 +2137,6 @@ export interface paths {
          * @description Update a model provider credential's mutable fields. The `apiShape` and `base_url` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
          */
         patch: operations["updateModelProviderCredential"];
-        trace?: never;
-    };
-    "/api/model-provider-credentials/{id}/refresh-models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Discover the models this credential serves
-         * @description Discovers the models a credential serves. For API-key providers this is empirical: the credential's provider is asked for its model listing (`GET <base_url>/models`) — a listing that declares a next page is followed to its end, under a page cap, a model cap and a per-page byte budget — and the discovery candidates present in that listing are persisted as `available_model_ids`. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is derived from the provider definition and the pricing catalog on every read. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the listing path an auth failure, an unreadable listing, a listing cut short by one of those caps, or an empty intersection leaves the previously persisted list untouched; a `429` from the provider is replayed once before the attempt is abandoned.
-         */
-        post: operations["refreshModelProviderCredentialModels"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/model-provider-credentials/{id}/test": {
@@ -2314,7 +2318,7 @@ export interface paths {
         put?: never;
         /**
          * Test model configuration inline
-         * @description Test a model configuration without saving it first. If editing an existing model, pass `existing_model_id` to fall back to its stored API key when `api_key` is omitted. Rate limited to 5 requests per minute.
+         * @description Test a model configuration without saving it first. The probe uses `api_key` when given, the credential's stored key otherwise. A built-in credential is refused (403). Rate limited to 5 requests per minute.
          */
         post: operations["testModelInline"];
         delete?: never;
@@ -5522,7 +5526,15 @@ export interface components {
             /** @description Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the package is placed nowhere the caller can see — which the space form still lists when the caller could place it there in one click (a package whose home grants them `<type>:share`). */
             placements: components["schemas"]["PackagePlacement"][];
         }[];
-        /** @description Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal. */
+        /** @description A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request. */
+        ModelCostTier: {
+            inputTokensAbove: number;
+            input: number;
+            output: number;
+            cacheRead: number;
+            cacheWrite: number;
+        };
+        /** @description Normalized support facts derived from the model's record in Appstrate's pinned model registry, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal. */
         ModelGenerationCapabilities: {
             /** @enum {string} */
             temperature: "supported" | "unsupported" | "unknown";
@@ -5537,10 +5549,6 @@ export interface components {
                 adaptive: boolean | null;
                 levels: {
                     [key: string]: "supported" | "unsupported" | "unknown";
-                };
-                /** @description Optional provider-native values for portable levels (for example off to none). */
-                native_levels?: {
-                    [key: string]: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
                 };
             };
         };
@@ -5569,8 +5577,6 @@ export interface components {
             providerId?: string | null;
             oauth_email?: string | null;
             needs_reconnection?: boolean;
-            /** @description Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For API-key providers these are the discovery candidates present in the provider's `GET <base_url>/models` listing, persisted by model discovery (POST /:id/refresh-models); nothing is inference-probed. Empty when discovery never ran, and per-credential because the listing depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write. */
-            available_model_ids?: string[] | null;
             created_by: string | null;
             /** Format: date-time */
             createdAt: string;
@@ -5682,6 +5688,8 @@ export interface components {
             providerId: string | null;
             /** @description The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for managed models (binding not exposed) and for rows whose `providerId` has no registry entry. */
             provider_name: string | null;
+            /** @description Key of the Pi model-registry provider that describes this model (e.g. `moonshotai` for `moonshot`): a client builds its model record (limits, request dialect) from `pi_provider` + `modelId`. `null` for a gateway (`openai-compatible`, `anthropic-compatible`), which has no registry record, and for managed models — binding not exposed. */
+            pi_provider: string | null;
             /** @description Provider endpoint. `null` for managed models — binding not exposed. */
             base_url: string | null;
             /** @description Upstream model id. `null` for managed models — not exposed. */
@@ -5710,6 +5718,7 @@ export interface components {
                 output?: number;
                 cacheRead?: number;
                 cacheWrite?: number;
+                tiers?: components["schemas"]["ModelCostTier"][];
             } | null;
             created_by: string | null;
             /** Format: date-time */
@@ -12822,13 +12831,13 @@ export interface operations {
                 "X-Run-Id"?: string;
                 /** @description Forwarded verbatim to upstream. Defaults to `2023-06-01` when omitted. */
                 "anthropic-version"?: string;
-                /** @description Forwarded verbatim to upstream (e.g. `prompt-caching-2024-07-31`). */
+                /** @description Filtered to the betas the Pi SDK sends (e.g. `interleaved-thinking-2025-05-14`); any other is dropped. */
                 "anthropic-beta"?: string;
             };
             path?: never;
             cookie?: never;
         };
-        /** @description Anthropic Messages payload, with `model` replaced by an Appstrate model preset id. All other fields (`messages`, `system`, `tools`, `stream`, …) pass through untouched. */
+        /** @description Anthropic Messages payload, with `model` replaced by an Appstrate model preset id. All other fields (`messages`, `system`, `tools`, `stream`, …) pass through untouched; `fallbacks` and non-custom `tools` are refused. */
         requestBody: {
             content: {
                 "application/json": {
@@ -12995,6 +13004,85 @@ export interface operations {
                     /** @description Appstrate model preset id (NOT an upstream model id). */
                     model: string;
                     messages: Record<string, never>[];
+                    stream?: boolean;
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
+            200: {
+                headers: {
+                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
+                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    llmProxyOpenaiResponses: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional run id (`run_…`) to attribute the call to. Populated by `appstrate run` once the platform mints a remote run record; rolls up into the run's cost/token totals. */
+                "X-Run-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description OpenAI Responses payload, with `model` replaced by an Appstrate model preset id. All other fields pass through untouched. */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Appstrate model preset id (NOT an upstream model id). */
+                    model: string;
+                    input?: string | Record<string, never>[];
                     stream?: boolean;
                 } & {
                     [key: string]: unknown;
@@ -13814,7 +13902,7 @@ export interface operations {
                 limit?: number;
                 /** @description Number of items to skip before the first returned item. */
                 offset?: components["parameters"]["Offset"];
-                /** @description Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, featured, models. An unknown field is a 400. */
+                /** @description Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, featured, live_model_search, models. An unknown field is a 400. */
                 fields?: string;
             };
             header?: {
@@ -13851,22 +13939,25 @@ export interface operations {
                             authMode?: "api_key" | "oauth2";
                             /** @description Surface this provider in the picker's 'Featured' group (above an 'Other' divider). Module-supplied metadata; never gates writes — any registry entry stays selectable. */
                             featured?: boolean;
+                            /** @description The provider serves more models than `models` lists: they are searched live on the provider (`GET /api/models/openrouter`) and any model id is accepted, not only the listed ones. */
+                            live_model_search?: boolean;
                             models?: {
                                 id: string;
-                                /** @description Human-readable label, derived from the id at vendoring time. */
+                                /** @description Human-readable label — the registry record's name. */
                                 label: string;
                                 contextWindow: number;
                                 maxTokens?: number | null;
                                 capabilities: string[];
-                                generation?: components["schemas"]["ModelGenerationCapabilities"];
-                                /** @description Per-1M-token cost (USD). */
+                                generation: components["schemas"]["ModelGenerationCapabilities"];
+                                /** @description Per-1M-token cost (USD); null when the registry leaves the model unpriced. */
                                 cost: {
                                     input?: number;
                                     output?: number;
                                     cacheRead?: number;
                                     cacheWrite?: number;
-                                };
-                                /** @description Surface in the picker's 'Featured' group for this provider AND auto-seed in `org_models` on first connection. True when the model id appears in the provider's curated `featuredModels` whitelist; the rest of the catalog falls under 'All models'. */
+                                    tiers?: components["schemas"]["ModelCostTier"][];
+                                } | null;
+                                /** @description Surface in the picker's 'Featured' group for this provider AND auto-seed in `org_models` on first connection. True when the model id appears in the provider's pinned `featuredModels` list; the rest of the offer falls under 'All models'. */
                                 featured: boolean;
                             }[];
                         }[];
@@ -13892,8 +13983,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Wire format / API shape (a registry `apiShape` value) */
-                    apiShape: string;
+                    /** @description Registry id of the provider being configured. Unknown ids are rejected with 400. */
+                    providerId: string;
                     /**
                      * Format: uri
                      * @description Model provider API base URL
@@ -14015,47 +14106,6 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
-    refreshModelProviderCredentialModels: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Discovery outcome + the credential's current verified list */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /**
-                         * @description `ok` — list resolved (persisted on the listing path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — the listing could not be read, it was read but cut short by the page, model or byte cap (intersecting against a partial view would drop candidates sitting past it), or no candidate appeared in it; a provider `429` is replayed once before the read counts as failed. Previous list kept. `no_candidates` — provider resolves no discovery candidate.
-                         * @enum {string}
-                         */
-                        outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates";
-                        /** @description Number of discovery candidates the provider declares, after dedupe and cap — the same meaning on both paths. Not a request count: the listing path's requests are bounded by the listing's own pagination, not by the candidate count, and `offline`-validation providers (codex, claude-code) spend none. Not a count of what is served either: `available_model_ids` carries that. */
-                        candidate_count: number;
-                        available_model_ids: string[] | null;
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            429: components["responses"]["RateLimited"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
     testModelProviderCredential: {
         parameters: {
             query?: never;
@@ -14117,7 +14167,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `available_model_ids` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credentialId` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers a reconnect preserves the credential's empirically discovered list. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list. */
+            /** @description Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `available_model_ids` is the provider's offer (Pi's model registry), derived with no upstream call: every OAuth provider is a subscription provider (`codex`, `claude-code`) whose models are never enumerated. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -14301,6 +14351,7 @@ export interface operations {
                      *           "label": "GPT-4o",
                      *           "providerId": "openai",
                      *           "provider_name": "OpenAI",
+                     *           "pi_provider": "openai",
                      *           "apiShape": "openai-responses",
                      *           "base_url": "https://api.openai.com/v1",
                      *           "modelId": "gpt-4o",
@@ -14368,12 +14419,13 @@ export interface operations {
                     maxTokens?: number;
                     /** @description Whether the model supports reasoning */
                     reasoning?: boolean;
-                    /** @description Cost per million tokens (input/output/cacheRead/cacheWrite) */
+                    /** @description Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers) */
                     cost?: {
                         input?: number;
                         output?: number;
                         cacheRead?: number;
                         cacheWrite?: number;
+                        tiers?: components["schemas"]["ModelCostTier"][];
                     };
                     /** @description Managed-model flag. When true, this model's binding (modelId, provider, base_url, capabilities/cost) is not exposed on user-facing surfaces and these fields are null; inference is routed by the platform. */
                     aliased?: boolean;
@@ -14627,10 +14679,8 @@ export interface operations {
                     credentialId: string;
                     /** @description Model identifier */
                     modelId: string;
-                    /** @description Override API key for the probe. Falls back to `existing_model_id`'s key, then the credential's stored key. */
+                    /** @description Override API key for the probe. Falls back to the credential's stored key. */
                     api_key?: string;
-                    /** @description Existing model ID to fall back to for stored API key */
-                    existing_model_id?: string;
                 };
             };
         };
@@ -14703,12 +14753,13 @@ export interface operations {
                     contextWindow?: number | null;
                     maxTokens?: number | null;
                     reasoning?: boolean | null;
-                    /** @description Cost per million tokens (input/output/cacheRead/cacheWrite) */
+                    /** @description Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers) */
                     cost?: {
                         input?: number;
                         output?: number;
                         cacheRead?: number;
                         cacheWrite?: number;
+                        tiers?: components["schemas"]["ModelCostTier"][];
                     } | null;
                     /** @description Managed-model flag. When true, this model's binding is not exposed on user-facing surfaces. */
                     aliased?: boolean;

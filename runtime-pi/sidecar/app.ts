@@ -9,12 +9,10 @@ import type { ApiCallBaseDeps } from "./credential-proxy.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { BlobStore } from "./blob-store.ts";
 import { SIDECAR_AUTH_HEADER, type IntegrationBootReport } from "@appstrate/core/sidecar-types";
-import { PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import {
   DEFAULT_API_CALL_CONCURRENCY,
   LLM_STREAM_IDLE_TIMEOUT_MS,
   MAX_REQUEST_BODY_SIZE,
-  filterHeaders,
   llmUpstreamAbort,
   readPositiveIntEnv,
   readRequestBodyBounded,
@@ -31,6 +29,7 @@ import {
 } from "./model-swap.ts";
 import { handlePiMessagesRequest } from "./pi-messages-backend.ts";
 import { applyOauthBearerSwap } from "@appstrate/core/oauth-bearer-swap";
+import { forwardedLlmRequestHeaders } from "@appstrate/connect/llm-request-headers";
 import { llmProxyErrorBody } from "@appstrate/core/model-swap";
 import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
@@ -50,14 +49,6 @@ export type { SidecarConfig } from "./helpers.ts";
  * conditional.
  */
 const HEALTH_PATH = "/health";
-
-/**
- * Headers the agent stamps for the SIDECAR's benefit and that must never ride
- * on to a vendor: the auth token (a live per-run secret) and the pi-ai build
- * marker (`pi-messages` compatibility, meaningless upstream). Passed to
- * `filterHeaders` as its extra skip set on both `/llm/*` forwarding paths.
- */
-const SIDECAR_ONLY_REQUEST_HEADERS = new Set([SIDECAR_AUTH_HEADER, PI_SDK_VERSION_HEADER]);
 
 /**
  * Constant-time check of an inbound {@link SIDECAR_AUTH_HEADER} against the
@@ -775,13 +766,11 @@ export function createApp(deps: AppDeps): Hono {
       );
     }
 
-    const filtered = filterHeaders(c.req.header(), SIDECAR_ONLY_REQUEST_HEADERS);
-    const forwardedHeaders: Record<string, string> = {};
-    for (const [key, value] of Object.entries(filtered)) {
-      forwardedHeaders[key] = value.includes(apiKeyConfig.placeholder)
-        ? value.replace(apiKeyConfig.placeholder, apiKeyConfig.apiKey)
-        : value;
-    }
+    // Shared LLM header policy; the auth slot carrying the placeholder gets the real key.
+    const forwardedHeaders = forwardedLlmRequestHeaders(c.req.header(), {
+      placeholder: apiKeyConfig.placeholder,
+      secret: apiKeyConfig.apiKey,
+    });
 
     // Zero-copy body forward — nothing here rewrites the request.
     let body: ReadableStream<Uint8Array> | undefined;
@@ -876,19 +865,11 @@ export function createApp(deps: AppDeps): Hono {
 
     const { targetUrl, method } = deriveLlmTarget(c, baseUrl);
 
-    // Forward the SDK's headers verbatim except for the bearer-swap policy:
-    // drop any x-api-key (bearer-only) and force the real subscription bearer.
-    // The SDK's own fingerprint (user-agent, anthropic-beta, chatgpt-account-id)
-    // is preserved — the whole point of pass-through. `filterHeaders` first
-    // drops host/content-length/hop-by-hop plus the container→sidecar-only
-    // headers (the auth token must not travel to the provider); wrapping the
-    // result in a Headers normalises casing so the swap needs no manual
-    // authorization variant hunt.
+    // The shared LLM header policy, then the real subscription bearer. The
+    // SDK's own fingerprint (user-agent, anthropic-beta, chatgpt-account-id)
+    // is preserved — the whole point of pass-through.
     const buildHeaders = (accessToken: string): Headers =>
-      applyOauthBearerSwap(
-        new Headers(filterHeaders(c.req.header(), SIDECAR_ONLY_REQUEST_HEADERS)),
-        accessToken,
-      );
+      applyOauthBearerSwap(forwardedLlmRequestHeaders(c.req.header()), accessToken);
 
     // Buffer the request body (inference JSON, bounded by
     // SIDECAR_MAX_REQUEST_BODY_BYTES via the Content-Length precheck +

@@ -28,12 +28,12 @@ packages/module-ee (billing)   → 0 pi-* imports
 packages/core (@appstrate/core)→ 0 pi-* imports
 ```
 
-All SDK usage lives behind a hard process/architecture boundary: the agent runs
-inside a sandboxed container, and credentials are mediated by the sidecar (see
-`SIDECAR.md`). The SDK never sees platform credentials and never executes inside
-the API process.
+Agent runs execute the SDK inside a sandboxed container, and credentials are
+mediated by the sidecar (see `SIDECAR.md`). The API process reaches pi-ai only
+through `@appstrate/runner-pi`: the model registry and pricing (`pi-model.ts`,
+below) and the in-process chat engine.
 
-The entire import surface, after this hardening, is **four barrel files**:
+The entire import surface, after this hardening, is **four barrel files** and `pi-model.ts`:
 
 | Package                | Barrel                             | Symbols consumed                                                                                                                                                                                                                                                                                                                   |
 | ---------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -43,7 +43,13 @@ The entire import surface, after this hardening, is **four barrel files**:
 | `@appstrate/cli`       | `apps/cli/src/lib/pi-sdk.ts`       | `Api`, `Model` (types)                                                                                                                                                                                                                                                                                                             |
 
 Every other module imports these symbols from its package-local barrel, never
-from the SDK directly.
+from the SDK directly — except `packages/runner-pi/src/pi-model.ts`, which imports
+Pi's model registry (`pi-ai/providers/all`) and the root `calculateCost` /
+`getSupportedThinkingLevels` to build and price every platform `Model` from Pi's
+record. It stays off the barrel so only `@appstrate/runner-pi/pi-model` consumers
+load the registry: the agent container, the sidecar, the CLI and the API process
+on every boot (model catalog, ledger pricing). Measured cost: ~14 ms to import;
+the sidecar bundle grows 1.55 → 2.15 MB.
 
 > `examples/custom-skill/skill.ts` intentionally imports
 > `@earendil-works/pi-coding-agent` directly — it is user-facing documentation that
@@ -77,12 +83,13 @@ one-line override for them too.
 
 ### Single swap point (barrel) + ESLint guard
 
-Because the SDK is imported only through the four `pi-sdk.ts` barrels, swapping
-the implementation is a change to those files alone — no agent logic moves.
+Because the SDK is imported only through the four `pi-sdk.ts` barrels and
+`pi-model.ts`, swapping the implementation is a change to those files alone — no
+agent logic moves.
 
 A `no-restricted-imports` rule in `eslint.config.mjs` forbids any direct
 `@earendil-works/pi-*` import (the whole vendor family — including subpaths) outside
-the barrels (the barrels are exempted via `ignores`). The guard covers every
+the barrels (the barrels and `pi-model.ts` are exempted via `ignores`). The guard covers every
 declared SDK consumer tree: `packages/runner-pi/src`, `runtime-pi`, `apps/cli/src`,
 `apps/api/src`, and `packages/afps-runtime/src`. `afps-runtime` is SDK-agnostic and
 imports zero pi-\* symbols today, so it has no barrel — the guard simply keeps it

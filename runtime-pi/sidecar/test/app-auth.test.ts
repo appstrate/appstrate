@@ -167,8 +167,8 @@ describe("sidecar control surface — agent authentication", () => {
   });
 
   it("never forwards the token upstream on the /llm/* passthrough", async () => {
-    // The token is a live secret and the upstream is a third party. It reaches
-    // `filterHeaders`' skip set for the same reason `x-appstrate-pi-sdk` does.
+    // The token is a live secret and the upstream is a third party: the shared
+    // LLM header policy drops every `x-appstrate-*` header.
     let forwarded: Headers | undefined;
     const fetchFn = mock(async (_url: string, init: RequestInit) => {
       forwarded = new Headers(init.headers);

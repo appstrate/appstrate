@@ -26,7 +26,7 @@ import { randomBytes } from "node:crypto";
 import { logger } from "../../lib/logger.ts";
 import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
-import { buildRuntimePiEnv, derivePiProvider } from "@appstrate/runner-pi";
+import { buildRuntimePiEnv } from "@appstrate/runner-pi";
 import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
 import {
   assertOauthRunIsolation,
@@ -51,7 +51,6 @@ import { runWithSpan, currentTraceparent, recordContainerSpawn } from "@appstrat
 import { getEnv } from "@appstrate/env";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { LlmProxyConfig, ModelSwap, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
-import { toNativeModelReasoningLevel } from "@appstrate/core/model-generation";
 
 /**
  * Grace added to the platform's container watchdog on top of the agent's
@@ -254,11 +253,6 @@ async function runPlatformContainerImpl(
     // Model-alias swap descriptor (LLM-gateway alias pattern). The container is
     // handed the public alias as MODEL_ID (below); the sidecar swaps it for the
     // real upstream id on every call. The real id never enters the container.
-    const requestedReasoningLevel = plan.generationConfig?.reasoning_level ?? "medium";
-    const nativeReasoningLevel = toNativeModelReasoningLevel(
-      requestedReasoningLevel,
-      llmConfig.generation,
-    );
     const modelSwap: ModelSwap | undefined = llmConfig.aliased
       ? {
           alias: llmConfig.aliasId,
@@ -268,22 +262,14 @@ async function runPlatformContainerImpl(
           // endpoint, and tells the sidecar to terminate rather than proxy.
           clientApiShape: ALIAS_CLIENT_API_SHAPE,
           backingApiShape: llmConfig.apiShape,
-          // What the sidecar rebuilds the backing's pi-ai Model from. Private
-          // to this channel — none of it reaches `containerEnv` below.
+          // What the sidecar rebuilds the backing's pi-ai Model from — Pi's
+          // record, by its Pi provider key. Private to this channel — none of
+          // it reaches `containerEnv` below.
           backing: {
-            providerId: derivePiProvider(llmConfig.providerId, llmConfig.apiShape),
-            reasoning: llmConfig.reasoning ?? false,
-            ...(llmConfig.generation?.reasoning.native_levels
-              ? { reasoningLevelMap: llmConfig.generation.reasoning.native_levels }
-              : {}),
+            providerId: llmConfig.piProvider,
+            ...(llmConfig.reasoning != null ? { reasoning: llmConfig.reasoning } : {}),
             input: llmConfig.input ?? ["text"],
           },
-          ...(llmConfig.apiShape === "anthropic-messages" &&
-          llmConfig.generation?.reasoning.adaptive === true &&
-          requestedReasoningLevel !== "off" &&
-          nativeReasoningLevel !== "none"
-            ? { anthropicAdaptiveReasoning: { effort: nativeReasoningLevel } }
-            : {}),
         }
       : undefined;
 
@@ -377,11 +363,11 @@ async function runPlatformContainerImpl(
         api: llmConfig.apiShape,
         modelId,
         baseUrl: llmConfig.baseUrl,
-        // The vendor key pi-ai derives a request shape from. A sidecar-proxied
-        // run replaces MODEL_BASE_URL with the sidecar's, erasing one of the two
-        // inputs compat detection reads; without it every provider would get
-        // plain-OpenAI bytes. An aliased run needs no vendor key at all.
-        providerId: llmConfig.providerId,
+        // The Pi key the container resolves Pi's record (dialect, limits) by.
+        // A sidecar-proxied run replaces MODEL_BASE_URL with the sidecar's, so
+        // without it every provider would get plain-OpenAI bytes. An aliased
+        // run needs no vendor key at all.
+        piProvider: llmConfig.piProvider,
         apiKey: llmApiKey,
         // When the sidecar is skipped, the agent talks to the upstream
         // provider directly — we must hand it the real API key, not the
@@ -391,7 +377,6 @@ async function runPlatformContainerImpl(
         contextWindow: llmConfig.contextWindow,
         maxTokens: llmConfig.maxTokens,
         reasoning: llmConfig.reasoning,
-        reasoningLevelMap: llmConfig.generation?.reasoning.native_levels,
         cost: llmConfig.cost,
         // WHAT this run is, not which vars to mask: `buildRuntimePiEnv` owns
         // the alias policy for the container env contract.

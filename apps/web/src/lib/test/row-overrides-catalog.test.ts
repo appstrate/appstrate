@@ -8,7 +8,7 @@
  * not the question — a catalogued row always carries the catalog's. Reading it
  * that way would open the capabilities toggle on every catalogued row, and
  * saving would freeze those numbers as overrides: renaming a model would
- * silently cut it off from the weekly catalog refresh.
+ * silently cut it off from catalog updates.
  */
 
 import { describe, it, expect } from "bun:test";

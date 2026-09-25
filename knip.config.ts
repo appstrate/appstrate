@@ -425,11 +425,12 @@ const config: KnipConfig = {
        * compiles any ignore entry containing `(`, `|`, `*`, `+`, `{`, `^` or
        * `$` to a RegExp, and reports an entry that never suppressed anything
        * as a configuration hint. `@appstrate/module-claude-code` is in that
-       * position today: it is loaded exactly like its three siblings, but one
-       * unit test (`test/unit/services/model-selection.test.ts`) imports it
-       * statically to assert the claude-code model lists, so knip already
-       * sees a reader and would call a literal entry redundant. It is not —
-       * the day that assertion moves, the dependency reads as dead. The
+       * position today: it is loaded exactly like its three siblings, but
+       * unit tests (`test/unit/model-catalog.test.ts` and the model-offer /
+       * pi-parity suites) import it statically to read its model provider,
+       * so knip already sees a reader and would call a literal entry
+       * redundant. It is not — the day those imports go, the dependency
+       * reads as dead. The
        * alternation covers it without asserting anything untrue, and stays
        * exact: a new module dependency is not silently covered, it has to be
        * named here.

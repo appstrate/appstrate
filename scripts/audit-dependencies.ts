@@ -137,8 +137,8 @@ const REASONS = {
    * `@google/genai` is an optional peer of `@earendil-works/pi-ai` and is
    * imported by pi-ai only on the Google provider path. Nothing in this repo
    * imports it (grepped 2026-09-07), but Google IS a selectable model provider
-   * (`apps/api/src/data/pricing/google-ai.json`, `featured-models.json`), so
-   * the code loads whenever a run picks a Gemini model. Conditionally
+   * (`google-ai` in `apps/api/src/modules/core-providers`), so the code loads
+   * whenever a run picks a Gemini model. Conditionally
    * reachable, therefore treated as product code.
    */
   googleGenai:

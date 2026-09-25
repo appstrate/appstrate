@@ -39,6 +39,7 @@
     ".": "./src/index.ts",
     "./loop-env": "./src/loop-env.ts",
     "./model-compat": "./src/model-compat.ts",
+    "./pi-model": "./src/pi-model.ts",
     "./provider-map": "./src/provider-map.ts",
     "./runtime-tools": "./src/runtime-tools/index.ts"
   },

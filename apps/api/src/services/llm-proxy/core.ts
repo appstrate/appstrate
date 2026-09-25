@@ -28,16 +28,13 @@ import {
   LLM_NON_STREAMING_TIMEOUT_MS,
   parseProxyRequest,
 } from "./helpers.ts";
-import { forwardMeteredResponse } from "./metering.ts";
+import { DEFAULT_MAX_REQUEST_BYTES, forwardMeteredResponse, usageFrameBound } from "./metering.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
-
-/** Maximum request body the proxy will accept before refusing up-front. */
-const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 
 interface ProxyCallInputs {
   adapter: LlmProxyAdapter;
@@ -50,6 +47,8 @@ interface ProxyCallInputs {
    * null for headless/CLI proxy calls.
    */
   chatSessionId: string | null;
+  /** Platform `Request-Id`, for the upstream-error log. */
+  requestId: string;
   /** Request URL path *after* the route prefix, e.g. `/v1/chat/completions`. */
   upstreamPath: string;
   incomingHeaders: Headers;
@@ -158,14 +157,10 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     throw new LlmProxyUnsupportedSubscriptionError(resolved.providerId);
   }
 
-  // Usage reporting is forced by the ADAPTER (the protocol registry), not by an
-  // apiShape check here: each wire family knows what its own upstream needs to
-  // emit usage (openai-compatible: `stream_options.include_usage`; anthropic:
-  // nothing). It applies to EVERY preset — a call on an org-owned preset that
-  // returns no parseable usage is just as unaccounted as a system one, and the
-  // ledger feeds `runs.cost` and the org's own usage views either way.
+  // The ADAPTER makes the body meterable, for EVERY preset: an org-owned call
+  // with no parseable usage is as unaccounted as a system one.
   const rewrittenBody = request.rewriteModel(resolved.modelId, (body) =>
-    inputs.adapter.forceUsageReporting?.(body),
+    inputs.adapter.prepareRequest?.(body),
   );
 
   // Model-alias swap (issue #727). When the resolved preset is an alias, the
@@ -334,12 +329,14 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       presetId,
       resolved,
       started,
+      requestId: inputs.requestId,
     },
     {
       swap,
       cache: cacheKeyForWrite
         ? { cacheKey: cacheKeyForWrite, ttlSeconds: cacheConfig.ttlSeconds }
         : null,
+      maxFrameChars: usageFrameBound(maxBytes),
     },
   );
 }

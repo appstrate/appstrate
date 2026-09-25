@@ -16,6 +16,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   create, save, publish and import, while `integrationManifestSchema` keeps reading a
   stored manifest that predates it (a published version is immutable).
 
+- **`ModelCost.tiers`** and **`ModelCostTier`** (`@appstrate/core/module`,
+  optional) — request-wide price tiers in the shape of Pi's model registry:
+  `{ inputTokensAbove, input, output, cacheRead, cacheWrite }`, the highest
+  threshold a request's input (input + cache-read + cache-write tokens)
+  exceeds prices the whole request (OpenAI's long-context rates above 272k
+  tokens, #1549). `modelCostSchema` validates them: every rate is a required
+  non-negative number and `inputTokensAbove` is positive. Additive — a cost
+  without `tiers` is unchanged.
+
+- **`ModelProviderDefinition.publicModelListing`** (`@appstrate/core/module`,
+  optional) — declares the vendor fact that a provider answers
+  `GET <baseUrl>/models` without checking the API key (OpenCode Go), so a
+  listing success proves nothing about the credential. The platform then
+  validates the key with one minimal chat completion on a model of the
+  provider's offer, in the connection test and before trusting the listing in
+  model discovery (#1549). Supported on `apiShape: "openai-completions"` with a
+  non-empty offer; registration refuses any other declaration.
+  Additive — existing definitions are unaffected.
+
 - **`AFPS_SCHEMA_VERSION`** (`@appstrate/core/validation`) — the AFPS
   `schema_version` every manifest the platform writes declares (`"0.3"`, the
   revision spec Appendix A tells producers to emit). The skill-only import, the
@@ -96,10 +115,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING: model generation settings are snake_case** (`@appstrate/core/model-generation`,
   #1545): `modelGenerationSettingsSchema` reads `reasoning_level` (was
-  `reasoningLevel`), and `ModelGenerationCapabilities` /
-  `ModelGenerationCapabilitiesOverride` spell `reasoning.temperature_compatible`
-  and `reasoning.native_levels` (were `temperatureCompatible` / `nativeLevels`).
-  The settings schema is `.strict()`, so the old key is refused, not dropped.
+  `reasoningLevel`), and `ModelGenerationCapabilities` spells
+  `reasoning.temperature_compatible` (was `temperatureCompatible`). The
+  settings schema is `.strict()`, so the old key is refused, not dropped.
 - **BREAKING: `ProblemDetail` extension members are snake_case**
   (`@appstrate/core/api-errors`, #1545): `ApiError.toProblemDetail()` writes
   `request_id` (was `requestId`) and `retry_after` (was `retryAfter`), and both
@@ -118,6 +136,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (omitted when the provider surfaced none) replace `accessToken` /
   `accountId`; `expiresAt` keeps its universal carve-out name. The sidecar
   image must match the API.
+
+- **`ModelSwapBacking.reasoning`** (`@appstrate/core/sidecar-types`) is now
+  optional: absent means unknown, and Pi's record decides.
+
+- **BREAKING: `ModelSwapBacking.providerId` is `string | null`**
+  (`@appstrate/core/sidecar-types`). It still names the backing's Pi provider
+  key; `null` is a gateway Pi keeps no record of (`openai-compatible`,
+  `anthropic-compatible`), for which the sidecar builds a record-less model
+  (#1549).
+
+- **BREAKING: `ModelProviderDefinition.featuredModels` is `readonly string[]`**
+  (`@appstrate/core/module`), no longer `ModelIdSelection`: a provider pins its
+  featured ids, and every one must be in its offer (boot fails otherwise). A
+  module declaring a `{ catalogFamilies, generations }` selector lists the ids
+  instead (#1549).
+
+- **BREAKING: `ModelProviderDefinition.catalogProviderId`** (`@appstrate/core/module`)
+  names a **Pi builtin provider key** (defaults to `providerId`): the
+  provider's offer is that Pi provider's records served over its `apiShape`.
+  It no longer names a vendored pricing catalog, so a module that set it to
+  reuse another catalog (`codex` → `"openai"`) sets the Pi key that records its
+  models (`"openai-codex"`). A definition naming no Pi provider offers nothing
+  and takes any model id (#1549).
+
 - **`run_and_wait` inline manifest defaults** (`@appstrate/core/run-and-wait-client`):
   a manifest that omits `schema_version` now gets `"0.3"` (was `"0.2"`), and the
   default `$schema` is read from `AFPS_SCHEMA_URLS.agent` (same URL as before).
@@ -205,6 +247,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{ type: "error", error: { type, message } }`, the envelope
   `syntheticAliasErrorBody` already used and both the Anthropic and the OpenAI
   SDK parse. `syntheticAliasErrorBody` now builds on it (same output).
+
+### Removed
+
+- **`CatalogModelSelector`**, **`ModelIdSelection`**, **`isCatalogModelSelector`**
+  and **`ModelProviderDefinition.modelDiscoveryCandidates`**
+  (`@appstrate/core/module`) — BREAKING. A provider's discovery candidates, and
+  the set a `modelDiscovery: { mode: "static" }` provider serves, are its whole
+  offer in Pi's model registry; nothing is derived from an id grammar any more.
+  A module drops `modelDiscoveryCandidates` and declares `featuredModels` as an
+  id array (#1549).
+
+- **`SubscriptionChatModel.reasoningLevelMap`** (`@appstrate/core/chat-contract`)
+  and **`ModelSwapBacking.reasoningLevelMap`** (`@appstrate/core/sidecar-types`)
+  — BREAKING. The Pi model record the runtime builds from carries the
+  provider-native thinking levels, so neither channel ships a map (#1549).
+
+- **`ModelSwap.anthropicAdaptiveReasoning`** (`@appstrate/core/sidecar-types`) —
+  BREAKING. The backing's Pi record says whether Anthropic thinking is adaptive,
+  so the sidecar no longer needs the descriptor to restore it (#1549).
+
+- **`ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE`**, **`ModelGenerationCapabilitiesOverride`**
+  and **`applyModelGenerationCapabilitiesOverride`** (`@appstrate/core/model-generation`),
+  and **`ModelProviderDefinition.generationOverride`** (`@appstrate/core/module`)
+  — BREAKING. The platform catalog is now Pi's model registry, whose records
+  carry the facts a provider override patched in (Anthropic's temperature not
+  combinable with thinking, adaptive thinking, the supported effort levels), so
+  no provider declares one. A module drops `generationOverride` (#1549).
+
+- **`toNativeModelReasoningLevel`**, **`modelNativeReasoningLevelSchema`** and
+  **`ModelNativeReasoningLevel`** (`@appstrate/core/model-generation`), and
+  `ModelGenerationCapabilities.reasoning.native_levels` — BREAKING. The
+  provider-native effort values live on the Pi record the runtime builds from
+  (`thinkingLevelMap`), so the capabilities carry only the portable levels
+  (#1549).
 
 ## [11.1.0] — 2026-09-22
 

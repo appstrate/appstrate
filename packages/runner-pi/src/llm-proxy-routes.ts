@@ -7,14 +7,14 @@
  * as if it were the real provider. That works only because our base URL mirrors
  * each vendor SDK's own path convention, and those conventions disagree:
  *
- *   - the OpenAI client appends `/chat/completions`, so `/v1` belongs in the
- *     BASE (`https://api.openai.com/v1`);
+ *   - the OpenAI client appends `/chat/completions` (Responses: `/responses`),
+ *     so `/v1` belongs in the BASE (`https://api.openai.com/v1`);
  *   - the Anthropic client appends `/v1/messages`, so the base is the bare host
  *     (`https://api.anthropic.com`);
  *   - the Mistral transport appends `/v1/chat/completions` — the Anthropic
  *     convention, not the OpenAI one.
  *
- * So `/v1` sits in the base for `openai-completions` and in the suffix for the
+ * So `/v1` sits in the base for the two OpenAI shapes and in the suffix for the
  * other two. That looks like an inconsistency and is not one, which is exactly
  * why it kept being copied by hand: the route table in `apps/api`, the chat
  * engine's base-URL builder and the CLI's each spelled the same three strings
@@ -62,6 +62,7 @@ interface LlmProxyRoute {
  */
 export const LLM_PROXY_ROUTES = {
   "openai-completions": { baseSuffix: "/v1", sdkPath: "/chat/completions" },
+  "openai-responses": { baseSuffix: "/v1", sdkPath: "/responses" },
   "anthropic-messages": { baseSuffix: "", sdkPath: "/v1/messages" },
   "mistral-conversations": { baseSuffix: "", sdkPath: "/v1/chat/completions" },
 } as const satisfies Record<string, LlmProxyRoute>;

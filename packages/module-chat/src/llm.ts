@@ -28,6 +28,8 @@ export interface OrgModel {
   apiShape: string;
   /** Credential provider id — distinguishes claude-code (subscription) from anthropic (api key). */
   providerId?: string;
+  /** Pi registry provider whose record shapes the request; `null` for a gateway. */
+  pi_provider: string | null;
   label?: string;
   enabled?: boolean;
   /** snake_case to match the `/api/models` wire field — camelCase silently never matches. */

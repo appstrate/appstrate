@@ -2,12 +2,10 @@
 
 import { describe, expect, it } from "bun:test";
 import {
-  applyModelGenerationCapabilitiesOverride,
   mapModelReasoningLevels,
   ModelGenerationError,
   reconcileModelGenerationSettings,
   resolveModelGenerationSettings,
-  toNativeModelReasoningLevel,
   type ModelGenerationCapabilities,
 } from "./model-generation.ts";
 
@@ -107,7 +105,7 @@ describe("resolveModelGenerationSettings", () => {
     ).toThrow("does not support reasoning level 'high'");
   });
 
-  it("rejects unconfirmed levels when LiteLLM only confirms one level", () => {
+  it("rejects unconfirmed levels when the catalog confirms only one level", () => {
     expect(() =>
       resolveModelGenerationSettings({
         capabilities: capabilities({
@@ -148,32 +146,6 @@ describe("resolveModelGenerationSettings", () => {
         override: { temperature: 0.4, reasoning_level: "off" },
       }),
     ).toEqual({ temperature: 0.4, reasoning_level: "off" });
-  });
-});
-
-describe("applyModelGenerationCapabilitiesOverride", () => {
-  it("overrides only provider-specific facts and preserves catalog reasoning", () => {
-    const catalog = capabilities();
-    expect(
-      applyModelGenerationCapabilitiesOverride(catalog, { temperature: "unsupported" }),
-    ).toEqual({ ...catalog, temperature: "unsupported" });
-  });
-
-  it("allows a provider override to clear adaptive reasoning", () => {
-    const catalog = capabilities({
-      reasoning: { ...capabilities().reasoning, adaptive: true },
-    });
-    expect(
-      applyModelGenerationCapabilitiesOverride(catalog, { reasoning: { adaptive: null } }),
-    ).toMatchObject({ reasoning: { adaptive: null } });
-  });
-
-  it("merges a sparse provider pair constraint into reasoning", () => {
-    expect(
-      applyModelGenerationCapabilitiesOverride(capabilities(), {
-        reasoning: { temperature_compatible: "unsupported" },
-      }),
-    ).toMatchObject({ reasoning: { temperature_compatible: "unsupported" } });
   });
 });
 
@@ -240,25 +212,5 @@ describe("reconcileModelGenerationSettings", () => {
         }),
       ),
     ).toEqual({});
-  });
-});
-
-describe("toNativeModelReasoningLevel", () => {
-  it("maps portable xhigh to the provider-native max value", () => {
-    expect(
-      toNativeModelReasoningLevel(
-        "xhigh",
-        capabilities({
-          reasoning: {
-            ...capabilities().reasoning,
-            native_levels: { xhigh: "max" },
-          },
-        }),
-      ),
-    ).toBe("max");
-  });
-
-  it("keeps max as a distinct first-class effort", () => {
-    expect(toNativeModelReasoningLevel("max", capabilities())).toBe("max");
   });
 });

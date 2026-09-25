@@ -15,7 +15,7 @@ import {
   seedRun,
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
-import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
+import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { assertDbHas, assertDbMissing, expectProblem, getDbRow } from "../../helpers/assertions.ts";
 import { spaces, spacePackages, auditEvents, packages, runs } from "@appstrate/db/schema";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
@@ -663,10 +663,12 @@ describe("Spaces API", () => {
         orgId: ctx.orgId,
         providerId: TEST_OAUTH_PROVIDER_ID,
       });
+      // A model Pi records, so its reasoning levels (xhigh included) are known:
+      // an unknown model admits no level at all.
       const model = await seedOrgModel({
         orgId: ctx.orgId,
         credentialId: credential.id,
-        modelId: "test-reasoning-model",
+        modelId: TEST_OAUTH_MODEL_ID,
       });
 
       for (const body of [

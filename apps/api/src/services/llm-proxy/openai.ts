@@ -5,9 +5,8 @@
  *
  * The `openai-completions` and `mistral-conversations` apiShapes speak
  * the same wire (snake_case `prompt_tokens` / `completion_tokens`, SSE
- * usage on the terminal frame). The only protocol-specific difference is
- * which inbound headers get forwarded — expressed here as `AdapterOptions`.
- * Adding a new OpenAI-compatible apiShape is a single call to
+ * usage on the terminal frame) and the same bearer auth. Adding a new
+ * OpenAI-compatible apiShape is a single call to
  * {@link createOpenAICompatibleAdapter}.
  *
  * Usage normalisation — PARITY WITH THE RUNNER. The same upstream reply is
@@ -36,14 +35,17 @@
  */
 
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
-import { extractUsageObject, parseSseDataFrame, tokenCount } from "./helpers.ts";
-
-interface AdapterOptions {
-  /** Protocol family discriminator — must match the route's `apiShape`. */
-  apiShape: string;
-  /** Inbound header names (lowercase) the adapter forwards to upstream. */
-  forwardHeaders?: ReadonlySet<string>;
-}
+import { invalidRequest } from "../../lib/errors.ts";
+import {
+  asRecord,
+  extractUsageObject,
+  parseSseDataFrame,
+  refuseLongCacheTtl,
+  refuseNonStandardServiceTier,
+  refuseUnmeteredFields,
+  tokenCount,
+  upstreamHeaders,
+} from "./helpers.ts";
 
 /**
  * Normalise an OpenAI-compatible `usage` object into the four DISJOINT cost
@@ -57,11 +59,7 @@ function parseOpenAICompatibleUsage(u: Record<string, unknown>): UpstreamUsage |
   const completion = tokenCount(u["completion_tokens"]);
   if (prompt === undefined && completion === undefined) return null;
 
-  const rawDetails = u["prompt_tokens_details"];
-  const details =
-    rawDetails && typeof rawDetails === "object" && !Array.isArray(rawDetails)
-      ? (rawDetails as Record<string, unknown>)
-      : null;
+  const details = asRecord(u["prompt_tokens_details"]);
 
   // Three vendors spelling the SAME live quantity three ways. This reads like
   // the `X ?? legacyX` chain docs/NO_TRANSITIONAL_CODE.md §1 prohibits and is
@@ -73,47 +71,73 @@ function parseOpenAICompatibleUsage(u: Record<string, unknown>): UpstreamUsage |
     tokenCount(details?.["cached_tokens"]) ?? // OpenAI, OpenRouter
     tokenCount(u["prompt_cache_hit_tokens"]) ?? // DeepSeek
     tokenCount(u["cached_tokens"]); // Kimi
-  const reportedCacheWrite = tokenCount(details?.["cache_write_tokens"]);
+  return partitionOpenAIUsage({
+    prompt,
+    completion,
+    reportedCacheRead,
+    reportedCacheWrite: tokenCount(details?.["cache_write_tokens"]),
+  });
+}
 
-  const cacheWrite = reportedCacheWrite ?? 0;
-  const cacheRead = reportedCacheRead ?? 0;
-  const input = Math.max(0, (prompt ?? 0) - cacheRead - cacheWrite);
+/**
+ * Split an OpenAI-family prompt total (cache buckets INCLUDED) into the four
+ * disjoint cost buckets — pi-ai's formula on both OpenAI wires (Chat
+ * Completions and Responses): `input = max(0, prompt − cacheRead − cacheWrite)`.
+ */
+export function partitionOpenAIUsage(u: {
+  prompt: number | undefined;
+  completion: number | undefined;
+  reportedCacheRead: number | undefined;
+  reportedCacheWrite: number | undefined;
+}): UpstreamUsage {
+  const cacheWrite = u.reportedCacheWrite ?? 0;
+  const cacheRead = u.reportedCacheRead ?? 0;
+  const input = Math.max(0, (u.prompt ?? 0) - cacheRead - cacheWrite);
 
-  const result: UpstreamUsage = { inputTokens: input, outputTokens: completion ?? 0 };
+  const result: UpstreamUsage = { inputTokens: input, outputTokens: u.completion ?? 0 };
   // Only surface a bucket the provider actually reported: an unreported bucket
   // stays NULL on the ledger row ("provider said nothing"), distinct from a
   // reported zero.
-  if (reportedCacheRead !== undefined) result.cacheReadTokens = cacheRead;
-  if (reportedCacheWrite !== undefined) result.cacheWriteTokens = cacheWrite;
+  if (u.reportedCacheRead !== undefined) result.cacheReadTokens = cacheRead;
+  if (u.reportedCacheWrite !== undefined) result.cacheWriteTokens = cacheWrite;
   return result;
 }
 
-export function createOpenAICompatibleAdapter(opts: AdapterOptions): LlmProxyAdapter {
-  const forwardHeaders = opts.forwardHeaders ?? new Set<string>();
+/** The forwarded caller headers plus `Authorization: Bearer <upstream key>`. */
+export function bearerUpstreamHeaders(incoming: Headers, apiKey: string): Headers {
+  return upstreamHeaders(incoming, { authorization: `Bearer ${apiKey}` });
+}
 
+/** `apiShape` must match the route's. */
+export function createOpenAICompatibleAdapter(apiShape: string): LlmProxyAdapter {
   const adapter: LlmProxyAdapter = {
-    apiShape: opts.apiShape,
+    apiShape,
 
-    buildUpstreamHeaders(incoming, apiKey) {
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      };
-      if (forwardHeaders.size > 0) {
-        for (const [k, v] of incoming) {
-          if (forwardHeaders.has(k.toLowerCase())) headers[k] = v;
-        }
+    buildUpstreamHeaders: bearerUpstreamHeaders,
+
+    prepareRequest(body) {
+      // OpenRouter: fallback lists and `provider` routing bill whichever
+      // endpoint answered; `plugins` / `web_search_options` / `transforms` bill
+      // apart from the tokens. No platform-built Pi model emits any of them
+      // (`provider` needs `compat.openRouterRouting`); `store: false` is Pi's own.
+      refuseUnmeteredFields(body, [
+        "models",
+        "route",
+        "provider",
+        "plugins",
+        "web_search_options",
+        "transforms",
+        "store",
+      ]);
+      refuseNonStandardServiceTier(body);
+      refuseLongCacheTtl(body);
+      const stream = body["stream"];
+      if (stream != null && typeof stream !== "boolean") {
+        throw invalidRequest("`stream` must be a boolean", "stream");
       }
-      return headers;
-    },
-
-    forceUsageReporting(body) {
       // Streaming usage is opt-in on this wire: without
-      // `stream_options.include_usage` the provider emits NO usage frame at all
-      // and the call — already paid for upstream — would land in the ledger as
-      // an unmetered row. Billing must not depend on the caller SDK setting the
-      // flag, so the platform sets it for every preset it forwards.
-      if (body["stream"] !== true) return;
+      // `stream_options.include_usage` no usage frame is emitted at all.
+      if (stream !== true) return;
       const current = body["stream_options"];
       body["stream_options"] =
         current && typeof current === "object" && !Array.isArray(current)
@@ -143,7 +167,4 @@ export function createOpenAICompatibleAdapter(opts: AdapterOptions): LlmProxyAda
   return adapter;
 }
 
-export const openaiCompletionsAdapter = createOpenAICompatibleAdapter({
-  apiShape: "openai-completions",
-  forwardHeaders: new Set(["openai-organization", "openai-beta"]),
-});
+export const openaiCompletionsAdapter = createOpenAICompatibleAdapter("openai-completions");

@@ -169,25 +169,19 @@ function CredentialFormBody({
 
   const testMutation = useTestModelProviderCredentialInline();
   const [testResult, setTestResult] = useState<TestResult | null>(null);
-  // Inline-test endpoint still takes (apiShape, base_url) — these are
-  // computed from the chosen provider's registry entry (+ override).
-  const testApiShape = selectedProvider?.apiShape ?? "";
   const testBaseUrl = needsBaseUrlOverride
     ? baseUrlOverride.trim()
     : (selectedProvider?.defaultBaseUrl ?? "");
   const canTest =
-    !!selectedProvider &&
-    !isOAuthSelected &&
-    !!testApiShape &&
-    !!testBaseUrl &&
-    (!!apiKey.trim() || !!credential);
+    !!selectedProvider && !isOAuthSelected && !!testBaseUrl && (!!apiKey.trim() || !!credential);
 
   const handleTest = () => {
+    if (!selectedProvider) return;
     setTestResult(null);
     testMutation.mutate(
       {
         body: {
-          apiShape: testApiShape,
+          providerId: selectedProvider.providerId,
           base_url: testBaseUrl,
           ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
           ...(credential ? { credentialId: credential.id } : {}),

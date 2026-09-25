@@ -14,6 +14,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { derivePiCompactionSettings } from "../src/pi-runner.ts";
+import { DEFAULT_CONTEXT_WINDOW } from "../src/pi-model.ts";
 
 describe("derivePiCompactionSettings — reserveTokens", () => {
   it("uses model.maxTokens when populated", () => {
@@ -78,13 +79,13 @@ describe("derivePiCompactionSettings — keepRecentTokens", () => {
     expect(result.compaction.keepRecentTokens).toBe(20_000);
   });
 
-  it("null contextWindow → defaults to 200k path (keepRecentTokens=20000)", () => {
+  it("null contextWindow → defaults to the shared window (keepRecentTokens=20000)", () => {
     const result = derivePiCompactionSettings({ contextWindow: null, maxTokens: 16_384 }, {});
     if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
     expect(result.compaction.keepRecentTokens).toBe(20_000);
   });
 
-  it("undefined contextWindow → defaults to 200k path (keepRecentTokens=20000)", () => {
+  it("undefined contextWindow → defaults to the shared window (keepRecentTokens=20000)", () => {
     const result = derivePiCompactionSettings({ maxTokens: 16_384 }, {});
     if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
     expect(result.compaction.keepRecentTokens).toBe(20_000);
@@ -166,14 +167,19 @@ describe("derivePiCompactionSettings — context budget reported to the breadcru
     // fallback, so it is the only layer that can state the window the session
     // really ran against — anything derived one layer up is a guess about a
     // run that did not happen.
-    expect(derivePiCompactionSettings({ maxTokens: 16_384 }, {}).contextWindow).toBe(200_000);
+    expect(derivePiCompactionSettings({ maxTokens: 16_384 }, {}).contextWindow).toBe(
+      DEFAULT_CONTEXT_WINDOW,
+    );
     expect(
       derivePiCompactionSettings({ contextWindow: null, maxTokens: 16_384 }, {}).contextWindow,
-    ).toBe(200_000);
+    ).toBe(DEFAULT_CONTEXT_WINDOW);
   });
 
   it("keeps the window on the opt-out path too, fallback included", () => {
     const result = derivePiCompactionSettings({ contextWindow: null }, { enabled: false });
-    expect(result).toEqual({ compaction: { enabled: false }, contextWindow: 200_000 });
+    expect(result).toEqual({
+      compaction: { enabled: false },
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+    });
   });
 });

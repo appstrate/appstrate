@@ -22,14 +22,8 @@ export {
 } from "./pi-runner.ts";
 
 // Same rule as the `pi-sdk.ts` block below: only what something OUTSIDE the
-// package imports FROM THE BARREL. Four more sat here and none had such a
-// reader — `PI_SDK_VERSION` / `PI_SDK_VERSION_HEADER` reach the sidecar through
-// the `./provider-map` subpath (`runtime-pi/sidecar/pi-messages-backend.ts`),
-// and `ALIAS_PI_PROVIDER_KEY` / `PI_PROVIDER_BY_MODEL_PROVIDER` are read only
-// inside this package. knip cannot see the difference — `index.ts` is an entry,
-// so an export here always has "a reader". Re-add a line only when something
-// outside the package actually imports it from `@appstrate/runner-pi`.
-export { deriveProviderFromApi, derivePiProvider, PROVIDER_BY_API } from "./provider-map.ts";
+// package imports FROM THE BARREL (knip cannot tell — `index.ts` is an entry).
+export { deriveProviderFromApi, PROVIDER_BY_API } from "./provider-map.ts";
 
 // The llm-proxy's path convention, declared once. Read by `apps/api` to mount
 // the proxy routes, and by the chat engine + the CLI to build the base URL a

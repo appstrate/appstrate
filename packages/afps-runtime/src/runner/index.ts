@@ -10,12 +10,7 @@ export {
   type ReduceOptions,
 } from "./reducer.ts";
 export { truncateToolResult, DEFAULT_TOOL_RESULT_BYTE_LIMIT } from "./tool-result.ts";
-export {
-  computeTokenCost,
-  classifyTokenPricing,
-  type TokenCost,
-  type TokenPricingStatus,
-} from "./token-cost.ts";
+export { classifyTokenPricing, type TokenCost, type TokenPricingStatus } from "./token-cost.ts";
 export {
   buildProgress,
   ASSISTANT_MESSAGE_PROGRESS_EVENT,

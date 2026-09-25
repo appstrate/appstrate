@@ -80,6 +80,20 @@ function getBuiltinModules(): Map<string, string> {
 }
 
 /**
+ * The `MODULES` specifiers to load at boot (default: the `@appstrate/env` schema).
+ * Every listed module must load and init, or boot fails. `MODULES=none` boots
+ * zero modules; `MODULES=""` means the default set (the env getter reads `""` as unset).
+ */
+export function getModuleRegistry(): string[] {
+  const value = getEnv().MODULES;
+  if (value.trim() === "none") return [];
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
  * Resolve a module specifier. If a built-in module with that id exists under
  * `apps/api/src/modules/<specifier>/index.ts`, it's loaded from that path;
  * otherwise the specifier is treated as an npm package name and loaded via
@@ -103,7 +117,7 @@ async function resolveSpecifier(specifier: string): Promise<{ default?: Appstrat
  * exported thing is malformed. Collapsing them sends an author with a
  * wrong-shaped export to inspect a manifest that is fine.
  */
-async function importModule(specifier: string): Promise<AppstrateModule> {
+export async function importModule(specifier: string): Promise<AppstrateModule> {
   try {
     const raw = await resolveSpecifier(specifier);
     const mod = raw.default;

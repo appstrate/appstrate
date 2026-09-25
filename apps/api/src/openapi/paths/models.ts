@@ -38,6 +38,7 @@ export const modelsPaths = {
                     label: "GPT-4o",
                     providerId: "openai",
                     provider_name: "OpenAI",
+                    pi_provider: "openai",
                     apiShape: "openai-responses",
                     base_url: "https://api.openai.com/v1",
                     modelId: "gpt-4o",
@@ -110,12 +111,17 @@ export const modelsPaths = {
                 reasoning: { type: "boolean", description: "Whether the model supports reasoning" },
                 cost: {
                   type: "object",
-                  description: "Cost per million tokens (input/output/cacheRead/cacheWrite)",
+                  description:
+                    "Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
                   properties: {
                     input: { type: "number" },
                     output: { type: "number" },
                     cacheRead: { type: "number" },
                     cacheWrite: { type: "number" },
+                    tiers: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/ModelCostTier" },
+                    },
                   },
                   // Closed like the body around it: a stripped `cache_read`
                   // would store a row that bills cache tokens at no rate.
@@ -397,7 +403,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Test model configuration inline",
       description:
-        "Test a model configuration without saving it first. If editing an existing model, pass `existing_model_id` to fall back to its stored API key when `api_key` is omitted. Rate limited to 5 requests per minute.",
+        "Test a model configuration without saving it first. The probe uses `api_key` when given, the credential's stored key otherwise. A built-in credential is refused (403). Rate limited to 5 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -417,11 +423,7 @@ export const modelsPaths = {
                 api_key: {
                   type: "string",
                   description:
-                    "Override API key for the probe. Falls back to `existing_model_id`'s key, then the credential's stored key.",
-                },
-                existing_model_id: {
-                  type: "string",
-                  description: "Existing model ID to fall back to for stored API key",
+                    "Override API key for the probe. Falls back to the credential's stored key.",
                 },
               },
               additionalProperties: false,
@@ -481,12 +483,17 @@ export const modelsPaths = {
                 reasoning: { type: ["boolean", "null"] },
                 cost: {
                   type: ["object", "null"],
-                  description: "Cost per million tokens (input/output/cacheRead/cacheWrite)",
+                  description:
+                    "Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
                   properties: {
                     input: { type: "number" },
                     output: { type: "number" },
                     cacheRead: { type: "number" },
                     cacheWrite: { type: "number" },
+                    tiers: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/ModelCostTier" },
+                    },
                   },
                   // Closed like the body around it: a stripped `cache_read`
                   // would store a row that bills cache tokens at no rate.

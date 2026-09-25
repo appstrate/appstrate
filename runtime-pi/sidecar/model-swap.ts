@@ -75,11 +75,13 @@ export function parseModelSwapEnv(raw: string): ModelSwap {
     throw new Error('PI_MODEL_SWAP_JSON: missing "backing"');
   }
   const b = backing as Record<string, unknown>;
-  if (typeof b["providerId"] !== "string" || b["providerId"].trim().length === 0) {
+  // null = a gateway backing, which Pi keeps no record of.
+  const providerId = b["providerId"];
+  if (providerId !== null && (typeof providerId !== "string" || providerId.trim().length === 0)) {
     throw new Error('PI_MODEL_SWAP_JSON: missing or blank "backing.providerId"');
   }
-  if (typeof b["reasoning"] !== "boolean") {
-    throw new Error('PI_MODEL_SWAP_JSON: missing or non-boolean "backing.reasoning"');
+  if (b["reasoning"] !== undefined && typeof b["reasoning"] !== "boolean") {
+    throw new Error('PI_MODEL_SWAP_JSON: non-boolean "backing.reasoning"');
   }
   if (!Array.isArray(b["input"]) || b["input"].length === 0) {
     throw new Error('PI_MODEL_SWAP_JSON: missing or empty "backing.input"');

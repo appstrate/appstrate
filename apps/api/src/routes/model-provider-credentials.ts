@@ -25,11 +25,10 @@ import {
   updateModelProviderCredential,
 } from "../services/model-providers/credentials.ts";
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
-import { resolveFeaturedModels } from "../services/model-providers/model-selection.ts";
-import { discoverAvailableModels } from "../services/model-providers/model-discovery.ts";
+import { hasLiveModelSearch } from "../services/model-search.ts";
 import { listServedModels } from "../services/model-providers/model-listing.ts";
 import { describeServedModel } from "../services/model-providers/model-metadata.ts";
-import { listCatalogModels } from "../services/pricing-catalog.ts";
+import { listCatalogModels } from "../services/model-catalog.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ProviderRegistryEntry, ProviderRegistryModelEntry } from "@appstrate/shared-types";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
@@ -100,8 +99,8 @@ interface DiscoverTarget {
 /**
  * Enumeration never spends a subscription token
  * (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`). The declaration that keeps
- * a credential off the listing path is `modelDiscovery: { mode: "static" }` —
- * the same predicate `discoverAvailableModels` branches on — not the auth mode:
+ * a credential off the listing path is `modelDiscovery: { mode: "static" }`,
+ * not the auth mode:
  * the registry requires every oauth2 provider to declare it at boot
  * (`assertSubscriptionNeverEnumerated`), and an api-key provider that declares
  * it is asking for the same treatment.
@@ -176,37 +175,68 @@ async function resolveDiscoverTarget(
 
 export const testInlineSchema = z
   .object({
-    apiShape: z.string().min(1),
+    providerId: z.string().min(1),
     base_url: z.url(),
     api_key: z.string().optional(),
     credentialId: z.string().optional(),
   })
   .strict();
 
+const sameBaseUrl = (a: string, b: string) => a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
+
 /**
- * Build the picker-facing model list for one provider. The vendored
- * pricing catalog is the single source of truth for per-model metadata
- * — provider definitions just point at catalog ids via `featuredModels`.
- *
- *   - **Has a catalog** (own — openai/anthropic/…; or foreign via
- *     `catalogProviderId` — codex → openai, claude-code → anthropic):
- *     expose every catalog entry as metadata; ids in `featuredModels` get
- *     `featured: true`. For subscription OAuth providers the served set is
- *     narrower than the catalog, but the empirical discovery run decides
- *     that at selection time (the model form filters this list by the
- *     credential's discovered ids) — the registry just supplies the metadata, so it
- *     carries the full catalog and stays a pure, org-independent function.
- *   - **No catalog** (`featuredModels` empty — openrouter live-search,
- *     the base-URL-overridable custom endpoints): empty list. The picker
- *     falls back to a typed model id or its own live-search UI.
+ * Resolve the `POST /test` body into the endpoint to probe. A stored credential
+ * supplies provider, api shape and base URL; `base_url` may differ from the
+ * stored one only with a caller-supplied key on a `baseUrlOverridable` provider.
+ */
+async function resolveTestTarget(
+  orgId: string,
+  body: z.infer<typeof testInlineSchema>,
+): Promise<DiscoverTarget & { accountId?: string; expiresAt?: number | null }> {
+  const callerKey = body.api_key || undefined;
+  if (body.credentialId !== undefined) {
+    if (isSystemModelProviderCredential(body.credentialId)) {
+      throw systemEntityForbidden("model provider credential", body.credentialId, "test");
+    }
+    const creds = await loadInferenceCredentials(orgId, body.credentialId);
+    if (creds) {
+      const overridable = getModelProvider(creds.providerId)?.baseUrlOverridable === true;
+      if (!sameBaseUrl(body.base_url, creds.baseUrl) && !(callerKey && overridable)) {
+        throw invalidRequest("base_url must be the credential's base URL", "base_url");
+      }
+      return {
+        ...creds,
+        baseUrl: callerKey ? body.base_url : creds.baseUrl,
+        apiKey: callerKey ?? creds.apiKey,
+      };
+    }
+  }
+  if (!callerKey) throw invalidRequest("API key is required", "api_key");
+  const cfg = getModelProvider(body.providerId);
+  if (!cfg) throw invalidRequest(`Unknown providerId: ${body.providerId}`, "providerId");
+  if (!cfg.baseUrlOverridable && !sameBaseUrl(body.base_url, cfg.defaultBaseUrl)) {
+    throw invalidRequest(
+      `Provider ${cfg.providerId} does not accept a base URL override`,
+      "base_url",
+    );
+  }
+  return {
+    providerId: cfg.providerId,
+    apiShape: cfg.apiShape,
+    baseUrl: body.base_url,
+    apiKey: callerKey,
+  };
+}
+
+/**
+ * Build the picker-facing model list for one provider: its catalog offer
+ * (Pi's records of its Pi provider on its `apiShape`), ids in
+ * `featuredModels` flagged `featured: true`. A gateway offers nothing: the
+ * picker falls back to a typed model id or its own live-search UI.
  */
 function serializeProviderModels(p: ModelProviderDefinition): ProviderRegistryModelEntry[] {
-  const catalogKey = p.catalogProviderId ?? p.providerId;
-  const catalog = listCatalogModels(catalogKey);
-  if (catalog.length === 0) return [];
-
-  const featuredSet = new Set(resolveFeaturedModels(p));
-  return catalog.map((m) => ({ ...m, featured: featuredSet.has(m.id) }));
+  const featuredSet = new Set(p.featuredModels);
+  return listCatalogModels(p).map((m) => ({ ...m, featured: featuredSet.has(m.id) }));
 }
 
 export function createModelProviderCredentialsRouter() {
@@ -219,8 +249,8 @@ export function createModelProviderCredentialsRouter() {
   // the rest of this resource (the catalog itself is non-sensitive metadata
   // — the gate is for surface uniformity, not the data).
   // Allowlisted projection keys for the `fields` selector. `models` is the
-  // heavy field — the full per-provider catalog (254 models / ~100KB across
-  // the registry). A caller asking only "which providers exist" can request
+  // heavy field — the full per-provider catalog offer (hundreds of models
+  // across the registry). A caller asking only "which providers exist" can request
   // `?fields=providerId,authMode` and skip catalog serialization entirely.
   const REGISTRY_FIELDS = [
     "providerId",
@@ -233,6 +263,7 @@ export function createModelProviderCredentialsRouter() {
     "baseUrlOverridable",
     "authMode",
     "featured",
+    "live_model_search",
     "models",
   ] as const;
 
@@ -254,6 +285,7 @@ export function createModelProviderCredentialsRouter() {
       baseUrlOverridable: p.baseUrlOverridable,
       authMode: p.authMode,
       featured: p.featured ?? false,
+      live_model_search: hasLiveModelSearch(p.providerId),
       models: includeModels ? serializeProviderModels(p) : [],
     }));
 
@@ -331,23 +363,12 @@ export function createModelProviderCredentialsRouter() {
     rateLimit(5),
     requirePermission("model-provider-credentials", "read"),
     async (c) => {
-      const orgId = c.get("orgId");
-      const data = await readJsonBody(c, testInlineSchema);
-      let apiKey = data.api_key;
-      if (!apiKey && data.credentialId) {
-        const existing = await loadInferenceCredentials(orgId, data.credentialId);
-        if (existing) apiKey = existing.apiKey;
-      }
-      if (!apiKey) {
-        throw invalidRequest("API key is required", "api_key");
-      }
+      const target = await resolveTestTarget(
+        c.get("orgId"),
+        await readJsonBody(c, testInlineSchema),
+      );
       try {
-        const result = await testModelConfig({
-          apiShape: data.apiShape,
-          baseUrl: data.base_url,
-          modelId: "_test",
-          apiKey,
-        });
+        const result = await testModelConfig({ ...target, modelId: "_test" });
         return c.json(result);
       } catch (err) {
         logger.error("Model provider credential inline test failed", {
@@ -361,10 +382,9 @@ export function createModelProviderCredentialsRouter() {
   // POST /api/model-provider-credentials/discover — what an endpoint serves,
   // described from its listing and the catalog, BEFORE a credential exists.
   // Writes no model state and never echoes the key — the probe itself is
-  // audited, since it spends a key on an operator-supplied URL. Gated like
-  // `refresh-models`. The listing is followed across its pages, and `truncated`
-  // says when a cap cut the read short rather than letting a partial list pass
-  // for a whole one.
+  // audited, since it spends a key on an operator-supplied URL. The listing is
+  // followed across its pages, and `truncated` says when a cap cut the read
+  // short rather than letting a partial list pass for a whole one.
   router.post(
     "/discover",
     rateLimit(6),
@@ -436,14 +456,8 @@ export function createModelProviderCredentialsRouter() {
         if (!creds) {
           throw notFound("Model provider credential not found");
         }
-        // OAuth providers reject the dummy `_test` model id — fall back to
-        // the registry's first model (sized for a low-cost probe regardless).
-        let modelId = "_test";
-        if (creds.providerId) {
-          const cfg = getModelProvider(creds.providerId);
-          const featured = cfg ? resolveFeaturedModels(cfg) : [];
-          if (featured.length > 0) modelId = featured[0]!;
-        }
+        // OAuth providers reject the dummy `_test` model id: probe a featured one.
+        const modelId = getModelProvider(creds.providerId)?.featuredModels[0] ?? "_test";
         const result = await testModelConfig({ ...creds, modelId });
         return c.json(result);
       } catch (err) {
@@ -455,52 +469,6 @@ export function createModelProviderCredentialsRouter() {
           id,
           error: getErrorMessage(err),
         });
-        throw internalError();
-      }
-    },
-  );
-
-  // POST /api/model-provider-credentials/:id/refresh-models — model
-  // discovery. For API-key providers this is empirical: one `GET /models`
-  // listing against the live credential, intersected with the provider's
-  // discovery candidates, persisted as `available_model_ids`. For
-  // `mode: "static"` providers (subscription: codex, claude-code) it is a
-  // no-op that reports the current list: ZERO upstream calls and ZERO writes,
-  // because their served set is derived from (definition, catalog) on every
-  // read. The endpoint is kept rather than removed so the model form keeps
-  // ONE code path for both provider kinds. Rate-limited (each call reaches
-  // the provider on the user's own credential), but loose enough for the
-  // model form to revalidate on every open while configuring several models
-  // in a row.
-  router.post(
-    "/:id/refresh-models",
-    rateLimit(6),
-    requirePermission("model-provider-credentials", "write"),
-    async (c) => {
-      const orgId = c.get("orgId");
-      const id = c.req.param("id")!;
-      if (isSystemModelProviderCredential(id)) {
-        throw systemEntityForbidden("model provider credential", id);
-      }
-      try {
-        const result = await discoverAvailableModels(orgId, id);
-        if (result.outcome === "credential_not_found") {
-          throw notFound("Model provider credential not found");
-        }
-        // Re-read through the credential DTO rather than echoing the ids
-        // discovery just verified: on a round that verified nothing the
-        // previous list is what still stands, and the DTO is the single
-        // place where a static provider's list gets derived. Both provider
-        // kinds therefore answer with exactly what a subsequent GET returns.
-        const credential = await getOrgModelProviderCredential(orgId, id);
-        return c.json({
-          outcome: result.outcome,
-          candidate_count: result.candidateCount,
-          available_model_ids: credential?.available_model_ids ?? null,
-        });
-      } catch (err) {
-        if (err instanceof ApiError) throw err;
-        logger.error("Model discovery failed", { id, error: getErrorMessage(err) });
         throw internalError();
       }
     },

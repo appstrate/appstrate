@@ -27,12 +27,11 @@ import {
   createOAuthCredential,
   dedupeCredentialLabel,
   findMissingIdentityClaims,
-  getOrgModelProviderCredential,
   reconnectOAuthCredential,
-  resolveCredentialModelIds,
   type CreateOAuthCredentialInput,
 } from "./credentials.ts";
 import { getModelProvider } from "./registry.ts";
+import { listCatalogModels } from "../model-catalog.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 
@@ -41,6 +40,7 @@ interface ImportOAuthModelProviderResult {
   credentialId: string;
   providerId: string;
   email?: string;
+  /** The provider's offer (Pi's registry): an oauth2 provider is `mode: "static"`, never probed. */
   availableModelIds: string[];
 }
 
@@ -99,6 +99,7 @@ export async function importOAuthModelProviderConnection(
         `Re-run the OAuth flow or check the CLI version.`,
     );
   }
+  const availableModelIds = listCatalogModels(config).map((m) => m.id);
   logger.info("oauth model provider connection import", {
     providerId: config.providerId,
     reconnect: !!reconnectCredentialId,
@@ -121,12 +122,11 @@ export async function importOAuthModelProviderConnection(
     if (!reconnected) {
       throw notFound("OAuth model provider credential not found");
     }
-    const credential = await getOrgModelProviderCredential(input.orgId, reconnectCredentialId);
     return {
       credentialId: reconnectCredentialId,
       providerId: input.providerId,
       email,
-      availableModelIds: credential?.available_model_ids ?? [],
+      availableModelIds,
     };
   }
 
@@ -144,34 +144,10 @@ export async function importOAuthModelProviderConnection(
     ...(email ? { email } : {}),
   });
 
-  // Report the credential's SERVABLE set, through the one accessor every read
-  // path uses — not the narrower `featuredModels` subset this used to echo.
-  // The helper prints this list in its terminal summary while the dashboard
-  // renders `available_model_ids` off a GET of the very same credential;
-  // sourcing them from two different resolutions made the two surfaces
-  // disagree by construction on every connection (3 ids vs 7-8), even with
-  // both lists perfectly current. Users read that as a bug, and it is one —
-  // in the reporting. The invariant is: this value equals what a subsequent
-  // GET returns.
-  //
-  // Still no discovery probe here, and the accessor's answer splits by
-  // provider kind:
-  //   - `modelDiscovery: { mode: "static" }` — derived from (definition ∩
-  //     catalog), zero upstream calls. Already final at import time, and it
-  //     tracks the catalog afterwards instead of freezing. Nothing is
-  //     persisted for these (Phase 2), so the null column below is not a gap.
-  //     Both OAuth providers registered today (claude-code, codex) are of
-  //     this kind — the pairing flow exists for subscription sign-ins, which
-  //     `docs/architecture/SUBSCRIPTION_COMPLIANCE.md` forbids probing at all.
-  //   - listing providers — the persisted column, necessarily null on a row
-  //     created microseconds ago, so `[]` ("nothing discovered yet") is the
-  //     honest answer. Unreachable from here: `registerModelProvider` refuses
-  //     an oauth2 provider that is not `mode: "static"`, and this function is
-  //     the OAuth path.
   return {
     credentialId,
     providerId: input.providerId,
     email,
-    availableModelIds: resolveCredentialModelIds(input.providerId, null),
+    availableModelIds,
   };
 }

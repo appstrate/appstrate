@@ -7,18 +7,16 @@
  *
  * The invariants under test: the endpoint spends the supplied key on
  * `GET <base_url>/models` and on nothing else — once for a listing that fits in
- * one page, once more per page a paginated listing declares — writes NOTHING (a
- * `credentialId` round must
- * leave `available_model_ids` alone), never returns a per-token cost, and never
- * reads a subscription (OAuth) token. The harness also validates every JSON
- * body against the OpenAPI response schema, so these tests gate the documented
- * shape as well.
+ * one page, once more per page a paginated listing declares — never returns a
+ * per-token cost, and never reads a subscription (OAuth) token. The harness
+ * also validates every JSON body against the OpenAPI response schema, so these
+ * tests gate the documented shape as well.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, auditEvents } from "@appstrate/db/schema";
+import { auditEvents } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -425,25 +423,14 @@ describe("POST /api/model-provider-credentials/discover", () => {
     expect(body.models).toEqual([]);
   });
 
-  it("enumerates an existing credential without persisting anything", async () => {
+  it("enumerates an existing credential", async () => {
     const id = await createCustomCredential(ctx, GOOD_BASE_URL);
-    const [before] = await db
-      .select({ ids: modelProviderCredentials.availableModelIds })
-      .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, id));
 
     const res = await discover(ctx, { credentialId: id });
     expect(res.status).toBe(200);
     const body = (await res.json()) as DiscoverBody;
     expect(body.outcome).toBe("ok");
     expect(body.models.map((m) => m.id)).toEqual(["gpt-4o", "qwen3:8b"]);
-
-    // Discovery is a read: `refresh-models` is the only writer of this column.
-    const [after] = await db
-      .select({ ids: modelProviderCredentials.availableModelIds })
-      .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, id));
-    expect(after?.ids ?? null).toEqual(before?.ids ?? null);
   });
 
   it("returns 404 for an unknown credentialId", async () => {

@@ -7,12 +7,25 @@
  * module graph (no mock.module needed — preload sets up DB/Redis/env).
  */
 
-import { describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { ModelGenerationError } from "@appstrate/core/model-generation";
 import {
+  buildRunContext,
   ModelNotConfiguredError,
   ModelCredentialMissingError,
   modelCredentialIsPresent,
 } from "../../../src/services/run-context-builder.ts";
+import { getPackage } from "../../../src/services/package-catalog.ts";
+import { logger } from "../../../src/lib/logger.ts";
+import { getTestApp } from "../../helpers/app.ts";
+import { truncateAll } from "../../helpers/db.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import {
+  seedOrgModel,
+  seedOrgModelProviderKey,
+  seedPackage,
+  seedSpacePackage,
+} from "../../helpers/seed.ts";
 import { signRunToken, parseSignedToken } from "../../../src/lib/run-token.ts";
 
 // ─── ModelNotConfiguredError ────────────────────────────────
@@ -147,5 +160,105 @@ describe("parseSignedToken", () => {
 
   it("rejects an empty string", () => {
     expect(parseSignedToken("")).toBeNull();
+  });
+});
+
+// ─── generation settings reaching the run ──────────────────
+//
+// Backing: Pi's deepseek-flash, which takes off/low/high/max — no `medium`.
+
+describe("buildRunContext generation settings", () => {
+  getTestApp(); // boots the model registry
+  let ctx: TestContext;
+  const agentId = "@genorg/agent";
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "genorg" });
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: agentId,
+      type: "agent",
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: {
+        name: agentId,
+        version: "0.1.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Agent",
+        description: "Generation settings",
+      },
+      draftContent: "Do the thing.",
+    });
+    await seedSpacePackage(ctx.defaultSpaceId, agentId);
+  });
+
+  async function flashModel(aliased: boolean): Promise<string> {
+    const cred = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      providerId: "deepseek",
+      apiShape: "openai-completions",
+      baseUrl: "https://api.deepseek.com/v1",
+      apiKey: "sk-test",
+    });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: cred.id,
+      modelId: "deepseek-flash",
+      aliased,
+    });
+    return model.id;
+  }
+
+  async function build(
+    modelId: string,
+    override: { temperature?: number; reasoning_level?: "medium" | "high" },
+    scheduleId?: string,
+  ) {
+    return buildRunContext({
+      runId: `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+      agent: (await getPackage(agentId, ctx.orgId))!,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      input: {},
+      modelId,
+      generationConfig: {},
+      generationConfigOverride: override,
+      ...(scheduleId ? { scheduleId } : {}),
+    });
+  }
+
+  it("sends an aliased run the backing's nearest level, and records the requested one", async () => {
+    const built = await build(await flashModel(true), { reasoning_level: "medium" });
+    expect(built.plan.generationConfig?.reasoning_level).toBe("high");
+    // The run row keeps the public level: the clamped one would name the backing's set.
+    expect(built.generationConfig.reasoning_level).toBe("medium");
+  });
+
+  it("still refuses a level the non-aliased model does not take", async () => {
+    await expect(build(await flashModel(false), { reasoning_level: "medium" })).rejects.toThrow(
+      ModelGenerationError,
+    );
+  });
+
+  it("drops a schedule's refused setting for that fire and logs it", async () => {
+    const warn = spyOn(logger, "warn");
+    try {
+      const built = await build(
+        await flashModel(false),
+        { temperature: 0.3, reasoning_level: "medium" },
+        "sched_1",
+      );
+      expect(built.generationConfig).toEqual({ temperature: 0.3 });
+      expect(built.plan.generationConfig).toEqual({ temperature: 0.3 });
+      const call = warn.mock.calls.find(([, data]) =>
+        JSON.stringify(data ?? {}).includes("sched_1"),
+      );
+      expect(call?.[1]).toMatchObject({ scheduleId: "sched_1", dropped: ["reasoning_level"] });
+      expect(JSON.stringify(call)).not.toContain("medium");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

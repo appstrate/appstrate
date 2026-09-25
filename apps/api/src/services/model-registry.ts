@@ -9,6 +9,7 @@ import { checkAliasInvariants } from "@appstrate/core/model-swap";
 import type { ModelMetadata } from "@appstrate/shared-types";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { getModelProvider } from "./model-providers/registry.ts";
+import { lookupCatalogModel, restrictsToOffer } from "./model-catalog.ts";
 
 // --- Types ---
 
@@ -33,10 +34,9 @@ interface SystemModelProviderCredentialDefinition {
 export interface ModelDefinition extends ModelMetadata {
   id: string;
   /**
-   * Optional. The resolver in `org-models.ts` falls back to the vendored
-   * pricing catalog (`<catalogProviderId ?? providerId>.label`) at read time
-   * when this is unset — keeps env entries minimal and lets catalog refreshes
-   * propagate.
+   * Optional. The resolver in `org-models.ts` falls back to the catalog
+   * label at read time when this is unset — keeps env entries minimal and
+   * lets a Pi registry bump propagate.
    */
   label?: string;
   /** Registered ModelProviderDefinition id — propagated from the parent system key. */
@@ -75,7 +75,7 @@ let systemModels: Map<string, ModelDefinition> | null = null;
 const rawModelSchema = z.object({
   id: z.string().optional(),
   modelId: z.string().min(1),
-  /** Optional — falls back to the vendored catalog label at resolve time. */
+  /** Optional — falls back to the catalog label at resolve time. */
   label: z.string().min(1).optional(),
   input: z.array(modelInputModalitySchema).nullable().optional(),
   contextWindow: z.number().positive().nullable().optional(),
@@ -231,6 +231,14 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
             continue;
           }
           const validM = mResult.data;
+          if (restrictsToOffer(provider) && !lookupCatalogModel(provider, validM.modelId)) {
+            throw new Error(
+              `[model-registry] SYSTEM_PROVIDER_KEYS entry "${validCredential.id}" declares model ` +
+                `${JSON.stringify(validM.modelId)}, which provider ` +
+                `${JSON.stringify(validCredential.providerId)} does not offer. Remove it or ` +
+                `pick an offered model id.`,
+            );
+          }
 
           // Model-alias guards (issue #727, Threat A) — same invariants the
           // POST /api/models route enforces for DB models. A misconfigured
@@ -265,7 +273,7 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
           mdlMap.set(modelId, {
             id: modelId,
             // Pass through env-supplied label; read path falls back to the
-            // vendored catalog (`<catalogProviderId ?? providerId>.label`).
+            // catalog label.
             ...(validM.label ? { label: validM.label } : {}),
             providerId: validCredential.providerId,
             apiShape,

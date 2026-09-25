@@ -22,13 +22,10 @@
  */
 
 import type { Api, Model } from "../../lib/pi-sdk.ts";
-import {
-  deriveProviderFromApi,
-  derivePiProvider,
-  llmProxyBaseUrl,
-  PROVIDER_BY_API,
-} from "@appstrate/runner-pi";
-import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
+import { deriveProviderFromApi, llmProxyBaseUrl, PROVIDER_BY_API } from "@appstrate/runner-pi";
+import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
+import { buildPiModel } from "@appstrate/runner-pi/pi-model";
+import type { ModelInputModality } from "@appstrate/core/module";
 import {
   isProxySupported,
   listModelPresets,
@@ -196,36 +193,21 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   if (isAnthropic) {
     headers["Authorization"] = `Bearer ${inputs.bearerToken}`;
   }
-  const model: Model<Api> = {
+  const model = buildPiModel({
     id: preset.id,
-    name: preset.label,
-    api: preset.apiShape as Api,
-    // `baseUrl` below is the llm-proxy's, so the provider key is the only
-    // upstream-detection input Pi has left: prefer the preset's real backing
-    // and fall back to the api shape's generic key (preset.apiShape already
-    // passed the proxy gate above, so the fallback is always a known api).
-    provider: derivePiProvider(preset.providerId, preset.apiShape),
+    registryModelId: preset.modelId,
+    apiShape: preset.apiShape,
+    // The platform names the Pi record (null for a gateway: no record); its
+    // limits apply unless the preset carries its own.
+    piProvider: preset.pi_provider,
     baseUrl,
-    reasoning: preset.reasoning ?? false,
-    input: (preset.input ?? ["text"]) as ("text" | "image")[],
-    cost: {
-      input: preset.cost?.input ?? 0,
-      output: preset.cost?.output ?? 0,
-      cacheRead: preset.cost?.cacheRead ?? 0,
-      cacheWrite: preset.cost?.cacheWrite ?? 0,
-    },
-    contextWindow: preset.contextWindow ?? 200_000,
-    maxTokens: preset.maxTokens ?? 8192,
-    // Preset mode is platform-billed: `baseUrl` points at `/api/llm-proxy/*`,
-    // which resolves the upstream credential server-side and writes an
-    // `llm_usage` row. Without this the record stayed silent, pi-ai defaulted
-    // the flag to TRUE, and `PI_CACHE_RETENTION=long` in the USER'S OWN shell —
-    // the CLI runs on their machine — emitted a 1h cache write that the
-    // anthropic adapter forwards unaltered and the meter prices at the
-    // short-retention rate. See `PLATFORM_MODEL_COMPAT`.
-    compat: { ...PLATFORM_MODEL_COMPAT },
+    reasoning: preset.reasoning,
+    input: preset.input as ModelInputModality[] | null,
+    cost: preset.cost,
+    contextWindow: preset.contextWindow,
+    maxTokens: preset.maxTokens,
     headers,
-  };
+  });
   // Placeholder for anthropic — never reaches upstream (see comment above).
   // For other APIs, pi-ai's SDK sends `Authorization: Bearer <apiKey>` natively.
   const apiKey = isAnthropic ? "x-platform-bearer-injected-via-headers" : inputs.bearerToken;

@@ -4,18 +4,17 @@
  * Shared body-manipulation helpers for `/api/llm-proxy/*` adapters.
  *
  * Every protocol family the proxy supports today (OpenAI Chat
- * Completions, Anthropic Messages, Mistral Chat Completions) speaks JSON
- * with a top-level `model` and a `usage` object, and streams via SSE
+ * Completions, OpenAI Responses, Anthropic Messages, Mistral Chat Completions)
+ * speaks JSON with a top-level `model` and a `usage` object, and streams via SSE
  * `data: {…}` frames. The transport-level mechanics — JSON parse,
  * `body.model` rewrite, SSE frame extraction — are identical across
  * adapters. Centralising them here keeps each adapter focused on the
  * truly protocol-specific bits (which fields to read out of `usage`,
- * which headers to forward).
+ * which auth header to set).
  *
  * Adapter-specific behaviour stays in the adapter:
  *   - which usage fields to read (`prompt_tokens` vs `input_tokens`, …)
  *   - which auth header to inject (`Authorization` vs `x-api-key`)
- *   - which inbound headers to forward (`anthropic-beta`, `openai-beta`, …)
  *
  * The `parseSseDataFrame` helper filters out OpenAI's `[DONE]`
  * terminator. Anthropic never emits that terminator, so the filter is a
@@ -26,6 +25,7 @@
 import { parseSseFrames, parseSseJsonData } from "@appstrate/core/sse";
 import { getEnv } from "@appstrate/env";
 import { DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS } from "@appstrate/connect/proxy-primitives";
+import { forwardedLlmRequestHeaders } from "@appstrate/connect/llm-request-headers";
 import { invalidRequest } from "../../lib/errors.ts";
 
 /**
@@ -106,9 +106,8 @@ interface ParsedProxyRequest {
   /**
    * Produce a fresh body byte sequence with `model` swapped for
    * `upstreamModelId`. The optional `mutate` callback receives the parsed body
-   * right before re-encoding — the seam the protocol adapter uses to force
-   * usage reporting on (`LlmProxyAdapter.forceUsageReporting`). The rest of the
-   * payload is preserved.
+   * right before re-encoding — the seam the protocol adapter prepares it through
+   * (`LlmProxyAdapter.prepareRequest`). The rest of the payload is preserved.
    */
   rewriteModel(
     upstreamModelId: string,
@@ -151,12 +150,55 @@ export function parseProxyRequest(rawBody: Uint8Array): ParsedProxyRequest {
   };
 }
 
+/**
+ * pi-ai `getBetaFeatures` (`api/anthropic-messages.js`) for an API key under
+ * `PLATFORM_MODEL_COMPAT` — never its fallback or OAuth betas.
+ */
+const PI_BETAS: ReadonlySet<string> = new Set([
+  "fine-grained-tool-streaming-2025-05-14",
+  "interleaved-thinking-2025-05-14",
+  "mid-conversation-output-config-2026-07-01",
+  "thinking-binding-controls-2026-08-01",
+  "mid-conversation-tool-changes-2026-07-01",
+]);
+
+/**
+ * Upstream request headers: the caller's, under the policy shared with the
+ * sidecar (`@appstrate/connect/llm-request-headers`), plus this upstream's auth.
+ * The body is re-serialised JSON, hence the forced `content-type`.
+ *
+ * Billing guard, on every wire (an anthropic-compatible gateway can sit behind
+ * any of them): `anthropic-beta` keeps only the betas Pi's own client sends —
+ * a beta can switch on a feature billed outside the reported tokens, and an
+ * allowlist also closes the ones not shipped yet. `x-anthropic-beta`, an alias
+ * some gateways honour, is dropped. It lives here and not in the shared
+ * policy: the sidecar's subscription passthrough needs Pi's OAuth betas.
+ */
+export function upstreamHeaders(incoming: Headers, auth: Record<string, string>): Headers {
+  const headers = forwardedLlmRequestHeaders(incoming);
+  headers.delete("x-anthropic-beta");
+  const betas = (headers.get("anthropic-beta") ?? "")
+    .split(",")
+    .map((beta) => beta.trim())
+    .filter((beta) => PI_BETAS.has(beta));
+  if (betas.length > 0) headers.set("anthropic-beta", betas.join(","));
+  else headers.delete("anthropic-beta");
+  headers.set("content-type", "application/json");
+  for (const [name, value] of Object.entries(auth)) headers.set(name, value);
+  return headers;
+}
+
 /** Pull `body.usage` out of a parsed JSON response. Returns null if absent or malformed. */
 export function extractUsageObject(body: unknown): Record<string, unknown> | null {
   if (!body || typeof body !== "object") return null;
   const u = (body as Record<string, unknown>)["usage"];
   if (!u || typeof u !== "object") return null;
   return u as Record<string, unknown>;
+}
+
+/** Narrow an unknown value to a plain JSON object, or null. */
+export function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 }
 
 /** Coerce an unknown value into a finite number, or undefined. */
@@ -191,4 +233,51 @@ export function parseSseDataFrame(chunk: string): unknown | null {
   const { frames } = parseSseFrames(chunk + "\n\n", "");
   const frame = frames[0];
   return frame ? parseSseJsonData(frame.data) : null;
+}
+
+/**
+ * Refuse a request setting any of `fields` (anything but absent, `null` or
+ * `false`): features the vendor bills outside this request's reported usage.
+ */
+export function refuseUnmeteredFields(
+  body: Record<string, unknown>,
+  fields: readonly string[],
+): void {
+  for (const field of fields) {
+    const value = body[field];
+    if (value !== undefined && value !== null && value !== false) {
+      throw invalidRequest(`\`${field}\` is not supported: its cost cannot be metered`, field);
+    }
+  }
+}
+
+/** OpenAI's tiers billed at the standard rate — the only one Pi's cost records carry. */
+const STANDARD_SERVICE_TIERS = new Set<unknown>(["auto", "default"]);
+
+/** Refuse an OpenAI `service_tier` (both wires) billed above the standard rate. */
+export function refuseNonStandardServiceTier(body: Record<string, unknown>): void {
+  const tier = body["service_tier"];
+  if (tier != null && !STANDARD_SERVICE_TIERS.has(tier)) {
+    throw invalidRequest("`service_tier` must be `auto` or `default`", "service_tier");
+  }
+}
+
+/** Nesting {@link refuseLongCacheTtl} walks; Anthropic's deepest holder is at 5. */
+const CACHE_CONTROL_MAX_DEPTH = 16;
+
+/**
+ * Refuse any `cache_control` whose `ttl` is set and not `"5m"`, wherever it
+ * sits in the body: a 1-hour write bills 2× input and the meter prices every
+ * cache write as a 5-minute one. Anthropic reads it natively, OpenRouter on
+ * the OpenAI wires; Pi sends none under `PLATFORM_MODEL_COMPAT`.
+ */
+export function refuseLongCacheTtl(body: Record<string, unknown>): void {
+  const walk = (value: unknown, depth: number): boolean => {
+    if (depth > CACHE_CONTROL_MAX_DEPTH || !value || typeof value !== "object") return false;
+    if (Array.isArray(value)) return value.some((item) => walk(item, depth + 1));
+    const ttl = asRecord((value as Record<string, unknown>)["cache_control"])?.["ttl"];
+    if (ttl !== undefined && ttl !== "5m") return true;
+    return Object.values(value).some((item) => walk(item, depth + 1));
+  };
+  if (walk(body, 0)) throw invalidRequest("`cache_control.ttl` must be `5m`", "cache_control");
 }

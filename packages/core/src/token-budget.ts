@@ -17,13 +17,11 @@
  * **Canonical model invariant.** A request consumes `input + output`
  * tokens, both drawn from the same context window, so
  * `max_output_tokens < context_window` always holds — output can never
- * occupy the entire window because the prompt needs room too. Our catalog
- * is sourced from LiteLLM / models.dev, which report
- * `max_output_tokens == context_window` for a class of models (devstral,
- * kimi-k2.5, several grok / mistral entries) — a known upstream data bug
- * (see LiteLLM issue #22478). The ingest path drops those to null, but the
- * runtime can still receive an impossible cap (manual `org_models` row, a
- * future bad source), so {@link deriveResponseReserveTokens} treats any
+ * occupy the entire window because the prompt needs room too. Model
+ * catalogs do report `max_output_tokens == context_window` for some models;
+ * the platform catalog (`toCatalogEntry`) drops such a cap to null, but the
+ * runtime can still receive an impossible one (a manual `org_models` row),
+ * so {@link deriveResponseReserveTokens} treats any
  * `maxTokens >= contextWindow` as unusable and falls back to a derived
  * default rather than producing a reserve that swallows the whole window
  * (which previously threw and crashed the sidecar at boot, or pinned the
