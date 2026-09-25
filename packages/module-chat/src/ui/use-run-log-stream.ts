@@ -27,7 +27,8 @@
 
 import { useEffect, useState } from "react";
 import { runProducedFilesPath } from "@appstrate/core/run-and-wait-client";
-import { useChatHeaders } from "./runtime-context.ts";
+import { canReadRuns } from "@appstrate/core/permissions";
+import { useChatHeaders, useChatHost } from "./runtime-context.ts";
 import {
   buildRunSseUrl,
   isTerminalStatus,
@@ -126,6 +127,10 @@ export function useRunLogStream(
   initialPackageId?: string,
 ): RunLogStream {
   const getHeaders = useChatHeaders();
+  // Every read below is a run read or a file read, neither implied by `chat:read`.
+  const { can } = useChatHost();
+  const readsRuns = canReadRuns(can);
+  const readsFiles = can("files:read");
   const [logs, setLogs] = useState<RunLogLine[]>([]);
   const [status, setStatus] = useState<RunStatus | undefined>(
     isTerminalStatus(initialStatus) ? initialStatus : undefined,
@@ -162,7 +167,7 @@ export function useRunLogStream(
   }
 
   useEffect(() => {
-    if (!runId) return;
+    if (!runId || !readsRuns) return;
     let cancelled = false;
     const headers = getHeaders?.() ?? {};
     const { orgId, spaceId, viewAs } = orgSpaceFromHeaders(headers);
@@ -196,6 +201,7 @@ export function useRunLogStream(
      * log-derived list.
      */
     const readProducedFiles = async (): Promise<SweepRead> => {
+      if (!readsFiles) return "failed";
       try {
         const res = await fetch(runProducedFilesPath(runId), {
           headers,
@@ -381,7 +387,7 @@ export function useRunLogStream(
     // stream reads its URL once at connect. Without it a preview entered while
     // a run card is open keeps tailing under the previous authority.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId, getHeaders]);
+  }, [runId, getHeaders, readsRuns, readsFiles]);
 
   return {
     logs,

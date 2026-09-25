@@ -2,6 +2,7 @@
   "file.unnamed": "this file",
   "file.previewOf": "Preview {{name}}",
   "file.downloadOf": "Download {{name}}",
+  "composer.readOnly": "Your role can read conversations, not write them.",
   "context.label": "Conversation context",
   "context.collapse": "Collapse conversation context",
   "context.loading": "Loading context…",

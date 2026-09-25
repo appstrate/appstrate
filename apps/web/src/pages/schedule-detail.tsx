@@ -26,8 +26,11 @@ import { ActorLabel } from "../components/actor-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
 import { useAgents } from "../hooks/use-packages";
+import { canReadRuns } from "@appstrate/core/permissions";
 import { formatDateField } from "../lib/format-date";
 import { MoreHorizontal, Pencil, Trash2, Play, Pause, Clock } from "lucide-react";
+
+type ScheduleTab = "runs" | "details";
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -39,8 +42,10 @@ export function ScheduleDetailPage() {
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
-  const tabs = ["runs", "details"] as const;
-  const [activeTab, setActiveTab] = useTabWithHash(tabs, "runs");
+  // A schedule's runs are runs: `schedules:read` alone does not list them.
+  const readsRuns = canReadRuns(can);
+  const tabs: readonly ScheduleTab[] = readsRuns ? ["runs", "details"] : ["details"];
+  const [activeTab, setActiveTab] = useTabWithHash(tabs, readsRuns ? "runs" : "details");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (isLoading) return <LoadingState />;
@@ -52,7 +57,7 @@ export function ScheduleDetailPage() {
 
   return (
     <div className="p-6">
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScheduleTab)}>
         <PageHeader
           title={schedule.name || schedule.id}
           emoji="📅"
@@ -100,14 +105,16 @@ export function ScheduleDetailPage() {
           }
         >
           <TabsList className="mt-3">
-            <TabsTrigger value="runs">{t("schedule.tabRuns")}</TabsTrigger>
+            {readsRuns && <TabsTrigger value="runs">{t("schedule.tabRuns")}</TabsTrigger>}
             <TabsTrigger value="details">{t("schedule.tabDetails")}</TabsTrigger>
           </TabsList>
         </PageHeader>
 
-        <TabsContent value="runs">
-          <ScheduleHistory schedule={schedule} />
-        </TabsContent>
+        {readsRuns && (
+          <TabsContent value="runs">
+            <ScheduleHistory schedule={schedule} />
+          </TabsContent>
+        )}
 
         <TabsContent value="details">
           <ScheduleParams schedule={schedule} />

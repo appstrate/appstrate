@@ -2,12 +2,15 @@
 
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { LayoutDashboard } from "lucide-react";
 import { useAuth } from "../hooks/use-auth";
 import { useAgents } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { usePermissions } from "../hooks/use-permissions";
+import { dashboardSections, hasAnyDashboardSection } from "../lib/dashboard-sections";
+import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
 import { ScheduleCard } from "../components/schedule-card";
 import { RunRows } from "../components/run-list";
@@ -18,6 +21,10 @@ const RECENT_RUNS_COUNT = 7;
 export function DashboardPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { profile, user } = useAuth();
+  const { can, ready } = usePermissions();
+  // Every query below gates itself on its guard; a section it feeds is drawn
+  // only when that read is open to the caller.
+  const sections = dashboardSections(can);
   const {
     data: runsData,
     isLoading: runsLoading,
@@ -30,7 +37,8 @@ export function DashboardPage() {
   const { data: unreadCounts } = useUnreadCountsByAgent();
   const { data: schedules } = useAllSchedules();
 
-  const isLoading = runsLoading || agentsLoading;
+  // A disabled query is not loading, so an unresolved permission set must be.
+  const isLoading = !ready || runsLoading || agentsLoading;
   const error = runsError || agentsError;
 
   if (isLoading) return <LoadingState />;
@@ -87,8 +95,15 @@ export function DashboardPage() {
       <h1 className="text-3xl font-bold">
         {t("dashboard.welcome", { name: firstName, ns: "common" })}
       </h1>
+      {!hasAnyDashboardSection(sections) && (
+        <EmptyState
+          message={t("dashboard.nothingReadable")}
+          hint={t("dashboard.nothingReadableHint")}
+          icon={LayoutDashboard}
+        />
+      )}
       {/* Upcoming schedules */}
-      {upcomingSchedules.length > 0 && (
+      {sections.schedules && upcomingSchedules.length > 0 && (
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-muted-foreground text-sm font-medium">
@@ -114,7 +129,7 @@ export function DashboardPage() {
       )}
 
       {/* Recent agents (horizontal scroll) */}
-      {recentAgentIds.length > 0 && (
+      {sections.recentAgents && recentAgentIds.length > 0 && (
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-muted-foreground text-sm font-medium">
@@ -150,23 +165,27 @@ export function DashboardPage() {
       )}
 
       {/* Recent runs */}
-      <section>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-muted-foreground text-sm font-medium">{t("dashboard.recentRuns")}</h2>
-          <Link
-            to="/runs"
-            className="text-muted-foreground hover:text-foreground text-xs transition-colors"
-          >
-            {t("dashboard.seeAll")}
-          </Link>
-        </div>
-        {/* Rendered from the runs THIS page already loaded. Mounting
+      {sections.recentRuns && (
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-muted-foreground text-sm font-medium">
+              {t("dashboard.recentRuns")}
+            </h2>
+            <Link
+              to="/runs"
+              className="text-muted-foreground hover:text-foreground text-xs transition-colors"
+            >
+              {t("dashboard.seeAll")}
+            </Link>
+          </div>
+          {/* Rendered from the runs THIS page already loaded. Mounting
             `<RunList pageSize={7}>` here instead issued a second
             `GET /api/runs` (a different `limit` is a different query key), and
             with it a second `COUNT` + enriched page read, for rows the 15 above
             already contain. */}
-        <RunRows runs={runs.slice(0, RECENT_RUNS_COUNT)} />
-      </section>
+          <RunRows runs={runs.slice(0, RECENT_RUNS_COUNT)} />
+        </section>
+      )}
     </div>
   );
 }

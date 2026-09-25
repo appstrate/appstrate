@@ -31,6 +31,21 @@ export const PACKAGE_PERMISSIONS: Record<
   },
 };
 
+/** The one read permission of a package family: its list, versions and files. */
+export function packageReadPermission(type: PackageType): GateablePermission {
+  return `${PACKAGE_PERMISSIONS[type].resource}:read`;
+}
+
+/**
+ * Who may SEE a package of this type — its detail, and for agents the index
+ * `GET /api/agents` too. The API's `packageReadPermissions` (RBAC spec §3.4):
+ * `agents:run` opens an agent in the summary projection its launch form reads.
+ */
+export function packageSightPermissions(type: PackageType): readonly GateablePermission[] {
+  const read = packageReadPermission(type);
+  return type === "agent" ? [read, "agents:run"] : [read];
+}
+
 /** One row of `GET /api/spaces`, narrowed to what the verdict below reads. */
 export interface SpaceGrant {
   permissions: string[];

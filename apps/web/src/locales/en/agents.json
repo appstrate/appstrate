@@ -3,6 +3,8 @@
   "dashboard.recentRuns": "Recent runs",
   "dashboard.upcomingSchedules": "Upcoming schedules",
   "dashboard.seeAll": "See all",
+  "dashboard.nothingReadable": "Nothing to show here",
+  "dashboard.nothingReadableHint": "Your role in this space gives access to no agents, runs or schedules. The menu leads to the pages open to you.",
   "list.create": "New agent",
   "list.createItem": "New {{type}}",
   "list.empty": "No active agent in this space.",

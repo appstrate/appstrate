@@ -6,6 +6,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope } from "./use-org-scope";
+import { usePermissions } from "./use-permissions";
 import { agentProxyKeys, packageKeys } from "../lib/query-keys";
 
 /** Wire shape from the OpenAPI spec (components.schemas.OrgProxy). */
@@ -53,9 +54,11 @@ export function useTestProxy() {
   return $api.useMutation("post", "/api/proxies/{id}/test");
 }
 
+/** `agents:read` alone: unlike the agent detail, `agents:run` does not open it. */
 export function useAgentProxy(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const { can } = usePermissions();
   return useQuery({
     // Key kept legacy-shaped: invalidated by useSetAgentProxy below and
     // space-switch resets.
@@ -66,7 +69,7 @@ export function useAgentProxy(packageId: string | undefined) {
       });
       return data!;
     },
-    enabled: !!orgId && !!spaceId && !!packageId,
+    enabled: can("agents:read") && !!orgId && !!spaceId && !!packageId,
   });
 }
 

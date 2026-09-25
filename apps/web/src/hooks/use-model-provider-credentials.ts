@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { $api, type components, type paths } from "../api/client";
 import { useOrgOnlyScope } from "./use-org-scope";
+import { usePermissions } from "./use-permissions";
 
 /** Wire shape from the OpenAPI spec (components.schemas.ModelProviderCredential). */
 export type ModelProviderCredentialInfo = components["schemas"]["ModelProviderCredential"];
@@ -35,25 +36,38 @@ export type ProviderRegistryEntry = RawProviderRegistryEntry &
     >
   >;
 
-/** Gated by `model-provider-credentials:read`; `enabled` skips a sure 403. */
-export function useModelProviderCredentials(enabled = true) {
+/**
+ * Both reads guard on the org grant `model-provider-credentials:read` (owner
+ * and admin), and reach members and guests through the agent configuration and
+ * launch-override surfaces — so they gate themselves on it.
+ */
+function useCredentialsReadScope(enabled: boolean) {
   const scope = useOrgOnlyScope();
+  const { can } = usePermissions();
+  return {
+    header: scope.header,
+    enabled: enabled && scope.enabled && can("model-provider-credentials:read"),
+  };
+}
+
+export function useModelProviderCredentials(enabled = true) {
+  const scope = useCredentialsReadScope(enabled);
   return $api.useQuery(
     "get",
     "/api/model-provider-credentials",
     { params: { header: scope.header } },
-    { enabled: enabled && scope.enabled, select: (e) => e.data },
+    { enabled: scope.enabled, select: (e) => e.data },
   );
 }
 
 export function useProvidersRegistry(enabled = true) {
-  const scope = useOrgOnlyScope();
+  const scope = useCredentialsReadScope(enabled);
   return $api.useQuery(
     "get",
     "/api/model-provider-credentials/registry",
     { params: { header: scope.header } },
     {
-      enabled: enabled && scope.enabled,
+      enabled: scope.enabled,
       staleTime: 5 * 60 * 1000,
       // This hook never sends `?fields=`, so the server returns full entries —
       // narrow the projection-loosened wire type to the full catalog shape.

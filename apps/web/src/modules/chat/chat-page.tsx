@@ -137,6 +137,7 @@ export function ChatModulePage() {
           uploadFile={uploadFile}
           t={translate}
           canAuthorAgents={canAuthorAgents({ can })}
+          can={can}
         />
       </div>
       <ConversationSidebar

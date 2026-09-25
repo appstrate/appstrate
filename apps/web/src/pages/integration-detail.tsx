@@ -1220,7 +1220,10 @@ function ConnectionTableRow({
   //               (`routes/integrations.ts`, `shared_with_org` branch);
   //   - rename  → owner OR org admin (same route, label branch).
   const isOwn = isConnectionOwnedBy(connection, user?.id);
-  const canRename = isOwn || can("integrations:configure");
+  // Rename, share and reconnect all write the connection, which guards on
+  // `integrations:connect` whoever owns it.
+  const canConnect = can("integrations:connect");
+  const canRename = canConnect && (isOwn || can("integrations:configure"));
   const startEdit = () => {
     setDraftLabel(connection.label ?? "");
     setEditing(true);
@@ -1332,7 +1335,7 @@ function ConnectionTableRow({
                       carries the actor identity — a non-owner reconnect 404s.
                       Only the owner can re-authenticate their own credential,
                       so others see the state without a dead CTA. */}
-                  {isOwn && canRenew && authType === "oauth2" && (
+                  {isOwn && canConnect && canRenew && authType === "oauth2" && (
                     <InlineConnectButton
                       packageId={packageId}
                       authKey={authKey}
@@ -1379,7 +1382,7 @@ function ConnectionTableRow({
 
         {/* Org-share toggle — owner-only (sharing is the owner's consent) */}
         <TableCell>
-          {isOwn ? (
+          {isOwn && canConnect ? (
             <label
               className="flex items-center gap-1.5 text-xs"
               title={t("integration.connection.shareWithOrg.help")}
@@ -1820,7 +1823,12 @@ export function IntegrationDetailPage() {
         {/* ─── Versions (read-only history; non-system only) ─── */}
         {!isBuiltIn && (
           <TabsContent value="versions" className="mt-4">
-            <VersionHistory packageId={packageId} type="integration" isOwned={isOwned} />
+            <VersionHistory
+              packageId={packageId}
+              type="integration"
+              canRestore={isOwned && !!homeWritable}
+              canDelete={isOwned && !!homeDeletable}
+            />
           </TabsContent>
         )}
       </Tabs>

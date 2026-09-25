@@ -10,6 +10,7 @@
 import { Sparkles, Zap, Crown, type LucideIcon } from "lucide-react";
 import { $api, type components } from "../api/client";
 import { useOrgOnlyScope } from "./use-org-scope";
+import { usePermissions } from "./use-permissions";
 
 /** One plan of the catalog: price, credit quota, and storage entitlement. */
 export type BillingPlanDetail = components["schemas"]["EeBillingPlan"];
@@ -37,13 +38,21 @@ export const PLAN_DESCRIPTION_KEYS: Record<BillingPlanDetail["id"], string> = {
  */
 export type CheckoutPlanId = components["schemas"]["EeCheckoutPlanId"];
 
+/**
+ * `billing:read` is an org grant an org `guest` does not hold, and the sidebar
+ * mounts this on every page — so the hook gates itself on it.
+ */
 export function useBilling(options?: { enabled?: boolean }) {
   const { enabled, header } = useOrgOnlyScope();
+  const { can } = usePermissions();
   return $api.useQuery(
     "get",
     "/api/billing",
     { params: { header } },
-    { enabled: (options?.enabled ?? true) && enabled, staleTime: 60_000 },
+    {
+      enabled: (options?.enabled ?? true) && enabled && can("billing:read"),
+      staleTime: 60_000,
+    },
   );
 }
 

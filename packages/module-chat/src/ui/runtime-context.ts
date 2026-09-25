@@ -122,7 +122,16 @@ export interface ChatHost {
   downloadFile: DownloadFile;
   useFileImageSrc: UseFileImageSrc;
   t: ChatTranslate;
+  can: ChatCan;
 }
+
+/**
+ * The caller's grants, resolved by the shell: the chat asks for the exact
+ * string the guard of each endpoint it calls checks, and holds none of its own
+ * RBAC. A route gated on `chat:read` implies neither `chat:write` nor the runs,
+ * files and integrations reads its cards make (#1556).
+ */
+export type ChatCan = (permission: string) => boolean;
 
 const ChatHostContext = createContext<ChatHost | null>(null);
 

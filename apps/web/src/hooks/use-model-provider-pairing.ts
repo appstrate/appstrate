@@ -13,6 +13,7 @@
  */
 
 import { $api } from "../api/client";
+import { usePermissions } from "./use-permissions";
 
 export function useCreateModelProviderPairing() {
   return $api.useMutation("post", "/api/model-providers-oauth/pairing");
@@ -30,12 +31,14 @@ export function useCreateModelProviderPairing() {
  * it from the store.
  */
 export function useModelProviderPairingStatus(id: string | null, options: { enabled: boolean }) {
+  // Guarded like the credentials it mints; a role preview can drop it mid-poll.
+  const { can } = usePermissions();
   return $api.useQuery(
     "get",
     "/api/model-providers-oauth/pairing/{id}",
     { params: { path: { id: id ?? "" } } },
     {
-      enabled: options.enabled && !!id,
+      enabled: options.enabled && !!id && can("model-provider-credentials:read"),
       refetchInterval: (q) => {
         // Any errored request is terminal for the poll: the TTL reap surfaces
         // as 404/410, but auth/permission/server failures (401/403/5xx, or a

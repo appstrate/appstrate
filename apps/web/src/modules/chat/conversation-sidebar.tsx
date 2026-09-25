@@ -28,6 +28,8 @@ import { FilePreview } from "../../components/file-preview";
 import { FileViewer } from "../../components/file-viewer";
 import { useFile, useFileDownload, useFiles } from "../../hooks/use-files";
 import { useOrgOnlyScope, useOrgScope } from "../../hooks/use-org-scope";
+import { usePermissions } from "../../hooks/use-permissions";
+import { canReadRuns } from "@appstrate/core/permissions";
 import { formatDateField } from "../../lib/format-date";
 import type {
   ConversationSidebarAction,
@@ -38,9 +40,17 @@ import type {
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
 
+/** `chat:read` opens the page, not the runs and files these two tabs list. */
 function useConversationTabs() {
   const { t } = useTranslation("chat");
-  return [
+  const { can } = usePermissions();
+  const readable: Record<ConversationSidebarTab, boolean> = {
+    preview: true,
+    runs: canReadRuns(can),
+    files: can("files:read"),
+    info: true,
+  };
+  const [preview, ...rest] = [
     { id: "preview", Icon: EyeIcon, label: t("context.tabs.preview") },
     { id: "runs", Icon: ActivityIcon, label: t("context.tabs.runs") },
     { id: "files", Icon: FilesIcon, label: t("context.tabs.files") },
@@ -50,6 +60,8 @@ function useConversationTabs() {
     Icon: typeof EyeIcon;
     label: string;
   }[];
+  // The preview leads and always stays: it is the fallback for a hidden tab.
+  return [preview, ...rest.filter(({ id }) => readable[id])] as const;
 }
 
 export function ConversationContextActions({
@@ -152,6 +164,7 @@ function ConversationRuns({
 }) {
   const { t } = useTranslation("chat");
   const scope = useOrgScope();
+  const { can } = usePermissions();
   const query = $api.useQuery(
     "get",
     "/api/runs",
@@ -161,7 +174,7 @@ function ConversationRuns({
         header: scope.header,
       },
     },
-    { enabled: scope.enabled && active && !!conversationId },
+    { enabled: canReadRuns(can) && scope.enabled && active && !!conversationId },
   );
 
   if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
@@ -354,19 +367,19 @@ export function ConversationSidebar({
             </Button>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
-            {state.activeTab === "preview" ? (
+            {activeTab.id === "preview" ? (
               <PreviewTab
                 file={state.selectedFile}
                 onOpenModal={() => dispatch({ type: "open-modal" })}
               />
             ) : null}
-            {state.activeTab === "runs" ? (
+            {activeTab.id === "runs" ? (
               <ConversationRuns conversationId={conversationId} active />
             ) : null}
-            {state.activeTab === "files" ? (
+            {activeTab.id === "files" ? (
               <ConversationFiles conversationId={conversationId} active onSelect={showFile} />
             ) : null}
-            {state.activeTab === "info" ? (
+            {activeTab.id === "info" ? (
               <ConversationInfo conversationId={conversationId} active />
             ) : null}
           </div>

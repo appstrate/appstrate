@@ -2,6 +2,7 @@
   "file.unnamed": "ce fichier",
   "file.previewOf": "Aperçu de {{name}}",
   "file.downloadOf": "Télécharger {{name}}",
+  "composer.readOnly": "Votre rôle permet de lire les conversations, pas d’en écrire.",
   "context.label": "Contexte de la conversation",
   "context.collapse": "Replier le contexte de la conversation",
   "context.loading": "Chargement du contexte…",

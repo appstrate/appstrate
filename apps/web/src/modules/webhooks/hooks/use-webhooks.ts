@@ -6,6 +6,7 @@ import type { WebhookDelivery } from "@appstrate/shared-types";
 import { $api, client, type components, type paths } from "@/api/client";
 import { useCurrentOrgId } from "@/hooks/use-org";
 import { useCurrentSpaceId } from "@/hooks/use-current-space";
+import { usePermissions } from "@/hooks/use-permissions";
 
 /** Wire shape from the OpenAPI spec (components.schemas.WebhookObject). */
 export type WebhookInfo = components["schemas"]["WebhookObject"];
@@ -52,12 +53,15 @@ function useWebhookScope() {
  */
 export function useWebhooks() {
   const scope = useWebhookScope();
+  // The `spaceId` filter asks for space `webhooks:read` on top of the list's
+  // either-level guard; an org-level reader alone lists the org rows only.
+  const spaceFilter = usePermissions().can("webhooks:read") ? scope.spaceId : null;
   return $api.useQuery(
     "get",
     "/api/webhooks",
     {
       params: {
-        query: { spaceId: scope.spaceId ?? undefined },
+        query: { spaceId: spaceFilter ?? undefined },
         header: scope.header,
       },
     },

@@ -372,7 +372,7 @@ export function RunDetailPage() {
               nothing is threaded from the run DTO; see `ContextGaugeReadout`
               for the readings, the live cadence and when it renders nothing. */}
                 <ContextGaugeReadout turns={turnRows} status={run.status} />
-                {!isRunning && !isInline && agent && (
+                {!isRunning && !isInline && agent && can("agents:run") && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -416,7 +416,7 @@ export function RunDetailPage() {
                 {/* Cancel hidden for remote-origin runs — the process runs on the
               caller's host and the platform cannot signal it. A soft-cancel
               (server flag + CLI poll) is tracked as a follow-up. */}
-                {isRunning && enrichedRun.runOrigin !== "remote" && (
+                {isRunning && enrichedRun.runOrigin !== "remote" && can("runs:cancel") && (
                   <Button
                     variant="destructive"
                     onClick={() => cancelRun.mutate(runId!)}

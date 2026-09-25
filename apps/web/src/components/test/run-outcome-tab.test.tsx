@@ -61,6 +61,7 @@ function outcome(
     hasMore?: boolean;
     isLoading?: boolean;
     error?: unknown;
+    filesDenied?: boolean;
   } = {},
 ): string {
   return render(
@@ -77,6 +78,7 @@ function outcome(
       hasMore={extra.hasMore ?? false}
       isLoading={extra.isLoading ?? false}
       error={extra.error ?? null}
+      filesDenied={extra.filesDenied}
     />,
   );
 }
@@ -330,5 +332,21 @@ describe("what the run produced LEADS the pane", () => {
     const html = outcome(three, { producedFileCount: 1 });
     expect(html).toContain(agentsFr["run.sectionProducedFiles"]);
     expect(html).not.toContain(`aria-label="${filesFr["run.featuredLabel"]}"`);
+  });
+});
+
+// A role without `files:read` never lists the files (#1556), yet the run's own
+// count says it produced some: the card stays and says why it is empty.
+describe("Outcome without `files:read`", () => {
+  it("names the missing access instead of claiming there is no file", () => {
+    const html = outcome([], { producedFileCount: 2, filesDenied: true });
+    expect(html).toContain(agentsFr["run.sectionProducedFiles"]);
+    expect(html).toContain(filesFr["run.noAccess"]);
+    expect(html).not.toContain(filesFr["run.empty"]);
+  });
+
+  it("does not hold the featured-file slot it can never fill", () => {
+    const html = outcome([], { producedFileCount: 1, filesDenied: true });
+    expect(html).not.toContain(VIEWER_HEIGHT_CLASS);
   });
 });

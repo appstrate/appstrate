@@ -43,6 +43,7 @@ import { requiredScopesForAgent } from "@appstrate/core/integration";
 import { client } from "../../api/client";
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
 import { isVersioned } from "../../lib/version-selector";
+import { usePermissions } from "../../hooks/use-permissions";
 
 /**
  * How the picker persists the actor's pick:
@@ -121,6 +122,9 @@ export function IntegrationConnectionPicker({
   const { openPopup, isPending: oauthPending } = useHostedConnectPopup();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  // Adding, renewing and upgrading all open a connect session, which guards on
+  // `integrations:connect` — a grant the server's `can_add_connection` omits.
+  const canConnect = usePermissions().can("integrations:connect");
 
   const overrideMode = persistence.mode === "override";
   const auths = manifest.auths ?? {};
@@ -156,8 +160,9 @@ export function IntegrationConnectionPicker({
     member_pinned_connection_id: memberPinnedConnectionId,
     org_default_connection_id: orgDefaultConnectionId,
     org_default_enforced: orgDefaultEnforced,
-    can_add_connection: canAddConnection,
+    can_add_connection: serverAllowsAdd,
   } = resolution;
+  const canAddConnection = serverAllowsAdd && canConnect;
 
   const ownerLabel = (c: IntegrationCandidate): string =>
     c.is_own
@@ -375,7 +380,10 @@ export function IntegrationConnectionPicker({
             // let the actor pin a foreign needs_reconnection row (their
             // pick survives once the owner renews it).
             const canRenew =
-              c.needs_reconnection && c.is_own && auths[c.auth_key]?.type === "oauth2";
+              canConnect &&
+              c.needs_reconnection &&
+              c.is_own &&
+              auths[c.auth_key]?.type === "oauth2";
             return (
               <DropdownMenuItem
                 key={c.id}
@@ -501,7 +509,7 @@ export function IntegrationConnectionPicker({
           <span className="text-foreground/80 font-mono text-[0.65rem] break-words">
             {displayMissingScopes.join(" ")}
           </span>
-          {displayOwnedByActor && auths[displayConn.auth_key]?.type === "oauth2" && (
+          {canConnect && displayOwnedByActor && auths[displayConn.auth_key]?.type === "oauth2" && (
             <div>
               <Button
                 size="sm"

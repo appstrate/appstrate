@@ -53,6 +53,7 @@ describe("chat page session scope", () => {
           uploadFile={async () => "upload://unused"}
           t={(key) => key}
           canAuthorAgents={false}
+          can={() => true}
         />,
         { queryClient: qc },
       );

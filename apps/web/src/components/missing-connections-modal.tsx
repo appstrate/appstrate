@@ -10,6 +10,7 @@ import { Spinner } from "./spinner";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { resolutionBlocksRun } from "./integration-connect/integration-run-readiness";
 import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/use-integrations";
+import { usePermissions } from "../hooks/use-permissions";
 
 /**
  * Recovery surface for the run-kickoff 409 emitted by
@@ -232,6 +233,7 @@ function MissingRow({
   const { t } = useTranslation(["agents"]);
   const packageId = parseField(err.field);
   const { data: detail } = useIntegrationDetail(packageId);
+  const readsIntegrations = usePermissions().can("integrations:read");
   // Structural failures can't be fixed by connecting — an admin must activate
   // the integration or the agent must drop the dependency. No picker.
   const isStructural = isStructuralCode(err.code);
@@ -253,8 +255,11 @@ function MissingRow({
   const resolved = !!resolution && !resolutionBlocksRun(resolution);
   // The picker needs the manifest + first verdict to render fully wired; hold
   // a spinner until both land (non-structural rows with the agent in context).
-  const canRenderPicker = !isStructural && !!agentPackageId && !!detail && !!resolution;
-  const loadingVerdict = !isStructural && !!agentPackageId && (!detail || !resolution);
+  // Both reads gate on `integrations:read`: without it neither lands, so the
+  // row names the integration and waits for nothing.
+  const pickable = !isStructural && !!agentPackageId && readsIntegrations;
+  const canRenderPicker = pickable && !!detail && !!resolution;
+  const loadingVerdict = pickable && (!detail || !resolution);
 
   const displayName = detail?.manifest.display_name ?? packageId;
   const Icon = resolved ? Check : isStructural ? XCircle : AlertTriangle;

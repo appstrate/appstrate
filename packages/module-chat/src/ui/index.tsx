@@ -41,6 +41,7 @@ import {
   SelectConversationProvider,
 } from "./runtime-context.ts";
 import type {
+  ChatCan,
   ChatHost,
   ChatTranslate,
   DownloadFile,
@@ -151,6 +152,8 @@ export interface ChatPageProps {
   t: ChatTranslate;
   /** Whether the caller may create agents, resolved by the shell: the module resolves no RBAC. */
   canAuthorAgents: boolean;
+  /** The caller's grants (see `ChatCan`). Pass a stable function. */
+  can: ChatCan;
 }
 
 export function ChatPage({
@@ -166,6 +169,7 @@ export function ChatPage({
   uploadFile,
   t,
   canAuthorAgents,
+  can,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -236,8 +240,10 @@ export function ChatPage({
   // failed PUT self-heals on the next signal/refetch; a duplicate PUT from a
   // refetch landing mid-flight is idempotent (monotonic marker) server-side.
   // External-system sync in an effect (no setState) — React Compiler-safe.
+  const canWrite = can("chat:write");
   useEffect(() => {
-    if (!visible) return;
+    // Marking read is a write (`chat:write`); a read-only caller keeps the dot.
+    if (!visible || !canWrite) return;
     const active = sessions.data?.find((s) => s.id === activeId);
     if (!active?.unread) return;
     queryClient.setQueryData<SessionsCache>(sessionsQueryKey(pageSpaceId), (prev) =>
@@ -246,7 +252,7 @@ export function ChatPage({
       ),
     );
     void markSessionRead(getHeaders, activeId).catch(() => {});
-  }, [sessions.data, activeId, getHeaders, pageSpaceId, queryClient, visible]);
+  }, [sessions.data, activeId, getHeaders, pageSpaceId, queryClient, visible, canWrite]);
 
   const unreadIds = useMemo(() => {
     const list = sessions.data ?? [];
@@ -262,8 +268,9 @@ export function ChatPage({
       downloadFile,
       useFileImageSrc,
       t,
+      can,
     }),
-    [onOpenFile, downloadFile, useFileImageSrc, t],
+    [onOpenFile, downloadFile, useFileImageSrc, t, can],
   );
 
   // File attachments: the composer stages picked files through the HOST uploader
