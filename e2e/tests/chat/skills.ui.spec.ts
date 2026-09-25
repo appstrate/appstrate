@@ -2,7 +2,8 @@
 
 /**
  * Skills in the chat, from the browser: the picker stores the selection on a
- * conversation that has no row yet, before any message is sent.
+ * conversation that has no row yet, before any message is sent, and the URL
+ * adopts that conversation so a reload reopens it.
  */
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
@@ -50,4 +51,12 @@ test("hides the catalogue and pins a skill before the first message", async ({
   expect(
     body.data.map((s) => ({ skill_catalogue: s.skill_catalogue, pinned_skills: s.pinned_skills })),
   ).toEqual([{ skill_catalogue: false, pinned_skills: [packageId] }]);
+
+  // The URL holds the conversation the pins were written to; a reload reopens it.
+  const sessionId = body.data[0]!.id;
+  await expect(page).toHaveURL(new RegExp(`/chat/${sessionId}$`));
+  await page.reload();
+  await trigger.click();
+  await expect(popover.getByTestId("skills-catalogue-toggle")).not.toBeChecked();
+  await expect(popover.getByTestId(`skill-pin-${packageId}`)).toBeChecked();
 });

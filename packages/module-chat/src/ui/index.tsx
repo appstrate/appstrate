@@ -455,12 +455,17 @@ const Conversation = memo(function Conversation({
     () => (
       <div className="flex items-center gap-2">
         {showPicker && (
-          <SkillsPicker sessionId={id} getHeaders={getHeaders} initialSelection={initialSkills} />
+          <SkillsPicker
+            sessionId={id}
+            getHeaders={getHeaders}
+            initialSelection={initialSkills}
+            persisted={persistedAtMount}
+          />
         )}
         {composerSlot}
       </div>
     ),
-    [id, getHeaders, initialSkills, showPicker, composerSlot],
+    [id, getHeaders, initialSkills, persistedAtMount, showPicker, composerSlot],
   );
 
   if (persistedAtMount && history.isPending) {

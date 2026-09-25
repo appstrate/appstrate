@@ -2,7 +2,7 @@
 
 // Skill picker: local selection seeded once; one PUT at a time, reverted on failure.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpenIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -17,32 +17,44 @@ import {
 import { cn } from "@appstrate/ui/cn";
 import { MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
 import { skillPickerRows, togglePinned } from "./chat-skills.ts";
-import { useChatHost, type GetHeaders } from "./runtime-context.ts";
+import { useChatHost, useSelectConversation, type GetHeaders } from "./runtime-context.ts";
 import { fetchSkills, putSessionSkills, spaceIdFromHeaders } from "./sessions.ts";
 
 interface SkillsPickerProps {
   sessionId: string;
   getHeaders: GetHeaders | undefined;
   initialSelection: ChatSkillSelection;
+  /** Whether the conversation's id is already in the URL. */
+  persisted: boolean;
 }
 
-export function SkillsPicker({ sessionId, getHeaders, initialSelection }: SkillsPickerProps) {
-  const { t } = useChatHost();
+export function SkillsPicker({
+  sessionId,
+  getHeaders,
+  initialSelection,
+  persisted,
+}: SkillsPickerProps) {
+  const { t, can } = useChatHost();
+  const selectConversation = useSelectConversation();
+  // The first write creates the row, so the URL adopts its id at once, as a first
+  // send does: a reload then reopens this conversation instead of minting another.
+  const adopted = useRef(persisted);
   const [open, setOpen] = useState(false);
   const [selection, setSelection] = useState(initialSelection);
   // Controls are disabled while a PUT is in flight, so writes never race.
   const [saving, setSaving] = useState(false);
   // Space-scoped: the listing reads `X-Space-Id`, so the key carries the space.
   const spaceId = spaceIdFromHeaders(getHeaders);
+  const readable = !!spaceId && can("skills:read");
   const catalogue = useQuery({
     queryKey: ["chat", "skills", spaceId],
     queryFn: () => fetchSkills(getHeaders),
-    enabled: !!spaceId,
+    enabled: readable,
     staleTime: 60_000,
   });
   const skills = catalogue.data ?? [];
-  // A disabled query stays `isPending` forever; no space reads as "nothing".
-  const loading = !!spaceId && catalogue.isPending;
+  // A disabled query stays `isPending` forever; unreadable reads as "nothing".
+  const loading = readable && catalogue.isPending;
 
   const pinned = selection.pinnedSkills;
   const pinnedSet = new Set(pinned);
@@ -53,6 +65,10 @@ export function SkillsPicker({ sessionId, getHeaders, initialSelection }: Skills
     const previous = selection;
     setSelection(next);
     setSaving(true);
+    if (!adopted.current) {
+      adopted.current = true;
+      selectConversation?.(sessionId);
+    }
     putSessionSkills(getHeaders, sessionId, next)
       .catch(() => setSelection(previous))
       .finally(() => setSaving(false));
