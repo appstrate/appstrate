@@ -743,19 +743,20 @@ export class ProcessOrchestrator implements RunOrchestrator {
  * had it taken, which the finder used to throw on. `null` when a probe fails.
  */
 async function probeTwoFreePorts(): Promise<SidecarPorts | null> {
-  const probes: ReturnType<typeof Bun.serve>[] = [];
+  // Raw TCP listeners, NOT `Bun.serve`: under `bun --hot` (the dev server) a
+  // second `Bun.serve()` hot-reloads the first one and returns the SAME
+  // server, so both probes reported one port and the sidecar refused to boot
+  // with PORT === FORWARD_PROXY_PORT.
+  const probes: Bun.TCPSocketListener[] = [];
   try {
-    probes.push(Bun.serve({ port: 0, fetch: () => new Response() }));
-    probes.push(Bun.serve({ port: 0, fetch: () => new Response() }));
-    const [sidecar = 0, forwardProxy = 0] = probes.map((p) => p.port ?? 0);
-    return sidecar && forwardProxy ? { sidecar, forwardProxy } : null;
+    for (let i = 0; i < 2; i++) {
+      probes.push(Bun.listen({ hostname: "0.0.0.0", port: 0, socket: { data() {} } }));
+    }
+    const [sidecar = 0, forwardProxy = 0] = probes.map((p) => p.port);
+    return sidecar && forwardProxy && sidecar !== forwardProxy ? { sidecar, forwardProxy } : null;
   } catch {
     return null;
   } finally {
-    // AWAITED: `Server.stop()` returns a promise that settles once the socket
-    // is actually released. Returning a port whose probe server is still
-    // bound is exactly the EADDRINUSE-at-sidecar-boot the finder exists to
-    // avoid.
-    await Promise.all(probes.map((p) => p.stop(true)));
+    for (const probe of probes) probe.stop(true);
   }
 }

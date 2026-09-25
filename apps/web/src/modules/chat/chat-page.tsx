@@ -114,12 +114,13 @@ export function ChatModulePage() {
   // The chat's tools (run agents, inspect runs, search…) are served by the
   // `mcp` module, which is a hard peer requirement of `chat` (enforced at
   // boot) — so tools are always available when the chat is reachable.
-  // Bound the chat to the viewport height below the app shell's h-16 header so
-  // the thread scrolls internally and the composer stays pinned (sticky) at the
-  // bottom. Without a definite height here the flex chain grows with the message
-  // list and the composer scrolls off-screen.
+  // Fill the shell's scroll container (a flex column already sized to the
+  // viewport minus the header and any banner) so the thread scrolls internally
+  // and the composer stays pinned at the bottom. A hard-coded viewport calc here
+  // ignored the banner and the collapsed header and overflowed into a second,
+  // page-level scrollbar.
   return (
-    <div className="relative flex h-[calc(100dvh-4rem)] min-h-0 min-w-0">
+    <div className="relative flex min-h-0 min-w-0 flex-1">
       <div className="min-w-0 flex-1">
         <ChatPage
           getHeaders={getHeaders}
