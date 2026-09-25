@@ -245,9 +245,9 @@ export async function resolveLiveIntegrationCredentials(
   };
 
   // A forced refresh nothing can recover (no refresh client, or not oauth2).
-  // One 401 can be a transient upstream fault, so it counts toward the refresh
-  // streak: 502 until INTEGRATION_REFRESH_MAX_FAILURES, then terminal. Only a
-  // reconnect resets it, so rare isolated 401s add up over time.
+  // One 401 can be a transient upstream fault, so it is counted: 502 until
+  // INTEGRATION_REFRESH_MAX_FAILURES, then terminal. Not a streak — only a
+  // credential write (reconnect) resets the counter, so isolated 401s add up.
   const rejectUnrefreshable = async (reason: string): Promise<never> => {
     const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
     const { failures, needsReconnection } = await recordIntegrationRefreshFailure(
@@ -267,7 +267,8 @@ export async function resolveLiveIntegrationCredentials(
     });
     throw badGateway(
       `Integration '${integrationId}' auth '${authKey}' was rejected upstream (${reason}); ` +
-        `${failures}/${maxFailures} consecutive rejections before the connection is flagged`,
+        `${failures}/${maxFailures} upstream rejections since the connection was last ` +
+        `(re)connected before it is flagged`,
     );
   };
 

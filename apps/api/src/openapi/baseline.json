@@ -4106,7 +4106,7 @@
         "operationId": "streamAllRuns",
         "tags": ["Realtime"],
         "summary": "SSE: all run status changes",
-        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent format: `event: run_update\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
+        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=apst_... query parameter. Each channel reaches only a caller who may receive it; see Channel access below.\n\nEvent format: `event: run_update\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows), `chat_session_update` (a change signal on one of the caller's own chat sessions, emitted when the chat module is enabled). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel the caller may receive. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nChannel access: `run_update`, `run_log` and `run_metric` need `runs:read` or `runs:read-all` in the space (for an API key, among its scopes). `chat_session_update` needs `chat:read` in the space, as every `/api/chat` route does; an API key never holds it. `connection_update` carries only the caller's own rows: a session always receives it, an API key needs `integrations:read`. A channel the caller may not receive is dropped from the subscription; the stream is refused with 403 only when none of the requested channels (every channel, when `channels` is omitted) remains.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/SseOrgId"
@@ -4158,7 +4158,7 @@
         "operationId": "streamRun",
         "tags": ["Realtime"],
         "summary": "SSE: single run events",
-        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
+        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=apst_... query parameter. The caller must hold `runs:read` or `runs:read-all` in the space (for an API key, among its scopes); without either the stream is refused with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel the caller may receive. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
         "parameters": [
           {
             "name": "id",
@@ -4218,7 +4218,7 @@
         "operationId": "streamAgentRuns",
         "tags": ["Realtime"],
         "summary": "SSE: agent run changes",
-        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
+        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=apst_... query parameter. The caller must hold `runs:read` or `runs:read-all` in the space (for an API key, among its scopes); without either the stream is refused with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel the caller may receive. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
         "parameters": [
           {
             "name": "packageId",
@@ -13173,7 +13173,7 @@
             "$ref": "#/components/responses/InternalServerError"
           },
           "502": {
-            "description": "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected fewer than `INTEGRATION_REFRESH_MAX_FAILURES` consecutive times; the rejection is counted and the connection is flagged (`410`) once the streak reaches the threshold.",
+            "description": "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` rejections accumulate since it was last (re)connected. Not a streak: only a reconnect resets the count.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -22766,7 +22766,7 @@
             }
           },
           "400": {
-            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
+            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -22883,7 +22883,7 @@
             }
           },
           "400": {
-            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
+            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -23024,7 +23024,7 @@
             }
           },
           "400": {
-            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
+            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -23134,7 +23134,7 @@
             }
           },
           "400": {
-            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding `/api/llm-proxy/<api>/…` route instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
+            "description": "Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -23154,6 +23154,338 @@
           },
           "413": {
             "description": "Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware)."
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded."
+          }
+        }
+      }
+    },
+    "/internal/llm-proxy/openai-completions/v1/chat/completions": {
+      "post": {
+        "operationId": "runLlmProxyOpenaiChatCompletions",
+        "tags": ["Internal"],
+        "summary": "Run inference (openai-completions) — metered by the platform LLM proxy",
+        "description": "Container-to-host only. Auth via Bearer run token. Serves a running platform-origin run whose model is platform-provided: the run's own model is resolved and injected server-side whatever `body.model` names, and each call is metered from the provider's response and attributed to the run. Same request guards and response forwarding as the corresponding `/api/llm-proxy/…` endpoint.",
+        "security": [
+          {
+            "bearerExecToken": []
+          }
+        ],
+        "requestBody": {
+          "description": "The provider payload for this protocol; `model` is ignored.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
+            "headers": {
+              "x-llm-proxy-cache-status": {
+                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["HIT", "MISS"]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`."
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded."
+          }
+        }
+      }
+    },
+    "/internal/llm-proxy/openai-responses/v1/responses": {
+      "post": {
+        "operationId": "runLlmProxyOpenaiResponses",
+        "tags": ["Internal"],
+        "summary": "Run inference (openai-responses) — metered by the platform LLM proxy",
+        "description": "Container-to-host only. Auth via Bearer run token. Serves a running platform-origin run whose model is platform-provided: the run's own model is resolved and injected server-side whatever `body.model` names, and each call is metered from the provider's response and attributed to the run. Same request guards and response forwarding as the corresponding `/api/llm-proxy/…` endpoint.",
+        "security": [
+          {
+            "bearerExecToken": []
+          }
+        ],
+        "requestBody": {
+          "description": "The provider payload for this protocol; `model` is ignored.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
+            "headers": {
+              "x-llm-proxy-cache-status": {
+                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["HIT", "MISS"]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`."
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded."
+          }
+        }
+      }
+    },
+    "/internal/llm-proxy/anthropic-messages/v1/messages": {
+      "post": {
+        "operationId": "runLlmProxyAnthropicMessages",
+        "tags": ["Internal"],
+        "summary": "Run inference (anthropic-messages) — metered by the platform LLM proxy",
+        "description": "Container-to-host only. Auth via Bearer run token. Serves a running platform-origin run whose model is platform-provided: the run's own model is resolved and injected server-side whatever `body.model` names, and each call is metered from the provider's response and attributed to the run. Same request guards and response forwarding as the corresponding `/api/llm-proxy/…` endpoint.",
+        "security": [
+          {
+            "bearerExecToken": []
+          }
+        ],
+        "requestBody": {
+          "description": "The provider payload for this protocol; `model` is ignored.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
+            "headers": {
+              "x-llm-proxy-cache-status": {
+                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["HIT", "MISS"]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`."
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded."
+          }
+        }
+      }
+    },
+    "/internal/llm-proxy/mistral-conversations/v1/chat/completions": {
+      "post": {
+        "operationId": "runLlmProxyMistralChatCompletions",
+        "tags": ["Internal"],
+        "summary": "Run inference (mistral-conversations) — metered by the platform LLM proxy",
+        "description": "Container-to-host only. Auth via Bearer run token. Serves a running platform-origin run whose model is platform-provided: the run's own model is resolved and injected server-side whatever `body.model` names, and each call is metered from the provider's response and attributed to the run. Same request guards and response forwarding as the corresponding `/api/llm-proxy/…` endpoint.",
+        "security": [
+          {
+            "bearerExecToken": []
+          }
+        ],
+        "requestBody": {
+          "description": "The provider payload for this protocol; `model` is ignored.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
+            "headers": {
+              "x-llm-proxy-cache-status": {
+                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["HIT", "MISS"]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`."
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -23588,7 +23920,7 @@
         "name": "channels",
         "in": "query",
         "required": false,
-        "description": "Comma-separated list of SSE channels to subscribe to (`run_update`, `run_log`, `run_metric`, `connection_update`, `chat_session_update`). Omit to receive every channel (default, unchanged behaviour). Unknown names are ignored; if nothing is recognised the stream falls back to every channel. Declaring only the channels you consume avoids fanning the `run_log` firehose out to a stream that discards it.",
+        "description": "Comma-separated list of SSE channels to subscribe to (`run_update`, `run_log`, `run_metric`, `connection_update`, `chat_session_update`). Omit to receive every channel the caller may receive (default). Unknown names are ignored; if nothing is recognised the stream falls back to that same default. Declaring only the channels you consume avoids fanning the `run_log` firehose out to a stream that discards it.",
         "schema": {
           "type": "string",
           "example": "run_update,connection_update"
@@ -26074,7 +26406,8 @@
             "type": "boolean"
           },
           "can_add_connection": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether the caller may create a connection for this integration: holds `integrations:connect`, and either holds `integrations:configure` or the space does not block member connections."
           },
           "candidates": {
             "type": "array",

@@ -96,8 +96,10 @@ export const integrationConnections = pgTable(
     // looking healthy. This counter, gated on `expiresAt < now() - grace`,
     // escalates such a connection to `needsReconnection` so the preflight
     // resolver catches it with an actionable cause instead of every run dying
-    // opaquely at integration boot. Reset to 0 on any successful credential
-    // write (`persistCredentialBundle`).
+    // opaquely at integration boot. Also counts upstream 401s on an auth that
+    // cannot refresh (no expiry gate) — cumulative since the last reconnect,
+    // not consecutive. Reset to 0 on any successful credential write
+    // (`persistCredentialBundle`).
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
     // NOTE — there is deliberately no `last_refresh_failure_at` here, and the
     // same note sits on the `model_provider_credentials` twin. There was one,

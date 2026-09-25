@@ -448,10 +448,10 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
   it("flags needsReconnection + records run metadata + 410 once a non-OAuth auth's forced refreshes reach the threshold", async () => {
     // A forced /refresh only happens after an upstream 401. A non-OAuth
     // (api_key) credential cannot be refreshed; one 401 may be transient, so
-    // the route answers 502 until the streak reaches the threshold, then flags
-    // the connection, stamps the run's degraded_integrations, and returns 410
-    // (the sidecar maps that to "don't retry"). This is the single place a
-    // terminal auth failure is recorded — no separate report endpoint.
+    // the route answers 502 until the rejection count reaches the threshold,
+    // then flags the connection, stamps the run's degraded_integrations, and
+    // returns 410 (the sidecar maps that to "don't retry"). This is the single
+    // place a terminal auth failure is recorded — no separate report endpoint.
     await seedIntegration(INTEGRATION, true);
     await seedConnection(INTEGRATION);
 

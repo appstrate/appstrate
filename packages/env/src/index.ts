@@ -422,7 +422,9 @@ export const envSchema = z
     // it early with an actionable "reconnect" cause instead of every scheduled
     // run dying opaquely at integration boot. The expiry gate prevents a
     // temporary upstream outage on a still-valid token from bricking the
-    // connection — escalation requires the token to be genuinely dead.
+    // connection — escalation requires the token to be genuinely dead. An auth
+    // that cannot refresh counts upstream 401s against the same limit, with no
+    // expiry gate and no reset short of a reconnect (cumulative, not a streak).
     INTEGRATION_REFRESH_MAX_FAILURES: z.coerce.number().int().positive().default(5),
     INTEGRATION_REFRESH_GRACE_SECONDS: z.coerce.number().int().nonnegative().default(3600),
 
