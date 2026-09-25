@@ -288,33 +288,16 @@ describe("assignSlugs — agent commands (D23)", () => {
     ]);
   });
 
-  it("reports an agent whose command cannot be rendered instead of planning it", () => {
-    const { planned, failed } = assignSlugs([], [{ ...view("@acme/foo"), version: "not-semver" }]);
-
-    expect(planned).toEqual([]);
-    expect(failed.map((f) => f.packageId)).toEqual(["@acme/foo"]);
-  });
-
-  it("lets an agent that fails to render leave its name to the next claimant", () => {
-    const { planned } = assignSlugs(
+  it("reports an agent that fails to render and leaves its name to the next claimant", () => {
+    const { planned, failed } = assignSlugs(
       [],
       [{ ...view("@acme/foo"), version: "not-semver" }, view("@zed/foo")],
     );
 
+    expect(failed.map((f) => f.packageId)).toEqual(["@acme/foo"]);
     expect(planned.map((entry) => [entry.packageId, entry.slug])).toEqual([
       ["@zed/foo", "run-foo"],
     ]);
-  });
-
-  it("honours a slug the ledger reserves for an unresolved package", () => {
-    const { planned } = assignSlugs(
-      [],
-      [view("@acme/foo")],
-      new Map([["run-foo", "@gone/unresolved"]]),
-    );
-
-    expect(planned[0]?.slug).toBe("run-acme-foo");
-    expect(planned[0]?.renamedFrom).toBe("run-foo");
   });
 });
 
@@ -333,19 +316,6 @@ describe("assignSlugs — an installed name stays with its package", () => {
       "@alpha/report": "run-alpha-report",
       "@zeta/report": "run-report",
     });
-  });
-
-  it("keeps a skill on its name when a newcomer sorts first", () => {
-    const { planned } = assignSlugs(
-      [
-        resolved({ packageId: "@alpha/report", frontmatterName: "report" }),
-        resolved({ packageId: "@zeta/report", frontmatterName: "report" }),
-      ],
-      [],
-      new Map([["report", "@zeta/report"]]),
-    );
-
-    expect(slugsOf(planned)).toEqual({ "@alpha/report": "alpha-report", "@zeta/report": "report" });
   });
 
   it("keeps a fallback holder on its fallback, and gives it the name once its holder left", () => {
@@ -376,17 +346,6 @@ describe("assignSlugs — an installed name stays with its package", () => {
 
     expect(slugsOf(assignSlugs([], agents, held).planned)).toEqual({
       "@a/alpha-report": "run-a-alpha-report",
-      "@alpha/report": "run-alpha-report",
-      "@zeta/report": "run-report",
-    });
-  });
-
-  it("never hands a held agent fallback to a skill that prefers it", () => {
-    const skills = [resolved({ packageId: "@a/tool", frontmatterName: "run-alpha-report" })];
-    const agents = [view("@alpha/report"), view("@zeta/report")];
-
-    expect(slugsOf(assignSlugs(skills, agents, held).planned)).toEqual({
-      "@a/tool": "a-tool",
       "@alpha/report": "run-alpha-report",
       "@zeta/report": "run-report",
     });

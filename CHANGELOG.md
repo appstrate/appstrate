@@ -9,20 +9,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **`appstrate packages sync` installs the pinned space's agents as Claude Code
-  commands** (#1268). Every agent active in the profile's pinned space becomes
-  `/appstrate:run-<agent>` in the plugin: Claude builds the input from the
-  request, asks for missing required fields, uploads local files, and
-  launches the agent through the plugin's MCP server with `run_and_wait`,
-  whose permission prompt shows the input before the metered run. Each
-  command carries the space's launch contract — which fields are prompted,
-  prefilled or locked, split by `partitionInputFields`, now in
-  `@appstrate/core/input-resolution` and shared with the dashboard's launch
-  form — never a stored value, and pins the agent's version; a republish,
-  lock or schema change rewrites it at the next sync. Needs `agents:run`,
-  `runs:read` (or `runs:read-all`) and `mcp:invoke` in the pinned space —
-  core's `agentCapabilities` reaching `run`, the grant the MCP server exposes
-  `run_and_wait` and `invoke_operation` on; the `runner` role has it. The
-  `codex` and `claude-user` targets get no agent commands. No server change.
+  commands** (#1268). Each agent active in the pinned space becomes
+  `/appstrate:run-<agent>` in the plugin: Claude builds the input from your
+  request, uploads local files and launches the agent with the plugin MCP
+  server's `run_and_wait`, whose permission prompt shows the input first. The
+  command follows the space's prompted / prefilled / locked fields, never
+  writes a stored value, and pins the agent's version. Needs `agents:run`,
+  `runs:read` (or `runs:read-all`) and `mcp:invoke` in that space. Plugin
+  target only; no server change.
 - **The conformance monitor now probes the provider API of seven
   credential-only integrations without a credential** (`auth-reject`, tier
   `mcp`). A 401 alone proves little — most providers answer 401 with or

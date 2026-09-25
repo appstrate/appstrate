@@ -329,12 +329,6 @@ interface SlugAssignment {
   failed: { packageId: string; error: unknown }[];
 }
 
-interface Claimant {
-  packageId: string;
-  preferred: string;
-  prefix: string;
-}
-
 /**
  * Newcomers collide in input order (sorted by package id); every skill before
  * any agent (D23). `incumbents` (slug → wanted package id) are never handed to
@@ -348,25 +342,8 @@ export function assignSlugs(
   incumbents: ReadonlyMap<string, string> = new Map(),
 ): SlugAssignment {
   const nameOf = (packageId: string): string => parseScopedName(packageId)?.name ?? packageId;
-  const failed: SlugAssignment["failed"] = [];
-  const skillClaims = skills.map((skill) => ({
-    skill,
-    packageId: skill.packageId,
-    preferred: skillSlug(skill.frontmatterName, nameOf(skill.packageId)),
-    prefix: "",
-  }));
-  const agentClaims = agents.flatMap((view) => {
-    try {
-      const preferred = agentSlug(nameOf(view.packageId));
-      return [{ view, packageId: view.packageId, preferred, prefix: AGENT_SLUG_PREFIX }];
-    } catch (error) {
-      failed.push({ packageId: view.packageId, error });
-      return [];
-    }
-  });
-
   const taken = new Set<string>();
-  const pick = ({ packageId, preferred, prefix }: Claimant): SlugClaim => {
+  const pick = (packageId: string, preferred: string, prefix: string): SlugClaim => {
     const blocked = new Set(taken);
     let own: string | undefined;
     for (const [slug, holder] of incumbents) {
@@ -379,27 +356,29 @@ export function assignSlugs(
     return slug === preferred ? { slug } : { slug, renamedFrom: preferred };
   };
 
-  const planned: PlannedEntry[] = skillClaims.map((claimant) => {
-    const naming = pick(claimant);
+  const planned: PlannedEntry[] = skills.map((skill) => {
+    const preferred = skillSlug(skill.frontmatterName, nameOf(skill.packageId));
+    const naming = pick(skill.packageId, preferred, "");
     taken.add(naming.slug);
-    return { ...claimant.skill, kind: "skill" as const, ...naming };
+    return { ...skill, kind: "skill" as const, ...naming };
   });
-  for (const claimant of agentClaims) {
-    const { view } = claimant;
+  const failed: SlugAssignment["failed"] = [];
+  for (const view of agents) {
+    const { packageId, version } = view;
     try {
-      const naming = pick(claimant);
+      const naming = pick(packageId, agentSlug(nameOf(packageId)), AGENT_SLUG_PREFIX);
       const files = materializeAgent(naming.slug, view);
       taken.add(naming.slug);
       planned.push({
         kind: "agent",
-        packageId: view.packageId,
-        version: view.version,
+        packageId,
+        version,
         integrity: treeIntegrity(files),
         files,
         ...naming,
       });
     } catch (error) {
-      failed.push({ packageId: view.packageId, error });
+      failed.push({ packageId, error });
     }
   }
   return { planned, failed };

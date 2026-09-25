@@ -643,9 +643,7 @@ function suppliesSkills(space: Space): boolean {
 /** The grant the MCP server itself exposes `run_and_wait` on (D19). */
 function suppliesAgents(space: Space): boolean {
   const has = (permission: string): boolean => space.permissions.includes(permission);
-  return (
-    space.access === "member" && reaches(agentCapabilities(has, has("mcp:invoke")).runLevel, "run")
-  );
+  return reaches(agentCapabilities(has, has("mcp:invoke")).runLevel, "run");
 }
 
 /** Why `suppliesSkills` said no — the half of the answer a user can act on. */

@@ -490,11 +490,7 @@ function agentRoute(
         .filter((agent) => !agent.activeIn || agent.activeIn.includes(spaceId))
         .map((agent) => ({
           id: agent.id,
-          name: agent.id.split("/")[1],
-          display_name: agent.display_name ?? agent.id,
-          description: agent.description ?? "",
           source: agent.source ?? "local",
-          updatedAt: "2026-01-01T00:00:00.000Z",
         })),
       hasMore: false,
     });
@@ -522,33 +518,24 @@ function agentRoute(
     }
     version = versions.at(-1) ?? null;
     description = agent.draft?.description ?? description;
-  } else if (selector === "latest" || (selector !== null && versions.includes(selector))) {
-    // A system agent ships its definition with the platform: any selector resolves to it.
-    version = selector === "latest" ? (versions.at(-1) ?? null) : selector;
-    if (version === null && !system) {
-      return json({ code: "not_found", detail: `Version '${selector}' not found` }, 404);
-    }
+  } else if (selector === "latest") {
+    version = versions.at(-1) ?? null;
+    if (version === null) return json({ code: "not_found", detail: "No published version" }, 404);
   } else {
     return json({ code: "bad_request", message: `Unexpected version selector: ${selector}` }, 400);
   }
   const values = agent.values ?? {};
   const lockedFields = agent.locked_fields ?? [];
   return json({
-    id: agent.id,
     display_name: agent.display_name ?? agent.id,
     description,
-    source: agent.source ?? "local",
-    scope: detail![1],
-    version: version ?? "1.0.0",
-    definition: selector === "draft" ? "draft" : "published",
-    dependencies: { integrations: [] },
+    version,
     input: {
       ...(agent.input ?? { schema: { type: "object", properties: {} } }),
       // A summary read (`agents:run` alone) keeps the lock names, not the values behind them.
       values: fullRead ? values : withoutLockedFields(values, lockedFields),
       locked_fields: lockedFields,
     },
-    active: !agent.activeIn || agent.activeIn.includes(spaceId),
   });
 }
 

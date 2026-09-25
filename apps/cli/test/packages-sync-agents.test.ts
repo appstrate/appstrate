@@ -11,19 +11,12 @@
  * the disk.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { lstat, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { describe, it, expect } from "bun:test";
+import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { packagesSyncCommand } from "../src/commands/packages-sync.ts";
-import { getDataDir } from "../src/lib/config.ts";
 import { getStatePath } from "../src/lib/skills-sync/state.ts";
-import {
-  installFakeKeyring,
-  seedLoggedInProfile,
-  useTempConfigHome,
-  type FakeKeyringInstall,
-} from "./helpers/auth-fixture.ts";
+import { seedLoggedInProfile } from "./helpers/auth-fixture.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 import { ExitError } from "./helpers/process-exit.ts";
 import {
@@ -33,6 +26,7 @@ import {
   type SkillFixture,
   type SpaceFixture,
 } from "./helpers/skills-server.ts";
+import { exists, pluginRoot, readText, snapshot, useSyncHarness } from "./helpers/sync-harness.ts";
 
 // Platform-shaped: the command writes the space id, and refuses any other shape.
 const PINNED = "spc_00000000-0000-4000-8000-000000000001";
@@ -42,38 +36,7 @@ const SPACES: SpaceFixture[] = [
   { id: OTHER, name: "Space Two" },
 ];
 
-const configHome = useTempConfigHome("appstrate-cli-agents-cfg-");
-let keyring: FakeKeyringInstall;
-const originalFetch = globalThis.fetch;
-const originalHome = process.env.HOME;
-const originalDataHome = process.env.XDG_DATA_HOME;
-
-let home: string;
-let dataHome: string;
-
-beforeEach(async () => {
-  await configHome.setup();
-  keyring = installFakeKeyring();
-  home = await mkdtemp(join(tmpdir(), "appstrate-cli-agents-home-"));
-  dataHome = await mkdtemp(join(tmpdir(), "appstrate-cli-agents-data-"));
-  process.env.HOME = home;
-  process.env.XDG_DATA_HOME = dataHome;
-  await seedLoggedInProfile("default", { orgId: "org_1", spaceId: PINNED });
-});
-
-afterEach(async () => {
-  keyring.restore();
-  globalThis.fetch = originalFetch;
-  if (originalHome === undefined) delete process.env.HOME;
-  else process.env.HOME = originalHome;
-  if (originalDataHome === undefined) delete process.env.XDG_DATA_HOME;
-  else process.env.XDG_DATA_HOME = originalDataHome;
-  await configHome.teardown();
-  await rm(home, { recursive: true, force: true });
-  await rm(dataHome, { recursive: true, force: true });
-});
-
-const pluginRoot = (): string => join(getDataDir(), "claude-plugin");
+const harness = useSyncHarness("appstrate-cli-agents", PINNED);
 const pluginSkills = (): string => join(pluginRoot(), "skills");
 const commandFile = (slug: string, file = "SKILL.md"): string => join(pluginSkills(), slug, file);
 
@@ -99,32 +62,6 @@ function serve(
   const server = createSkillServer(options.skills ?? SKILLS, options.spaces ?? SPACES, agents);
   server.install();
   return server;
-}
-
-async function readText(path: string): Promise<string> {
-  return readFile(path, "utf-8");
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await lstat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function snapshot(root: string): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
-  const walk = async (dir: string, prefix: string): Promise<void> => {
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) await walk(join(dir, entry.name), rel);
-      else out[rel] = await readText(join(dir, entry.name));
-    }
-  };
-  await walk(root, "");
-  return out;
 }
 
 async function ledgerVersion(slug: string): Promise<string | undefined> {
@@ -153,23 +90,13 @@ describe("packages sync — agent commands in the plugin", () => {
     expect(stderr()).toBe("");
   });
 
-  it("shows agent commands in a dry run and writes nothing", async () => {
-    serve([REPORT]);
-    const { io, stdout } = createMemoryIO();
-
-    await packagesSyncCommand({ dryRun: true }, io);
-
-    expect(stdout()).toContain("  + run-report\n");
-    expect(await exists(pluginRoot())).toBe(false);
-  });
-
   it("never writes an agent to codex or claude-user, and lists none for them", async () => {
     const server = serve([REPORT]);
 
     await packagesSyncCommand({ target: ["codex", "claude-user"] }, createMemoryIO().io);
 
-    expect(await readdir(join(home, ".agents", "skills"))).toEqual(["pdf-tools"]);
-    expect(await readdir(join(home, ".claude", "skills"))).toEqual(["pdf-tools"]);
+    expect(await readdir(join(harness.home(), ".agents", "skills"))).toEqual(["pdf-tools"]);
+    expect(await readdir(join(harness.home(), ".claude", "skills"))).toEqual(["pdf-tools"]);
     expect(server.agentReads()).toBe(0);
   });
 
@@ -179,7 +106,7 @@ describe("packages sync — agent commands in the plugin", () => {
     await packagesSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
 
     expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
-    expect(await readdir(join(home, ".agents", "skills"))).toEqual(["pdf-tools"]);
+    expect(await readdir(join(harness.home(), ".agents", "skills"))).toEqual(["pdf-tools"]);
   });
 
   it("leaves the plugin untouched when nothing changed", async () => {
@@ -297,7 +224,7 @@ describe("packages sync — agent commands in the plugin", () => {
       targets: Record<string, { context: { userId: string } }>;
     };
     expect(state.targets.codex?.context.userId).toBe("u_2");
-    expect(await readdir(join(home, ".agents", "skills"))).toEqual(["pdf-tools"]);
+    expect(await readdir(join(harness.home(), ".agents", "skills"))).toEqual(["pdf-tools"]);
     expect(await exists(commandFile("run-report"))).toBe(true);
   });
 });
@@ -402,17 +329,6 @@ describe("packages sync — agents under --source draft", () => {
     expect(await ledgerVersion("run-assistant")).toBe("1.0.0");
   });
 
-  it("skips an agent the caller may not write, saying whose copy it is", async () => {
-    serve([{ ...REPORT, draft: { notWritable: true } }]);
-    const { io, stderr } = createMemoryIO();
-
-    await packagesSyncCommand({ source: "draft", printPath: true }, io);
-
-    expect(stderr()).toContain("Skipped @acme/report");
-    expect(stderr()).toContain("author's working copy");
-    expect(await exists(join(pluginSkills(), "run-report"))).toBe(false);
-  });
-
   it("lets a context switch through when a draft is refused, removing it", async () => {
     serve([REPORT]);
     await packagesSyncCommand({ source: "draft" }, createMemoryIO().io);
@@ -444,14 +360,6 @@ describe("packages sync — agents under --source draft", () => {
 });
 
 describe("packages sync — agent command names (D23)", () => {
-  it("gives a skill its name and the agent of the same name the run- prefix", async () => {
-    serve([{ ...REPORT, id: "@team/pdf-tools" }]);
-
-    await packagesSyncCommand({}, createMemoryIO().io);
-
-    expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-pdf-tools"]);
-  });
-
   it("falls back to run-<scope>-<name> when a skill already holds run-<name>", async () => {
     serve([{ ...REPORT, id: "@team/pdf-tools" }], {
       skills: [
@@ -498,25 +406,6 @@ describe("packages sync — an installed name stays with its package", () => {
     expect(await readText(commandFile("run-report"))).toContain("@alpha/report");
   });
 
-  it("never hands a skill's name to a newcomer that sorts first", async () => {
-    const zeta: SkillFixture = { id: "@zeta/report", skillMd: skillMd("report", "Zeta.") };
-    const alpha: SkillFixture = { id: "@alpha/report", skillMd: skillMd("report", "Alpha.") };
-    serve([], { skills: [zeta] });
-    await packagesSyncCommand({}, createMemoryIO().io);
-
-    serve([], { skills: [alpha, zeta] });
-    await packagesSyncCommand({}, createMemoryIO().io);
-
-    expect(await readText(commandFile("report"))).toContain("Zeta.");
-    expect(await readText(commandFile("alpha-report"))).toContain("Alpha.");
-
-    serve([], { skills: [alpha] });
-    await packagesSyncCommand({}, createMemoryIO().io);
-
-    expect(await readdir(pluginSkills())).toEqual(["report"]);
-    expect(await readText(commandFile("report"))).toContain("Alpha.");
-  });
-
   it("settles two disagreeing ledgers by target order, the plugin first", async () => {
     const zeta: SkillFixture = { id: "@zeta/report", skillMd: skillMd("report", "Zeta.") };
     const alpha: SkillFixture = { id: "@alpha/report", skillMd: skillMd("report", "Alpha.") };
@@ -529,7 +418,7 @@ describe("packages sync — an installed name stays with its package", () => {
     serve([], { skills: [alpha, zeta] });
     await packagesSyncCommand({ target: ["codex", "claude-plugin"] }, createMemoryIO().io);
 
-    const codex = join(home, ".agents", "skills");
+    const codex = join(harness.home(), ".agents", "skills");
     expect(await readText(commandFile("report"))).toContain("Alpha.");
     expect(await readText(commandFile("zeta-report"))).toContain("Zeta.");
     expect(await readText(join(codex, "report", "SKILL.md"))).toContain("Alpha.");

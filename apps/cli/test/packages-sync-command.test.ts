@@ -15,70 +15,21 @@
  * separates a directory this sync created from one the user wrote by hand.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { describe, it, expect } from "bun:test";
+import { lstat, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { packagesSyncCommand } from "../src/commands/packages-sync.ts";
 import { getDataDir } from "../src/lib/config.ts";
-import { getStatePath, readSyncState } from "../src/lib/skills-sync/state.ts";
-import {
-  installFakeKeyring,
-  seedLoggedInProfile,
-  useTempConfigHome,
-  type FakeKeyringInstall,
-} from "./helpers/auth-fixture.ts";
+import { getStatePath, readSyncState, STATE_VERSION } from "../src/lib/skills-sync/state.ts";
+import { seedLoggedInProfile } from "./helpers/auth-fixture.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 import { ExitError } from "./helpers/process-exit.ts";
 import { createSkillServer, skillMd, type SkillFixture } from "./helpers/skills-server.ts";
+import { exists, pluginRoot, readText, snapshot, useSyncHarness } from "./helpers/sync-harness.ts";
 
-const configHome = useTempConfigHome("appstrate-cli-skills-cfg-");
-let keyring: FakeKeyringInstall;
-const originalFetch = globalThis.fetch;
-const originalHome = process.env.HOME;
-const originalDataHome = process.env.XDG_DATA_HOME;
-
-let home: string;
-let dataHome: string;
-
-beforeEach(async () => {
-  await configHome.setup();
-  keyring = installFakeKeyring();
-  home = await mkdtemp(join(tmpdir(), "appstrate-cli-skills-home-"));
-  dataHome = await mkdtemp(join(tmpdir(), "appstrate-cli-skills-data-"));
-  process.env.HOME = home;
-  process.env.XDG_DATA_HOME = dataHome;
-  await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1" });
-});
-
-afterEach(async () => {
-  keyring.restore();
-  globalThis.fetch = originalFetch;
-  if (originalHome === undefined) delete process.env.HOME;
-  else process.env.HOME = originalHome;
-  if (originalDataHome === undefined) delete process.env.XDG_DATA_HOME;
-  else process.env.XDG_DATA_HOME = originalDataHome;
-  await configHome.teardown();
-  await rm(home, { recursive: true, force: true });
-  await rm(dataHome, { recursive: true, force: true });
-});
-
-const pluginRoot = (): string => join(getDataDir(), "claude-plugin");
-const codexRoot = (): string => join(home, ".agents", "skills");
-
-async function readText(path: string): Promise<string> {
-  return readFile(path, "utf-8");
-}
-
-/** Files and directories alike — `readdir` alone would say "no" to a file. */
-async function exists(path: string): Promise<boolean> {
-  try {
-    await lstat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
+const harness = useSyncHarness("appstrate-cli-skills", "spc_1");
+const codexRoot = (): string => join(harness.home(), ".agents", "skills");
 
 const ONE_SKILL: SkillFixture[] = [
   { id: "@acme/pdf-tools", skillMd: skillMd("PDF Tools", "Work with PDFs.") },
@@ -294,9 +245,9 @@ describe("packages sync — --print-path", () => {
 
 describe("packages sync — shared targets", () => {
   it("leaves client MCP configurations untouched for codex and claude-user", async () => {
-    const codexConfig = join(home, ".codex", "config.toml");
-    const claudeConfig = join(home, ".claude.json");
-    await mkdir(join(home, ".codex"), { recursive: true });
+    const codexConfig = join(harness.home(), ".codex", "config.toml");
+    const claudeConfig = join(harness.home(), ".claude.json");
+    await mkdir(join(harness.home(), ".codex"), { recursive: true });
     await writeFile(codexConfig, '[mcp_servers.personal]\nurl = "https://mcp.example.com"\n');
     await writeFile(claudeConfig, '{"mcpServers":{"personal":{"url":"https://mcp.example.com"}}}');
     const before = [await readText(codexConfig), await readText(claudeConfig)];
@@ -306,7 +257,7 @@ describe("packages sync — shared targets", () => {
 
     expect([await readText(codexConfig), await readText(claudeConfig)]).toEqual(before);
     expect(await readdir(codexRoot())).toEqual(["pdf-tools"]);
-    expect(await readdir(join(home, ".claude", "skills"))).toEqual(["pdf-tools"]);
+    expect(await readdir(join(harness.home(), ".claude", "skills"))).toEqual(["pdf-tools"]);
     expect(await exists(pluginRoot())).toBe(false);
   });
   it("writes into ~/.agents/skills and leaves a foreign directory alone", async () => {
@@ -431,23 +382,34 @@ describe("packages sync — guards and dry run", () => {
   });
 
   // A managed key is a directory name, a removal path and a frontmatter `name`.
-  for (const slug of ["../../escape", "x\ny: z"]) {
-    it(`claims nothing from a ledger whose key is ${JSON.stringify(slug)}`, async () => {
-      createSkillServer(ONE_SKILL).install();
-      await packagesSyncCommand({}, createMemoryIO().io);
-      const raw = JSON.parse(await readText(getStatePath())) as {
-        targets: Record<string, { managed: Record<string, unknown> }>;
-      };
-      const managed = raw.targets["claude-plugin"]!.managed;
-      managed[slug] = managed["pdf-tools"];
-      await writeFile(getStatePath(), JSON.stringify(raw));
+  it("claims nothing from a ledger whose key is not a skill name", async () => {
+    const entry = { packageId: "@acme/pdf-tools", version: "1.0.0", integrity: "sha256-x" };
+    const context = {
+      profileName: "default",
+      instance: "https://x",
+      userId: "u_1",
+      orgId: "org_1",
+    };
+    const writeLedger = async (slugs: string[]): Promise<void> => {
+      const managed = Object.fromEntries(slugs.map((slug) => [slug, entry]));
+      const target = { context, source: "published", root: pluginRoot(), managed };
+      await mkdir(join(getDataDir(), "skills-sync"), { recursive: true });
+      await writeFile(
+        getStatePath(),
+        JSON.stringify({ version: STATE_VERSION, targets: { "claude-plugin": target } }),
+      );
+    };
+    await writeLedger(["pdf-tools"]);
+    expect((await readSyncState()).corrupt).toBe(false);
 
+    for (const slug of ["../../escape", "x\ny: z"]) {
+      await writeLedger(["pdf-tools", slug]);
       expect(await readSyncState()).toEqual({
-        state: { version: expect.any(Number), targets: {} },
+        state: { version: STATE_VERSION, targets: {} },
         corrupt: true,
       });
-    });
-  }
+    }
+  });
 });
 
 describe("packages sync — unmanaged destinations", () => {
@@ -1236,22 +1198,6 @@ describe("packages sync — request concurrency", () => {
     expect(server.peakInFlight()).toBe(8);
   });
 });
-
-/** Recursive path → text snapshot, for the determinism assertion. */
-async function snapshot(root: string): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
-  const walk = async (dir: string, prefix: string): Promise<void> => {
-    for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a, b) =>
-      a.name.localeCompare(b.name),
-    )) {
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) await walk(join(dir, entry.name), rel);
-      else out[rel] = await readText(join(dir, entry.name));
-    }
-  };
-  await walk(root, "");
-  return out;
-}
 
 /** The caller's standing in a space, as `GET /api/spaces` reports it — a
  * space listed without it is one this profile may only ask to join, and can
