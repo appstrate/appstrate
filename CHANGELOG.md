@@ -76,18 +76,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Operator-visible log and error text changed** (#1571) — update any alert
   or grep keyed on the old wording:
   - the error log `Sidecar exited before run completed` and the debug log
-    `Sidecar exit watcher errored` are gone: the run launcher reports the
-    sidecar's exit code and log tail (`Sidecar exited while the run was in
-progress`);
-  - the internal credentials-refresh `502` now reads `N/M upstream rejections
-since the connection was last (re)connected before it is flagged` (was
-    `N/M consecutive rejections before the connection is flagged`) — the count
-    was never a streak;
-  - the server `warn` `Stored generation settings refused by the model, dropped
-for this scheduled run` now ends `dropped for this run`, and also covers
-    space defaults;
-  - `failed to append dropped-integration run log` is now `failed to append
-drop marker run log`.
+    `Sidecar exit watcher errored` are gone. An agent run's launcher reports
+    the sidecar's exit code and log tail as
+    `Sidecar exited while the run was in progress`; a connect run whose sidecar
+    dies before printing a result logs
+    `connect-run: sidecar exited without emitting a result` with `connectId`,
+    `exitCode` and the last 30 log lines, and its error now names the exit
+    code (`connect-run: sidecar exited with code N without emitting a result`);
+  - the internal credentials-refresh `502` now reads
+    `N/M upstream rejections since the connection was last (re)connected before it is flagged`
+    (was `N/M consecutive rejections before the connection is flagged`) — the
+    count was never a streak;
+  - the server `warn`
+    `Stored generation settings refused by the model, dropped for this scheduled run`
+    now ends `dropped for this run`, and also covers space defaults;
+  - `failed to append dropped-integration run log` is now
+    `failed to append drop marker run log`.
 
 - **BREAKING (operators): runs on a platform-provided model are served through
   the platform's metered LLM proxy, like chat.** A run whose model is a

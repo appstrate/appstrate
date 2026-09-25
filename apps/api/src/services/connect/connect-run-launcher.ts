@@ -76,6 +76,9 @@ import type { CredentialBundle } from "./strategy.ts";
 const RESULT_SENTINEL = "APPSTRATE_CONNECT_RESULT:";
 const ERROR_SENTINEL = "APPSTRATE_CONNECT_ERROR:";
 
+/** Log lines kept for the operator when the sidecar dies without a sentinel. */
+const CRASH_TAIL_LINES = 30;
+
 /** Cap on the integration-authored diagnostic we echo back to the caller. */
 const MAX_DIAGNOSTIC_CHARS = 300;
 
@@ -523,7 +526,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
         connectResultKey: resultKey.toString("base64"),
       });
 
-      const bundle = await this.captureBundle(orch, sidecar, resultKey);
+      const bundle = await this.captureBundle(orch, sidecar, resultKey, connectId);
       logger.info("connect-run completed", {
         connectId,
         integrationId: execution.integrationId,
@@ -570,6 +573,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     orch: RunOrchestrator,
     sidecar: WorkloadHandle,
     resultKey: Buffer,
+    connectId: string,
   ): Promise<CredentialBundle> {
     await orch.startWorkload(sidecar);
 
@@ -594,7 +598,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     }, this.timeoutMs);
 
     try {
-      await orch.waitForExit(sidecar);
+      const exitCode = await orch.waitForExit(sidecar);
       // Drain remaining buffered log lines before parsing.
       logAbort.abort();
       await logStream;
@@ -611,6 +615,19 @@ class ConnectRunExecutor implements ConnectToolExecutor {
           title: "Gateway Timeout",
           detail: `The connection attempt timed out after ${this.timeoutMs}ms — the login did not complete in time. Please try again.`,
         });
+      }
+      // No sentinel = the sidecar died before reporting (OOM, boot failure).
+      // Only then is the tail logged: no line carries the result ciphertext.
+      if (!lines.some((l) => l.includes(RESULT_SENTINEL) || l.includes(ERROR_SENTINEL))) {
+        logger.error("connect-run: sidecar exited without emitting a result", {
+          connectId,
+          exitCode,
+          tail: lines.slice(-CRASH_TAIL_LINES).join("\n"),
+        });
+        // Operator-facing only: the routes log it and answer a generic 500.
+        throw new Error(
+          `connect-run: sidecar exited with code ${exitCode} without emitting a result`,
+        );
       }
       // Parse regardless of exit code: on a non-zero exit the sidecar emits
       // the ERROR sentinel before exiting 1, which carries the real cause.

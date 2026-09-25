@@ -17,9 +17,10 @@
  *     even on error.
  */
 
-import { describe, it, expect, beforeAll } from "bun:test";
+import { describe, it, expect, beforeAll, spyOn } from "bun:test";
 import { createCipheriv, randomBytes } from "node:crypto";
 import { ApiError } from "../../../src/lib/errors.ts";
+import { logger } from "../../../src/lib/logger.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
 import {
   registerOrchestrator,
@@ -571,6 +572,83 @@ describe("createConnectRunExecutor.run", () => {
     await expect(executor.run(execution())).rejects.toThrow(/upstream rejected the secret/);
     expect(calls.removedWorkloads).toBe(1);
     expect(calls.removedBoundaries).toBe(1);
+  });
+
+  // ─── sidecar crash with no sentinel ───
+  // The operator's only trace of an OOM / boot failure: exit code + log tail.
+  // Logged ONLY when no sentinel line exists, so the result ciphertext never
+  // reaches the logs.
+
+  const CRASH_LOG = "connect-run: sidecar exited without emitting a result";
+
+  it("logs the exit code and log tail when the sidecar dies without a sentinel", async () => {
+    const logs = Array.from({ length: 40 }, (_, i) => `boot line ${i}`);
+    const { orch, calls } = mockOrchestrator({ stdoutLines: logs, exitCode: 137 });
+    const executor = createConnectRunExecutor({
+      orchestrator: orch,
+      resolveMcpServer: fakeMcpResolver,
+    });
+    const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const err = (await executor.run(execution()).then(
+        () => null,
+        (e: unknown) => e,
+      )) as Error | null;
+      // Plain Error: the routes log it and answer a generic 500.
+      expect(err).not.toBeInstanceOf(ApiError);
+      expect(err!.message).toBe(
+        "connect-run: sidecar exited with code 137 without emitting a result",
+      );
+      const call = errorSpy.mock.calls.find(([msg]) => msg === CRASH_LOG);
+      expect(call?.[1]).toEqual({
+        connectId: calls.createdBoundaries[0]!,
+        exitCode: 137,
+        tail: logs.slice(-30).join("\n"),
+      });
+      expect(calls.removedWorkloads).toBe(1);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("never logs the tail when a result sentinel was emitted, even an undecryptable one", async () => {
+    // A result line that fails to parse still carries ciphertext: the crash
+    // log (which dumps the tail) must not fire.
+    const { orch } = mockOrchestrator({
+      stdoutLines: ["boot", "APPSTRATE_CONNECT_RESULT:garbage"],
+      exitCode: 1,
+    });
+    const executor = createConnectRunExecutor({
+      orchestrator: orch,
+      resolveMcpServer: fakeMcpResolver,
+    });
+    const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      await expect(executor.run(execution())).rejects.toThrow(/could not be decrypted/);
+      expect(errorSpy.mock.calls.find(([msg]) => msg === CRASH_LOG)).toBeUndefined();
+      expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("APPSTRATE_CONNECT_RESULT");
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("does not log a crash on the success path", async () => {
+    const { orch } = mockOrchestrator({
+      stdoutLines: ["boot"],
+      resultBundle: { outputs: { session_token: "sess-1" }, expiresAt: null },
+      exitCode: 0,
+    });
+    const executor = createConnectRunExecutor({
+      orchestrator: orch,
+      resolveMcpServer: fakeMcpResolver,
+    });
+    const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      await executor.run(execution());
+      expect(errorSpy.mock.calls.find(([msg]) => msg === CRASH_LOG)).toBeUndefined();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("throws on timeout and tears down", async () => {
