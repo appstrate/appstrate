@@ -7,6 +7,7 @@ import { join } from "node:path";
 import type { PiModelConfig } from "@appstrate/runner-pi";
 import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import { createApp, type AppDeps } from "../sidecar/app.ts";
+import type { OAuthTokenCache } from "../sidecar/oauth-token-cache.ts";
 import { createRuntimePiRunner } from "../pi-runner.ts";
 import { codexPlaceholderJwt } from "./helpers/container-e2e.ts";
 import {
@@ -64,7 +65,7 @@ describe("runtime-pi sidecar transport wiring", () => {
           input instanceof Request
             ? new URL(input.url)
             : new URL(typeof input === "string" ? input : input.href);
-        // The sidecar's key-outcome report to the platform shares this fetch.
+        // Only the LLM upstream is under test; any platform call is acknowledged.
         if (url.pathname.startsWith("/internal/")) return new Response(null, { status: 204 });
         upstreamRequests.push({
           method: init?.method ?? (input instanceof Request ? input.method : "GET"),
@@ -79,14 +80,18 @@ describe("runtime-pi sidecar transport wiring", () => {
           sidecarAuthToken: SIDECAR_AUTH_TOKEN,
           proxyUrl: "",
           llm: {
-            authMode: "api_key",
+            authMode: "oauth",
             baseUrl: "https://upstream.example",
-            apiKey: "real-key",
-            placeholder: TEST_JWT,
+            credentialId: "cred_test",
           },
         },
         cookieJar: new Map(),
         fetchFn,
+        oauthTokenCache: {
+          getToken: async () => ({ accessToken: "oat-real", expiresAt: null }),
+          invalidate: () => {},
+          forceRefresh: async () => ({ accessToken: "oat-real", expiresAt: null }),
+        } as unknown as OAuthTokenCache,
       };
       const app = createApp(deps);
       server = Bun.serve({

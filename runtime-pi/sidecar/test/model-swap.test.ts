@@ -110,14 +110,11 @@ describe("parseModelSwapEnv", () => {
     ).toThrow(/"backingApiShape"/);
   });
 
-  it("rejects a known but non-aliasable protocol (url-model)", () => {
+  it("rejects a vendor protocol as the CLIENT dialect, at boot", () => {
     // Every call would be refused anyway — say so at boot instead.
     expect(() =>
-      parseModelSwapEnv(JSON.stringify({ ...wellFormed, clientApiShape: "google-generative-ai" })),
+      parseModelSwapEnv(JSON.stringify({ ...wellFormed, clientApiShape: "openai-completions" })),
     ).toThrow(/"clientApiShape"/);
-    expect(() =>
-      parseModelSwapEnv(JSON.stringify({ ...wellFormed, backingApiShape: "google-generative-ai" })),
-    ).toThrow(/"backingApiShape"/);
   });
 
   it("rejects the client dialect as a BACKING, at boot", () => {
@@ -203,7 +200,7 @@ describe("parseModelSwapEnv", () => {
   it("never names the backing model in any message", () => {
     const cases = [
       JSON.stringify({ alias: "appstrate-medium", real: "deepseek-chat" }),
-      JSON.stringify({ ...wellFormed, clientApiShape: "google-generative-ai" }),
+      JSON.stringify({ ...wellFormed, clientApiShape: "openai-completions" }),
       `{"real":"deepseek-chat",`,
     ];
     for (const raw of cases) {

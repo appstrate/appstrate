@@ -4,8 +4,9 @@
  * Coverage for the sidecar's first-party HTTP routes:
  *
  *   - `GET  /health`     — readiness probe.
- *   - `ALL  /llm/*`      — placeholder-substituting LLM reverse proxy
- *                          consumed by the in-container Pi SDK over HTTP.
+ *   - `ALL  /llm/*`      — LLM reverse proxy consumed by the in-container
+ *                          Pi SDK over HTTP (platform mode here; the
+ *                          platform-specific surface is in `platform-llm.test.ts`).
  *
  * `/mcp` (mounted by `mountMcp`) is exercised in `mcp.test.ts`.
  * Credential-proxy invariants (cred fetch, allowlist matching, 401
@@ -148,16 +149,17 @@ describe("GET /integrations/boot-report", () => {
 // `${MODEL_BASE_URL}/v1/chat/completions` (or equivalent). The platform
 // wires `MODEL_BASE_URL = http://sidecar:8080/llm` (Docker mode) or
 // `http://localhost:<port>/llm` (process orchestrator). The sidecar
-// owns the real LLM API key and substitutes a per-run placeholder
-// embedded in the SDK-generated headers, then streams the upstream
-// response back to the agent.
+// forwards to the platform's LLM proxy under the run token, then streams
+// the upstream response back to the agent.
 
 const LLM_CONFIG: LlmProxyConfig = {
-  authMode: "api_key",
+  authMode: "platform",
+  apiShape: "anthropic-messages",
   baseUrl: "https://api.anthropic.com",
-  apiKey: "real-sk-ant-key",
-  placeholder: "sk-placeholder",
 };
+
+/** Where `LLM_CONFIG`'s inference call lands (`makeDeps`' platform URL). */
+const PROXY_INFERENCE_URL = "http://mock:3000/internal/llm-proxy/anthropic-messages/v1/messages";
 
 /** The envelope every `/llm/*` refusal the sidecar answers itself carries. */
 type LlmErrorBody = { type: string; error: { type: string; message: string } };
@@ -169,23 +171,6 @@ describe("ALL /llm/* — SSRF protection", () => {
       authMode: "oauth",
       baseUrl: "http://169.254.169.254/metadata",
       credentialId: "cred_blocked",
-    };
-    const app = createTestApp(deps);
-    const res = await app.request("/llm/v1/messages", { method: "POST" });
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as LlmErrorBody;
-    expect(body.type).toBe("error");
-    expect(body.error.type).toBe("permission_error");
-    expect(body.error.message).toContain("blocked network range");
-  });
-
-  it("returns 403 when api_key baseUrl targets a blocked network range", async () => {
-    const deps = makeDeps();
-    deps.config.llm = {
-      authMode: "api_key",
-      baseUrl: "http://169.254.169.254/metadata",
-      apiKey: "real-sk",
-      placeholder: "sk-placeholder",
     };
     const app = createTestApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
@@ -244,7 +229,7 @@ describe("ALL /llm/* — basic routing", () => {
     });
     expect(res.status).toBe(200);
     const url = fetchFn.mock.calls[0]![0];
-    expect(url).toBe("https://api.anthropic.com/v1/messages?stream=true");
+    expect(url).toBe(`${PROXY_INFERENCE_URL}?stream=true`);
   });
 
   it("returns 502 with hostname hint when upstream fetch fails", async () => {
@@ -258,7 +243,7 @@ describe("ALL /llm/* — basic routing", () => {
     expect(res.status).toBe(502);
     const body = (await res.json()) as LlmErrorBody;
     expect(body.type).toBe("error");
-    expect(body.error.message).toContain("api.anthropic.com");
+    expect(body.error.message).toContain("(mock)");
   });
 
   it("forwards upstream error status transparently", async () => {
@@ -274,67 +259,6 @@ describe("ALL /llm/* — basic routing", () => {
     const app = createTestApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(429);
-  });
-});
-
-describe("ALL /llm/* — placeholder replacement", () => {
-  it("replaces placeholder in x-api-key header", async () => {
-    const fetchFn = mock(
-      async (_url: string, _init?: RequestInit) => new Response("ok", { status: 200 }),
-    );
-    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    deps.config.llm = LLM_CONFIG;
-    const app = createTestApp(deps);
-    await app.request("/llm/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": "sk-placeholder" },
-    });
-    const opts = fetchFn.mock.calls[0]![1]!;
-    const headers = Object.fromEntries(new Headers(opts.headers));
-    expect(headers["x-api-key"]).toBe("real-sk-ant-key");
-  });
-
-  it("replaces placeholder embedded in Authorization Bearer header", async () => {
-    const fetchFn = mock(
-      async (_url: string, _init?: RequestInit) => new Response("ok", { status: 200 }),
-    );
-    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    deps.config.llm = {
-      authMode: "api_key",
-      baseUrl: "https://api.anthropic.com",
-      apiKey: "sk-ant-oat01-real-token",
-      placeholder: "sk-ant-oat01-placeholder",
-    };
-    const app = createTestApp(deps);
-    await app.request("/llm/v1/messages", {
-      method: "POST",
-      headers: { Authorization: "Bearer sk-ant-oat01-placeholder" },
-    });
-    const opts = fetchFn.mock.calls[0]![1]!;
-    const headers = Object.fromEntries(new Headers(opts.headers));
-    expect(headers["authorization"]).toBe("Bearer sk-ant-oat01-real-token");
-  });
-
-  it("preserves headers that do not contain the placeholder", async () => {
-    const fetchFn = mock(
-      async (_url: string, _init?: RequestInit) => new Response("ok", { status: 200 }),
-    );
-    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    deps.config.llm = LLM_CONFIG;
-    const app = createTestApp(deps);
-    await app.request("/llm/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": "sk-placeholder",
-        "Content-Type": "application/json",
-        "X-Custom": "untouched",
-      },
-    });
-    const opts = fetchFn.mock.calls[0]![1]!;
-    const headers = Object.fromEntries(new Headers(opts.headers));
-    expect(headers["x-api-key"]).toBe("real-sk-ant-key");
-    expect(headers["content-type"]).toBe("application/json");
-    expect(headers["x-custom"]).toBe("untouched");
   });
 });
 
@@ -373,12 +297,12 @@ describe("ALL /llm/* — shared forwarding policy", () => {
     return forwarded!;
   }
 
-  it("api_key: forwards the SDK's headers, swaps only the placeholder credential", async () => {
+  it("platform: forwards the SDK's headers under the run token", async () => {
     const headers = await forwardedBy(LLM_CONFIG);
     for (const name of KEPT) expect(headers.get(name)).not.toBeNull();
     for (const name of DROPPED) expect(headers.get(name)).toBeNull();
-    expect(headers.get("x-api-key")).toBe("real-sk-ant-key");
-    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("authorization")).toBe("Bearer tok");
+    expect(headers.get("x-api-key")).toBeNull();
   });
 
   it("oauth: forwards the SDK's headers under the real bearer", async () => {
@@ -470,7 +394,7 @@ describe("ALL /llm/* — telemetry", () => {
       const payload = observed?.[1] as Record<string, unknown> | undefined;
       expect(payload).toMatchObject({
         status: 200,
-        authMode: "api_key",
+        authMode: "platform",
         bytes: chunks.reduce((n, c) => n + new TextEncoder().encode(c).byteLength, 0),
         chunks: 2,
       });
@@ -483,7 +407,7 @@ describe("ALL /llm/* — telemetry", () => {
       expect(payload?.maxIdleMs).toBeGreaterThanOrEqual(0);
       // `totalMs` is monotonically >= ttfbMs.
       expect(payload?.totalMs).toBeGreaterThanOrEqual(payload?.ttfbMs as number);
-      expect(payload?.targetUrl).toBe("https://api.anthropic.com/v1/messages");
+      expect(payload?.targetUrl).toBe(PROXY_INFERENCE_URL);
     } finally {
       infoSpy.mockRestore();
     }
@@ -519,7 +443,7 @@ describe("ALL /llm/* — telemetry", () => {
       const cancelled = warnSpy.mock.calls.find(([msg]) => msg === "llm.stream.cancelled");
       expect(cancelled).toBeDefined();
       const payload = cancelled?.[1] as Record<string, unknown> | undefined;
-      expect(payload).toMatchObject({ status: 200, authMode: "api_key" });
+      expect(payload).toMatchObject({ status: 200, authMode: "platform" });
       expect(String(payload?.reason)).toContain("test-abort");
     } finally {
       warnSpy.mockRestore();
@@ -530,10 +454,10 @@ describe("ALL /llm/* — telemetry", () => {
   //
   // `passUpstream` bounds how long the UPSTREAM may stay silent between two
   // chunks (`LLM_STREAM_IDLE_TIMEOUT_MS`, 120 s in production; injected here as
-  // a few ms via `deps.llmStreamIdleTimeoutMs`). Four of the ten api shapes
-  // this platform maps ignore pi-ai's own `timeoutMs`, so a stalled
-  // Gemini/Vertex/Bedrock stream had no bound below the 30 min absolute cap and
-  // runs died on their wall-clock watchdog with nothing to show the user.
+  // a few ms via `deps.llmStreamIdleTimeoutMs`). Not every api shape this
+  // platform maps honours pi-ai's own `timeoutMs`, so a stalled stream had no
+  // bound below the 30 min absolute cap and runs died on their wall-clock
+  // watchdog with nothing to show the user.
   //
   // The subtlety these tests pin: the wrapper is `pull`-based, so a timeout
   // must be armed against the PENDING `reader.read()` and cleared when it
@@ -577,7 +501,7 @@ describe("ALL /llm/* — telemetry", () => {
       const idle = warnSpy.mock.calls.find(([msg]) => msg === "llm.stream.idle_timeout");
       expect(idle).toBeDefined();
       const payload = idle?.[1] as Record<string, unknown> | undefined;
-      expect(payload).toMatchObject({ status: 200, authMode: "api_key", idleTimeoutMs: 25 });
+      expect(payload).toMatchObject({ status: 200, authMode: "platform", idleTimeoutMs: 25 });
       // Telemetry still describes what DID arrive before the stall.
       expect(payload?.chunks).toBe(1);
     } finally {

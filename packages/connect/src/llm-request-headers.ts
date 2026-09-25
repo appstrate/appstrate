@@ -26,11 +26,13 @@
 
 import { HOP_BY_HOP_HEADERS } from "./proxy-primitives.ts";
 
-/** The auth slots pi-ai's SDKs write the provider key into. */
-const CREDENTIAL_SLOTS = new Set(["authorization", "x-api-key", "x-goog-api-key", "api-key"]);
-
 const DROPPED = new Set([
   ...HOP_BY_HOP_HEADERS,
+  // The auth slots pi-ai's SDKs write a provider key into.
+  "authorization",
+  "x-api-key",
+  "x-goog-api-key",
+  "api-key",
   "host",
   "content-length",
   "accept-encoding",
@@ -67,29 +69,12 @@ const DROPPED_PREFIXES = [
   "x-auth-request-",
 ];
 
-/** A placeholder the caller's SDK put in its auth slot, and the real key it stands for. */
-export interface CredentialPlaceholder {
-  placeholder: string;
-  secret: string;
-}
-
-/**
- * The headers to send upstream. With `credential`, the auth slot carrying its
- * placeholder is kept with the secret swapped in (the sidecar's api-key mode);
- * every other inbound credential is dropped.
- */
-export function forwardedLlmRequestHeaders(
-  incoming: Headers | Record<string, string>,
-  credential?: CredentialPlaceholder,
-): Headers {
+/** The headers to send upstream; the caller sets its own upstream auth on the result. */
+export function forwardedLlmRequestHeaders(incoming: Headers | Record<string, string>): Headers {
   const out = new Headers();
   new Headers(incoming).forEach((value, name) => {
     if (DROPPED.has(name) || DROPPED_PREFIXES.some((prefix) => name.startsWith(prefix))) return;
-    if (!CREDENTIAL_SLOTS.has(name)) {
-      out.set(name, value);
-    } else if (credential && value.includes(credential.placeholder)) {
-      out.set(name, value.replace(credential.placeholder, credential.secret));
-    }
+    out.set(name, value);
   });
   return out;
 }

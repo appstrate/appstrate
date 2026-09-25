@@ -74,7 +74,6 @@ const ENV_KEY_BY_PROVIDER: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
   mistral: "MISTRAL_API_KEY",
-  google: "GOOGLE_API_KEY",
 };
 
 export class ModelResolutionError extends Error {
@@ -155,7 +154,7 @@ export function resolveModel(flags: ModelFlags): ResolvedModel {
  * "apiKey" — pi-ai sends it as `Authorization: Bearer …`.
  *
  * Only protocol families wired on `/api/llm-proxy/*` today are accepted;
- * picking an unsupported preset (e.g. `google-generative-ai`) fails fast
+ * picking an unsupported preset (e.g. `openai-codex-responses`) fails fast
  * with an actionable message so the user can switch preset or mode
  * before any LLM call goes out.
  */

@@ -11,8 +11,8 @@
 import type { ModelApiShape, ModelSwap } from "./sidecar-types.ts";
 
 /**
- * The protocols an alias can be BACKED by. Only these carry the model id in the
- * request BODY; url-model shapes cannot back an alias.
+ * The protocols an alias can be BACKED by: every vendor protocol, each carrying
+ * the model id in the request BODY. `pi-messages` is the client dialect only.
  */
 const ALIAS_BACKING_SHAPES = [
   "anthropic-messages",
@@ -59,7 +59,7 @@ export function isAliasInferenceCall(method: string, path: string): boolean {
  * Reason an aliased model fails its configuration invariants, or `null`:
  *   - `missing_label` — a derived label names the real backing, leaking it on
  *     `/api/models` and `run.model_label`.
- *   - `non_aliasable_shape` — model id in the URL, or the client-only dialect.
+ *   - `non_aliasable_shape` — the client-only dialect.
  *   - `oauth_provider` — the oauth `/llm` mode is a pure bearer-swap carrying no
  *     `modelSwap`, so an alias there could never be swapped.
  */

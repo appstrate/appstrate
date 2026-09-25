@@ -43,10 +43,6 @@ export const PROVIDER_BY_API: Record<ModelApiShape, string> = {
   "openai-responses": "openai",
   "openai-codex-responses": "openai-codex",
   "mistral-conversations": "mistral",
-  "google-generative-ai": "google",
-  "google-vertex": "google-vertex",
-  "azure-openai-responses": "azure-openai-responses",
-  "bedrock-converse-stream": "amazon-bedrock",
 };
 
 /**

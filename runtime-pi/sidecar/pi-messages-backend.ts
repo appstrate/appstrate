@@ -130,11 +130,11 @@ export type BackingStreamFn = (
 
 /** Where the re-originated call goes, and what pi-ai authenticates it with. */
 interface PiMessagesUpstream {
-  /** The backing's own endpoint — pi-ai derives vendor dialect from it. */
+  /** The backing's own endpoint, never dialed — pi-ai derives vendor dialect from it. */
   baseUrl: string;
   apiKey: string;
-  /** Set when another endpoint serves the call: its base, and the headers it authenticates. */
-  via?: { baseUrl: string; headers: Record<string, string> };
+  /** The endpoint that serves the call instead: its base, and the headers it authenticates. */
+  via: { baseUrl: string; headers: Record<string, string> };
 }
 
 /**
@@ -410,7 +410,7 @@ function projectRequestOptions(
   const incoming = body.options ?? {};
   return {
     apiKey: upstream.apiKey,
-    ...(upstream.via ? { headers: upstream.via.headers } : {}),
+    headers: upstream.via.headers,
     signal,
     fetch: upstreamFetch,
     // NOT part of the client's payload and deliberately not derived from it:
@@ -625,9 +625,7 @@ export function handlePiMessagesRequest(
   // Per REQUEST, never per process: the recorded status belongs to this turn.
   const transport = deps.fetchImpl ?? fetch;
   const { baseUrl, via } = deps.upstream;
-  const statusProbe = createUpstreamStatusProbe(
-    via ? redirectingFetch(transport, baseUrl, via.baseUrl) : transport,
-  );
+  const statusProbe = createUpstreamStatusProbe(redirectingFetch(transport, baseUrl, via.baseUrl));
   const upstream = stream(
     model,
     body.context,

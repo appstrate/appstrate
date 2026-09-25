@@ -17,8 +17,8 @@
  *                                    └─ agent    (uid 1001, lo + sink only)
  *
  * The agent reaches the sidecar over the guest loopback
- * (`http://127.0.0.1:8080`), so the sidecar's placeholder-substituting
- * LLM proxy, forward proxy and MCP surface work unchanged. The sidecar
+ * (`http://127.0.0.1:8080`), so the sidecar's LLM proxy, forward proxy
+ * and MCP surface work unchanged. The sidecar
  * spawns integrations with `INTEGRATION_RUNTIME_ADAPTER=process` — from
  * its in-guest perspective the world looks exactly like process mode,
  * while the HOST keeps a hardware virtualization boundary around the

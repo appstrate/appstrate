@@ -128,8 +128,15 @@ const BACKINGS: Backing[] = [
 const CONTEXT_WINDOW = 200_000;
 const MAX_TOKENS = 32_768;
 
+/** The platform proxy's auth — the only headers the re-originated call may carry. */
+const PROXY_HEADERS = { authorization: "Bearer run-token" };
+
 function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessagesBackendDeps {
-  const upstream = { baseUrl: backing.baseUrl, apiKey: "sk-real-key" };
+  const upstream = {
+    baseUrl: backing.baseUrl,
+    apiKey: "appstrate-run",
+    via: { baseUrl: "https://platform.invalid/internal/llm-proxy/x", headers: PROXY_HEADERS },
+  };
   const swap: ModelSwap = {
     alias: "appstrate-medium",
     real: backing.modelId,
@@ -1140,11 +1147,9 @@ describe("handlePiMessagesRequest", () => {
   //
   // The alias path re-originates through pi-ai and consumes a GENERATOR, so it
   // does not go through `passUpstream` and inherited none of its bounds. It is
-  // also exactly the population that needs one: `pi-messages` is one of the four
-  // api shapes that ignore pi-ai's own `timeoutMs`, and the backing rebuilt here
-  // can be another (`google-vertex`, `bedrock-converse-stream`). Without the
-  // bound a stalled backing burned the whole run budget and died on the
-  // wall-clock watchdog with nothing to show.
+  // also exactly the population that needs one: `pi-messages` ignores pi-ai's own
+  // `timeoutMs`. Without the bound a stalled backing burned the whole run budget
+  // and died on the wall-clock watchdog with nothing to show.
   //
   // Same instrument as `passUpstream`'s (see `app.test.ts`): armed against the
   // PENDING `next()` and cleared the moment it settles — never a long-lived
@@ -1598,7 +1603,7 @@ describe("pi-ai version drift", () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatchObject({ container: "0.85.0", sidecar: PI_SDK_VERSION });
     // The inbound header is a container↔sidecar fact; it must not ride upstream.
-    expect(forwarded).toEqual({ modelHeaders: undefined, optionHeaders: undefined });
+    expect(forwarded).toEqual({ modelHeaders: undefined, optionHeaders: PROXY_HEADERS });
   });
 });
 

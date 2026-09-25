@@ -21,7 +21,6 @@ describe("splitCredentials — secret routing", () => {
   it("moves every known-secret key to MMDS and leaves non-secret keys on the drive", () => {
     const sidecarEnv = {
       RUN_TOKEN: "tok",
-      PI_API_KEY: "key",
       PI_LLM_OAUTH_CONFIG_JSON: "{}",
       CONNECT_LOGIN_JSON: "{}",
       INTEGRATIONS_TO_SPAWN_JSON: "[]",

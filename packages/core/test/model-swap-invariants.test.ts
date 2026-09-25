@@ -42,18 +42,6 @@ describe("checkAliasInvariants", () => {
     expect(checkAliasInvariants({ ...wellFormed, label: "" })).toBe("missing_label");
   });
 
-  it("rejects url-model protocols (the swap only rewrites the body `model` field)", () => {
-    const urlModelShapes: ModelApiShape[] = [
-      "google-generative-ai",
-      "google-vertex",
-      "azure-openai-responses",
-      "bedrock-converse-stream",
-    ];
-    for (const shape of urlModelShapes) {
-      expect(checkAliasInvariants({ ...wellFormed, apiShape: shape })).toBe("non_aliasable_shape");
-    }
-  });
-
   it("rejects oauth-subscription providers (the oauth path is a pure bearer-swap)", () => {
     expect(checkAliasInvariants({ ...wellFormed, authMode: "oauth2" })).toBe("oauth_provider");
   });
@@ -83,7 +71,6 @@ describe("checkAliasInvariants", () => {
     for (const shape of backingShapes) {
       expect(isAliasBackingShape(shape)).toBe(true);
     }
-    expect(isAliasBackingShape("google-generative-ai")).toBe(false);
     expect(isAliasBackingShape("pi-messages")).toBe(false);
   });
 

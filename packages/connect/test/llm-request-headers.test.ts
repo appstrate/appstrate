@@ -70,26 +70,6 @@ describe("forwardedLlmRequestHeaders", () => {
     expect([...out]).toEqual([["x-vendor-foo", "bar"]]);
   });
 
-  it("re-admits only the credential header carrying the placeholder, with the secret", () => {
-    const credential = { placeholder: "sk-placeholder", secret: "sk-real" };
-    const out = forwardedLlmRequestHeaders(
-      {
-        Authorization: "Bearer sk-placeholder",
-        "x-api-key": "sk-someone-else",
-        cookie: "sk-placeholder",
-        "x-appstrate-sidecar-auth": "sk-placeholder",
-        "x-vendor-foo": "bar",
-      },
-      credential,
-    );
-    expect(out.get("authorization")).toBe("Bearer sk-real");
-    expect(out.get("x-api-key")).toBeNull();
-    expect(out.get("x-appstrate-sidecar-auth")).toBeNull();
-    expect(out.get("x-vendor-foo")).toBe("bar");
-    // A cookie is never a provider credential slot.
-    expect(out.get("cookie")).toBeNull();
-  });
-
   // Each row: a header a caller, an auth proxy or a CDN may set, which must
   // never reach a vendor against a stored credential. Mixed case on purpose.
   const HARDENED_DROPS: [string, string][] = [

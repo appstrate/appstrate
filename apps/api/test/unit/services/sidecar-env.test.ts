@@ -12,11 +12,10 @@ describe("applySpecToSidecarEnv", () => {
       modelContextWindow: 200_000,
       modelMaxTokens: 8_192,
       llm: {
-        authMode: "api_key",
+        authMode: "platform",
+        apiShape: "openai-completions",
         baseUrl: "https://api.openai.com",
-        apiKey: "sk-test",
-        placeholder: "OPENAI_API_KEY",
-      } as SidecarLaunchSpec["llm"],
+      },
       integrations: [{ id: "gmail" } as never],
       runtimeTools: ["output", "log"],
       outputSchema: { type: "object" },
@@ -38,8 +37,7 @@ describe("applySpecToSidecarEnv", () => {
       "MODEL_CONTEXT_WINDOW",
       "MODEL_MAX_TOKENS",
       "PI_BASE_URL",
-      "PI_API_KEY",
-      "PI_PLACEHOLDER",
+      "PI_LLM_PLATFORM_API_SHAPE",
       "INTEGRATIONS_TO_SPAWN_JSON",
       "RUNTIME_TOOLS_JSON",
       "OUTPUT_SCHEMA",
@@ -60,7 +58,7 @@ describe("applySpecToSidecarEnv", () => {
     expect(processEnv.INTEGRATION_RUNTIME_ADAPTER).toBe("process");
   });
 
-  it("ships the (non-forging) oauth llm config as JSON instead of api-key vars", () => {
+  it("ships the (non-forging) oauth llm config as JSON instead of platform vars", () => {
     const spec: SidecarLaunchSpec = {
       runToken: "rt_test",
       llm: {
@@ -74,10 +72,10 @@ describe("applySpecToSidecarEnv", () => {
 
     expect(env.PI_LLM_OAUTH_CONFIG_JSON).toBe(JSON.stringify(spec.llm));
     expect(env.PI_BASE_URL).toBeUndefined();
-    expect(env.PI_API_KEY).toBeUndefined();
+    expect(env.PI_LLM_PLATFORM_API_SHAPE).toBeUndefined();
   });
 
-  it("ships the platform llm route as a shape, the model's endpoint and a swap — no key", () => {
+  it("ships the platform llm route as a shape, the model's endpoint and a swap", () => {
     const modelSwap = {
       alias: "appstrate-medium",
       real: "deepseek-chat",
@@ -100,7 +98,6 @@ describe("applySpecToSidecarEnv", () => {
     expect(env.PI_LLM_PLATFORM_API_SHAPE).toBe("openai-completions");
     expect(env.PI_MODEL_SWAP_JSON).toBe(JSON.stringify(modelSwap));
     expect(env.PI_BASE_URL).toBe("https://api.deepseek.com");
-    expect(env.PI_API_KEY).toBeUndefined();
     expect(env.PI_LLM_OAUTH_CONFIG_JSON).toBeUndefined();
   });
 

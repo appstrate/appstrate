@@ -38,10 +38,9 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
       sidecarAuthToken: TOKEN,
       proxyUrl: "",
       llm: {
-        authMode: "api_key",
+        authMode: "platform",
+        apiShape: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
-        apiKey: "real-sk-ant-key",
-        placeholder: "sk-placeholder",
       },
     },
     cookieJar: new Map(),
@@ -167,8 +166,8 @@ describe("sidecar control surface — agent authentication", () => {
   });
 
   it("never forwards the token upstream on the /llm/* passthrough", async () => {
-    // The token is a live secret and the upstream is a third party: the shared
-    // LLM header policy drops every `x-appstrate-*` header.
+    // The token authenticates the agent to THIS sidecar only: the shared LLM
+    // header policy drops every `x-appstrate-*` header.
     let forwarded: Headers | undefined;
     const fetchFn = mock(async (_url: string, init: RequestInit) => {
       forwarded = new Headers(init.headers);

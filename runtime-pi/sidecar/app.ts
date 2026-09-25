@@ -19,7 +19,6 @@ import {
   withIdleBound,
   STREAM_IDLE,
   type SidecarConfig,
-  type LlmProxyApiKeyConfig,
   type LlmProxyConfig,
   type LlmProxyOauthConfig,
   type LlmProxyPlatformConfig,
@@ -265,9 +264,8 @@ async function passUpstream(
       try {
         const outcome = await withIdleBound(reader.read(), idleTimeoutMs);
         if (outcome === STREAM_IDLE) {
-          // Four of the ten api shapes this platform maps ignore pi-ai's own
-          // `timeoutMs` (google-generative-ai, google-vertex,
-          // bedrock-converse-stream, pi-messages), so this proxy is the only
+          // Not every api shape this platform maps honours pi-ai's own
+          // `timeoutMs` (`pi-messages` ignores it), so this proxy is the only
           // provider-agnostic place a stalled stream can be caught. Without it
           // the run just burns its wall-clock budget and dies with no error.
           //
@@ -282,8 +280,7 @@ async function passUpstream(
           // rather than from this text: pi-ai's adapters throw on a premature
           // end — `openai-completions.js` "Stream ended without finish_reason"
           // (whenever `compat.supportsFinishReason`, its default),
-          // `google-generative-ai.js` "Google stream ended without a finish
-          // reason", `anthropic-messages.js` "Anthropic stream ended before
+          // `anthropic-messages.js` "Anthropic stream ended before
           // message_stop" — and those strings match
           // `RETRYABLE_PROVIDER_ERROR_PATTERN` (`dist/utils/retry.js`:
           // `ended without`, `stream ended before message_stop`). So the
@@ -492,8 +489,8 @@ async function bufferLlmBodyBounded(c: Context, maxBytes: number): Promise<strin
 /**
  * Derive the upstream `/llm/*` target from the inbound request: strip the
  * `/llm` mount prefix, re-append the query string onto the configured base URL,
- * and surface the method. Shared by both `/llm` branches (api_key + oauth);
- * each keeps its own SSRF check (`isBlockedEgressUrl`) and credential handling.
+ * and surface the method. Shared by both `/llm` branches (platform + oauth);
+ * each keeps its own credential handling.
  *
  * The stripped `path` is returned alongside the composed URL because the alias
  * surface check needs exactly that suffix — the same one the in-container SDK
@@ -512,11 +509,11 @@ function deriveLlmTarget(
 /** pi-ai needs a key to sign with; the proxy ignores it and reads the run token. */
 const PLATFORM_PROXY_API_KEY = "appstrate-run";
 
-/** Where a keyed `/llm/*` call goes, and how the sidecar authenticates there. */
-interface KeyedLlmUpstream {
+/** Where a platform-mode `/llm/*` call goes, and how the sidecar authenticates there. */
+interface PlatformLlmUpstream {
   baseUrl: string;
-  /** The only reachable path when narrowed; `null` is the vendor passthrough. */
-  inferencePath: string | null;
+  /** The only reachable path: the proxy serves inference and nothing else. */
+  inferencePath: string;
   /** Upstream headers for a forwarded request. */
   headers(incoming: Record<string, string>): Headers;
   /** Where and how pi-ai re-originates an aliased call. */
@@ -524,19 +521,10 @@ interface KeyedLlmUpstream {
 }
 
 /** `null` for a shape the proxy does not serve, which `server.ts` refuses at boot. */
-function keyedLlmUpstream(
+function platformLlmUpstream(
   config: SidecarConfig,
-  llm: LlmProxyApiKeyConfig | LlmProxyPlatformConfig,
-): KeyedLlmUpstream | null {
-  if (llm.authMode === "api_key") {
-    const credential = { placeholder: llm.placeholder, secret: llm.apiKey };
-    return {
-      baseUrl: llm.baseUrl,
-      inferencePath: null,
-      headers: (incoming) => forwardedLlmRequestHeaders(incoming, credential),
-      pi: { baseUrl: llm.baseUrl, apiKey: llm.apiKey },
-    };
-  }
+  llm: LlmProxyPlatformConfig,
+): PlatformLlmUpstream | null {
   if (!isProxiedApiShape(llm.apiShape)) return null;
   const headers = { authorization: `Bearer ${config.runToken}` };
   const baseUrl = llmProxyBaseUrl(config.platformApiUrl, llm.apiShape, RUN_LLM_PROXY_MOUNT);
@@ -557,16 +545,17 @@ function keyedLlmUpstream(
  * Build the sidecar's HTTP surface.
  *
  *   - `GET  /health`     — readiness probe.
- *   - `ALL  /llm/*`      — reverse proxy to the platform-configured LLM
- *                          provider. The Pi SDK (in-container) calls
- *                          `${MODEL_BASE_URL}/v1/chat/completions` (or
+ *   - `ALL  /llm/*`      — reverse proxy to the run's LLM upstream (the
+ *                          platform's metered LLM proxy, or the OAuth
+ *                          subscription provider). The Pi SDK (in-container)
+ *                          calls `${MODEL_BASE_URL}/v1/chat/completions` (or
  *                          equivalent) over HTTP — MCP `tools/call` is
  *                          unsuitable for a streamed completion the SDK
- *                          consumes natively. The sidecar swaps the
- *                          placeholder embedded in the SDK's auth header
- *                          for the real API key, then streams the
- *                          upstream response back to the agent without
- *                          buffering. The agent never sees the key.
+ *                          consumes natively. The sidecar replaces the
+ *                          placeholder in the SDK's auth header with its own
+ *                          upstream auth, then streams the upstream response
+ *                          back to the agent without buffering. The agent
+ *                          never sees a credential.
  *   - `ALL  /mcp`        — JSON-RPC entrypoint mounted by `mountMcp`.
  *                          Exposes `{ns}__api_call`, `run_history`, and
  *                          `recall_memory` as MCP tools backed by the
@@ -653,8 +642,8 @@ export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
 
 export function createApp(deps: AppDeps): Hono {
   const { config } = deps;
-  const keyedUpstream =
-    config.llm && config.llm.authMode !== "oauth" ? keyedLlmUpstream(config, config.llm) : null;
+  const platformUpstream =
+    config.llm?.authMode === "platform" ? platformLlmUpstream(config, config.llm) : null;
   const fetchFn = deps.fetchFn ?? fetch;
   const isReady = deps.isReady ?? (() => true);
 
@@ -732,21 +721,17 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(deps.integrationBootReportProvider());
   });
 
-  // LLM reverse proxy. Three modes:
+  // LLM reverse proxy. Two modes:
   //
-  //   - api_key: the Pi SDK formats every header (auth, beta, identity)
-  //     using the platform-supplied placeholder; we swap the placeholder
-  //     for the real key and forward directly to the upstream provider.
-  //     Request/response bodies stream through zero-copy. The Pi SDK
-  //     handles retry on 429/5xx natively (Retry-After honoring + jitter).
   //   - oauth: the no-forge path for an OAuth subscription. The Pi SDK
   //     already signs the subscription request shape (Anthropic OAuth
   //     fingerprint or codex-responses headers); the sidecar resolves a fresh
   //     access token from the platform (`/internal/oauth-token/:id`) and swaps
   //     the placeholder request bearer for it — forging nothing. On 401 we
   //     refresh + retry once. There is no fingerprint-forging mode.
-  //   - platform: the api_key forward to the platform's metered LLM proxy,
-  //     with the run token for the placeholder; inference endpoint only.
+  //   - platform: forward to the platform's metered LLM proxy with the run
+  //     token in place of the placeholder; inference endpoint only. Bodies
+  //     stream through zero-copy; the Pi SDK retries 429/5xx natively.
   app.all("/llm/*", async (c) => {
     const llm = config.llm;
     if (!llm) {
@@ -764,24 +749,12 @@ export function createApp(deps: AppDeps): Hono {
       return handleOauthLlmRequest(c, llm);
     }
 
-    const upstreamLlm = keyedUpstream;
+    const upstreamLlm = platformUpstream;
     if (!upstreamLlm) return llmProxyError(503, "api_error", "LLM proxy not configured");
-    // The egress floor guards vendor endpoints, not the platform's own address.
-    if (llm.authMode === "api_key" && isBlockedEgressUrl(upstreamLlm.baseUrl)) {
-      return llmProxyError(403, "permission_error", "LLM base URL targets a blocked network range");
-    }
     const { targetUrl, method, path } = deriveLlmTarget(c, upstreamLlm.baseUrl);
 
-    // ALIASED runs get a narrowed `/llm/*` surface, not a passthrough. The
-    // agent needs the inference endpoint to do its job; everything else the
-    // vendor happens to serve on the same base URL is opacity it was never
-    // promised — `GET /v1/models` alone returns the vendor's catalogue.
-    // Refused HERE, before the header filter swaps the placeholder for the
-    // real key and before any upstream fetch: the credential must not be
-    // spent on a request we are about to reject.
-    //
-    // Non-aliased runs on a vendor upstream keep the verbatim passthrough —
-    // their contract is reaching the provider, not hiding it.
+    // ALIASED runs get a narrowed `/llm/*` surface — the pi-messages inference
+    // call only — refused HERE, before any upstream call.
     if (llm.modelSwap) {
       const swap = llm.modelSwap;
       if (!isAliasInferenceCall(method, path)) {
@@ -806,8 +779,8 @@ export function createApp(deps: AppDeps): Hono {
       // vendor-neutral `pi-messages` so no vendor request shape or response
       // dialect ever reaches it, and the sidecar re-originates the call against
       // the real backing through pi-ai (`pi-messages-backend.ts`). Everything
-      // below — the placeholder→key header swap, the body forward, the response
-      // passthrough — serves non-aliased runs only.
+      // below — the header swap, the body forward, the response passthrough —
+      // serves non-aliased runs only.
       const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
       if (buffered instanceof Response) return buffered;
       return handlePiMessagesRequest(
@@ -832,8 +805,7 @@ export function createApp(deps: AppDeps): Hono {
       );
     }
 
-    const { inferencePath } = upstreamLlm;
-    if (inferencePath !== null && (method !== "POST" || path !== inferencePath)) {
+    if (method !== "POST" || path !== upstreamLlm.inferencePath) {
       logger.warn("llm: non-inference request refused", { method, path });
       return llmProxyError(404, "not_found_error", "Not an inference endpoint");
     }
@@ -842,10 +814,7 @@ export function createApp(deps: AppDeps): Hono {
     const forwardedHeaders = upstreamLlm.headers(c.req.header());
 
     // Zero-copy body forward — nothing here rewrites the request.
-    let body: ReadableStream<Uint8Array> | undefined;
-    if (method !== "GET" && method !== "HEAD") {
-      body = c.req.raw.body ?? undefined;
-    }
+    const body = c.req.raw.body ?? undefined;
 
     let upstream: Response;
     // THREE deadlines now bound an LLM stream, and the split matters:
@@ -863,9 +832,8 @@ export function createApp(deps: AppDeps): Hono {
     // that was reverted in #366 (see issue #369). That reasoning stands —
     // undici is still not the answer, the sidecar runs Bun's native `fetch`
     // and we are not swapping it back. What changed is that "no body timeout"
-    // stopped being acceptable: pi-ai's per-adapter `timeoutMs` is ignored by
-    // four of the api shapes we map (google-generative-ai, google-vertex,
-    // bedrock-converse-stream, pi-messages), so a stalled stream had NO bound
+    // stopped being acceptable: pi-ai's per-adapter `timeoutMs` is not honoured
+    // by every api shape we map (`pi-messages` ignores it), so a stalled stream had NO bound
     // below 30 min and runs died on their wall-clock watchdog with no error.
     // The idle bound lives in our own stream wrapper instead — provider
     // agnostic, and no transport swap.
@@ -957,7 +925,7 @@ export function createApp(deps: AppDeps): Hono {
       body = buffered.byteLength > 0 ? buffered : undefined;
     }
 
-    // Same deadline split as the api_key path above (absolute cap + TTFB
+    // Same deadline split as the platform path above (absolute cap + TTFB
     // bound disarmed on headers; inter-chunk silence handled by
     // `passUpstream`). Armed PER ATTEMPT: the 401 replay below re-enters this
     // closure and must get its own fresh TTFB window rather than inherit an

@@ -20,10 +20,6 @@ describe("deriveProviderFromApi", () => {
     expect(deriveProviderFromApi("openai-responses")).toBe("openai");
     expect(deriveProviderFromApi("openai-codex-responses")).toBe("openai-codex");
     expect(deriveProviderFromApi("mistral-conversations")).toBe("mistral");
-    expect(deriveProviderFromApi("google-generative-ai")).toBe("google");
-    expect(deriveProviderFromApi("google-vertex")).toBe("google-vertex");
-    expect(deriveProviderFromApi("azure-openai-responses")).toBe("azure-openai-responses");
-    expect(deriveProviderFromApi("bedrock-converse-stream")).toBe("amazon-bedrock");
   });
 
   it("throws on an unknown api shape rather than guessing", () => {
