@@ -129,7 +129,7 @@ services:
   # (`drizzle.ee_migrations`) — so there is no second migrate service.
 
   appstrate-migrate:
-    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.61}
+    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.62}
     restart: "no"
     command: ["bun", "packages/db/src/migrate.ts"]
     environment:
@@ -141,12 +141,12 @@ services:
   # ── Runtime image pull (ensure images are cached before app starts) ──
 
   appstrate-pi:
-    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.61}
+    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-sidecar:
-    image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.61}
+    image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
@@ -154,34 +154,34 @@ services:
   # local AFPS integration (resolved from RUNNER_IMAGE_* below). Pre-pulled so
   # the first integration boot does not block on — or fail at — a cold pull.
   appstrate-mcp-runner-node:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.61}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-mcp-runner-python:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.61}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-mcp-runner-bun:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.61}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-mcp-runner-uv:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.61}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-mcp-runner-binary:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.61}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   # ── Main application ────────────────────────────────────────────────
 
   appstrate:
-    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.61}
+    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.62}
     # Browser traffic reaches port 3000 through the Coolify proxy and needs no
     # host port. This mapping serves the remote run-plane
     # (RUN_ADAPTER=firecracker-remote): microVM guests have no DNS and reach the
@@ -229,13 +229,13 @@ services:
       # Without these the sidecar falls back to bare `appstrate-*:latest` tags
       # and tries to pull them from Docker Hub, so every local integration dies
       # at boot.
-      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.61}
-      - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.61}
-      - RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.61}
-      - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.61}
-      - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.61}
-      - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.61}
-      - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.61}
+      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.62}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
