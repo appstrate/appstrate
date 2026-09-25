@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`RunOrchestrator.sidecarExitsIndependently`** (`@appstrate/core/platform-types`,
+  optional, #1561) — `true` when `waitForExit` on a sidecar handle resolves on the
+  sidecar's own exit. The run launcher then fails a run the moment its sidecar dies
+  instead of waiting for the agent. Absent means the sidecar shares the agent's
+  lifecycle (a microVM running both), and the launcher waits for the agent alone.
+
 - **`partitionInputFields`**, **`resolvedInputDefaults`**, **`AgentInputSettings`**
   and **`InputFieldPartition`** (`@appstrate/core/input-resolution`, #1268) — an
   agent's launch contract: split its input fields into `locked` (never sent, 400

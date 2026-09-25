@@ -263,6 +263,7 @@ interface SidecarPorts {
 }
 
 export class ProcessOrchestrator implements RunOrchestrator {
+  readonly sidecarExitsIndependently = true;
   private processes = new Map<string, ProcessHandle>();
   private sidecarPorts = new Map<string, SidecarPorts>();
   private pendingSpecs = new Map<string, PendingSpec>();

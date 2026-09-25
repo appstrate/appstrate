@@ -231,6 +231,16 @@ export interface RunOrchestrator {
   /** Wait for a workload to finish. Returns the exit code. */
   waitForExit(handle: WorkloadHandle): Promise<number>;
 
+  /**
+   * `true` when `waitForExit` on a sidecar handle resolves on the sidecar's
+   * OWN exit, independently of the agent's. The run launcher then fails a
+   * run the moment its sidecar dies, instead of letting the agent wait out
+   * its MCP handshake deadline. Absent or `false` when the sidecar shares the
+   * agent's lifecycle and its exit cannot be observed on its own (a microVM
+   * running both): the launcher then waits for the agent alone.
+   */
+  readonly sidecarExitsIndependently?: boolean;
+
   /** Stream logs from a running workload. Format-agnostic (text line by line). */
   streamLogs(handle: WorkloadHandle, signal?: AbortSignal): AsyncGenerator<string>;
 

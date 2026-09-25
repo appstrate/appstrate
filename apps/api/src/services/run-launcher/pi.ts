@@ -650,7 +650,28 @@ async function waitForWorkload(
   }
 
   try {
-    const exitCode = await orch.waitForExit(agent);
+    const agentExit = orch.waitForExit(agent);
+    const sidecarDeath = await firstUnexpectedSidecarExit(
+      orch,
+      sidecar,
+      agentExit,
+      () => timedOut || (signal?.aborted ?? false),
+    );
+    if (sidecarDeath !== null) {
+      // Nothing the agent does from here can succeed: its tools, model proxy
+      // and forward proxy all sat behind the sidecar. Stop it rather than let
+      // it wait out its MCP handshake deadline, then fail on the real cause.
+      orch.stopWorkload(agent).catch(() => {});
+      await agentExit.catch(() => {});
+      logger.error("Sidecar exited while the run was in progress", {
+        runId: agent.runId,
+        exitCode: sidecarDeath,
+      });
+      throw new Error(
+        `Sidecar exited with code ${sidecarDeath} while the run was in progress; the agent was stopped`,
+      );
+    }
+    const exitCode = await agentExit;
     if (exitCode !== 0 && !timedOut && !signal?.aborted) {
       logAbort.abort();
       await logStream;
@@ -672,6 +693,34 @@ async function waitForWorkload(
 }
 
 // --- Helpers ---
+
+/**
+ * Resolve with the sidecar's exit code if it exits before the agent does and
+ * the platform did not ask for it (timeout, cancel); `null` once the agent
+ * exits first. An orchestrator that cannot observe the sidecar on its own
+ * ({@link RunOrchestrator.sidecarExitsIndependently}) only ever yields `null`.
+ */
+async function firstUnexpectedSidecarExit(
+  orch: RunOrchestrator,
+  sidecar: WorkloadHandle | undefined,
+  agentExit: Promise<number>,
+  stopRequested: () => boolean,
+): Promise<number | null> {
+  const agentDone = agentExit.then(
+    () => null,
+    () => null,
+  );
+  if (!sidecar || !orch.sidecarExitsIndependently) return agentDone;
+  // A wait that rejects (container gone, daemon error) says nothing about how
+  // the sidecar ended: fall back to waiting for the agent, as before.
+  const sidecarDone = orch.waitForExit(sidecar).then(
+    (code) => code,
+    () => new Promise<never>(() => {}),
+  );
+  const first = await Promise.race([agentDone, sidecarDone]);
+  if (first === null || stopRequested()) return agentDone;
+  return first;
+}
 
 /** Leading dash-separated segments a placeholder may keep. */
 const PLACEHOLDER_PREFIX_SEGMENTS = 2;
