@@ -268,7 +268,8 @@ export const schemas = {
       reasoning_level: {
         type: ["string", "null"],
         enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max", null],
-        description: "Portable reasoning effort normalized across providers.",
+        description:
+          "Portable reasoning effort normalized across providers; null or omission inherits the next lower-precedence layer, and `medium` applies when no layer sets one. `off` sends the provider an explicit disable.",
       },
     },
   },

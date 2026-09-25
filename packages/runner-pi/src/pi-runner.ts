@@ -43,6 +43,7 @@ import { ALIAS_PI_PROVIDER_KEY, PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "./
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import {
   anthropicThinkingBudgets,
+  DEFAULT_MODEL_REASONING_LEVEL,
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
@@ -257,7 +258,7 @@ export interface PiRunnerOptions {
   extensionFactories?: ExtensionFactory[];
   /** Path where the credential store persists. Defaults to `/tmp/pi-auth/auth.json`. */
   authStoragePath?: string;
-  /** Pi SDK thinking level. Defaults to `"medium"`. */
+  /** Pi SDK thinking level. Defaults to `DEFAULT_MODEL_REASONING_LEVEL`. */
   thinkingLevel?: ModelReasoningLevel;
   /** Provider sampling temperature. Omitted to preserve provider/Pi defaults. */
   temperature?: number;
@@ -620,7 +621,7 @@ export class PiRunner {
     const { model, apiKey, systemPrompt, startMessage } = this.opts;
     const cwd = this.opts.cwd ?? process.cwd();
     const agentDir = this.opts.agentDir ?? "/tmp/pi-agent";
-    const requestedThinkingLevel = this.opts.thinkingLevel ?? "medium";
+    const requestedThinkingLevel = this.opts.thinkingLevel ?? DEFAULT_MODEL_REASONING_LEVEL;
     const {
       model: sessionModel,
       thinkingLevel,

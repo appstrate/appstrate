@@ -178,7 +178,7 @@ export function ModelSelect({
                     // `settings:` — the shared label family lives in the
                     // settings bundle (a boot namespace, so already loaded);
                     // the host binds `t` to `chat`.
-                    labels={buildGenerationLabels((key) => t(`settings:${key}`))}
+                    labels={buildGenerationLabels((key, options) => t(`settings:${key}`, options))}
                   />
                 )}
               </>

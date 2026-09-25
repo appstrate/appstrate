@@ -22,6 +22,8 @@ export interface ModelGenerationControlLabels {
   reasoningHint: string;
   inherit: string;
   inheritShort: string;
+  /** What an unset reasoning level resolves to — not the provider's choice. */
+  reasoningInherit: string;
   unsupported: string;
   unsupportedShort: string;
   levels: Record<ModelReasoningLevel, string>;
@@ -83,7 +85,7 @@ export function ModelGenerationControls({
     value.temperature == null ? labels.inherit : String(value.temperature);
   const selectedReasoning = value.reasoning_level
     ? labels.levels[value.reasoning_level]
-    : labels.inherit;
+    : labels.reasoningInherit;
 
   return (
     <FieldGroup className={cn("grid", compact ? "gap-2" : "gap-3", !stacked && "sm:grid-cols-2")}>
@@ -184,8 +186,8 @@ export function ModelGenerationControls({
           >
             <ToggleGroupItem
               value={INHERIT}
-              aria-label={labels.inherit}
-              title={labels.inherit}
+              aria-label={labels.reasoningInherit}
+              title={labels.reasoningInherit}
               className="h-8 min-w-0 rounded-r-none px-1 text-[0.65rem]"
             >
               {labels.inheritShort}

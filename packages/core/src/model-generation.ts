@@ -18,6 +18,14 @@ export const modelReasoningLevelSchema = z.enum(MODEL_REASONING_LEVELS);
 
 export type ModelReasoningLevel = z.infer<typeof modelReasoningLevelSchema>;
 
+/**
+ * The level runs and chat apply when no layer sets one. Pi has no
+ * "provider default" state — its session always resolves a level, and `off`
+ * sends an explicit disable — so "unset" means this level, and the UI says so.
+ * Equal to Pi's own `DEFAULT_THINKING_LEVEL`.
+ */
+export const DEFAULT_MODEL_REASONING_LEVEL = "medium" satisfies ModelReasoningLevel;
+
 const ANTHROPIC_REASONING_BUDGET_TOKENS = {
   minimal: 1024,
   low: 2048,

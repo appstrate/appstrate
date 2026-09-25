@@ -5640,7 +5640,7 @@ export interface components {
             /** @description Provider sampling temperature; null or omission inherits the runtime default. */
             temperature?: number | null;
             /**
-             * @description Portable reasoning effort normalized across providers.
+             * @description Portable reasoning effort normalized across providers; null or omission inherits the next lower-precedence layer, and `medium` applies when no layer sets one. `off` sends the provider an explicit disable.
              * @enum {string|null}
              */
             reasoning_level?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | null;
