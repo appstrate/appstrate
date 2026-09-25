@@ -126,10 +126,8 @@ export interface ChatHost {
 }
 
 /**
- * The caller's grants, resolved by the shell: the chat asks for the exact
- * string the guard of each endpoint it calls checks, and holds none of its own
- * RBAC. A route gated on `chat:read` implies neither `chat:write` nor the runs,
- * files and integrations reads its cards make (#1556).
+ * The caller's grants, resolved by the shell. The chat asks for the exact
+ * permission each endpoint it calls guards on and holds no RBAC of its own.
  */
 export type ChatCan = (permission: string) => boolean;
 

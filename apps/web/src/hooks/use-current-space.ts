@@ -3,11 +3,8 @@
 import { useCallback, useEffect } from "react";
 import { useStore } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { spaceStore, getCurrentSpaceId } from "../stores/space-store";
+import { spaceStore } from "../stores/space-store";
 import { useSpaces } from "./use-spaces";
-
-// Re-export non-hook accessor
-export { getCurrentSpaceId };
 
 /** Reactive hook — re-renders when the current space changes; null until one is resolved. */
 export function useCurrentSpaceId(): string | null {

@@ -13,10 +13,11 @@
 
 import { describe, expect, it } from "bun:test";
 import { resolveChatCapabilities, type ChatAccessContext } from "./chat-access.ts";
-import { PACKAGE_PERMISSIONS, type SpaceGrant } from "../../lib/package-permissions.ts";
+import { spacePackagePermission } from "@appstrate/core/permissions";
+import type { SpaceGrant } from "../../lib/package-permissions.ts";
 
 /** The grant `maySetPackageActive` reads for an integration in a team space. */
-const INTEGRATION_ACTIVATE_PERMISSION = PACKAGE_PERMISSIONS.integration.activate;
+const INTEGRATION_ACTIVATE_PERMISSION = spacePackagePermission("integration", "activate");
 
 /** A caller holding exactly `permissions`, standing in `space`, agent authoring on unless said. */
 function context(

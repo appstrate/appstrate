@@ -12,6 +12,7 @@ import {
   packagePermission,
   packageSightPermissions,
   reaches,
+  spacePackagePermission,
   CORE_RESOURCE_ACTIONS,
   CORE_RESOURCE_LEVELS,
   CORE_RESOURCE_NAMES,
@@ -348,6 +349,24 @@ describe("packagePermission / packageSightPermissions", () => {
     expect(packageSightPermissions("skill")).toEqual(["skills:read"]);
     expect(packageSightPermissions("integration")).toEqual(["integrations:read"]);
     expect(packageSightPermissions("mcp-server")).toEqual(["mcp-servers:read"]);
+  });
+});
+
+describe("spacePackagePermission", () => {
+  it("asks each family's activation grant, spelled as role data", () => {
+    const acts = ["activate", "configure", "deactivate"] as const;
+    const table = Object.fromEntries(
+      (["agent", "skill", "mcp-server", "integration"] as const).map((type) => [
+        type,
+        acts.map((op) => spacePackagePermission(type, op)),
+      ]),
+    );
+    expect(table).toEqual({
+      agent: ["agents:configure", "agents:configure", "agents:configure"],
+      skill: ["skills:write", "skills:write", "skills:write"],
+      "mcp-server": ["mcp-servers:write", "mcp-servers:write", "mcp-servers:write"],
+      integration: ["integrations:install", "integrations:install", "integrations:uninstall"],
+    });
   });
 });
 

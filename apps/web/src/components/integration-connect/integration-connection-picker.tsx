@@ -122,8 +122,9 @@ export function IntegrationConnectionPicker({
   const { openPopup, isPending: oauthPending } = useHostedConnectPopup();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  // Adding, renewing and upgrading all open a connect session, which guards on
-  // `integrations:connect` — a grant the server's `can_add_connection` omits.
+  // Renewing and upgrading open a connect session (`integrations:connect`).
+  // Adding is the server's `can_add_connection`, which already includes it:
+  // here the grant only tells a role refusal from the admin's block policy.
   const canConnect = usePermissions().can("integrations:connect");
 
   const overrideMode = persistence.mode === "override";
@@ -160,9 +161,8 @@ export function IntegrationConnectionPicker({
     member_pinned_connection_id: memberPinnedConnectionId,
     org_default_connection_id: orgDefaultConnectionId,
     org_default_enforced: orgDefaultEnforced,
-    can_add_connection: serverAllowsAdd,
+    can_add_connection: canAddConnection,
   } = resolution;
-  const canAddConnection = serverAllowsAdd && canConnect;
 
   const ownerLabel = (c: IntegrationCandidate): string =>
     c.is_own
@@ -315,7 +315,13 @@ export function IntegrationConnectionPicker({
           data-testid={`member-pick-blocked-${integrationId}`}
         >
           <Lock className="size-3" />
-          <span className="truncate">{t("detail.integrationMemberPicker.blockedByAdmin")}</span>
+          <span className="truncate">
+            {t(
+              canConnect
+                ? "detail.integrationMemberPicker.blockedByAdmin"
+                : "detail.integrationMemberPicker.blockedByRole",
+            )}
+          </span>
         </Button>
       </div>
     );

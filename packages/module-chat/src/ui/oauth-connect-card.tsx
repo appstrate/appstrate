@@ -139,8 +139,7 @@ export function OAuthConnectCard({
 }) {
   const aui = useAui();
   const getHeaders = useChatHeaders();
-  // The brand lookup reads the integration (`integrations:read`); without it
-  // the chip keeps the bare package id.
+  // Without `integrations:read` the chip keeps the bare package id.
   const readsIntegration = useChatHost().can("integrations:read");
   const [phase, setPhase] = useState<Phase>("idle");
   const [errMsg, setErrMsg] = useState<string | null>(null);

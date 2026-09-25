@@ -76,6 +76,7 @@ export function ThreadList({
     fetchNextPage,
   } = useSessions();
   const now = useNowTick();
+  const { can, t } = useChatHost();
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
@@ -112,7 +113,7 @@ export function ThreadList({
         )}
         {!isLoading && (sessions ?? []).length === 0 && (
           <p className="text-muted-foreground px-2 py-6 text-center text-xs">
-            Envoie un message ! Ton historique de conversations apparaîtra ici.
+            {t(can("chat:write") ? "threads.empty" : "threads.emptyReadOnly")}
           </p>
         )}
       </div>
@@ -151,7 +152,6 @@ function ConversationRow({
   const select = useSelectConversation();
   const queryClient = useQueryClient();
   const { editing, setEditing, save } = useInlineRename(session.id);
-  // Rename and delete both guard on `chat:write`.
   const canWrite = useChatHost().can("chat:write");
 
   const onDelete = async () => {

@@ -1,15 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Who reaches each SPA route under the main layout — ONE declaration, read by
- * the route gate (`RouteGate`), the sidebar and the settings tabs. A gated
- * route names the operations its page is built on and the permissions that
- * open it (any one suffices); `apps/api/test/unit/spa-route-access.test.ts`
- * pins those to the operations' real guards. `app.tsx` keys its pages by
- * `RoutePath`, so a route and its declaration cannot exist one without the other.
- *
- * Pure data: that API test imports this file, so nothing here may reach React,
- * the browser or the SPA's hooks.
+ * Who reaches each route under the main layout — one declaration, read by
+ * `RouteGate`, the shell's links and the settings tabs; `anyOf` is pinned to the
+ * named operations' guards by `apps/api/test/unit/spa-route-access.test.ts`.
+ * Pure data: that API test imports it, so nothing here may reach React.
  */
 
 import {
@@ -100,8 +95,7 @@ export const ROUTE_ACCESS = {
   "/preferences/devices": OWN_ACCOUNT,
   "/preferences/connections": OWN_ACCOUNT,
 
-  // The page lists both levels. The detail's guard is the ROW's level, resolved
-  // in the handler (`loadWebhookForAction`), so only the list pins the pair.
+  // Both levels; the detail's guard is the row's level, resolved in its handler.
   "/webhooks": { feature: "webhooks", anyOf: WEBHOOKS_READ, operations: ["listWebhooks"] },
   "/webhooks/:id": { feature: "webhooks", anyOf: WEBHOOKS_READ, operations: ["getWebhook"] },
 
@@ -115,8 +109,7 @@ export const ROUTE_ACCESS = {
   "/end-users": { anyOf: ["end-users:read"], operations: ["listEndUsers"] },
 
   "/org-settings": { open: "layout only: the index redirects to general, every tab gates itself" },
-  // `GET /api/orgs/{orgId}` asks membership only (every org role holds
-  // `org:read`); the member list in it is filtered on `members:read` by the handler.
+  // The org read asks membership only; its handler filters the member list on `members:read`.
   "/org-settings/general": { anyOf: ["org:read"], operations: ["getOrganization"] },
   "/org-settings/members": { anyOf: ["members:read"], operations: ["getOrganization"] },
   "/org-settings/roles": { anyOf: ["roles:read"], operations: ["listRoles"] },

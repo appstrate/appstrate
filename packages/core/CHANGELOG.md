@@ -23,11 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the web app so the CLI's generated commands and the launch form apply the
   same rule.
 
-- **`packagePermission`** and **`packageSightPermissions`**
-  (`@appstrate/core/permissions`, #1556) — a package type's `<resource>:<action>`
-  permission, and the permissions that let a caller see a package of that type
-  (`agents:run` also opens an agent, RBAC spec §3.4). The platform's guards and the
-  SPA's gates read the same rule.
+- **`packagePermission`**, **`packageSightPermissions`** and
+  **`spacePackagePermission`** (`@appstrate/core/permissions`, #1556) — a package
+  type's `<resource>:<action>` permission, the permissions that let a caller see a
+  package of that type (`agents:run` also opens an agent, RBAC spec §3.4), and the
+  one an activate / configure / deactivate act on a space placement asks for. The
+  platform's guards and the SPA's gates read the same rules.
 
 - **`findNonSnakeCaseIdentityClaimKeys`** and **`IdentityClaimKeyViolation`**
   (`@appstrate/core/integration`, #1545) — list the `auths.{key}.identity_claims`

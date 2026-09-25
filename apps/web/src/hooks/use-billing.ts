@@ -38,10 +38,7 @@ export const PLAN_DESCRIPTION_KEYS: Record<BillingPlanDetail["id"], string> = {
  */
 export type CheckoutPlanId = components["schemas"]["EeCheckoutPlanId"];
 
-/**
- * `billing:read` is an org grant an org `guest` does not hold, and the sidebar
- * mounts this on every page — so the hook gates itself on it.
- */
+/** `billing:read` is an org grant a `guest` lacks, and the sidebar mounts this everywhere. */
 export function useBilling(options?: { enabled?: boolean }) {
   const { enabled, header } = useOrgOnlyScope();
   const { can } = usePermissions();

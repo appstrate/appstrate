@@ -27,24 +27,48 @@ describe("route declarations", () => {
     expect(app).toMatch(/const PAGES: Record<RoutePath, ReactNode> =/);
   });
 
-  it("points every sidebar entry and settings tab at a declared route", () => {
-    const targets = [
-      ...source("../../components/nav-org.tsx").matchAll(/(?:path|landsOn): "([^"]+)"/g),
-      ...source("../../components/nav-org.tsx").matchAll(/canReach\("([^"]+)"\)/g),
-      ...source("../../pages/org-settings/layout.tsx").matchAll(/\bto: "([^"]+)"/g),
-      ...source("../../pages/org-settings/layout.tsx").matchAll(/canReach\("([^"]+)"\)/g),
-    ].map((m) => m[1]!);
-    expect(targets.length).toBeGreaterThan(25);
-    expect(targets.filter((t) => !declared.has(t))).toEqual([]);
+  /** The shell: whatever renders on every page and links into the registry. */
+  const SHELL = [
+    "components/nav-org.tsx",
+    "pages/org-settings/layout.tsx",
+    "components/org-switcher.tsx",
+    "components/notification-bell.tsx",
+    "components/sidebar-billing.tsx",
+    "components/nav-user.tsx",
+    "components/app-sidebar.tsx",
+  ].map((file) => ({ file, text: source(`../../${file}`) }));
+  /** Routes outside `MainLayout`, which no declaration covers. */
+  const OUTSIDE_MAIN_LAYOUT = new Set(["/onboarding/create"]);
+  const links = (text: string) => [...text.matchAll(/\bto(?:=|: )"([^"]+)"/g)].map((m) => m[1]!);
+  const reached = (text: string) => [...text.matchAll(/canReach\("([^"]+)"\)/g)].map((m) => m[1]!);
+
+  it("points every shell link at a declared route", () => {
+    const targets = SHELL.flatMap(({ text }) => [
+      ...links(text),
+      ...reached(text),
+      ...[...text.matchAll(/(?:path|landsOn): "([^"]+)"/g)].map((m) => m[1]!),
+    ]);
+    expect(targets.length).toBeGreaterThan(40);
+    expect(targets.filter((t) => !declared.has(t) && !OUTSIDE_MAIN_LAYOUT.has(t))).toEqual([]);
   });
 
-  it("leaves visibility to the declarations, never to a local permission or flag check", () => {
-    for (const file of ["../../components/nav-org.tsx", "../../pages/org-settings/layout.tsx"]) {
-      expect({ file, local: source(file).match(/\bcan\(|features\./g) ?? [] }).toEqual({
-        file,
-        local: [],
-      });
-    }
+  it("shows a shell link to a gated route only behind `canReach` of that route", () => {
+    const allOn = new Proxy({}, { get: () => true });
+    const unguarded = SHELL.flatMap(({ file, text }) =>
+      links(text)
+        .filter((t) => declared.has(t))
+        .filter((t) => routeVerdict(t as RoutePath, () => false, allOn) !== "granted")
+        .filter((t) => !reached(text).includes(t))
+        .map((t) => `${file} → ${t}`),
+    );
+    expect(unguarded).toEqual([]);
+  });
+
+  it("leaves shell visibility to the declarations, never to a local permission or flag check", () => {
+    const local = SHELL.flatMap(({ file, text }) =>
+      (text.match(/\busePermissions\(|\bcan\(|\bfeatures\./g) ?? []).map((m) => `${file}: ${m}`),
+    );
+    expect(local).toEqual([]);
   });
 });
 

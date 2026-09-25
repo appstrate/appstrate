@@ -48,11 +48,7 @@ import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel } from "./turn-model.ts";
-import {
-  FileAttachment,
-  ATTACHMENT_CHIP_CLASS,
-  ATTACHMENT_IMAGE_CLASS,
-} from "./file-attachment.tsx";
+import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
 import { isImageMime } from "@appstrate/core/mime";
 
 export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
@@ -200,16 +196,6 @@ function FileAttachmentPart(props: { filename?: string }) {
 // `File: FileAttachmentPart` Parts mapping above NEVER fires for user messages
 // (it stays correct for assistant file parts). We render sent attachments from
 // the attachments channel instead (`MessagePrimitive.Attachments`).
-
-/** Inert chip: file icon + truncated name, no download (same look as FileAttachmentPart). */
-function InertAttachmentChip({ name }: { name: string }) {
-  return (
-    <div className={ATTACHMENT_CHIP_CLASS}>
-      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="truncate font-medium">{name || UNNAMED_FILE}</span>
-    </div>
-  );
-}
 
 /**
  * One sent attachment on a user message. An `appfile://` (server-persisted, or a

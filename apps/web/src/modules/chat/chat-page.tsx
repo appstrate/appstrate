@@ -70,11 +70,9 @@ export function ChatModulePage() {
   // those answers speaks the same language too — labels and aria-labels alike.
   const { t, i18n } = useTranslation("chat");
   const { can } = usePermissions();
-  // The persona and space are read reactively and threaded through so this
-  // callback's identity changes with either. The module's SSE effects and its
-  // memoized conversation depend on `getHeaders`, and a stream reads its URL
-  // once — without this they would keep tailing under the authority the preview
-  // replaced, or never see the space resolved after mount.
+  // Persona and space are threaded through so this callback's identity moves
+  // with either: the module's streams read their URL once, and would otherwise
+  // keep tailing under the replaced authority or miss a space resolved late.
   const viewAs = useViewAsHeader();
   const spaceId = useCurrentSpaceId();
   const getHeaders = useCallback(

@@ -29,6 +29,7 @@ import {
   packagePermission,
   packageSightPermissions,
   reportPermissionDenial,
+  spacePackagePermission,
 } from "@appstrate/core/permissions";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { getOrgMember, getOrgSettings } from "../services/organizations.ts";
@@ -77,26 +78,6 @@ export const requireAgentRead = requireAnyPermission(packageSightPermissions("ag
  */
 export function agentReadIsSummary(c: Context<AppEnv>): boolean {
   return !callerPermissions(c).has("agents:read");
-}
-
-/**
- * The permission one ACT on a space placement asks for, per package type.
- *
- * The act is spelled activate / configure / deactivate everywhere the platform
- * talks about it; the permission STRINGS keep the spelling they have in
- * `space_roles` rows and in every API key's scope list
- * (`integrations:install` / `integrations:uninstall`). Those are data, and
- * renaming a grant is a migration of rows, not of code — so the mapping is the
- * one place where the two vocabularies meet.
- */
-export function spacePackagePermission(
-  type: PackageType,
-  op: "activate" | "configure" | "deactivate",
-): Permission {
-  if (type === "agent") return "agents:configure";
-  if (type === "integration")
-    return op === "deactivate" ? "integrations:uninstall" : "integrations:install";
-  return packagePermission(type, "write");
 }
 
 /**

@@ -5,7 +5,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
-import { useAppConfig } from "./use-app-config";
+import { useCanReach } from "./use-can-reach";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateNotificationQueries } from "./use-notifications";
 import { parseSseFrames } from "@appstrate/core/sse";
@@ -306,30 +306,37 @@ function handleSSEMessage(
 }
 
 /**
- * The channels this hook dispatches on that the caller can receive, in the
- * `?channels=` spelling. The server drops the rest anyway; asking only for
- * these is what makes a change of the set (a role, a preview, a space) a
- * change of the effect's deps, so the stream reopens under the new grants.
- * `run_log` is never asked for: it is the per-log firehose this hook would
- * discard. Exported for its test.
+ * The channels the hook dispatches on that the caller can receive — never the
+ * `run_log` firehose. An effect dep: a new set reopens the stream under the new
+ * grants. Exported for its test.
  */
-export function globalStreamChannels(caller: { readsRuns: boolean; chat: boolean }): string {
+export function globalStreamChannels(caller: { readsRuns: boolean; readsChat: boolean }): string {
   return [
     ...(caller.readsRuns ? ["run_update"] : []),
-    // The caller's own connection rows: a session needs no permission for them.
     "connection_update",
-    ...(caller.chat ? ["chat_session_update"] : []),
+    ...(caller.readsChat ? ["chat_session_update"] : []),
   ].join(",");
 }
 
 /**
- * Is a refused stream worth reopening? A 4xx other than 429 answers the
- * request itself — session, grants, space, persona — so the same request gets
- * the same answer; the effect reopens when one of those changes instead.
- * Exported for its test.
+ * A 4xx other than 429 answers the request itself (session, grants, space,
+ * persona): the effect reopens when one changes, not on a timer. Exported for its test.
  */
 export function isRetryableStreamStatus(status: number): boolean {
   return status === 429 || status >= 500;
+}
+
+/** Reconnect until aborted or refused; a throw is retried like an ended stream. Exported for its test. */
+export async function reconnectUntilRefused(
+  connect: () => Promise<"refused" | "ended">,
+  signal: AbortSignal,
+  backoff: () => Promise<void>,
+): Promise<void> {
+  while (!signal.aborted) {
+    const outcome = await connect().catch(() => "failed" as const);
+    if (signal.aborted || outcome === "refused") return;
+    await backoff();
+  }
 }
 
 /**
@@ -345,12 +352,11 @@ export function useGlobalRunSync() {
   // would otherwise keep filling the cache with the other authority's rows.
   const viewAs = useViewAsHeader();
   const { can, ready } = usePermissions();
-  const { features } = useAppConfig();
-  // Null until the grants load: `can` answers false meanwhile, so opening at
-  // once would drop `run_update` and reopen a moment later — two connections
-  // per page load.
+  const canReach = useCanReach();
+  // Null until the grants load, or the stream would open without `run_update`
+  // and reopen a moment later.
   const channels = ready
-    ? globalStreamChannels({ readsRuns: canReadRuns(can), chat: !!features.chat })
+    ? globalStreamChannels({ readsRuns: canReadRuns(can), readsChat: canReach("/chat") })
     : null;
   const qcRef = useRef(qc);
   qcRef.current = qc;
@@ -389,16 +395,12 @@ export function useGlobalRunSync() {
         controller.signal.addEventListener("abort", onAbort, { once: true });
       });
 
-    // A refusal is not a transient outage: retrying it would loop an idle tab
-    // forever against an answer the server has already given.
-    let refused = false;
-
-    // One connection attempt. Returns when the stream ends or errors; throws
-    // only for a non-OK response (handled by the reconnect loop).
+    // One connection attempt: "refused" for an answer the server would give
+    // again, "ended" when the stream closes; throws on a transient failure.
     const connectOnce = async () => {
       const res = await fetch(
         // `verbose` is deliberately absent: it only affects `run_log`, which
-        // `globalStreamChannels` never asks for.
+        // we no longer subscribe to.
         withViewAsParam(
           `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=${channels}`,
           viewAs,
@@ -411,7 +413,7 @@ export function useGlobalRunSync() {
       if (!res.ok || !res.body) {
         // A refused persona also ends the preview the banner still claims.
         await endPreviewIfRefused(res);
-        refused = !res.ok && !isRetryableStreamStatus(res.status);
+        if (!res.ok && !isRetryableStreamStatus(res.status)) return "refused" as const;
         throw new Error(`realtime stream unavailable (${res.status})`);
       }
 
@@ -468,24 +470,17 @@ export function useGlobalRunSync() {
           }
         }
       }
+      return "ended" as const;
     };
 
-    (async () => {
-      while (!controller.signal.aborted) {
-        try {
-          await connectOnce();
-        } catch {
-          // Failed to connect — fall through to the backoff below.
-        }
-        if (controller.signal.aborted || refused) break;
-        // Jitter — de-synchronize reconnect stampedes (every tab reconnects
-        // at once after a redeploy).
-        const delay =
-          Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS) * (0.5 + Math.random() * 0.5);
-        attempt++;
-        await sleep(delay);
-      }
-    })();
+    void reconnectUntilRefused(connectOnce, controller.signal, () => {
+      // Jitter — de-synchronize reconnect stampedes (every tab reconnects
+      // at once after a redeploy).
+      const delay =
+        Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS) * (0.5 + Math.random() * 0.5);
+      attempt++;
+      return sleep(delay);
+    });
 
     return () => {
       controller.abort();

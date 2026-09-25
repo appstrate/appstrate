@@ -21,11 +21,9 @@ export function useSpaces(enabled = true) {
 }
 
 /**
- * Start the listing at boot, beside `primeOrgList()` (see `main.tsx`): no
- * space-scoped request leaves before it proves the remembered space enterable,
- * so waiting for React to mount the layout would delay every one of them by a
- * round trip. Keyed on the remembered org, so it can never answer for another;
- * a failure is not cached as data, and `useSpaces` refetches it on mount.
+ * Start the listing at boot (`main.tsx`): every space-scoped request waits on it,
+ * so waiting for the layout to mount would cost each a round trip. Keyed on the
+ * remembered org; a failure is not cached, `useSpaces` refetches on mount.
  */
 export function primeSpaceList(): void {
   const orgId = getCurrentOrgId();

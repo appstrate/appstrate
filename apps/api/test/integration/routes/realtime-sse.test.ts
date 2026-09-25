@@ -1048,6 +1048,54 @@ describe("realtime SSE routes (integration)", () => {
       await opened.body?.cancel();
     });
 
+    it("withholds chat frames from a role without chat:read, as `/api/chat/*` does", async () => {
+      const noChat = await seedSpaceRole({
+        orgId: ctx.orgId,
+        key: "sse-no-chat",
+        permissions: ["agents:read", "integrations:read"],
+      });
+      const other = await createTestUser();
+      await addOrgMember(ctx.orgId, other.id, "member");
+      await seedSpaceMember({
+        spaceId,
+        userId: other.id,
+        presetRole: null,
+        customRoleId: noChat.id,
+      });
+      const asOther = (query: string) =>
+        app.request(`/api/realtime/runs?${query}orgId=${ctx.orgId}&spaceId=${spaceId}`, {
+          headers: { Cookie: other.cookie, Accept: "text/event-stream" },
+        });
+
+      expect((await asOther("channels=chat_session_update&")).status).toBe(403);
+
+      const res = await asOther("");
+      expect(res.status).toBe(200);
+      await wait();
+      await pgNotify("chat_session_update", {
+        session_id: "chs-no-chat",
+        org_id: ctx.orgId,
+        user_id: other.id,
+      });
+      await wait();
+      await pgNotify("connection_update", {
+        operation: "UPDATE",
+        id: "conn-no-chat",
+        integration_package_id: "@x/svc",
+        auth_key: "primary",
+        user_id: other.id,
+        end_user_id: null,
+        space_id: spaceId,
+        needs_reconnection: true,
+        deleted: false,
+      });
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      expect(events.map((e) => e.event)).toEqual(["connection_update"]);
+    });
+
     it("still refuses the single-run and per-agent streams, which carry runs alone", async () => {
       for (const path of [
         `/api/realtime/runs/${memberRun.id}`,

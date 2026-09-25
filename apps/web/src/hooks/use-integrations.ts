@@ -114,11 +114,7 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
 // Hooks
 // ─────────────────────────────────────────────
 
-/**
- * Scope of every integration READ: all guard on `integrations:read`, which no
- * agent or run read implies, so pages that show integrations incidentally
- * (agent tabs, launch overrides, run banners) must not ask without it.
- */
+/** Every integration read guards on `integrations:read`, which no agent or run read implies. */
 function useIntegrationsReadScope() {
   const scope = useOrgScope();
   const { can } = usePermissions();
@@ -171,14 +167,9 @@ export function useIntegrationConnections(packageId: string | undefined) {
 }
 
 /**
- * Shared query options for a (integration, agent) resolution verdict.
- * Every consumer — the picker hook ({@link useIntegrationAgentResolution}) and
- * the launch-badge readiness hook (`useAgentIntegrationsReadiness`) — builds
- * the SAME `[method, path, init]` key from ONE place and shares the cache.
- * Hand-copying the key risked a silent cache split where the badge and the
- * Connexions tab fetch the same verdict twice and disagree.
- *
- * Guarded on `integrations:read`, which no agent read implies (#1556).
+ * Query options for an (integration, agent) resolution verdict, shared by the
+ * picker ({@link useIntegrationAgentResolution}) and the launch-badge readiness
+ * hook: one key, so the badge and the Connexions tab cannot disagree.
  */
 function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, version?: string) {
   const orgId = useCurrentOrgId();

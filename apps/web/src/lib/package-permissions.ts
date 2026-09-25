@@ -1,27 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PackageType } from "@appstrate/core/validation";
-import type { GateablePermission } from "../hooks/use-permissions";
-
-/**
- * Per package family: the two activation grants — the same table the API
- * enforces (`spacePackagePermission`, `apps/api/src/lib/package-access.ts`).
- * The family's own read/write/delete/share strings are `packagePermission`
- * (`@appstrate/core/permissions`).
- * `agents:configure` rather than `agents:write`: activating chooses which space
- * runs an agent, it does not author one. The strings themselves still read
- * `integrations:install` / `integrations:uninstall` because they are ROLE DATA
- * in the database, not identifiers this tree is free to rename.
- */
-export const PACKAGE_PERMISSIONS: Record<
-  PackageType,
-  { activate: GateablePermission; deactivate: GateablePermission }
-> = {
-  agent: { activate: "agents:configure", deactivate: "agents:configure" },
-  skill: { activate: "skills:write", deactivate: "skills:write" },
-  "mcp-server": { activate: "mcp-servers:write", deactivate: "mcp-servers:write" },
-  integration: { activate: "integrations:install", deactivate: "integrations:uninstall" },
-};
+import { spacePackagePermission } from "@appstrate/core/permissions";
 
 /** One row of `GET /api/spaces`, narrowed to what the verdict below reads. */
 export interface SpaceGrant {
@@ -54,8 +34,7 @@ export function maySetPackageActive(
 ): boolean {
   if (!space) return false;
   if (space.personal && space.access === "member") return true;
-  const grants = PACKAGE_PERMISSIONS[type];
-  return space.permissions.includes(next ? grants.activate : grants.deactivate);
+  return space.permissions.includes(spacePackagePermission(type, next ? "activate" : "deactivate"));
 }
 
 /**

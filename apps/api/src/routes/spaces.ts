@@ -9,6 +9,7 @@ import {
   packagePermission,
   SPACE_ROLE_PRESETS,
   SPACE_VISIBILITIES,
+  spacePackagePermission,
 } from "@appstrate/core/permissions";
 import type { SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
@@ -67,7 +68,6 @@ import {
   assertCatalogPackageAccess,
   assertPackageShareAccess,
   isPackageReadableInSpace,
-  spacePackagePermission,
 } from "../lib/package-access.ts";
 import {
   markSpaceRescope,

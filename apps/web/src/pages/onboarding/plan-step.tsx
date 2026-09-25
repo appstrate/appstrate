@@ -12,6 +12,7 @@ import {
 } from "../../components/onboarding-layout";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useBilling, useCheckout, type CheckoutPlanId } from "../../hooks/use-billing";
+import { usePermissions } from "../../hooks/use-permissions";
 import { Spinner } from "../../components/spinner";
 import { PlanGrid } from "../../components/plan-card";
 
@@ -29,7 +30,13 @@ export function OnboardingPlanStep() {
     }
   }, [features.billing, navigate, nextRoute]);
 
-  const { data: billing, isLoading } = useBilling({ enabled: !!orgId && features.billing });
+  const { data: billing, isLoading: billingLoading } = useBilling({
+    enabled: !!orgId && features.billing,
+  });
+  // The read waits on the grants; a disabled query is not "loading", so without
+  // `ready` the grid would paint empty first.
+  const { ready } = usePermissions();
+  const isLoading = !ready || billingLoading;
   const checkoutMutation = useCheckout();
 
   const goNext = () => nextRoute && navigate(nextRoute);

@@ -112,6 +112,8 @@ interface RunLogStream {
    * stays false and nothing is auto-presented: no evidence, no presentation.
    */
   sweepDone: boolean;
+  /** The caller may not read runs, so nothing above will ever be fetched. */
+  runDenied: boolean;
 }
 
 /**
@@ -127,7 +129,7 @@ export function useRunLogStream(
   initialPackageId?: string,
 ): RunLogStream {
   const getHeaders = useChatHeaders();
-  // Every read below is a run read or a file read, neither implied by `chat:read`.
+  // `chat:read` implies neither the run reads nor the file read below.
   const { can } = useChatHost();
   const readsRuns = canReadRuns(can);
   const readsFiles = can("files:read");
@@ -399,5 +401,6 @@ export function useRunLogStream(
     producedFiles,
     producedFilesTruncated,
     sweepDone,
+    runDenied: !readsRuns,
   };
 }

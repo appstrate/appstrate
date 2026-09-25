@@ -380,8 +380,9 @@ export function createAgentsRouter() {
           scope: getSpaceScope(c),
           agentPackageId: agent.id,
           actor: getActor(c),
-          // Drives `can_add_connection`: the same exemption the connect route
-          // applies, so the badge cannot promise what the mutation refuses.
+          // Drive `can_add_connection` with the connect routes' own guard and
+          // exemption, so the badge cannot promise what the mutation refuses.
+          canConnect: c.get("permissions")?.has("integrations:connect") ?? false,
           canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
           // The ROUTER decides which definition readiness judges, and it is
           // EXACTLY the one the detail page rendered: an explicit selector (a

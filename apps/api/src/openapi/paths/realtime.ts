@@ -39,17 +39,14 @@ const SSE_RUN_VISIBILITY_DESCRIPTION =
   "The single-run stream refuses a run the caller may not read with 404, the same answer as " +
   "`GET /api/runs/{id}`.";
 
-/**
- * Who receives which channel on the multiplexed stream: the run channels need
- * a run read, the per-actor ones only the credential's ceiling (RBAC spec §7.1).
- */
+/** Each channel asks what the HTTP route reading its rows asks (RBAC spec §7.1). */
 const SSE_CHANNEL_ACCESS_DESCRIPTION =
   "\n\nChannel access: `run_update`, `run_log` and `run_metric` need `runs:read` or `runs:read-all` " +
-  "in the space (for an API key, among its scopes). `connection_update` and `chat_session_update` carry " +
-  "only the caller's own rows and need nothing more for a session; an API key needs `integrations:read` " +
-  "for `connection_update` and never receives `chat_session_update`. A channel the caller may not " +
-  "receive is dropped from the subscription; the stream is refused with 403 only when none of the " +
-  "requested channels (every channel, when `channels` is omitted) remains.";
+  "in the space (for an API key, among its scopes). `chat_session_update` needs `chat:read` in the space, " +
+  "as every `/api/chat` route does; an API key never holds it. `connection_update` carries only the " +
+  "caller's own rows: a session always receives it, an API key needs `integrations:read`. A channel the " +
+  "caller may not receive is dropped from the subscription; the stream is refused with 403 only when " +
+  "none of the requested channels (every channel, when `channels` is omitted) remains.";
 
 export const realtimePaths = {
   "/api/realtime/runs": {

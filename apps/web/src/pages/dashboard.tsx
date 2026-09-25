@@ -89,21 +89,28 @@ export function DashboardPage() {
     .slice(0, 5);
 
   const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0];
+  // What is DRAWN, not merely readable: a readable section with nothing in it
+  // still leaves the page bare.
+  const shown = {
+    schedules: sections.schedules && upcomingSchedules.length > 0,
+    recentAgents: sections.recentAgents && recentAgentIds.length > 0,
+    recentRuns: sections.recentRuns,
+  };
 
   return (
     <div className="space-y-6 p-6">
       <h1 className="text-3xl font-bold">
         {t("dashboard.welcome", { name: firstName, ns: "common" })}
       </h1>
-      {!Object.values(sections).some(Boolean) && (
+      {!Object.values(shown).some(Boolean) && (
         <EmptyState
-          message={t("dashboard.nothingReadable")}
-          hint={t("dashboard.nothingReadableHint")}
+          message={t("dashboard.empty")}
+          hint={t("dashboard.emptyHint")}
           icon={LayoutDashboard}
         />
       )}
       {/* Upcoming schedules */}
-      {sections.schedules && upcomingSchedules.length > 0 && (
+      {shown.schedules && (
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-muted-foreground text-sm font-medium">
@@ -129,7 +136,7 @@ export function DashboardPage() {
       )}
 
       {/* Recent agents (horizontal scroll) */}
-      {sections.recentAgents && recentAgentIds.length > 0 && (
+      {shown.recentAgents && (
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-muted-foreground text-sm font-medium">
@@ -165,7 +172,7 @@ export function DashboardPage() {
       )}
 
       {/* Recent runs */}
-      {sections.recentRuns && (
+      {shown.recentRuns && (
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-muted-foreground text-sm font-medium">

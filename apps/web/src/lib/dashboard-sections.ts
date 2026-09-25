@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
-import type { GateablePermission } from "../hooks/use-permissions";
+import {
+  canReadRuns,
+  packageSightPermissions,
+  type CorePermission,
+} from "@appstrate/core/permissions";
 
 /** Which dashboard sections the caller can read — each one is its own read. */
 export interface DashboardSections {
@@ -12,12 +15,10 @@ export interface DashboardSections {
 
 /**
  * The dashboard is the fallback route: it renders for ANY principal, so each
- * section answers to the guard of the query that feeds it (#1556). The same
- * disjunctions gate the hooks themselves; this decides what is drawn.
+ * section answers to the guard of the query that feeds it (#1556). Pure: the
+ * API's preset pin (`apps/api/test/unit/spa-dashboard-sections.test.ts`) imports it.
  */
-export function dashboardSections(
-  can: (permission: GateablePermission) => boolean,
-): DashboardSections {
+export function dashboardSections(can: (permission: CorePermission) => boolean): DashboardSections {
   const runs = canReadRuns(can);
   return {
     schedules: can("schedules:read"),

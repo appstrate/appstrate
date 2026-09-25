@@ -203,6 +203,22 @@ export function packageSightPermissions(type: PackageType): readonly CorePermiss
   return [packagePermission(type, "read"), ...(PACKAGE_EXTRA_SIGHT_PERMISSIONS[type] ?? [])];
 }
 
+/**
+ * The permission one act on a space placement asks for. The strings keep their
+ * `space_roles` spelling (`integrations:install` / `:uninstall`): they are role
+ * data, and renaming a grant migrates rows, not code. `agents:configure` rather
+ * than `agents:write`: activating picks where an agent runs, it authors nothing.
+ */
+export function spacePackagePermission(
+  type: PackageType,
+  op: "activate" | "configure" | "deactivate",
+): CorePermission {
+  if (type === "agent") return "agents:configure";
+  if (type === "integration")
+    return op === "deactivate" ? "integrations:uninstall" : "integrations:install";
+  return packagePermission(type, "write");
+}
+
 /** Launch AND read back: a run nobody can poll still bills. */
 export function canRunAgents(has: (permission: CorePermission) => boolean): boolean {
   return has("agents:run") && canReadRuns(has);

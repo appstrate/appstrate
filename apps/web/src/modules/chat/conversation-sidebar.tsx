@@ -40,8 +40,11 @@ import type {
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
 
-/** `chat:read` opens the page, not the runs and files these two tabs list. */
-function useConversationTabs() {
+/**
+ * `chat:read` opens the page, not the runs and files two tabs list. A stored
+ * tab the caller can no longer see resolves to the preview, which always stays.
+ */
+function useConversationTabs(selected: ConversationSidebarTab) {
   const { t } = useTranslation("chat");
   const { can } = usePermissions();
   const readable: Record<ConversationSidebarTab, boolean> = {
@@ -60,8 +63,8 @@ function useConversationTabs() {
     Icon: typeof EyeIcon;
     label: string;
   }[];
-  // The preview leads and always stays: it is the fallback for a hidden tab.
-  return [preview, ...rest.filter(({ id }) => readable[id])] as const;
+  const tabs = [preview, ...rest.filter(({ id }) => readable[id])];
+  return { tabs, activeTab: tabs.find(({ id }) => id === selected) ?? preview };
 }
 
 export function ConversationContextActions({
@@ -72,12 +75,12 @@ export function ConversationContextActions({
   dispatch: Dispatch<ConversationSidebarAction>;
 }) {
   const { t } = useTranslation("chat");
-  const tabs = useConversationTabs();
+  const { tabs, activeTab } = useConversationTabs(state.activeTab);
 
   return (
     <TooltipProvider delayDuration={300}>
       <Tabs
-        value={state.expanded ? state.activeTab : ""}
+        value={state.expanded ? activeTab.id : ""}
         onValueChange={(tab) =>
           dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })
         }
@@ -328,8 +331,7 @@ export function ConversationSidebar({
   dispatch: Dispatch<ConversationSidebarAction>;
 }) {
   const { t } = useTranslation("chat");
-  const tabs = useConversationTabs();
-  const activeTab = tabs.find(({ id }) => id === state.activeTab) ?? tabs[0];
+  const { activeTab } = useConversationTabs(state.activeTab);
   const ActiveTabIcon = activeTab.Icon;
   const showFile = (file: SidebarFile) => dispatch({ type: "show-file", file });
 
@@ -347,7 +349,7 @@ export function ConversationSidebar({
         <aside
           id={CONVERSATION_CONTEXT_PANEL_ID}
           role="tabpanel"
-          aria-labelledby={`conversation-context-${state.activeTab}-tab`}
+          aria-labelledby={`conversation-context-${activeTab.id}-tab`}
           aria-label={t("context.label")}
           className="bg-background absolute inset-y-0 right-0 z-30 flex h-full w-[min(92vw,36rem)] shrink-0 flex-col border-l shadow-xl lg:static lg:w-[42vw] lg:max-w-[42rem] lg:min-w-[28rem] lg:shadow-none"
         >

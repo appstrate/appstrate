@@ -37,21 +37,20 @@ export type ProviderRegistryEntry = RawProviderRegistryEntry &
   >;
 
 /**
- * Both reads guard on the org grant `model-provider-credentials:read` (owner
- * and admin), and reach members and guests through the agent configuration and
- * launch-override surfaces — so they gate themselves on it.
+ * Both reads guard on `model-provider-credentials:read`, which the agent and
+ * launch surfaces mounting them do not imply.
  */
-function useCredentialsReadScope(enabled: boolean) {
+function useCredentialsReadScope() {
   const scope = useOrgOnlyScope();
   const { can } = usePermissions();
   return {
     header: scope.header,
-    enabled: enabled && scope.enabled && can("model-provider-credentials:read"),
+    enabled: scope.enabled && can("model-provider-credentials:read"),
   };
 }
 
-export function useModelProviderCredentials(enabled = true) {
-  const scope = useCredentialsReadScope(enabled);
+export function useModelProviderCredentials() {
+  const scope = useCredentialsReadScope();
   return $api.useQuery(
     "get",
     "/api/model-provider-credentials",
@@ -60,8 +59,8 @@ export function useModelProviderCredentials(enabled = true) {
   );
 }
 
-export function useProvidersRegistry(enabled = true) {
-  const scope = useCredentialsReadScope(enabled);
+export function useProvidersRegistry() {
+  const scope = useCredentialsReadScope();
   return $api.useQuery(
     "get",
     "/api/model-provider-credentials/registry",
