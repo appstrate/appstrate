@@ -40,6 +40,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { PackageOpen } from "lucide-react";
 import { useFiles, type FileDto } from "../hooks/use-files";
+import { usePermissions } from "../hooks/use-permissions";
 import { featuredRunFile, producedRunFiles } from "../lib/files";
 import { runHasOutcome, runHasOutputValue } from "../lib/run-detail-tabs";
 import { FileListPanel } from "./file-list-panel";
@@ -71,9 +72,11 @@ interface RunOutcomeProps {
 /** Fetches the run's files and hands them to the view. */
 export function RunOutcomeTab(props: RunOutcomeProps) {
   const { data, isLoading, error } = useFiles({ runId: props.runId, limit: 100 });
+  const { can } = usePermissions();
   return (
     <RunOutcomeView
       {...props}
+      filesDenied={!can("files:read")}
       files={data?.data ?? []}
       // The route clamps `limit` to 100 and answers `hasMore` with no cursor
       // field (paging is `startingAfter=<last id>`). It describes the run's
@@ -104,8 +107,14 @@ export function RunOutcomeView({
   hasMore,
   isLoading,
   error,
+  filesDenied = false,
 }: RunOutcomeProps & {
   files: FileDto[];
+  /**
+   * The caller may not list files (`files:read`): the run's count still says
+   * files were produced, so the card stays and says why it is empty.
+   */
+  filesDenied?: boolean;
   /**
    * The list query's page was capped — the run's file CONTAINER holds rows
    * beyond it. Not "the produced list was cut": the container ORs the run's own
@@ -207,7 +216,10 @@ export function RunOutcomeView({
               files={produced}
               isLoading={isLoading}
               error={error}
-              empty={{ message: t("run.empty", { ns: "files" }), compact: true }}
+              empty={{
+                message: t(filesDenied ? "run.noAccess" : "run.empty", { ns: "files" }),
+                compact: true,
+              }}
               runId={runId}
             />
             {pageCutProducedFiles && (

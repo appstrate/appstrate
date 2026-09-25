@@ -18,6 +18,7 @@ import {
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { SchemaWrapper } from "@appstrate/core/form";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
+import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
 import { usePackageActivationState, useSetPackageActive } from "../hooks/use-library";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { LoadingState, ErrorState } from "../components/page-states";
@@ -161,6 +162,13 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // Whether this page is looking at the whole resource. Only an agent has a
   // narrower read; every other type reaches this route on its own `<type>:read`.
   const fullRead = type !== "agent" || can("agents:read");
+  // Each tab below is fed by a read of its own, none implied by this route.
+  const tabReads = {
+    runs: canReadRuns(can),
+    connections: can("integrations:read"),
+    memory: can("persistence:read"),
+    usedBy: packageSightPermissions("agent").some(can),
+  };
   const isVersionView = !!versionParam;
 
   // ── Data loading (unified) ──
@@ -255,12 +263,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // four is fed by a field the summary read omits (manifest, prompt, authoring
   // history) or by a route — versions, files — that answers them 403.
   const allValidTabs: DetailTab[] = [
-    "connections",
-    "runs",
-    "configuration",
-    "memory",
+    ...(tabReads.connections ? (["connections"] as const) : []),
+    ...(tabReads.runs ? (["runs"] as const) : []),
+    ...(can("agents:configure") ? (["configuration"] as const) : []),
+    ...(tabReads.memory ? (["memory"] as const) : []),
     "api",
-    "usedBy",
+    ...(tabReads.usedBy ? (["usedBy"] as const) : []),
     ...(can("schedules:read") ? (["schedules"] as const) : []),
     ...(fullRead ? (["overview", "content", "versions", "diff"] as const) : []),
   ];
@@ -276,7 +284,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // still wins in `useTabWithHash`.
   const defaultTab: DetailTab =
     type === "agent"
-      ? "runs"
+      ? tabReads.runs
+        ? "runs"
+        : fullRead
+          ? "overview"
+          : "api"
       : primaryDisplayFile(type).source === "content"
         ? "content"
         : "overview";
@@ -378,15 +390,17 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   };
 
   const agentTabs: Array<{ id: DetailTab; label: string }> = [
-    { id: "runs", label: t("detail.tabRuns") },
-    { id: "connections", label: t("detail.tabConnections") },
+    ...(tabReads.runs ? [{ id: "runs" as DetailTab, label: t("detail.tabRuns") }] : []),
+    ...(tabReads.connections
+      ? [{ id: "connections" as DetailTab, label: t("detail.tabConnections") }]
+      : []),
     ...(effectiveShowConfigTab
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
       : []),
     ...(can("schedules:read")
       ? [{ id: "schedules" as DetailTab, label: t("detail.tabSchedules") }]
       : []),
-    { id: "memory", label: t("detail.tabMemory") },
+    ...(tabReads.memory ? [{ id: "memory" as DetailTab, label: t("detail.tabMemory") }] : []),
     { id: "api", label: t("detail.tabApi") },
     ...(fullRead ? [overviewTab, filesTab] : []),
   ];
@@ -394,7 +408,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
     overviewTab,
     filesTab,
-    { id: "usedBy", label: t("packages.usedBy") },
+    ...(tabReads.usedBy ? [{ id: "usedBy" as DetailTab, label: t("packages.usedBy") }] : []),
   ];
 
   // Shared tabs appended to all package types
@@ -621,7 +635,14 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           );
         })()}
 
-      {tab === "versions" && <VersionHistory packageId={packageId} type={type} isOwned={isOwned} />}
+      {tab === "versions" && (
+        <VersionHistory
+          packageId={packageId}
+          type={type}
+          canRestore={isOwned && !!homeWritable}
+          canDelete={isOwned && !!homeDeletable}
+        />
+      )}
 
       {tab === "diff" && latestVersionForDiff && (
         <DiffTab

@@ -79,11 +79,13 @@ section.
 `apps/web/src/pages/test/billing-admin-sections.test.tsx`,
 `apps/web/src/pages/test/billing-plan-change.test.tsx`.
 
-**4. SPA — edit (6 files)**
+**4. SPA — edit (7 files)**
 
 - `apps/web/src/app.tsx` — drop the two `lazy()` imports (`OnboardingPlanStep`,
-  `OrgSettingsBillingPage`) and their two `<Route>` blocks (`/onboarding/plan`,
-  and `path="billing"` under `RequirePermission billing:read`).
+  `OrgSettingsBillingPage`), the `/onboarding/plan` `<Route>` block, and the
+  `"/org-settings/billing"` entry of the `PAGES` table.
+- `apps/web/src/lib/route-access.ts` — drop the `/org-settings/billing` entry
+  (`PAGES` is keyed by `RoutePath`, so the two go together or `tsc` fails).
 - `apps/web/src/components/app-sidebar.tsx` — drop the `SidebarBilling` import
   and its usage.
 - `apps/web/src/components/onboarding-layout.tsx` — drop `"plan"` from the

@@ -6,7 +6,8 @@ import { ChevronsUpDown, Check, Plus, Star, Library } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useSpaces } from "../hooks/use-spaces";
 import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
-import { usePermissions, useCanManageOrgCatalog } from "../hooks/use-permissions";
+import { useCanManageOrgCatalog } from "../hooks/use-permissions";
+import { useCanReach } from "../hooks/use-can-reach";
 import { spaceRoleLabel } from "../hooks/use-roles";
 import {
   DropdownMenu,
@@ -50,7 +51,7 @@ export function OrgSwitcher() {
   const { data: spaces } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
-  const { can } = usePermissions();
+  const canReach = useCanReach();
   const canManageCatalog = useCanManageOrgCatalog();
 
   const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
@@ -203,7 +204,7 @@ export function OrgSwitcher() {
                 {t("switcher.createOrg")}
               </Link>
             </DropdownMenuItem>
-            {can("spaces:read") && (
+            {canReach("/space/packages") && (
               <DropdownMenuItem asChild>
                 <Link to="/space/packages" className="text-primary flex items-center gap-2">
                   <Library size={14} />

@@ -17,3 +17,8 @@ export function turnCapabilities(has: (permission: string) => boolean): TurnCapa
   const invokes = has("mcp:read") && has("mcp:invoke");
   return { invokes, ...agentCapabilities(has, invokes) };
 }
+
+/** Creating agents from the chat: the composer's authoring switch and the shell's access row. */
+export function canAuthorAgents(has: (permission: string) => boolean): boolean {
+  return has("chat:write") && turnCapabilities(has).authors;
+}

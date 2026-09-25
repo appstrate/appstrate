@@ -8,6 +8,7 @@ import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { PackageType } from "@appstrate/core/validation";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
+import { usePermissions } from "../hooks/use-permissions";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 import { primaryDisplayFile } from "../lib/package-files";
 import { skillFrontmatterError, translateSkillFrontmatterError } from "../lib/skill-frontmatter";
@@ -26,7 +27,7 @@ import { SourceSection } from "../components/integration-editor/source-section";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
 import { Spinner } from "../components/spinner";
-import { NoAccessState } from "../components/require-permission";
+import { NoAccessState } from "../components/route-gate";
 import { EditorShell } from "../components/editor-shell";
 
 import { newPackageContent } from "../lib/package-file-drafts";
@@ -605,7 +606,10 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   });
   const pkgQuery = usePackageDetail(type, type !== "agent" && isEdit ? packageId : undefined);
 
-  const isLoading = type === "agent" ? agentQuery.isLoading : pkgQuery.isLoading;
+  // The detail read gates itself on the permission set, and a disabled query is
+  // not loading: without `ready` a hard reload would redirect before it lands.
+  const { ready } = usePermissions();
+  const isLoading = !ready || (type === "agent" ? agentQuery.isLoading : pkgQuery.isLoading);
   const detail = type === "agent" ? agentQuery.data : pkgQuery.data;
 
   if (isEdit && isLoading) {
@@ -617,7 +621,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   }
 
   if (isEdit && !detail) {
-    return <Navigate to="/agents" replace />;
+    return <Navigate to={packageListPath(type)} replace />;
   }
 
   // Write authority is the package's HOME space, not the space this request

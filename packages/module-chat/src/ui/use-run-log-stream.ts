@@ -27,7 +27,8 @@
 
 import { useEffect, useState } from "react";
 import { runProducedFilesPath } from "@appstrate/core/run-and-wait-client";
-import { useChatHeaders } from "./runtime-context.ts";
+import { canReadRuns } from "@appstrate/core/permissions";
+import { useChatHeaders, useChatHost } from "./runtime-context.ts";
 import {
   buildRunSseUrl,
   isTerminalStatus,
@@ -111,6 +112,8 @@ interface RunLogStream {
    * stays false and nothing is auto-presented: no evidence, no presentation.
    */
   sweepDone: boolean;
+  /** The caller may not read runs, so nothing above will ever be fetched. */
+  runDenied: boolean;
 }
 
 /**
@@ -126,6 +129,10 @@ export function useRunLogStream(
   initialPackageId?: string,
 ): RunLogStream {
   const getHeaders = useChatHeaders();
+  // `chat:read` implies neither the run reads nor the file read below.
+  const { can } = useChatHost();
+  const readsRuns = canReadRuns(can);
+  const readsFiles = can("files:read");
   const [logs, setLogs] = useState<RunLogLine[]>([]);
   const [status, setStatus] = useState<RunStatus | undefined>(
     isTerminalStatus(initialStatus) ? initialStatus : undefined,
@@ -162,7 +169,7 @@ export function useRunLogStream(
   }
 
   useEffect(() => {
-    if (!runId) return;
+    if (!runId || !readsRuns) return;
     let cancelled = false;
     const headers = getHeaders?.() ?? {};
     const { orgId, spaceId, viewAs } = orgSpaceFromHeaders(headers);
@@ -196,6 +203,7 @@ export function useRunLogStream(
      * log-derived list.
      */
     const readProducedFiles = async (): Promise<SweepRead> => {
+      if (!readsFiles) return "failed";
       try {
         const res = await fetch(runProducedFilesPath(runId), {
           headers,
@@ -381,7 +389,7 @@ export function useRunLogStream(
     // stream reads its URL once at connect. Without it a preview entered while
     // a run card is open keeps tailing under the previous authority.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId, getHeaders]);
+  }, [runId, getHeaders, readsRuns, readsFiles]);
 
   return {
     logs,
@@ -393,5 +401,6 @@ export function useRunLogStream(
     producedFiles,
     producedFilesTruncated,
     sweepDone,
+    runDenied: !readsRuns,
   };
 }

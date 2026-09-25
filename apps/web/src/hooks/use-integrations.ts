@@ -60,6 +60,7 @@ export type IntegrationClient = NonNullable<
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgScope } from "./use-org-scope";
+import { usePermissions } from "./use-permissions";
 
 // Re-export wire types for component consumers — canonical definitions
 // live in `@appstrate/shared-types/integrations.ts`.
@@ -113,8 +114,15 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
 // Hooks
 // ─────────────────────────────────────────────
 
-export function useIntegrations() {
+/** Every integration read guards on `integrations:read`, which no agent or run read implies. */
+function useIntegrationsReadScope() {
   const scope = useOrgScope();
+  const { can } = usePermissions();
+  return { header: scope.header, enabled: scope.enabled && can("integrations:read") };
+}
+
+export function useIntegrations() {
+  const scope = useIntegrationsReadScope();
   return $api.useQuery(
     "get",
     "/api/integrations",
@@ -128,7 +136,7 @@ export function useIntegrations() {
 }
 
 export function useIntegrationDetail(packageId: string | undefined) {
-  const scope = useOrgScope();
+  const scope = useIntegrationsReadScope();
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}",
@@ -144,7 +152,7 @@ export function useIntegrationDetail(packageId: string | undefined) {
 }
 
 export function useIntegrationConnections(packageId: string | undefined) {
-  const scope = useOrgScope();
+  const scope = useIntegrationsReadScope();
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/connections",
@@ -159,20 +167,14 @@ export function useIntegrationConnections(packageId: string | undefined) {
 }
 
 /**
- * Shared query options for a (integration, agent) resolution verdict.
- * Exported so every consumer — the picker hook
- * ({@link useIntegrationAgentResolution}) and the launch-badge readiness hook
- * (`useAgentIntegrationsReadiness`) — builds the SAME `[method, path, init]`
- * key from ONE place and shares the cache. Hand-copying the key risked a
- * silent cache split where the badge and the Connexions tab fetch the same
- * verdict twice and disagree.
+ * Query options for an (integration, agent) resolution verdict, shared by the
+ * picker ({@link useIntegrationAgentResolution}) and the launch-badge readiness
+ * hook: one key, so the badge and the Connexions tab cannot disagree.
  */
-function agentConnectionReadinessQueryOptions(
-  orgId: string | null | undefined,
-  spaceId: string | null | undefined,
-  agentPackageId: string | undefined,
-  version?: string,
-) {
+function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, version?: string) {
+  const orgId = useCurrentOrgId();
+  const spaceId = useCurrentSpaceId();
+  const { can } = usePermissions();
   const { scope, name } = agentPackageId
     ? splitPackageRef(agentPackageId)
     : { scope: "", name: "" };
@@ -192,7 +194,7 @@ function agentConnectionReadinessQueryOptions(
         },
       },
     },
-    { enabled: Boolean(orgId && spaceId && agentPackageId) },
+    { enabled: Boolean(can("integrations:read") && orgId && spaceId && agentPackageId) },
   );
 }
 
@@ -204,9 +206,7 @@ function agentConnectionReadinessQueryOptions(
  * `run_blocking` flag. Replaces the former N per-integration round-trips.
  */
 export function useAgentConnectionReadiness(agentPackageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
-  return useQuery(agentConnectionReadinessQueryOptions(orgId, spaceId, agentPackageId));
+  return useQuery(useAgentConnectionReadinessOptions(agentPackageId));
 }
 
 /**
@@ -220,11 +220,10 @@ export function useIntegrationAgentResolution(
   agentPackageId: string | undefined,
   version?: string,
 ) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
+  const options = useAgentConnectionReadinessOptions(agentPackageId, version);
   return useQuery({
-    ...agentConnectionReadinessQueryOptions(orgId, spaceId, agentPackageId, version),
-    enabled: Boolean(orgId && spaceId && integrationId && agentPackageId),
+    ...options,
+    enabled: options.enabled && !!integrationId,
     select: (data) =>
       data.integrations.find((i) => i.integration_id === integrationId)?.resolution ?? null,
   });
@@ -240,11 +239,10 @@ export function useIntegrationRunBlocking(
   agentPackageId: string | undefined,
   version?: string,
 ) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
+  const options = useAgentConnectionReadinessOptions(agentPackageId, version);
   return useQuery({
-    ...agentConnectionReadinessQueryOptions(orgId, spaceId, agentPackageId, version),
-    enabled: Boolean(orgId && spaceId && integrationId && agentPackageId),
+    ...options,
+    enabled: options.enabled && !!integrationId,
     select: (data) =>
       data.integrations.find((i) => i.integration_id === integrationId)?.run_blocking ?? false,
   });
@@ -326,7 +324,7 @@ export function useRotateIntegrationOAuthClient() {
  * connections always use the default — there is no per-connect picker.
  */
 export function useIntegrationClients(packageId: string | undefined, authKey: string | undefined) {
-  const scope = useOrgScope();
+  const scope = useIntegrationsReadScope();
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/auths/{authKey}/clients",
@@ -367,7 +365,7 @@ export function useSetDefaultIntegrationClient() {
 // ─────────────────────────────────────────────
 
 export function useIntegrationPins(packageId: string | undefined) {
-  const scope = useOrgScope();
+  const scope = useIntegrationsReadScope();
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/pins",
@@ -387,7 +385,7 @@ export function useIntegrationPins(packageId: string | undefined) {
  * picker.
  */
 export function useAgentsConsumingIntegration(packageId: string | undefined) {
-  const scope = useOrgScope();
+  const scope = useIntegrationsReadScope();
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/consuming-agents",
@@ -464,7 +462,7 @@ export function useDeleteIntegrationPin() {
 // ─── Org default connection (cross-agent governance) ───────────────────────
 
 export function useIntegrationOrgDefault(packageId: string | undefined) {
-  const scope = useOrgScope();
+  const scope = useIntegrationsReadScope();
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/default",

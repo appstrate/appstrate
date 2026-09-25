@@ -13,6 +13,8 @@ import { triggerBlobDownload } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
+import { usePermissions } from "./use-permissions";
+import { packagePermission, packageSightPermissions } from "@appstrate/core/permissions";
 import { ApiError } from "../api/errors";
 import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
 import type {
@@ -31,6 +33,19 @@ import type {
 // across files: use-editor-state / use-library / use-models / use-proxies
 // invalidate them after writes, and use-current-space resets them on
 // space switch. Only the fetch layer is migrated to the typed client.
+
+// Each read gates ITSELF on the permission its route guards (#1556): a custom
+// space role may omit any of them, and a surface that shows a package family
+// only incidentally must not fire a request the server is bound to refuse.
+function useCanReadPackages(type: PackageType): boolean {
+  const { can } = usePermissions();
+  return can(packagePermission(type, "read"));
+}
+
+function useCanSeePackage(type: PackageType): boolean {
+  const { can } = usePermissions();
+  return packageSightPermissions(type).some(can);
+}
 
 // --- Packages — one factory over the four types ---
 //
@@ -146,6 +161,7 @@ function usePackageList(type: PackageType) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
+  const canRead = useCanReadPackages(type);
   return useQuery({
     queryKey: packageKeys.list(segment, orgId, spaceId),
     queryFn: async (): Promise<OrgPackageItem[]> => {
@@ -170,7 +186,7 @@ function usePackageList(type: PackageType) {
         auto_installed: item.auto_installed,
       }));
     },
-    enabled: !!orgId && !!spaceId,
+    enabled: canRead && !!orgId && !!spaceId,
   });
 }
 
@@ -185,11 +201,12 @@ function usePackageDetail<T extends PackageType>(
   // The server's default projection and an explicit `draft` are two different
   // answers and must never share a cache entry.
   const version = opts?.version;
+  const canSee = useCanSeePackage(type);
 
   return useQuery({
     queryKey: packageKeys.detail(segment, orgId, spaceId, id!, version ?? null),
     queryFn: () => fetchPackageDetail(type, id!, version),
-    enabled: !!orgId && !!spaceId && !!id && (opts?.enabled ?? true),
+    enabled: canSee && !!orgId && !!spaceId && !!id && (opts?.enabled ?? true),
   });
 }
 
@@ -298,6 +315,7 @@ export {
 export function useAgents() {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const canSee = useCanSeePackage("agent");
   return useQuery({
     queryKey: agentsKeys.list(orgId, spaceId),
     queryFn: async (): Promise<AgentListItem[]> => {
@@ -319,7 +337,7 @@ export function useAgents() {
         dependencies: a.dependencies,
       }));
     },
-    enabled: !!orgId && !!spaceId,
+    enabled: canSee && !!orgId && !!spaceId,
   });
 }
 
@@ -379,6 +397,7 @@ export function useVersionDetail(
 ) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const canRead = useCanReadPackages(type);
   return useQuery({
     queryKey: ["version-detail", orgId, spaceId, type, packageId, version],
     queryFn: async (): Promise<VersionDetailResponse> => {
@@ -388,13 +407,14 @@ export function useVersionDetail(
       );
       return data!;
     },
-    enabled: !!orgId && !!spaceId && !!packageId && !!version,
+    enabled: canRead && !!orgId && !!spaceId && !!packageId && !!version,
   });
 }
 
 export function usePackageVersions(type: PackageType, packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const canRead = useCanReadPackages(type);
   return useQuery({
     queryKey: ["package-versions", orgId, spaceId, type, packageId],
     queryFn: async (): Promise<VersionListItem[]> => {
@@ -404,7 +424,7 @@ export function usePackageVersions(type: PackageType, packageId: string | undefi
       );
       return data!.data;
     },
-    enabled: !!orgId && !!spaceId && !!packageId,
+    enabled: canRead && !!orgId && !!spaceId && !!packageId,
   });
 }
 
@@ -510,6 +530,7 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
 export function useVersionInfo(type: PackageType, packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const canRead = useCanReadPackages(type);
   return useQuery({
     queryKey: ["version-info", orgId, spaceId, type, packageId],
     queryFn: async (): Promise<{
@@ -525,7 +546,7 @@ export function useVersionInfo(type: PackageType, packageId: string | undefined)
         active_version: data!.active_version ?? null,
       };
     },
-    enabled: !!orgId && !!spaceId && !!packageId,
+    enabled: canRead && !!orgId && !!spaceId && !!packageId,
   });
 }
 

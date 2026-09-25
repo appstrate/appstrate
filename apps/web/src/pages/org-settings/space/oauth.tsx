@@ -2,7 +2,6 @@
 
 import { lazy, Suspense } from "react";
 import { Navigate } from "react-router-dom";
-import { useAppConfig } from "../../../hooks/use-app-config";
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { LoadingState } from "../../../components/page-states";
 
@@ -13,10 +12,9 @@ const OAuthClientsTab = lazy(() =>
 );
 
 export function OrgSettingsSpaceOauthPage() {
-  const { features } = useAppConfig();
   const spaceId = useCurrentSpaceId();
 
-  if (!spaceId || !features.oidc) {
+  if (!spaceId) {
     return <Navigate to="/org-settings/space/general" replace />;
   }
 

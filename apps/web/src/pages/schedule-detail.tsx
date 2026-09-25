@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePermissions } from "../hooks/use-permissions";
+import { useCanReach } from "../hooks/use-can-reach";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
@@ -26,8 +27,11 @@ import { ActorLabel } from "../components/actor-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
 import { useAgents } from "../hooks/use-packages";
+import { canReadRuns } from "@appstrate/core/permissions";
 import { formatDateField } from "../lib/format-date";
 import { MoreHorizontal, Pencil, Trash2, Play, Pause, Clock } from "lucide-react";
+
+type ScheduleTab = "runs" | "details";
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -39,8 +43,10 @@ export function ScheduleDetailPage() {
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
-  const tabs = ["runs", "details"] as const;
-  const [activeTab, setActiveTab] = useTabWithHash(tabs, "runs");
+  // A schedule's runs are runs: `schedules:read` alone does not list them.
+  const readsRuns = canReadRuns(can);
+  const tabs: readonly ScheduleTab[] = readsRuns ? ["runs", "details"] : ["details"];
+  const [activeTab, setActiveTab] = useTabWithHash(tabs, readsRuns ? "runs" : "details");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (isLoading) return <LoadingState />;
@@ -52,7 +58,7 @@ export function ScheduleDetailPage() {
 
   return (
     <div className="p-6">
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScheduleTab)}>
         <PageHeader
           title={schedule.name || schedule.id}
           emoji="📅"
@@ -100,14 +106,16 @@ export function ScheduleDetailPage() {
           }
         >
           <TabsList className="mt-3">
-            <TabsTrigger value="runs">{t("schedule.tabRuns")}</TabsTrigger>
+            {readsRuns && <TabsTrigger value="runs">{t("schedule.tabRuns")}</TabsTrigger>}
             <TabsTrigger value="details">{t("schedule.tabDetails")}</TabsTrigger>
           </TabsList>
         </PageHeader>
 
-        <TabsContent value="runs">
-          <ScheduleHistory schedule={schedule} />
-        </TabsContent>
+        {readsRuns && (
+          <TabsContent value="runs">
+            <ScheduleHistory schedule={schedule} />
+          </TabsContent>
+        )}
 
         <TabsContent value="details">
           <ScheduleParams schedule={schedule} />
@@ -152,6 +160,8 @@ function ScheduleParams({
 }) {
   const { t } = useTranslation(["agents"]);
   const { data: agents } = useAgents();
+  const canReach = useCanReach();
+  const agentPath = `/agents/${schedule.packageId}`;
   const agentDisplayName =
     agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
   const input = schedule.input;
@@ -177,12 +187,13 @@ function ScheduleParams({
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">
           <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramAgent")}</p>
-          <Link
-            to={`/agents/${schedule.packageId}`}
-            className="text-sm font-medium hover:underline"
-          >
-            {agentDisplayName}
-          </Link>
+          {canReach(agentPath) ? (
+            <Link to={agentPath} className="text-sm font-medium hover:underline">
+              {agentDisplayName}
+            </Link>
+          ) : (
+            <p className="text-sm font-medium">{agentDisplayName}</p>
+          )}
         </div>
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">

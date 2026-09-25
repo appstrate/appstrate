@@ -21,11 +21,10 @@ import {
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
-import { usePermissions } from "../hooks/use-permissions";
-import { useAppConfig } from "../hooks/use-app-config";
 import { useChatUnreadCount } from "@appstrate/module-chat/unread";
 import { buildScopingHeaders } from "../lib/scoping-headers";
-import { WEBHOOK_READ_PERMISSIONS } from "../lib/webhook-permissions";
+import type { RoutePath } from "../lib/route-access";
+import { useCanReach } from "../hooks/use-can-reach";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
@@ -36,15 +35,21 @@ import {
   SidebarMenuItem,
 } from "@appstrate/ui/components/sidebar";
 
-type NavItem = { path: string; label: string; icon: LucideIcon; badge?: number };
+type NavItem = {
+  path: RoutePath;
+  label: string;
+  icon: LucideIcon;
+  badge?: number;
+  /** The route the link lands on, when `path` redirects there. */
+  landsOn?: RoutePath;
+};
 
 export function NavOrg() {
   const { t } = useTranslation();
   const location = useLocation();
   const { data: unreadCount } = useUnreadCount();
   const { data: agents } = useAgents();
-  const { can } = usePermissions();
-  const { features } = useAppConfig();
+  const canReach = useCanReach();
 
   // Inline runs live on ephemeral shadow packages that are not in `agents`,
   // so they don't contribute to `runningRuns`. Check them separately.
@@ -58,56 +63,43 @@ export function NavOrg() {
     (agents?.some((f) => f.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0;
   const unread = unreadCount ?? 0;
   // Unread chat replies — drives the Chat nav badge, aligned with the Runs badge.
-  const chatUnread = useChatUnreadCount(buildScopingHeaders, features.chat);
+  const chatUnread = useChatUnreadCount(buildScopingHeaders, canReach("/chat"));
 
   // Grouped nav: work surfaces (Activité) → build loop (Automatisation) →
   // reusable building blocks (Extensions) → admin-only config (Administration).
   // Runs is rendered specially (running spinner + unread badge) inside Activité.
-  const activityItems: NavItem[] = [
+  // Every entry, Runs included, is shown exactly when its route's declaration
+  // (`lib/route-access.ts`) opens the page it lands on — a custom space role
+  // may hold none of them, so no entry is assumed reachable.
+  const reachable = (items: NavItem[]) => items.filter((i) => canReach(i.landsOn ?? i.path));
+
+  const activityItems = reachable([
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
-    // Module-contributed product surfaces (absent flag = entry hidden)
-    ...(features.chat
-      ? [{ path: "/chat", label: t("nav.chat"), icon: MessageSquare, badge: chatUnread }]
-      : []),
+    { path: "/chat", label: t("nav.chat"), icon: MessageSquare, badge: chatUnread },
     { path: "/files", label: t("nav.files"), icon: FileText },
-  ];
+  ]);
 
-  // Automation and Extensions below: each entry asks for the permission its
-  // landing page's list route needs, so a caller who would land on a wall of
-  // 403s never sees the link. `agents` is the disjunction the route itself
-  // accepts: a `runner` launches agents it holds no `agents:read` on. (Activité
-  // above is ungated — every principal in a space reaches those three.)
-  const automationItems: NavItem[] = [
-    ...(can("agents:read") || can("agents:run")
-      ? [{ path: "/agents", label: t("nav.agents"), icon: Layers }]
-      : []),
-    ...(can("schedules:read")
-      ? [{ path: "/schedules", label: t("nav.schedules"), icon: Calendar }]
-      : []),
-  ];
+  const automationItems = reachable([
+    { path: "/agents", label: t("nav.agents"), icon: Layers },
+    { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
+  ]);
 
-  const extensionItems: NavItem[] = [
-    ...(can("skills:read") ? [{ path: "/skills", label: t("nav.skills"), icon: Wrench }] : []),
-    ...(can("mcp-servers:read")
-      ? [{ path: "/mcp-servers", label: t("nav.mcpServers"), icon: Plug }]
-      : []),
-    ...(can("integrations:read")
-      ? [{ path: "/integrations", label: t("nav.integrations"), icon: Boxes }]
-      : []),
-  ];
+  const extensionItems = reachable([
+    { path: "/skills", label: t("nav.skills"), icon: Wrench },
+    { path: "/mcp-servers", label: t("nav.mcpServers"), icon: Plug },
+    { path: "/integrations", label: t("nav.integrations"), icon: Boxes },
+  ]);
 
-  const canReadWebhooks = WEBHOOK_READ_PERMISSIONS.some((p) => can(p));
-  const adminItems: NavItem[] = [
-    ...(features.webhooks && canReadWebhooks
-      ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]
-      : []),
-    ...(can("end-users:read")
-      ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }]
-      : []),
-    ...(can("org:read")
-      ? [{ path: "/org-settings", label: t("nav.settings"), icon: Settings }]
-      : []),
-  ];
+  const adminItems = reachable([
+    { path: "/webhooks", label: t("nav.webhooks"), icon: Webhook },
+    { path: "/end-users", label: t("nav.endUsers"), icon: Users },
+    {
+      path: "/org-settings",
+      landsOn: "/org-settings/general",
+      label: t("nav.settings"),
+      icon: Settings,
+    },
+  ]);
 
   const renderItems = (items: NavItem[]) =>
     items.map((item) => (
@@ -137,34 +129,36 @@ export function NavOrg() {
         <SidebarMenu>
           {renderItems(activityItems)}
           {/* Runs — with unread badge + running indicator */}
-          <SidebarMenuItem className="relative">
-            <SidebarMenuButton
-              asChild
-              isActive={location.pathname.startsWith("/runs")}
-              tooltip={t("nav.runs")}
-            >
-              <Link to="/runs">
-                <span className="flex size-4 shrink-0 items-center justify-center">
-                  {hasRunning ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : (
-                    <Activity size={16} />
-                  )}
-                </span>
-                <span>{t("nav.runs")}</span>
-              </Link>
-            </SidebarMenuButton>
-            {unread > 0 && (
-              <>
-                <SidebarMenuBadge>
-                  <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-                    {unread > 99 ? "99+" : unread}
+          {canReach("/runs") && (
+            <SidebarMenuItem className="relative">
+              <SidebarMenuButton
+                asChild
+                isActive={location.pathname.startsWith("/runs")}
+                tooltip={t("nav.runs")}
+              >
+                <Link to="/runs">
+                  <span className="flex size-4 shrink-0 items-center justify-center">
+                    {hasRunning ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <Activity size={16} />
+                    )}
                   </span>
-                </SidebarMenuBadge>
-                <span className="ring-sidebar bg-destructive pointer-events-none absolute top-1 right-1 hidden size-2 rounded-full ring-2 group-data-[collapsible=icon]:block" />
-              </>
-            )}
-          </SidebarMenuItem>
+                  <span>{t("nav.runs")}</span>
+                </Link>
+              </SidebarMenuButton>
+              {unread > 0 && (
+                <>
+                  <SidebarMenuBadge>
+                    <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
+                      {unread > 99 ? "99+" : unread}
+                    </span>
+                  </SidebarMenuBadge>
+                  <span className="ring-sidebar bg-destructive pointer-events-none absolute top-1 right-1 hidden size-2 rounded-full ring-2 group-data-[collapsible=icon]:block" />
+                </>
+              )}
+            </SidebarMenuItem>
+          )}
         </SidebarMenu>
       </SidebarGroup>
 

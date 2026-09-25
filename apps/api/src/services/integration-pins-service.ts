@@ -654,6 +654,7 @@ async function resolveAgentIntegrationPick(args: {
   agentPackageId: string;
   integrationId: string;
   actor: Actor;
+  canConnect: boolean;
   canConfigureIntegrations: boolean;
   /** The manifest of the version under inspection — never re-read from the package. */
   agentManifest: Record<string, unknown>;
@@ -669,6 +670,7 @@ async function resolveAgentIntegrationPick(args: {
     agentPackageId,
     integrationId,
     actor,
+    canConnect,
     canConfigureIntegrations,
     agentManifest,
     resolution,
@@ -776,7 +778,7 @@ async function resolveAgentIntegrationPick(args: {
     member_pinned_connection_id: memberPinnedConnectionId,
     org_default_connection_id: orgDefaultConnectionId,
     org_default_enforced: orgDefaultEnforced,
-    can_add_connection: canConfigureIntegrations || !blocked,
+    can_add_connection: canConnect && (canConfigureIntegrations || !blocked),
     candidates,
   };
 }
@@ -818,6 +820,8 @@ export async function resolveAgentConnectionReadiness(args: {
   scope: SpaceScope;
   agentPackageId: string;
   actor: Actor;
+  /** `integrations:connect` and `integrations:configure`: together they drive `can_add_connection`. */
+  canConnect: boolean;
   canConfigureIntegrations: boolean;
   /**
    * Version selector (`draft` | `published` | concrete semver | dist-tag) —
@@ -830,7 +834,7 @@ export async function resolveAgentConnectionReadiness(args: {
    */
   version: string;
 }): Promise<AgentConnectionReadiness> {
-  const { scope, agentPackageId, actor, canConfigureIntegrations, version } = args;
+  const { scope, agentPackageId, actor, canConnect, canConfigureIntegrations, version } = args;
   const loaded = await getPackage(agentPackageId, scope.orgId);
   if (!loaded) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
   // The SPACE's own switch, asked here and reported rather than thrown. The run
@@ -912,6 +916,7 @@ export async function resolveAgentConnectionReadiness(args: {
         agentPackageId: agent.id,
         integrationId: e.id,
         actor,
+        canConnect,
         canConfigureIntegrations,
         agentManifest,
         resolution: pickResolution,

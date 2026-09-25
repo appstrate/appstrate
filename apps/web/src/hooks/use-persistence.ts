@@ -23,6 +23,7 @@ import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
+import { usePermissions } from "./use-permissions";
 import { onMutationError } from "./use-mutations";
 import { persistenceKeys } from "../lib/query-keys";
 import type { PersistenceScopeFilter } from "../components/persistence/scope-filter";
@@ -46,6 +47,7 @@ function usePersistenceQuery<T>(
 ) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const { can } = usePermissions();
   return useQuery({
     // Key pinned to the legacy "agent-persistence" prefix: use-mutations and
     // the space-switch reset invalidate by that prefix.
@@ -57,7 +59,8 @@ function usePersistenceQuery<T>(
       });
       return pick(data ?? {});
     },
-    enabled: !!orgId && !!spaceId && !!packageId,
+    // Not implied by any page that shows memory (agent or run detail).
+    enabled: can("persistence:read") && !!orgId && !!spaceId && !!packageId,
   });
 }
 

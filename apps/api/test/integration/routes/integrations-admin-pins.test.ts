@@ -36,9 +36,10 @@ import {
   createTestContext,
   createTestUser,
   authHeaders,
+  memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage } from "../../helpers/seed.ts";
+import { seedAgent, seedPackage, seedSpaceMember, seedSpaceRole } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, organizationMembers } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
@@ -171,9 +172,10 @@ describe("/api/integrations/:packageId admin surface", () => {
   async function getResolution(
     agentId: string,
     integrationId: string,
+    as: TestContext = ctx,
   ): Promise<AgentResolutionDTO> {
     const res = await app.request(`/api/agents/${agentId}/connection-readiness`, {
-      headers: authHeaders(ctx),
+      headers: authHeaders(as),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -219,6 +221,30 @@ describe("/api/integrations/:packageId admin surface", () => {
     it("returns 401 without auth", async () => {
       const res = await app.request(`/api/agents/${AGENT}/connection-readiness`);
       expect(res.status).toBe(401);
+    });
+
+    // The connect routes guard on `integrations:connect`; `configure` only lifts
+    // the admin block. A flag ignoring the guard promised a refused mutation.
+    it("can_add_connection requires integrations:connect, whatever else the role holds", async () => {
+      async function memberWith(permissions: string[]): Promise<TestContext> {
+        const member = await memberContext(ctx, "member");
+        const role = await seedSpaceRole({ orgId: ctx.orgId, permissions });
+        await seedSpaceMember({
+          spaceId: ctx.defaultSpaceId,
+          userId: member.user.id,
+          presetRole: null,
+          customRoleId: role.id,
+        });
+        return member;
+      }
+      const base = ["agents:read", "integrations:read", "integrations:configure"];
+
+      const withoutConnect = await memberWith(base);
+      expect((await getResolution(AGENT, INTEGRATION, withoutConnect)).can_add_connection).toBe(
+        false,
+      );
+      const withConnect = await memberWith([...base, "integrations:connect"]);
+      expect((await getResolution(AGENT, INTEGRATION, withConnect)).can_add_connection).toBe(true);
     });
 
     // Regression (#576 follow-up): an INERT integration entry (declared with an

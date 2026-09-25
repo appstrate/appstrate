@@ -11,6 +11,8 @@ import {
 import { ScheduleForm } from "../components/schedule-form";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
+import { NoAccessState } from "../components/route-gate";
+import { usePermissions } from "../hooks/use-permissions";
 
 export function ScheduleEditPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -18,9 +20,10 @@ export function ScheduleEditPage() {
   const { id } = useParams<{ id: string }>();
 
   const { data: schedule, isLoading, error } = useScheduleById(id);
-  const { deps, error: depsError } = useScheduleFormDeps(schedule?.packageId);
+  const { deps, error: depsError, denied } = useScheduleFormDeps(schedule?.packageId);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
+  const { can } = usePermissions();
 
   if (isLoading) return <LoadingState />;
   if (error || !schedule) return <ErrorState message={error?.message} />;
@@ -31,6 +34,7 @@ export function ScheduleEditPage() {
   // that query FAILS (deleted agent, revoked permission) the detail never
   // lands, so waiting is waiting forever — say so instead.
   if (depsError) return <ErrorState message={depsError.message} />;
+  if (denied) return <NoAccessState />;
   if (!deps) return <LoadingState />;
 
   const scheduleName = schedule.name || t("schedule.unnamed");
@@ -89,11 +93,14 @@ export function ScheduleEditPage() {
             { onSuccess: () => navigate(`/schedules/${schedule.id}`) },
           );
         }}
-        onDelete={() => {
-          deleteSchedule.mutate(schedule.id, {
-            onSuccess: () => navigate("/schedules"),
-          });
-        }}
+        onDelete={
+          can("schedules:delete")
+            ? () =>
+                deleteSchedule.mutate(schedule.id, {
+                  onSuccess: () => navigate("/schedules"),
+                })
+            : undefined
+        }
         onCancel={() => navigate(-1)}
       />
     </div>

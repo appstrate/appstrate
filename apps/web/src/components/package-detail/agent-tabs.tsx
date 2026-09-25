@@ -16,6 +16,7 @@ import {
   type JSONSchema7,
 } from "@appstrate/core/form";
 import { useOrg } from "../../hooks/use-org";
+import { usePermissions } from "../../hooks/use-permissions";
 import { RunList } from "../run-list";
 import { ScheduleCard } from "../schedule-card";
 import { RunAgentButton } from "../run-agent-button";
@@ -63,6 +64,7 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "common"]);
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: schedules } = useSchedules(packageId);
+  const { can } = usePermissions();
 
   if (!detail) return null;
 
@@ -74,9 +76,11 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
     <>
       {!schedules || schedules.length === 0 ? (
         <EmptyState message={t("detail.emptySchedule")} icon={CalendarClock} compact>
-          <Button asChild>
-            <Link to="/schedules/new">{t("btn.add")}</Link>
-          </Button>
+          {can("schedules:write") && (
+            <Button asChild>
+              <Link to="/schedules/new">{t("btn.add")}</Link>
+            </Button>
+          )}
         </EmptyState>
       ) : (
         <div className="space-y-2">
@@ -179,6 +183,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: apiKeys, isLoading: keysLoading } = useApiKeys();
   const { currentOrg } = useOrg();
+  const { can } = usePermissions();
 
   const [rawKey, setRawKey] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -233,16 +238,18 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
     <div className="border-border bg-card space-y-5 rounded-lg border p-5">
       <h3 className="text-foreground text-sm font-medium">{t("api.title")}</h3>
 
-      {/* API Key section */}
-      {keysLoading ? (
+      {/* API Key section — the curl below stands on its own without it */}
+      {!can("api-keys:read") ? null : keysLoading ? (
         <div className="text-muted-foreground text-sm">{t("loading", { ns: "common" })}</div>
       ) : !firstKey && !rawKey ? (
         <div className="border-warning/30 bg-warning/5 rounded-md border px-4 py-3">
           <p className="text-warning text-sm">{t("api.noKey")}</p>
           <p className="text-muted-foreground mt-1 text-xs">{t("api.noKeyHint")}</p>
-          <Button size="sm" className="mt-2" onClick={() => setCreateModalOpen(true)}>
-            {t("api.createKey")}
-          </Button>
+          {can("api-keys:create") && (
+            <Button size="sm" className="mt-2" onClick={() => setCreateModalOpen(true)}>
+              {t("api.createKey")}
+            </Button>
+          )}
         </div>
       ) : (
         <div className="space-y-2 text-sm">

@@ -35,14 +35,17 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useFiles, type FileDto } from "../hooks/use-files";
+import { usePermissions } from "../hooks/use-permissions";
 import { FileListPanel, type DirectionFilter } from "./file-list-panel";
 
 /** Fetches the run's whole file container and hands it to the view. */
 export function RunFilesTab({ runId }: { runId: string }) {
   const { data, isLoading, error } = useFiles({ runId, limit: 100 });
+  const { can } = usePermissions();
   return (
     <RunFilesView
       runId={runId}
+      filesDenied={!can("files:read")}
       files={data?.data ?? []}
       // The route clamps `limit` to 100 and answers `hasMore` with no cursor
       // field. `hasMore` describes the run's file CONTAINER — every row this
@@ -66,9 +69,12 @@ export function RunFilesView({
   hasMore,
   isLoading,
   error,
+  filesDenied = false,
 }: {
   runId: string;
   files: FileDto[];
+  /** The caller may not list files (`files:read`), so none were fetched. */
+  filesDenied?: boolean;
   /** The list query's page was capped — rows of this run's container are missing. */
   hasMore?: boolean;
   isLoading: boolean;
@@ -84,7 +90,11 @@ export function RunFilesView({
         isLoading={isLoading}
         error={error}
         filter={{ axis: "direction", value: direction, onChange: setDirection }}
-        empty={{ message: t("run.empty"), hint: t("run.emptyHint"), compact: true }}
+        empty={
+          filesDenied
+            ? { message: t("run.noAccess"), compact: true }
+            : { message: t("run.empty"), hint: t("run.emptyHint"), compact: true }
+        }
         runId={runId}
       />
       {/* This pane calls itself the COMPLETE view of the run, so a silently

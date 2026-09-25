@@ -7,6 +7,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
+import { packageSightPermissions } from "@appstrate/core/permissions";
 import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
@@ -224,10 +225,14 @@ interface ScheduleFormDeps {
 export function useScheduleFormDeps(
   packageId: string | undefined,
   version?: string,
-): { deps: ScheduleFormDeps | null; error: Error | null } {
+): { deps: ScheduleFormDeps | null; error: Error | null; denied: boolean } {
   const { data: agentDetail, error } = usePackageDetail("agent", packageId, { version });
   const { data: agentModel } = useAgentModel(packageId);
   const { data: agentProxy } = useAgentProxy(packageId);
+  // The detail read gates itself, so a caller who may not see the agent gets
+  // neither data nor error: without this the page would wait forever.
+  const { can, ready } = usePermissions();
+  const denied = !!packageId && ready && !packageSightPermissions("agent").some(can);
 
   // `deps` stays null until the AGENT DETAIL itself lands, not merely until an
   // agent is picked: `ScheduleForm` seeds its input state once, in a `useState`
@@ -235,7 +240,7 @@ export function useScheduleFormDeps(
   // has since been locked — unremovable through the UI and refused on save
   // (400 `locked_input_field`). `key={schedule.id}` means no remount when the
   // detail arrives, so the only safe answer while it is in flight is "not yet".
-  if (!packageId || !agentDetail) return { deps: null, error };
+  if (!packageId || !agentDetail) return { deps: null, error, denied };
 
   const integrationDeps = agentDetail.dependencies.integrations.map((d) => ({
     id: d.id,
@@ -263,5 +268,6 @@ export function useScheduleFormDeps(
       skills: skillDeps,
     },
     error,
+    denied,
   };
 }

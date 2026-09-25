@@ -3,12 +3,16 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../../api/client.ts";
-import { RequirePermission } from "../../components/require-permission.tsx";
+import { RouteGate } from "../../components/route-gate.tsx";
 import { OrgSettingsSpaceMembersPage } from "../org-settings/space/members.tsx";
 import { orgStore } from "../../stores/org-store.ts";
 import { spaceStore } from "../../stores/space-store.ts";
 import { render } from "../../test/render.tsx";
 import { i18nReady } from "../../i18n.ts";
+import { installFakeStorage } from "../../test/fake-storage.ts";
+
+// `RouteGate` reads the module flags off `window.__APP_CONFIG__`.
+installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 await i18nReady;
 
@@ -123,9 +127,9 @@ function pageFor(
     queryClient.setQueryData(membersKey, { object: "list", data: [member], hasMore: false });
   try {
     const html = render(
-      <RequirePermission permission={["space-members:read", "space-members:invite"]}>
+      <RouteGate path="/org-settings/space/members">
         <OrgSettingsSpaceMembersPage />
-      </RequirePermission>,
+      </RouteGate>,
       { queryClient },
     );
     const membersQuery = queryClient.getQueryCache().find({ queryKey: membersKey });

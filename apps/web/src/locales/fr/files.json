@@ -10,6 +10,7 @@
   "filter.input": "Importés",
   "run.empty": "Aucun fichier",
   "run.emptyHint": "Ce run n'a ni fichier importé ni fichier produit.",
+  "run.noAccess": "Votre rôle ne donne pas accès aux fichiers de cet espace.",
   "run.truncated": "Seuls les 100 premiers fichiers de ce run sont affichés.",
   "run.featuredLabel": "Fichier produit",
   "row.download": "Télécharger",

@@ -1847,7 +1847,11 @@ export const schemas = {
       member_pinned_connection_id: { type: ["string", "null"] },
       org_default_connection_id: { type: ["string", "null"] },
       org_default_enforced: { type: "boolean" },
-      can_add_connection: { type: "boolean" },
+      can_add_connection: {
+        type: "boolean",
+        description:
+          "Whether the caller may create a connection for this integration: holds `integrations:connect`, and either holds `integrations:configure` or the space does not block member connections.",
+      },
       candidates: {
         type: "array",
         items: {

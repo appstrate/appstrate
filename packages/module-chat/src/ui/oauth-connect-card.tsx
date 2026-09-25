@@ -47,7 +47,7 @@ import {
   completionMatches,
 } from "@appstrate/core/connect-handshake";
 import { Button } from "@appstrate/ui/components/button";
-import { useChatHeaders } from "./runtime-context.ts";
+import { useChatHeaders, useChatHost } from "./runtime-context.ts";
 import { orgSpaceFromHeaders } from "./run-events.ts";
 import { claimResume, encodeResume, type CompletionDetail, type ResumeMeta } from "./auth-offer.ts";
 import { createConnectWaiter, routeCompletion } from "./connect-waiter.ts";
@@ -139,6 +139,8 @@ export function OAuthConnectCard({
 }) {
   const aui = useAui();
   const getHeaders = useChatHeaders();
+  // Without `integrations:read` the chip keeps the bare package id.
+  const readsIntegration = useChatHost().can("integrations:read");
   const [phase, setPhase] = useState<Phase>("idle");
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [meta, setMeta] = useState<ResumeMeta | null>(null);
@@ -148,7 +150,7 @@ export function OAuthConnectCard({
   // Fetch the integration's display name + icon once so the connect button and
   // the resume chip can show its brand instead of the bare `@scope/name` id.
   useEffect(() => {
-    if (!packageId) return;
+    if (!packageId || !readsIntegration) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -183,7 +185,7 @@ export function OAuthConnectCard({
     return () => {
       cancelled = true;
     };
-  }, [packageId, getHeaders]);
+  }, [packageId, getHeaders, readsIntegration]);
 
   const complete = useCallback(
     (ok: boolean, error?: string) => {

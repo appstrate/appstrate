@@ -1,38 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
+import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Lock } from "lucide-react";
-import {
-  usePermissions,
-  useCanManageOrgCatalog,
-  type GateablePermission,
-} from "../hooks/use-permissions";
+import { usePermissions, useCanManageOrgCatalog } from "../hooks/use-permissions";
+import { useAppConfig } from "../hooks/use-app-config";
+import { routeVerdict, type RoutePath } from "../lib/route-access";
 import { EmptyState, LoadingState } from "./page-states";
 
 /**
- * Route-level permission gate for the settings surfaces: it refuses to MOUNT
- * the page, so its queries never fire a row of 403s behind a blank panel. Not a
- * security boundary — the server's guards are.
- *
- * A list of permissions opens the page if the caller holds any one of them,
- * exactly as the route does (the webhooks page spans two resources).
+ * Route-level gate, read off the route's declaration in `lib/route-access.ts`:
+ * it refuses to MOUNT the page, so its queries never fire a row of 403s behind
+ * a blank panel. Not a security boundary — the server's guards are. A route
+ * whose module is not loaded does not exist, and falls back to the dashboard.
  */
-export function RequirePermission({
-  permission,
-  children,
-}: {
-  permission: GateablePermission | GateablePermission[];
-  children: ReactNode;
-}) {
+export function RouteGate({ path, children }: { path: RoutePath; children: ReactNode }) {
   const { can, ready } = usePermissions();
-  const required = Array.isArray(permission) ? permission : [permission];
+  const { features } = useAppConfig();
+  const verdict = routeVerdict(path, can, features);
 
+  if (verdict === "absent") return <Navigate to="/" replace />;
+  if (verdict === "granted") return <>{children}</>;
   // An unloaded permission set answers `false` for everything.
-  if (!ready) return <LoadingState />;
-  if (required.some((p) => can(p))) return <>{children}</>;
-
-  return <NoAccessState />;
+  return ready ? <NoAccessState /> : <LoadingState />;
 }
 
 /**

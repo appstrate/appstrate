@@ -59,3 +59,13 @@ describe("the complete file view says when it is not complete", () => {
     expect(filesTab([], { hasMore: true })).toContain(filesFr["run.truncated"]);
   });
 });
+
+describe("the file view without `files:read`", () => {
+  it("says the role cannot list files rather than that the run has none", () => {
+    const html = render(
+      <RunFilesView runId={RUN_ID} files={[]} isLoading={false} error={null} filesDenied />,
+    );
+    expect(html).toContain(filesFr["run.noAccess"]);
+    expect(html).not.toContain(filesFr["run.emptyHint"]);
+  });
+});

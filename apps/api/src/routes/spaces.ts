@@ -6,8 +6,10 @@ import type { Context, Next } from "hono";
 import { z } from "zod";
 import {
   makePermissionGuard,
+  packagePermission,
   SPACE_ROLE_PRESETS,
   SPACE_VISIBILITIES,
+  spacePackagePermission,
 } from "@appstrate/core/permissions";
 import type { SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
@@ -66,8 +68,6 @@ import {
   assertCatalogPackageAccess,
   assertPackageShareAccess,
   isPackageReadableInSpace,
-  packagePermission,
-  spacePackagePermission,
 } from "../lib/package-access.ts";
 import {
   markSpaceRescope,

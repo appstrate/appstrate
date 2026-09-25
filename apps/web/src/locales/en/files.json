@@ -10,6 +10,7 @@
   "filter.input": "Imported",
   "run.empty": "No files",
   "run.emptyHint": "This run has no uploaded or produced files.",
+  "run.noAccess": "Your role does not give access to this space's files.",
   "run.truncated": "Only the first 100 files of this run are shown.",
   "run.featuredLabel": "Produced file",
   "row.download": "Download",

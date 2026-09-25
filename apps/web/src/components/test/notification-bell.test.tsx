@@ -19,20 +19,25 @@ import { describe, it, expect } from "bun:test";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
 import { NotificationContent } from "../notification-bell.tsx";
+import type { RoutePath } from "../../lib/route-access.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
 
 const PACKAGE_ID = "@acme/worker";
 
+type Notifications = Parameters<typeof NotificationContent>[0]["notifications"];
+
 function renderList(
-  notifications: Parameters<typeof NotificationContent>[0]["notifications"],
+  notifications: Notifications,
+  canReach: (path: RoutePath) => boolean = () => true,
 ): string {
   return render(
     <NotificationContent
       unread={notifications.length}
       notifications={notifications}
       agentNameMap={new Map([[PACKAGE_ID, "Worker"]])}
+      canReach={canReach}
       onItemClick={() => {}}
       onClose={() => {}}
       markAllRead={() => {}}
@@ -94,5 +99,32 @@ describe("NotificationContent", () => {
 
     expect(html).toContain("Worker");
     expect(html).toContain(`href="/agents/${PACKAGE_ID}/runs/run_1"`);
+  });
+
+  // Notifications follow the session's ceiling, not the space's run reads: a
+  // caller can hold one for a run whose page would refuse them.
+  it("links nowhere the caller cannot reach", () => {
+    const notifications: Notifications = [
+      {
+        id: "n4",
+        type: "run_completed",
+        runId: "run_2",
+        payload: { packageId: PACKAGE_ID, status: "failed" },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+      {
+        id: "n5",
+        type: "package_shared",
+        runId: null,
+        payload: { packageId: PACKAGE_ID, package_type: "agent", shared_by_name: "Bob" },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+    ];
+    const denied = renderList(notifications, () => false);
+    expect(denied).toContain("Worker");
+    expect(denied).not.toContain("href=");
+    expect(renderList(notifications)).toContain('href="/runs"');
   });
 });

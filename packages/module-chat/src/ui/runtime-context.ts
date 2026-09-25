@@ -122,7 +122,14 @@ export interface ChatHost {
   downloadFile: DownloadFile;
   useFileImageSrc: UseFileImageSrc;
   t: ChatTranslate;
+  can: ChatCan;
 }
+
+/**
+ * The caller's grants, resolved by the shell. The chat asks for the exact
+ * permission each endpoint it calls guards on and holds no RBAC of its own.
+ */
+export type ChatCan = (permission: string) => boolean;
 
 const ChatHostContext = createContext<ChatHost | null>(null);
 

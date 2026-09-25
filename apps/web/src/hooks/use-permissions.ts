@@ -97,7 +97,9 @@ export function usePermissions() {
   // same as a denial. A gate that REFUSES on that answer (rather than merely
   // hiding a button) has to wait, or a hard reload flashes "no access" before
   // the two lists land. Ready = the org is known AND either a space is resolved
-  // or there is none this caller can enter.
+  // or there is none this caller can enter. Only `useSpaceResolver` resolves
+  // one, so `ready` never settles outside MainLayout; an org-level answer there
+  // needs no wait, the org's set arriving with `currentOrg` itself.
   const enterableSpaceExists = spaces?.some((s) => s.access === "member") ?? false;
   const ready = !!currentOrg && !spacesLoading && (!!space || !enterableSpaceExists);
 
