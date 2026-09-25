@@ -349,8 +349,9 @@ function decryptConnectResult(payloadB64: string, resultKey: Buffer): string {
 /**
  * Parse the connect-run sidecar's stdout for the result sentinel. Returns the
  * {@link CredentialBundle} on `APPSTRATE_CONNECT_RESULT:` (decrypting its
- * ciphertext payload with `resultKey`), throws on `APPSTRATE_CONNECT_ERROR:`
- * or when neither sentinel was emitted (sidecar died before producing a result).
+ * ciphertext payload with `resultKey`), throws on `APPSTRATE_CONNECT_ERROR:`,
+ * and returns `null` when neither sentinel was emitted (sidecar died before
+ * producing a result) — the caller owns that diagnosis.
  *
  * The throw is typed by audience, not by convenience:
  *   - a login-tool rejection (see {@link loginToolDiagnostic}) throws an
@@ -362,7 +363,10 @@ function decryptConnectResult(payloadB64: string, resultKey: Buffer): string {
  *     log and collapse into the generic 500 — sidecar internals must never
  *     reach an end user on the hosted connect form.
  */
-export function parseConnectResult(lines: readonly string[], resultKey: Buffer): CredentialBundle {
+export function parseConnectResult(
+  lines: readonly string[],
+  resultKey: Buffer,
+): CredentialBundle | null {
   // Scan from the end — the sentinel is the last meaningful line the sidecar
   // writes before exiting.
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -413,7 +417,7 @@ export function parseConnectResult(lines: readonly string[], resultKey: Buffer):
       throw new Error(`connect-run failed: ${msg || "unknown error"}`);
     }
   }
-  throw new Error("connect-run: sidecar exited without emitting a result");
+  return null;
 }
 
 class ConnectRunExecutor implements ConnectToolExecutor {
@@ -440,7 +444,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
       });
       // The configured execution backend cannot host a connect-run (sidecar-only
       // workload). Thrown BEFORE any boundary is created so the caller gets a
-      // clear diagnosis instead of "sidecar exited without emitting a result".
+      // clear diagnosis instead of a sidecar that silently never reports.
       //
       // It IS an `ApiError` so it rides the connect routes' existing
       // `if (err instanceof ApiError) throw err` passthrough and reaches the
@@ -616,9 +620,12 @@ class ConnectRunExecutor implements ConnectToolExecutor {
           detail: `The connection attempt timed out after ${this.timeoutMs}ms — the login did not complete in time. Please try again.`,
         });
       }
-      // No sentinel = the sidecar died before reporting (OOM, boot failure).
-      // Only then is the tail logged: no line carries the result ciphertext.
-      if (!lines.some((l) => l.includes(RESULT_SENTINEL) || l.includes(ERROR_SENTINEL))) {
+      // Parse regardless of exit code: on a non-zero exit the sidecar emits
+      // the ERROR sentinel before exiting 1, which carries the real cause.
+      const bundle = parseConnectResult(lines, resultKey);
+      // null = no sentinel: the sidecar died before reporting (OOM, boot
+      // failure). Only then is the tail logged — no line carries ciphertext.
+      if (bundle === null) {
         logger.error("connect-run: sidecar exited without emitting a result", {
           connectId,
           exitCode,
@@ -629,9 +636,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
           `connect-run: sidecar exited with code ${exitCode} without emitting a result`,
         );
       }
-      // Parse regardless of exit code: on a non-zero exit the sidecar emits
-      // the ERROR sentinel before exiting 1, which carries the real cause.
-      return parseConnectResult(lines, resultKey);
+      return bundle;
     } finally {
       clearTimeout(timer);
       logAbort.abort();

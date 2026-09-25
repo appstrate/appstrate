@@ -346,7 +346,7 @@ describe("parseConnectResult", () => {
       ["boot log", `APPSTRATE_CONNECT_RESULT:${encryptConnectResult(bundle, KEY)}`],
       KEY,
     );
-    expect(out.outputs.session_token).toBe("sess-1");
+    expect(out!.outputs.session_token).toBe("sess-1");
   });
 
   it("throws on the error sentinel", () => {
@@ -426,10 +426,8 @@ describe("parseConnectResult", () => {
     expect(err).not.toBeInstanceOf(ApiError);
   });
 
-  it("throws when no sentinel was emitted", () => {
-    expect(() => parseConnectResult(["just boot logs", "more logs"], KEY)).toThrow(
-      /without emitting a result/,
-    );
+  it("returns null when no sentinel was emitted", () => {
+    expect(parseConnectResult(["just boot logs", "more logs"], KEY)).toBeNull();
   });
 
   it("throws when the result sentinel cannot be decrypted (wrong key)", () => {
@@ -679,7 +677,7 @@ describe("createConnectRunExecutor.run", () => {
     // capability. A backend that boots its workload through the agent
     // (e.g. a one-shot microVM) cannot run a connect-run (sidecar-only) —
     // it would silently never start, so the executor must refuse up front
-    // instead of reporting "sidecar exited without emitting a result".
+    // instead of a sidecar that silently never reports.
     const prevAdapter = process.env.RUN_ADAPTER;
     process.env.RUN_ADAPTER = "fake-vm";
     registerOrchestrator(
