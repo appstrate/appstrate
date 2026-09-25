@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { RUN_LLM_PROXY_MOUNT, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
+import {
+  LLM_PROXY_MOUNT,
+  RUN_LLM_PROXY_MOUNT,
+  llmProxyUrlPath,
+  type ProxiedApiShape,
+} from "@appstrate/runner-pi";
 
 /**
- * LLM proxy endpoints — server-side model injection for remote-backed
- * AFPS runs. Route implementation: `apps/api/src/routes/llm-proxy.ts`.
+ * LLM proxy endpoints — server-side model injection and per-call metering for
+ * API callers (remote runs, the CLI, chat) under `LLM_PROXY_MOUNT`, and for a
+ * platform run's own inference under `RUN_LLM_PROXY_MOUNT`. Route
+ * implementation: `apps/api/src/routes/llm-proxy.ts`.
  *
  * Four protocol families ship today; each gets its own concrete endpoint
  * so callers hit the upstream shape they already know (OpenAI Chat
@@ -71,7 +78,7 @@ const baseResponses = {
       "Validation error — malformed body, missing/empty `model`, model " +
       "preset not enabled for this org, preset's protocol does not " +
       "match this endpoint (use the corresponding " +
-      "`/api/llm-proxy/<api>/…` route instead), the preset's provider is an " +
+      "endpoint for its protocol instead), the preset's provider is an " +
       "OAuth subscription with no proxyable gateway (connect an API-key " +
       "provider instead), or request body exceeds " +
       "the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB).",
@@ -108,7 +115,7 @@ const baseResponses = {
 } as const;
 
 export const llmProxyPaths = {
-  [`/api/llm-proxy${llmProxyUrlPath("openai-completions")}`]: {
+  [`${LLM_PROXY_MOUNT}${llmProxyUrlPath("openai-completions")}`]: {
     post: {
       operationId: "llmProxyOpenaiChatCompletions",
       tags: ["LLM Proxy"],
@@ -153,7 +160,7 @@ export const llmProxyPaths = {
       responses: baseResponses,
     },
   },
-  [`/api/llm-proxy${llmProxyUrlPath("openai-responses")}`]: {
+  [`${LLM_PROXY_MOUNT}${llmProxyUrlPath("openai-responses")}`]: {
     post: {
       operationId: "llmProxyOpenaiResponses",
       tags: ["LLM Proxy"],
@@ -202,7 +209,7 @@ export const llmProxyPaths = {
       responses: baseResponses,
     },
   },
-  [`/api/llm-proxy${llmProxyUrlPath("anthropic-messages")}`]: {
+  [`${LLM_PROXY_MOUNT}${llmProxyUrlPath("anthropic-messages")}`]: {
     post: {
       operationId: "llmProxyAnthropicMessages",
       tags: ["LLM Proxy"],
@@ -272,7 +279,7 @@ export const llmProxyPaths = {
       responses: baseResponses,
     },
   },
-  [`/api/llm-proxy${llmProxyUrlPath("mistral-conversations")}`]: {
+  [`${LLM_PROXY_MOUNT}${llmProxyUrlPath("mistral-conversations")}`]: {
     post: {
       operationId: "llmProxyMistralChatCompletions",
       tags: ["LLM Proxy"],

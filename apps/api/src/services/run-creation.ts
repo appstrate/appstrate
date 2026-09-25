@@ -260,6 +260,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       agentScope: agentDenorm.scope,
       agentName: agentDenorm.name,
       runOrigin: "remote",
+      modelId: null,
       sinkSecretEncrypted: encrypt(credentials.secret),
       sinkExpiresAt: new Date(credentials.expiresAt),
       // Always null on this path — see the readiness comment above.

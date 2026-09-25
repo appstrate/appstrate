@@ -56,6 +56,7 @@ import {
 // manifest declares no `@appstrate/runner-pi` dependency, and this gate only
 // needs the one path table.
 import {
+  LLM_PROXY_MOUNT,
   LLM_PROXY_ROUTES,
   RUN_LLM_PROXY_MOUNT,
   llmProxyUrlPath,
@@ -1994,7 +1995,7 @@ const SPEC_ONLY_ALLOWLIST = new Set<string>([
   // symmetry between a client's base URL and the server's mount is asserted
   // directly in `packages/runner-pi/test/llm-proxy-routes.test.ts`.
   ...(Object.keys(LLM_PROXY_ROUTES) as ProxiedApiShape[]).flatMap((shape) => [
-    `POST /api/llm-proxy${llmProxyUrlPath(shape)}`,
+    `POST ${LLM_PROXY_MOUNT}${llmProxyUrlPath(shape)}`,
     // Same file, same table: a platform run's own inference entry.
     `POST ${RUN_LLM_PROXY_MOUNT}${llmProxyUrlPath(shape)}`,
   ]),

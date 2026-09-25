@@ -16,7 +16,7 @@
 export type LlmProxyPrincipal =
   | { kind: "api_key"; apiKeyId: string; orgId: string; userId: string }
   | { kind: "jwt_user"; userId: string; orgId: string }
-  | { kind: "run"; runId: string; orgId: string };
+  | { kind: "run"; orgId: string };
 
 /**
  * Build the {@link LlmProxyPrincipal} from the resolved auth identity: an API

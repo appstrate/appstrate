@@ -48,6 +48,7 @@ import { uploadRunBundle } from "../run-workspace-storage.ts";
 import { startBootHeartbeat } from "../run-boot-heartbeat.ts";
 import { runWithSpan, currentTraceparent, recordContainerSpawn } from "@appstrate/core/telemetry";
 
+import { isMeteredByPlatformProxy, modelSourceOf } from "../state/runs.ts";
 import { getEnv } from "@appstrate/env";
 import { isBlockedEgressUrl } from "../../lib/egress-host-guard.ts";
 import { getModelProvider } from "../model-providers/registry.ts";
@@ -216,9 +217,10 @@ async function runPlatformContainerImpl(
     });
 
     const llmApiKey = llmConfig.apiKey;
-    // A platform-provided API key is spent only by the platform's LLM proxy;
-    // every other credential is dialed by the sidecar itself.
-    const servedByPlatformProxy = delivery.kind !== "oauth" && llmConfig.isSystemModel;
+    const servedByPlatformProxy = isMeteredByPlatformProxy({
+      modelSource: modelSourceOf(llmConfig),
+      modelId: llmConfig.aliasId,
+    });
 
     // When the sidecar dials the base URL, its egress floor refuses a blocked
     // range. Same guard, same allowlist, checked here so the run fails with the

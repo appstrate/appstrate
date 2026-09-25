@@ -27,19 +27,17 @@ export { deriveProviderFromApi, PROVIDER_BY_API } from "./provider-map.ts";
 
 // The llm-proxy's path convention, declared once. Read by `apps/api` to mount
 // the proxy routes, and by the chat engine + the CLI to build the base URL a
-// vendor client is pointed at — the three used to spell it out separately.
+// vendor client is pointed at.
 export {
+  LLM_PROXY_MOUNT,
   LLM_PROXY_ROUTES,
   RUN_LLM_PROXY_MOUNT,
   llmProxyBaseUrl,
   llmProxyUrlPath,
   type ProxiedApiShape,
 } from "./llm-proxy-routes.ts";
-// `isProxiedApiShape` is NOT here: its readers (the model registry, the sidecar)
-// import the `./llm-proxy-routes` subpath. It was added with
-// the four above, six lines under the rule that forbids it — which is the point
-// of the rule, since knip cannot see a barrel export with no reader.
-// `LlmProxyRoute` went further and is no longer exported at all.
+// `isProxiedApiShape` and `trimTrailingSlashes` are read through the
+// `./llm-proxy-routes` subpath, not the barrel.
 
 // Warms `@earendil-works/pi-coding-agent` (dynamic import) so the container
 // entrypoint can overlap its ~200ms eval with network-bound provisioning

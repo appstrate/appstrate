@@ -368,8 +368,8 @@ describe("runner ledger row — a platform-provided model is metered by the prox
   });
 
   it("still writes the runner row of a system run the proxy does not serve (no model id)", async () => {
-    // A run launched before `runs.model_id` existed: its sidecar spends the key
-    // itself, so the runner row is the only record of its usage.
+    // Deploy window: a run launched before migration 0072 has no pinned model;
+    // its sidecar spends the key itself, so the runner row is its only record.
     const run = await seedPlatformRun("system");
     await writeRunnerLedgerRow({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, run.id, {
       cost: null,
@@ -389,6 +389,7 @@ describe("runner ledger row — a platform-provided model is metered by the prox
       cost: null,
       usage: USAGE,
       modelSource: "org",
+      modelId: null,
       modelCost: RATES,
     });
     const rows = await runnerRows(run.id);

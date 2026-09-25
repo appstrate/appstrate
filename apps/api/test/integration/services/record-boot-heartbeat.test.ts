@@ -198,6 +198,7 @@ describe("recordBootHeartbeat — boot-window synthetic keep-alive gating", () =
         packageId: agentId,
         actor: { type: "user", id: ctx.user.id },
         input: null,
+        modelId: null,
         sinkSecretEncrypted: encrypt(RUN_SECRET),
         sinkExpiresAt: new Date(Date.now() + 3600_000),
       },
@@ -227,6 +228,7 @@ describe("recordBootHeartbeat — boot-window synthetic keep-alive gating", () =
         packageId: agentId,
         actor: { type: "user", id: ctx.user.id },
         input: null,
+        modelId: null,
       },
     );
 

@@ -68,10 +68,12 @@ export const LLM_PROXY_ROUTES = {
 } as const satisfies Record<string, LlmProxyRoute>;
 
 /** Where the proxy is mounted for API callers (API key, OIDC, chat loopback). */
-const LLM_PROXY_MOUNT = "/api/llm-proxy";
+export const LLM_PROXY_MOUNT = "/api/llm-proxy";
 
 /** Where the proxy is mounted for a platform run's sidecar, authenticated by the run token. */
 export const RUN_LLM_PROXY_MOUNT = "/internal/llm-proxy";
+
+type LlmProxyMount = typeof LLM_PROXY_MOUNT | typeof RUN_LLM_PROXY_MOUNT;
 
 /** Api shapes the llm-proxy can route, derived from the table itself. */
 export type ProxiedApiShape = keyof typeof LLM_PROXY_ROUTES;
@@ -95,22 +97,32 @@ export function isProxiedApiShape(apiShape: string): apiShape is ProxiedApiShape
  */
 export function llmProxyBaseUrl(
   origin: string,
+  apiShape: ProxiedApiShape,
+  mount?: LlmProxyMount,
+): string;
+export function llmProxyBaseUrl(
+  origin: string,
   apiShape: string,
-  mount: string = LLM_PROXY_MOUNT,
+  mount?: LlmProxyMount,
+): string | null;
+export function llmProxyBaseUrl(
+  origin: string,
+  apiShape: string,
+  mount: LlmProxyMount = LLM_PROXY_MOUNT,
 ): string | null {
   if (!isProxiedApiShape(apiShape)) return null;
-  // Index scan, not `origin.replace(/\/+$/, "")`. That regex is the textbook
-  // polynomial-ReDoS shape (`js/polynomial-redos`, and the same `\s+$` case
-  // CodeQL's own docs use): `/+` is ambiguous about where it starts matching,
-  // so on a string of many slashes that does NOT end in one the engine retries
-  // from each slash and the cost goes quadratic. `origin` here reaches an
-  // EXPORTED function from a package — chat passes `CHAT_SELF_ORIGIN`, the CLI
-  // passes `--instance` — which is exactly the "uncontrolled data" the rule is
-  // about. This loop is linear and needs no argument.
-  let end = origin.length;
-  while (end > 0 && origin.charCodeAt(end - 1) === 47 /* "/" */) end--;
-  const base = origin.slice(0, end);
-  return `${base}${mount}/${apiShape}${LLM_PROXY_ROUTES[apiShape].baseSuffix}`;
+  return `${trimTrailingSlashes(origin)}${mount}/${apiShape}${LLM_PROXY_ROUTES[apiShape].baseSuffix}`;
+}
+
+/**
+ * `url` without its trailing slashes. An index scan, not `replace(/\/+$/, "")`:
+ * that regex is the polynomial-ReDoS shape (`js/polynomial-redos`), and callers
+ * pass operator- or caller-supplied URLs.
+ */
+export function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url.charCodeAt(end - 1) === 47 /* "/" */) end--;
+  return url.slice(0, end);
 }
 
 /**

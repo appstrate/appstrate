@@ -39,7 +39,7 @@ import healthRouter, { bootGate, markServerReady } from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
 import { createLlmProxyRouter, createRunLlmProxyRouter } from "./routes/llm-proxy.ts";
-import { RUN_LLM_PROXY_MOUNT } from "@appstrate/runner-pi";
+import { LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT } from "@appstrate/runner-pi";
 import { createLibraryRouter } from "./routes/library.ts";
 import { createAuthBootstrapRouter } from "./routes/auth-bootstrap.ts";
 import orgsRouter from "./routes/organizations.ts";
@@ -373,7 +373,7 @@ app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
 app.route("/api/integrations", createIntegrationsRouter());
 app.route("/api/credential-proxy", createCredentialProxyRouter());
-app.route("/api/llm-proxy", createLlmProxyRouter());
+app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
 
 // Public invitation routes (no auth required — path doesn't start with /api/ or /auth/)
 app.route("/invite", invitationsRouter);

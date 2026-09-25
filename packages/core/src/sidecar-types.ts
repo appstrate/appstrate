@@ -534,8 +534,8 @@ export interface IntegrationSpawnSpec {
  *     body transforms. There is deliberately no fingerprint-forging mode: the
  *     platform itself never synthesises a provider fingerprint.
  *
- *   - `platform`: the upstream is the platform's own metered LLM proxy, which
- *     holds the credential; the sidecar authenticates with its run token.
+ *   - `platform`: the upstream is the platform's metered LLM proxy, which holds
+ *     the credential; the sidecar's run token authorises the run's inference.
  *
  * The model-alias swap ({@link ModelSwap}) exists on the `api_key` and
  * `platform` modes. Aliases are rejected for oauth-subscription providers (at
@@ -645,23 +645,13 @@ export interface LlmProxyApiKeyConfig {
   modelSwap?: ModelSwap;
 }
 
-/**
- * Platform mode — inference goes to the platform's metered LLM proxy at
- * `<platformApiUrl>/internal/llm-proxy/<apiShape>`, authenticated with the run
- * token. The platform resolves the run's model and meters every call; the
- * sidecar holds no provider credential, only the run token, which authorises
- * this run's metered inference.
- */
+/** Platform mode — see {@link LlmProxyConfig}. No provider credential. */
 export interface LlmProxyPlatformConfig {
   authMode: "platform";
   /** Protocol of the run's model — selects the proxy route. */
   apiShape: ModelApiShape;
-  /**
-   * The model's own endpoint. Never dialed by the sidecar: pi-ai derives an
-   * aliased backing's vendor dialect from it, while the call goes to the proxy.
-   */
+  /** The model's own endpoint, never dialed: pi-ai derives vendor dialect from it. */
   baseUrl: string;
-  /** See {@link ModelSwap}. */
   modelSwap?: ModelSwap;
 }
 

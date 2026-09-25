@@ -81,14 +81,9 @@ import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
 import { ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
-import { verifyRunToken } from "./internal.ts";
+import { verifyRunToken } from "../lib/verify-run-token.ts";
 
-// Protocol family → adapter. The PATHS are not spelled out here any more:
-// `LLM_PROXY_ROUTES` (`@appstrate/runner-pi`) owns the convention, because
-// the chat engine and the CLI have to build a base URL that agrees with it
-// and used to do so by hand-copying these strings. Only the adapter — the
-// request/response translation, which is genuinely this package's business —
-// is bound here.
+// Protocol family → adapter; the paths come from `LLM_PROXY_ROUTES`.
 const ADAPTERS: Record<ProxiedApiShape, LlmProxyAdapter> = {
   "openai-completions": openaiCompletionsAdapter,
   "openai-responses": openaiResponsesAdapter,
@@ -122,30 +117,25 @@ export function createLlmProxyRouter() {
 }
 
 /**
- * The inference of a platform run whose model spends a platform-provided
- * credential, mounted at `RUN_LLM_PROXY_MOUNT`. The run's sidecar calls it with
- * the run token instead of holding the vendor key, so every call is metered
- * here like any proxy call. The run's own model is served, whatever the body
- * names, and the call is attributed to that run alone.
+ * A platform run's own inference, at `RUN_LLM_PROXY_MOUNT`, called by its
+ * sidecar with the run token. Serves the run's pinned model whatever the body
+ * names. Rate-limited by the `/internal/*` limiter; the body cap below is the
+ * only one (`index.ts` exempts the mount from the global cap).
  */
 export function createRunLlmProxyRouter() {
-  // Rate-limited per run token by `createInternalRouter`'s `/internal/*` limiter.
   const router = new Hono<AppEnv>();
   const limits = getLlmProxyLimits();
-  // The one body cap on this mount: `index.ts` exempts it from the global one.
   router.use("/*", bodyLimit(limits.max_request_bytes));
 
   for (const apiShape of PROXIED_API_SHAPES) {
     router.post(llmProxyUrlPath(apiShape), async (c) => {
       const { runId, run } = await verifyRunToken(c);
-      // The launcher routes exactly these runs here, and the ledger writes no
-      // runner row for them; any other run is metered elsewhere.
-      if (run.runOrigin !== "platform" || !isMeteredByPlatformProxy(run)) {
+      if (!isMeteredByPlatformProxy(run)) {
         throw forbidden("This run's model is not served by the platform LLM proxy");
       }
       const orgId = run.orgId;
       return proxyAndLog(c, apiShape, limits, {
-        principal: { kind: "run", runId, orgId },
+        principal: { kind: "run", orgId },
         runId,
         chatSessionId: null,
         presetId: run.modelId,

@@ -77,7 +77,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`credential_source = 'system'`); such a run no longer writes a `runner` row.
   Runs on an organization's own credential are unchanged. New nullable column
   `runs.model_id` (migration `0072`) records the model a platform run launched
-  with; a run started before the upgrade keeps its previous path and ledger.
+  with; a system run launched before migration `0072` (the deploy window) keeps
+  its previous path and ledger.
   Operators:
   - boot now fails when a `SYSTEM_PROVIDER_KEYS` entry binds a provider whose
     API shape the proxy does not serve (served: `openai-completions`,

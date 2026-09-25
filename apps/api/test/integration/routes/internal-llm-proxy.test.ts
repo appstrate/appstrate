@@ -231,8 +231,13 @@ describe("POST /internal/llm-proxy — a run's own inference", () => {
 
   it("refuses a run whose model is not platform-provided or not pinned, and a remote-origin run", async () => {
     const byok = await seedSystemRun(ctx, { modelSource: "org" });
-    const remote = await seedSystemRun(ctx, { runOrigin: "remote" });
-    // Launched before `runs.model_id` existed: its sidecar holds its own key.
+    // A remote run resolves no platform model: no source, no pinned model.
+    const remote = await seedSystemRun(ctx, {
+      runOrigin: "remote",
+      modelSource: null,
+      modelId: null,
+    });
+    // Deploy window: launched before migration 0072, its sidecar holds its own key.
     const unpinned = await seedSystemRun(ctx, { modelId: null });
     for (const run of [byok, remote, unpinned]) {
       const res = await call(signRunToken(run.id), { model: SYSTEM_PRESET, messages: [] });

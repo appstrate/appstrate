@@ -33,6 +33,7 @@ import {
 } from "./helpers.ts";
 import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
 import { MODEL_INPUT_MODALITIES, type ModelInputModality } from "@appstrate/core/module";
+import { trimTrailingSlashes } from "@appstrate/runner-pi/llm-proxy-routes";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { buildPiModel } from "@appstrate/runner-pi/pi-model";
@@ -132,10 +133,8 @@ interface PiMessagesUpstream {
   /** The backing's own endpoint — pi-ai derives vendor dialect from it. */
   baseUrl: string;
   apiKey: string;
-  /** Merged over pi-ai's own headers, e.g. the platform proxy's bearer. */
-  headers?: Record<string, string>;
-  /** Set when the call is served elsewhere: this replaces the `baseUrl` prefix. */
-  dialBaseUrl?: string;
+  /** Set when another endpoint serves the call: its base, and the headers it authenticates. */
+  via?: { baseUrl: string; headers: Record<string, string> };
 }
 
 /**
@@ -143,9 +142,7 @@ interface PiMessagesUpstream {
  * Fails closed on any other URL: nothing else may leave through this transport.
  */
 function redirectingFetch(base: typeof fetch, baseUrl: string, to: string): typeof fetch {
-  let end = baseUrl.length;
-  while (end > 0 && baseUrl.charCodeAt(end - 1) === 47 /* "/" */) end--;
-  const from = baseUrl.slice(0, end);
+  const from = trimTrailingSlashes(baseUrl);
   return Object.assign(
     async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
       const url = input instanceof Request ? input.url : String(input);
@@ -413,7 +410,7 @@ function projectRequestOptions(
   const incoming = body.options ?? {};
   return {
     apiKey: upstream.apiKey,
-    ...(upstream.headers ? { headers: upstream.headers } : {}),
+    ...(upstream.via ? { headers: upstream.via.headers } : {}),
     signal,
     fetch: upstreamFetch,
     // NOT part of the client's payload and deliberately not derived from it:
@@ -627,9 +624,9 @@ export function handlePiMessagesRequest(
   const abort = llmUpstreamAbort(AbortSignal.any([request.signal, unwind.signal]));
   // Per REQUEST, never per process: the recorded status belongs to this turn.
   const transport = deps.fetchImpl ?? fetch;
-  const { baseUrl, dialBaseUrl } = deps.upstream;
+  const { baseUrl, via } = deps.upstream;
   const statusProbe = createUpstreamStatusProbe(
-    dialBaseUrl ? redirectingFetch(transport, baseUrl, dialBaseUrl) : transport,
+    via ? redirectingFetch(transport, baseUrl, via.baseUrl) : transport,
   );
   const upstream = stream(
     model,

@@ -15,6 +15,7 @@
 import { z } from "zod";
 import type { OpenApiSchemaEntry } from "@appstrate/core/module";
 import {
+  LLM_PROXY_MOUNT,
   LLM_PROXY_ROUTES,
   RUN_LLM_PROXY_MOUNT,
   llmProxyUrlPath,
@@ -717,7 +718,7 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
   // path entry and this exemption in one edit.
   ...Object.fromEntries(
     (Object.keys(LLM_PROXY_ROUTES) as ProxiedApiShape[]).flatMap((shape) =>
-      [`/api/llm-proxy`, RUN_LLM_PROXY_MOUNT].map((mount) => [
+      [LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT].map((mount) => [
         `POST ${mount}${llmProxyUrlPath(shape)}`,
         "verbatim provider passthrough; the body schema is the upstream provider's, not ours",
       ]),

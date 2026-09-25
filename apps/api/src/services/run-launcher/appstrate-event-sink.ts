@@ -43,12 +43,14 @@ export async function persistRunEvent(
   scope: SpaceScope,
   runId: string,
   event: RunEvent,
-  opts: {
-    writeLedger?: boolean;
-    modelSource?: string | null;
-    modelId?: string | null;
-    modelCost?: ModelCost | null;
-  } = {},
+  opts:
+    | { writeLedger?: false }
+    | {
+        writeLedger: true;
+        modelSource?: string | null;
+        modelId: string | null;
+        modelCost?: ModelCost | null;
+      } = {},
 ): Promise<string | null> {
   switch (event.type) {
     case "output.emitted": {
@@ -196,7 +198,7 @@ export async function writeRunnerLedgerRow(
     /** Run's model source — stamped as `credential_source`. */
     modelSource?: string | null;
     /** Run's pinned model (`runs.model_id`) — see {@link isMeteredByPlatformProxy}. */
-    modelId?: string | null;
+    modelId: string | null;
     /** Run's kickoff rate snapshot — prices the row and classifies it. */
     modelCost?: ModelCost | null;
   },

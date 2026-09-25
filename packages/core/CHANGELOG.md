@@ -23,13 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the web app so the CLI's generated commands and the launch form apply the
   same rule.
 
-- **`LlmProxyPlatformConfig`** (`@appstrate/core/sidecar-types`) — a third
-  `LlmProxyConfig` mode, `authMode: "platform"`: the sidecar's `/llm/*` upstream
-  is the platform's metered LLM proxy for the run's `apiShape`, authenticated
-  with the run token, with an optional `modelSwap`. It carries no credential. A
-  consumer that switches exhaustively on `LlmProxyConfig["authMode"]` must handle
-  the new member.
-
 - **`findNonSnakeCaseIdentityClaimKeys`** and **`IdentityClaimKeyViolation`**
   (`@appstrate/core/integration`, #1545) — list the `auths.{key}.identity_claims`
   keys and `connect.login.identity_outputs` names that are not snake_case, with
@@ -134,6 +127,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `LlmProxyConfig` gains a third member, `LlmProxyPlatformConfig`**
+  (`@appstrate/core/sidecar-types`), `authMode: "platform"`: the sidecar's
+  `/llm/*` upstream is the platform's metered LLM proxy for the run's
+  `apiShape`, authenticated with the run token; `baseUrl` is the model's own
+  endpoint (never dialed), with an optional `modelSwap`. It carries no provider
+  credential. A consumer that switches exhaustively on
+  `LlmProxyConfig["authMode"]` must handle the new member.
 - **BREAKING: model generation settings are snake_case** (`@appstrate/core/model-generation`,
   #1545): `modelGenerationSettingsSchema` reads `reasoning_level` (was
   `reasoningLevel`), and `ModelGenerationCapabilities` spells

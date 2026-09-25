@@ -75,7 +75,7 @@ import { createFilesRouter, createFilePreviewRouter } from "../../src/routes/fil
 import { createAdminStorageDeletionRouter } from "../../src/routes/admin-storage-deletion.ts";
 import { createCredentialProxyRouter } from "../../src/routes/credential-proxy.ts";
 import { createLlmProxyRouter, createRunLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
-import { RUN_LLM_PROXY_MOUNT } from "@appstrate/runner-pi";
+import { LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT } from "@appstrate/runner-pi";
 import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
@@ -314,7 +314,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/integrations", createIntegrationsRouter());
   app.route("/api/credential-proxy", createCredentialProxyRouter());
-  app.route("/api/llm-proxy", createLlmProxyRouter());
+  app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
   app.route("/invite", invitationsRouter);
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());
