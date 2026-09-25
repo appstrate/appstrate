@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.62] - 2026-09-25
+
 ### Added
 
 - **`generation_setting_dropped` — a run's log now says when a stored
@@ -492,7 +494,9 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `@appstrate/module-ee` applies its own `0008` (the `llm_usage` id columns of
   its ledger, cursor and floor, to `bigint`) at init. Scripts, in
   `scripts/migration/`, in order: **1. `0023`, `0024` and `0029` BEFORE the
-  deploy**, read-only — each must exit 0 (`0023`: every integration draft and
+  deploy**, read-only — each must exit 0, and `0020` (#1532: widens custom
+  space roles to the reads their actions require) applied while the old image
+  still runs (`0023`: every integration draft and
   published version whose JSONPath the release refuses on read is fixed or
   superseded, see the integrations entry above; `0024`: see the egress entry above; `0029`: every org integration
   whose draft or `latest` version declares a camelCase identity claim key is
@@ -501,13 +505,16 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `0028`, then `0030` (#1549: deletes the org models Pi's registry does not
   offer into a backup file, repoints an org default naming one to a surviving
   model of the same credential or clears it, clears the other references; `.ts`,
-  dry run by default, `--apply` to commit). Before the deploy, with the platform
+  dry run by default, `--apply` to commit), then `0031` (#1568: deletes the
+  retired `google-ai` credentials and their org models). Drain active runs
+  before stopping the platform (#1568). Before the deploy, with the platform
   env loaded, the new `bun run verify:system-models` must exit 0 — the image
   refuses to boot on a `SYSTEM_PROVIDER_KEYS` model outside Pi's offer, and
   `0030 --apply` refuses to run; on production change `deepseek-v4-flash` →
   `deepseek-flash`, keeping the entry's `id`. It is a pre-deploy step of every
   release from now on: any Pi bump can move the offer.
-  Right after the deploy, `0022` and `0026`. `0025`–`0028` are
+  Right after the deploy, `0022` and `0026`, and re-run the `0020` dry run: it
+  must list 0 rows. `0025`–`0028` are
   one-way against the image: snapshot the database before the window, and roll
   forward (the previous build reads the new spellings as unknown — agent
   launches answer 500).
