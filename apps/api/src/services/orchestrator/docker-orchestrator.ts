@@ -72,8 +72,15 @@ const DOCKER_SIDECAR_ENDPOINTS: SidecarEndpoints = {
 };
 
 export class DockerOrchestrator implements RunOrchestrator {
+  readonly sidecarExitsIndependently = true;
+  /**
+   * One in-flight exit poll per container. The sidecar has two waiters — the
+   * exit watcher below and the run launcher — and `docker.waitForExit` polls
+   * the daemon; without this each would poll it on its own.
+   */
+  private readonly exitWaits = new Map<string, Promise<number>>();
   private readonly sidecarExitWatcher = new SidecarExitWatcher({
-    waitForExit: (containerId) => docker.waitForExit(containerId),
+    waitForExit: (containerId) => this.waitForContainerExit(containerId),
     streamLogs: (containerId, signal) => docker.streamLogs(containerId, signal),
     onUnexpectedExit: ({ runId, containerId, exitCode, tail }) => {
       logger.error("Sidecar exited before run completed", {
@@ -467,7 +474,16 @@ export class DockerOrchestrator implements RunOrchestrator {
   }
 
   async waitForExit(handle: WorkloadHandle): Promise<number> {
-    return docker.waitForExit(handle.id);
+    return this.waitForContainerExit(handle.id);
+  }
+
+  private waitForContainerExit(containerId: string): Promise<number> {
+    let wait = this.exitWaits.get(containerId);
+    if (!wait) {
+      wait = docker.waitForExit(containerId).finally(() => this.exitWaits.delete(containerId));
+      this.exitWaits.set(containerId, wait);
+    }
+    return wait;
   }
 
   async *streamLogs(handle: WorkloadHandle, signal?: AbortSignal): AsyncGenerator<string> {
