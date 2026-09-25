@@ -2,16 +2,36 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "../api/client";
-import { useOrgOnlyScope } from "./use-org-scope";
+import { queryClient } from "../lib/query-client";
+import { getCurrentOrgId } from "../stores/org-store";
+import { orgOnlyHeader, useOrgOnlyScope } from "./use-org-scope";
+
+/** The one request init for the listing: the boot prime must land on `useSpaces`'s key. */
+function spacesListInit(header: ReturnType<typeof orgOnlyHeader>) {
+  return { params: { header } };
+}
 
 /** `enabled: false` for a surface that mounts the hook but needs no space list. */
 export function useSpaces(enabled = true) {
   const scope = useOrgOnlyScope();
-  return $api.useQuery(
-    "get",
-    "/api/spaces",
-    { params: { header: scope.header } },
-    { enabled: enabled && scope.enabled, select: (e) => e.data },
+  return $api.useQuery("get", "/api/spaces", spacesListInit(scope.header), {
+    enabled: enabled && scope.enabled,
+    select: (e) => e.data,
+  });
+}
+
+/**
+ * Start the listing at boot, beside `primeOrgList()` (see `main.tsx`): no
+ * space-scoped request leaves before it proves the remembered space enterable,
+ * so waiting for React to mount the layout would delay every one of them by a
+ * round trip. Keyed on the remembered org, so it can never answer for another;
+ * a failure is not cached as data, and `useSpaces` refetches it on mount.
+ */
+export function primeSpaceList(): void {
+  const orgId = getCurrentOrgId();
+  if (!orgId) return;
+  void queryClient.prefetchQuery(
+    $api.queryOptions("get", "/api/spaces", spacesListInit(orgOnlyHeader(orgId))),
   );
 }
 

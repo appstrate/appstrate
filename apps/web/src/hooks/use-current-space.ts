@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect } from "react";
 import { useStore } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { spaceStore, getCurrentSpaceId } from "../stores/space-store";
 import { useSpaces } from "./use-spaces";
-import { useAutoSelect } from "./use-auto-select";
 
 // Re-export non-hook accessor
 export { getCurrentSpaceId };
 
-/** Reactive hook — re-renders when the current space changes. */
+/** Reactive hook — re-renders when the current space changes; null until one is resolved. */
 export function useCurrentSpaceId(): string | null {
   return useStore(spaceStore, (s) => s.id);
 }
@@ -66,37 +65,43 @@ export function useSpaceSwitcher() {
   return { switchSpace };
 }
 
-/**
- * With no enterable space `useAutoSelect` has nothing to replace a stale id with,
- * and it would keep riding on `X-Space-Id`, 403-ing every space-scoped request.
- */
-export function dropUnenterableSpace(
-  queryClient: QueryClient,
-  enterable: { id: string }[] | undefined,
-  currentSpaceId: string | null,
-): void {
-  if (enterable?.length === 0 && currentSpaceId) selectSpace(queryClient, null);
+interface ResolvableSpace {
+  id: string;
+  isDefault: boolean;
+  access: string;
 }
 
 /**
- * Keeps `currentSpaceId` on an enterable (`access: "member"`) space or null —
- * pinning a `closed` space would 403 every space-scoped request. Render inside MainLayout.
+ * The space to stand in: the remembered one while it is still enterable, else
+ * the default, else any enterable one; null when none is. Only `member` access
+ * enters — scoping to a `closed` space would 403 every space-scoped request.
+ */
+export function enterableSpaceId(
+  remembered: string | null,
+  spaces: readonly ResolvableSpace[],
+): string | null {
+  const enterable = spaces.filter((s) => s.access === "member");
+  const pick =
+    enterable.find((s) => s.id === remembered) ??
+    enterable.find((s) => s.isDefault) ??
+    enterable[0];
+  return pick?.id ?? null;
+}
+
+/**
+ * The only path from the remembered space to a scope: requests carry no space
+ * until `GET /api/spaces` proves one enterable, and lose it the moment the
+ * listing stops listing it. Render inside MainLayout.
  */
 export function useSpaceResolver(): void {
   const queryClient = useQueryClient();
-  const currentSpaceId = useStore(spaceStore, (s) => s.id);
+  const current = useStore(spaceStore, (s) => s.id);
+  const remembered = useStore(spaceStore, (s) => s.remembered);
   const { data: spaces } = useSpaces();
-  const { switchSpace } = useSpaceSwitcher();
 
-  const enterable = useMemo(() => spaces?.filter((s) => s.access === "member"), [spaces]);
-  const findDefault = useCallback(
-    (items: { id: string; isDefault: boolean }[]) => items.find((s) => s.isDefault),
-    [],
-  );
-
-  useEffect(
-    () => dropUnenterableSpace(queryClient, enterable, currentSpaceId),
-    [queryClient, enterable, currentSpaceId],
-  );
-  useAutoSelect(enterable, currentSpaceId, switchSpace, findDefault);
+  useEffect(() => {
+    if (!spaces) return;
+    const next = enterableSpaceId(remembered, spaces);
+    if (next !== current) selectSpace(queryClient, next);
+  }, [queryClient, spaces, remembered, current]);
 }

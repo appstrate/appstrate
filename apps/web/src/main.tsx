@@ -9,6 +9,7 @@ import { App } from "./app";
 import { queryClient } from "./lib/query-client";
 import { startAuthBootstrap } from "./hooks/use-auth";
 import { primeOrgList } from "./hooks/use-org";
+import { primeSpaceList } from "./hooks/use-spaces";
 import { clearChunkReloadFlag, reloadOnceForChunkError } from "./lib/chunk-reload";
 import "./stores/theme-store";
 import "./styles.css";
@@ -51,11 +52,12 @@ window.addEventListener("vite:preloadError", (event) => {
 //
 // Kicking them here, before `i18nReady` resolves and before React mounts,
 // collapses those three round-trips into one and takes them off the locale
-// fetch's tail. `GET /api/spaces` is the only first-screen read with a
-// real data dependency (it needs the selected org id), so what is left is two
-// network levels, not four.
+// fetch's tail. `GET /api/spaces` needs the selected org id, which a
+// returning user already has persisted: it starts here too, and every
+// space-scoped read waits on it (`useSpaceResolver`).
 startAuthBootstrap();
 primeOrgList();
+primeSpaceList();
 
 // Warm the chat route's chunk on the same idle window. `ChatModulePage` is
 // `lazy()`, so its download only STARTS once the route element renders — which
