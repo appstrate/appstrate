@@ -277,6 +277,8 @@ describe("handleChatStream", () => {
       agentAuthoring?: boolean;
       /** Earlier turns replayed ahead of the new user message. */
       history?: unknown[];
+      /** Extra body fields, e.g. the picker's `skill_mode` / `pinned_skills`. */
+      body?: Record<string, unknown>;
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
@@ -311,6 +313,7 @@ describe("handleChatStream", () => {
         ...(overrides?.agentAuthoring === undefined
           ? {}
           : { agent_authoring: overrides.agentAuthoring }),
+        ...overrides?.body,
       }),
     });
     return res;
@@ -523,7 +526,7 @@ describe("handleChatStream", () => {
     }
   });
 
-  it("reads the skill mode off the session row: strict injects the chosen skill and withholds `skills:read`", async () => {
+  it("without a selection in the body, keeps the stored one: strict injects and withholds `skills:read`", async () => {
     // Persona, context block and token must agree within one turn; all three
     // are wired from the one session-row read, which only this test can prove.
     const sessionId = mintSessionId();
@@ -580,6 +583,58 @@ describe("handleChatStream", () => {
     expect(await tokenPermissions(input)).toEqual(["mcp:invoke", "mcp:read"]);
 
     await waitForAssistantPersist(sessionId);
+  });
+
+  it("writes the body's selection on the row it creates, and runs the turn on it", async () => {
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      permissions: new Set(["mcp:read", "mcp:invoke", "skills:read"]),
+      body: { skill_mode: "strict", pinned_skills: ["@acme/z", "@acme/a", "@acme/z"] },
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+
+    const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+    expect(row?.skillMode).toBe("strict");
+    expect(row?.pinnedSkills).toEqual(["@acme/a", "@acme/z"]);
+    expect(await tokenPermissions(calls[0]!)).toEqual(["mcp:invoke", "mcp:read"]);
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("lets the body's selection replace the stored one", async () => {
+    const sessionId = mintSessionId();
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      spaceId: ctx.defaultSpaceId,
+      title: null,
+      skillMode: "strict",
+      pinnedSkills: ["@acme/a"],
+    });
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      permissions: new Set(["mcp:read", "mcp:invoke", "skills:read"]),
+      body: { skill_mode: "auto", pinned_skills: [] },
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+
+    const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+    expect(row?.skillMode).toBe("auto");
+    expect(row?.pinnedSkills).toEqual([]);
+    expect(await tokenPermissions(calls[0]!)).toContain("skills:read");
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("refuses a skill mode without its skills, and the reverse", async () => {
+    for (const body of [{ skill_mode: "manual" }, { pinned_skills: ["@acme/a"] }]) {
+      const res = await postChat(mintSessionId(), undefined, scriptedEngine().engine, { body });
+      expect(res.status).toBe(400);
+    }
   });
 
   it("keeps `skills:read` on the token in manual, where the model may look for more", async () => {

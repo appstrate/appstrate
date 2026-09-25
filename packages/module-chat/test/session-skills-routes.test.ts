@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `PUT /api/chat/sessions/:id/skills` and the selection the session DTOs carry
- * back. The PUT creates the row for a client-minted id yet still 404s a
- * foreign-tenant one; pins are replaced wholesale, deduped and stored sorted.
+ * The skill selection the session DTOs carry back, and the listing the picker
+ * reads. A turn writes the selection (`chat-stream-handler.test.ts`).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -14,8 +13,10 @@ import {
   authHeaders,
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { chatSessions } from "@appstrate/db/schema";
 import { mintSessionId } from "../src/session-id.ts";
-import { MAX_PINNED_SKILLS } from "../src/skills.ts";
 
 const app = getTestApp();
 
@@ -23,7 +24,6 @@ interface SessionDto {
   id: string;
   skill_mode: string;
   pinned_skills: string[];
-  updatedAt: string;
 }
 
 describe("chat session skills", () => {
@@ -38,90 +38,11 @@ describe("chat session skills", () => {
     return { ...init, headers: { ...authHeaders(ctx), "Content-Type": "application/json" } };
   }
 
-  async function putSkills(
-    sessionId: string,
-    body: unknown,
-    as: TestContext = ctx,
-  ): Promise<Response> {
-    return app.request(`/api/chat/sessions/${sessionId}/skills`, {
-      method: "PUT",
-      headers: { ...authHeaders(as), "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  }
-
   async function getSession(sessionId: string): Promise<SessionDto> {
     const res = await app.request(`/api/chat/sessions/${sessionId}`, json());
     expect(res.status).toBe(200);
     return (await res.json()) as SessionDto;
   }
-
-  it("creates the session row for a client-minted id and persists the selection", async () => {
-    const id = mintSessionId();
-    const res = await putSkills(id, {
-      skill_mode: "manual",
-      pinned_skills: ["@acme/b", "@acme/a"],
-    });
-    expect(res.status).toBe(204);
-
-    const session = await getSession(id);
-    expect(session.skill_mode).toBe("manual");
-    expect(session.pinned_skills).toEqual(["@acme/a", "@acme/b"]);
-  });
-
-  it("replaces the whole set and dedupes what the client repeats", async () => {
-    const id = mintSessionId();
-    await putSkills(id, { skill_mode: "manual", pinned_skills: ["@acme/a", "@acme/b"] });
-    const replaced = await putSkills(id, {
-      skill_mode: "strict",
-      pinned_skills: ["@acme/c", "@acme/c", "@acme/a"],
-    });
-    expect(replaced.status).toBe(204);
-
-    const session = await getSession(id);
-    expect(session.skill_mode).toBe("strict");
-    expect(session.pinned_skills).toEqual(["@acme/a", "@acme/c"]);
-  });
-
-  it("leaves updatedAt alone, so a pin toggle never reorders the sidebar", async () => {
-    const id = mintSessionId();
-    await putSkills(id, { skill_mode: "auto", pinned_skills: [] });
-    const before = (await getSession(id)).updatedAt;
-    await Bun.sleep(5);
-    await putSkills(id, { skill_mode: "manual", pinned_skills: ["@acme/a"] });
-    const after = await getSession(id);
-    expect(after.pinned_skills).toEqual(["@acme/a"]);
-    expect(after.updatedAt).toBe(before);
-  });
-
-  it("answers 404 on another tenant's session id, and writes nothing", async () => {
-    const stranger = await createTestContext({ orgSlug: "chatskills-other" });
-    const id = mintSessionId();
-    expect((await putSkills(id, { skill_mode: "auto", pinned_skills: [] })).status).toBe(204);
-
-    const res = await putSkills(id, { skill_mode: "manual", pinned_skills: ["@x/y"] }, stranger);
-    expect(res.status).toBe(404);
-    const session = await getSession(id);
-    expect(session.skill_mode).toBe("auto");
-    expect(session.pinned_skills).toEqual([]);
-  });
-
-  it("refuses an unknown mode, a malformed id, an unknown field, and more skills than the ceiling", async () => {
-    const id = mintSessionId();
-    const atCap = Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => `@acme/s${i}`);
-    const overCap = [...atCap, "@acme/one-more"];
-    for (const body of [
-      { skill_mode: "sometimes", pinned_skills: [] },
-      { skill_mode: "auto", pinned_skills: ["not-a-package-id"] },
-      { skill_mode: "auto", pinned_skills: [], skill_catalogue: true },
-      { skill_mode: "auto", pinned_skills: overCap },
-    ]) {
-      expect((await putSkills(id, body)).status).toBe(400);
-    }
-    // None of the refusals created the session; the cap itself is accepted.
-    expect((await app.request(`/api/chat/sessions/${id}`, json())).status).toBe(404);
-    expect((await putSkills(id, { skill_mode: "auto", pinned_skills: atCap })).status).toBe(204);
-  });
 
   it("reads the picker's four fields off the real skills listing", async () => {
     // `fetchSkills` hand-types this row; this is what keeps it honest.
@@ -151,7 +72,7 @@ describe("chat session skills", () => {
     });
   });
 
-  it("carries the selection on the create, list and detail routes", async () => {
+  it("carries the stored selection on the create, list and detail routes", async () => {
     const created = await app.request(
       "/api/chat/sessions",
       json({ method: "POST", body: JSON.stringify({}) }),
@@ -161,7 +82,11 @@ describe("chat session skills", () => {
     expect(fresh.skill_mode).toBe("auto");
     expect(fresh.pinned_skills).toEqual([]);
 
-    await putSkills(fresh.id, { skill_mode: "manual", pinned_skills: ["@acme/a"] });
+    // Written by a turn in real use (`chat-stream-handler.test.ts`); here, the row.
+    await db
+      .update(chatSessions)
+      .set({ skillMode: "manual", pinnedSkills: ["@acme/a"] })
+      .where(eq(chatSessions.id, fresh.id));
 
     const list = (await (await app.request("/api/chat/sessions", json())).json()) as {
       data: SessionDto[];
@@ -173,5 +98,13 @@ describe("chat session skills", () => {
     const detail = await getSession(fresh.id);
     expect(detail.skill_mode).toBe("manual");
     expect(detail.pinned_skills).toEqual(["@acme/a"]);
+  });
+
+  it("serves no route that writes the selection outside a turn", async () => {
+    const res = await app.request(
+      `/api/chat/sessions/${mintSessionId()}/skills`,
+      json({ method: "PUT", body: JSON.stringify({ skill_mode: "manual", pinned_skills: [] }) }),
+    );
+    expect(res.status).toBe(404);
   });
 });

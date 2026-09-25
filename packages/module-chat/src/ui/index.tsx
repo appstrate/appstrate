@@ -63,7 +63,6 @@ import {
   patchSessionsCache,
   sessionQueryKey,
   sessionsQueryKey,
-  skillWriteSettled,
   spaceIdFromHeaders,
   SESSIONS_QUERY_KEY,
   stopSession,
@@ -85,7 +84,7 @@ import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
-import { DEFAULT_SKILL_SELECTION } from "../skills.ts";
+import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
 import { canAuthorAgents, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
@@ -448,24 +447,31 @@ const Conversation = memo(function Conversation({
   const initialMessages = useMemo(() => history.data?.messages ?? [], [history.data?.messages]);
 
   // Seeded once per conversation (`key={id}` remount). No picker on a failed
-  // read: its first click would PUT defaults over the stored pins.
+  // read: it would show the defaults, and a change would send them over the
+  // stored choice.
   const initialSkills = history.data?.skills ?? DEFAULT_SKILL_SELECTION;
   const showPicker = canPinSkills && !history.isError;
+  // What the user changed in the picker, sent with every turn and written by it;
+  // nothing changed = nothing sent, and the stored selection stands.
+  const chosenSkills = useRef<ChatSkillSelection | undefined>(undefined);
+  const chooseSkills = useCallback((selection: ChatSkillSelection) => {
+    chosenSkills.current = selection;
+  }, []);
+  const getChosenSkills = useCallback(() => chosenSkills.current, []);
   const slot = useMemo(
     () => (
       <div className="flex items-center gap-2">
         {showPicker && (
           <SkillsPicker
-            sessionId={id}
             getHeaders={getHeaders}
             initialSelection={initialSkills}
-            persisted={persistedAtMount}
+            onChange={chooseSkills}
           />
         )}
         {composerSlot}
       </div>
     ),
-    [id, getHeaders, initialSkills, persistedAtMount, showPicker, composerSlot],
+    [getHeaders, initialSkills, chooseSkills, showPicker, composerSlot],
   );
 
   if (persistedAtMount && history.isPending) {
@@ -482,6 +488,7 @@ const Conversation = memo(function Conversation({
       isPersisted={persistedAtMount}
       initialMessages={initialMessages}
       composerSlot={slot}
+      getChosenSkills={getChosenSkills}
       {...rest}
     />
   );
@@ -497,7 +504,11 @@ function ConversationInner({
   composerSlot,
   serverGenerating,
   serverUpdatedAt,
-}: Omit<ConversationProps, "canPinSkills"> & { initialMessages: UIMessage[] }) {
+  getChosenSkills,
+}: Omit<ConversationProps, "canPinSkills"> & {
+  initialMessages: UIMessage[];
+  getChosenSkills: () => ChatSkillSelection | undefined;
+}) {
   const queryClient = useQueryClient();
   const spaceId = spaceIdFromHeaders(getHeaders);
 
@@ -530,9 +541,8 @@ function ConversationInner({
         api: "/api/chat",
         credentials: "include",
         headers: buildHeaders,
-        prepareSendMessagesRequest: async ({ id: chatId, messages, body }) => {
-          // The turn reads the skill selection off the session row.
-          await skillWriteSettled(chatId);
+        prepareSendMessagesRequest: ({ id: chatId, messages, body }) => {
+          const skills = getChosenSkills();
           return {
             body: {
               ...body,
@@ -541,6 +551,10 @@ function ConversationInner({
               generation: getCompatibleGenerationSettings(),
               // Read at request time, like the model above, for the same reason.
               agent_authoring: getAgentAuthoringEnabled(),
+              ...(skills && {
+                skill_mode: skills.skillMode,
+                pinned_skills: [...skills.pinnedSkills],
+              }),
             },
           };
         },
@@ -550,7 +564,7 @@ function ConversationInner({
           api: `/api/chat/sessions/${chatId}/stream`,
         }),
       }),
-    [buildHeaders],
+    [buildHeaders, getChosenSkills],
   );
 
   const chat = useChat({

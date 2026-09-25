@@ -35,7 +35,9 @@ import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
 import { turnPermissions } from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
-import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "./skills.ts";
+import { chatSkillModeValues } from "@appstrate/db/schema";
+import { packageIdSchema } from "@appstrate/core/validation";
+import { DEFAULT_SKILL_SELECTION, MAX_PINNED_SKILLS, type ChatSkillSelection } from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
 import { ensureSession, persistUserMessage, persistAssistantMessage } from "./persistence.ts";
@@ -107,6 +109,8 @@ export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
 //   - any `file` part MUST reference an `upload://` or `appfile://` URI. That
 //     rejects inline `data:` bytes and arbitrary URLs in the chat channel
 //     (attachments flow only through the file store, never inline).
+//   - `skill_mode` and `pinned_skills` come together or not at all: the
+//     picker's selection, written onto the session row by this turn.
 //   - `.strict()`: an unknown field is a 400, never silently dropped.
 export const chatStreamSchema = z
   .object({
@@ -146,8 +150,18 @@ export const chatStreamSchema = z
     generation: modelGenerationSettingsSchema.optional(),
     /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
     agent_authoring: z.boolean().optional(),
+    /** The conversation's skill selection; absent = the one stored on the session. */
+    skill_mode: z.enum(chatSkillModeValues).optional(),
+    pinned_skills: z
+      .array(packageIdSchema)
+      .max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} chosen skills` })
+      .optional(),
   })
-  .strict();
+  .strict()
+  .refine((body) => (body.skill_mode === undefined) === (body.pinned_skills === undefined), {
+    error: "skill_mode and pinned_skills are sent together",
+    path: ["pinned_skills"],
+  });
 
 function clientErrorMessage(error: unknown): string {
   return clientTurnErrorMarker(classifyClientTurnError(error));
@@ -259,10 +273,17 @@ export async function handleChatStream(
   // `Promise.all` — a foreign-tenant 404 still surfaces before anything is
   // materialized into the session, and attaching the join in the same tick is
   // what keeps a rejection from ever going unhandled.
+  //
+  // The picker's selection rides the turn and is written in the same upsert, so
+  // nothing is stored before the first message; without one the row's stands.
+  const bodySkills: ChatSkillSelection | undefined =
+    body.skill_mode && body.pinned_skills
+      ? { skillMode: body.skill_mode, pinnedSkills: [...new Set(body.pinned_skills)].sort() }
+      : undefined;
   const sessionSkills: Promise<ChatSkillSelection> =
     sessionId && lastMessage?.id
-      ? ensureSession(sessionId, orgId, user.id, spaceId)
-      : Promise.resolve(DEFAULT_SKILL_SELECTION);
+      ? ensureSession(sessionId, orgId, user.id, spaceId, bodySkills)
+      : Promise.resolve(bodySkills ?? DEFAULT_SKILL_SELECTION);
 
   const origin = selfOrigin();
   const headers = forwardedHeaders(c);

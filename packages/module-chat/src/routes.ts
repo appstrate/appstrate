@@ -29,11 +29,10 @@ import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions, chatSkillModeValues } from "@appstrate/db/schema";
+import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
 import { invalidRequest, notFound, parseBody } from "@appstrate/core/api-errors";
 import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
-import { packageIdSchema } from "@appstrate/core/validation";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
 import { stopStream } from "./stop-registry.ts";
@@ -41,8 +40,6 @@ import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from 
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
-import { ensureSession } from "./persistence.ts";
-import { MAX_PINNED_SKILLS } from "./skills.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
 const SESSIONS_PAGE_SIZE = 100;
@@ -62,16 +59,6 @@ export const createSessionSchema = z.object({
 export const renameSessionSchema = z.object({
   title: z.string().min(1).max(200),
 });
-
-/** An unknown id is a chosen skill the turn names as unavailable, never a 400. */
-export const sessionSkillsSchema = z
-  .object({
-    skill_mode: z.enum(chatSkillModeValues),
-    pinned_skills: z
-      .array(packageIdSchema)
-      .max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} chosen skills` }),
-  })
-  .strict();
 
 type SessionRow = typeof chatSessions.$inferSelect;
 type MessageRow = typeof chatMessages.$inferSelect;
@@ -269,26 +256,6 @@ export function createChatRouter(deps: ChatPlatformDeps) {
         })
         .where(eq(chatSessions.id, session.id));
       notifySessionUpdate(session.id, session.orgId, session.userId);
-      return c.body(null, 204);
-    },
-  );
-
-  // PUT /api/chat/sessions/:id/skills — replace the skill selection, creating
-  // the row for a client-minted id: choosing skills before the first message is
-  // the normal case.
-  router.put(
-    "/api/chat/sessions/:id/skills",
-    rateLimited(60),
-    requireModulePermission("chat", "write"),
-    async (c) => {
-      const scope = sessionScope(c);
-      const id = c.req.param("id");
-      const data = parseBody(sessionSkillsSchema, await c.req.json().catch(() => null));
-      await ensureSession(id, scope.orgId, scope.userId, scope.spaceId, {
-        skillMode: data.skill_mode,
-        pinnedSkills: [...new Set(data.pinned_skills)].sort(),
-      });
-      notifySessionUpdate(id, scope.orgId, scope.userId);
       return c.body(null, 204);
     },
   );

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Skill picker: the conversation's skill mode and chosen skills. Local selection
-// seeded once; one PUT at a time, reverted on failure.
+// seeded once; nothing is written here — the next turn carries it.
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpenIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -24,8 +24,8 @@ import {
   type ChatSkillSelection,
 } from "../skills.ts";
 import { skillPickerRows, togglePinned } from "./chat-skills.ts";
-import { useChatHost, useSelectConversation, type GetHeaders } from "./runtime-context.ts";
-import { fetchSkills, putSessionSkills, spaceIdFromHeaders } from "./sessions.ts";
+import { useChatHost, type GetHeaders } from "./runtime-context.ts";
+import { fetchSkills, spaceIdFromHeaders } from "./sessions.ts";
 
 /** Every mode in display order, with its copy; a `Record`, so a new mode must be added here. */
 const MODE_COPY: Record<ChatSkillMode, { label: string; hint: string }> = {
@@ -36,30 +36,16 @@ const MODE_COPY: Record<ChatSkillMode, { label: string; hint: string }> = {
 const MODES = Object.keys(MODE_COPY) as ChatSkillMode[];
 
 interface SkillsPickerProps {
-  sessionId: string;
   getHeaders: GetHeaders | undefined;
   initialSelection: ChatSkillSelection;
-  /** Whether the conversation's id is already in the URL. */
-  persisted: boolean;
+  /** Every change, for the next turn to carry. */
+  onChange: (selection: ChatSkillSelection) => void;
 }
 
-export function SkillsPicker({
-  sessionId,
-  getHeaders,
-  initialSelection,
-  persisted,
-}: SkillsPickerProps) {
+export function SkillsPicker({ getHeaders, initialSelection, onChange }: SkillsPickerProps) {
   const { t, can } = useChatHost();
-  const selectConversation = useSelectConversation();
-  // The first write creates the row, so the URL adopts its id at once, as a first
-  // send does: a reload then reopens this conversation instead of minting another.
-  const adopted = useRef(persisted);
   const [open, setOpen] = useState(false);
   const [selection, setSelection] = useState(initialSelection);
-  // Controls are disabled while a PUT is in flight, so writes never race.
-  const [saving, setSaving] = useState(false);
-  // A refused write is reverted, and said: a silent revert reads as a dead control.
-  const [saveFailed, setSaveFailed] = useState(false);
   // Space-scoped: the listing reads `X-Space-Id`, so the key carries the space.
   const spaceId = spaceIdFromHeaders(getHeaders);
   const readable = !!spaceId && can("skills:read");
@@ -82,20 +68,8 @@ export function SkillsPicker({
   const inUse = choosing ? pinned.length : 0;
 
   const apply = (next: ChatSkillSelection) => {
-    const previous = selection;
     setSelection(next);
-    setSaving(true);
-    setSaveFailed(false);
-    if (!adopted.current) {
-      adopted.current = true;
-      selectConversation?.(sessionId);
-    }
-    putSessionSkills(getHeaders, sessionId, next)
-      .catch(() => {
-        setSelection(previous);
-        setSaveFailed(true);
-      })
-      .finally(() => setSaving(false));
+    onChange(next);
   };
 
   const togglePin = (packageId: string) => {
@@ -168,7 +142,6 @@ export function SkillsPicker({
               <TabsTrigger
                 key={mode}
                 value={mode}
-                disabled={saving}
                 data-testid={`skills-mode-${mode}`}
                 className="h-6 px-2 text-xs"
               >
@@ -180,15 +153,6 @@ export function SkillsPicker({
         <p className="text-muted-foreground mt-1.5 shrink-0 px-1 text-[0.7rem] leading-snug">
           {t(MODE_COPY[selection.skillMode].hint)}
         </p>
-        {saveFailed && (
-          <p
-            role="alert"
-            data-testid="skills-save-error"
-            className="text-destructive mt-1 shrink-0 px-1 text-[0.7rem] leading-snug"
-          >
-            {t("skills.saveError")}
-          </p>
-        )}
 
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t pt-2">
           <div className="text-muted-foreground px-1 py-1 text-[0.65rem] font-semibold tracking-wider uppercase">
@@ -228,7 +192,7 @@ export function SkillsPicker({
                     id={id}
                     data-testid={`skill-pin-${skill.packageId}`}
                     checked={checked}
-                    disabled={saving || inert}
+                    disabled={inert}
                     onCheckedChange={() => togglePin(skill.packageId)}
                     className="mt-0.5 shrink-0"
                   />

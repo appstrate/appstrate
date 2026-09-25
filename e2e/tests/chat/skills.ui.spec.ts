@@ -1,21 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Skills in the chat, from the browser: the picker stores the mode and the
- * chosen skills on a conversation that has no row yet, before any message is
- * sent, and the URL adopts that conversation so a reload reopens it.
+ * Skills in the chat, from the browser: the picker's mode and chosen skills
+ * stay in the page — nothing is written, no conversation is created — until a
+ * message carries them.
  */
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createSkill } from "../../helpers/seed.ts";
 
-interface SessionRow {
-  id: string;
-  skill_mode: string;
-  pinned_skills: string[];
-}
-
-test("switches to manual and chooses a skill before the first message", async ({
+test("carries the chosen mode and skills with the first message, and writes nothing before", async ({
   authedPage: page,
   apiClient,
   browserCtx,
@@ -25,13 +19,15 @@ test("switches to manual and chooses a skill before the first message", async ({
   await createSkill(apiClient, scope, name);
   const packageId = `${scope}/${name}`;
 
+  const writes: string[] = [];
+  page.on("request", (req) => {
+    if (req.method() !== "GET" && req.url().includes("/api/chat")) writes.push(req.url());
+  });
+
   await page.goto("/chat");
   const trigger = page.getByTestId("skills-picker-trigger");
-  await expect(trigger).toBeVisible();
-
   await trigger.click();
   const popover = page.getByTestId("skills-picker-popover");
-  await expect(popover).toBeVisible();
   const auto = popover.getByTestId("skills-mode-auto");
   const manual = popover.getByTestId("skills-mode-manual");
   await expect(auto).toHaveAttribute("data-state", "active");
@@ -40,38 +36,24 @@ test("switches to manual and chooses a skill before the first message", async ({
   await expect(pin).toBeDisabled();
   await manual.click();
   await expect(manual).toHaveAttribute("data-state", "active");
-  await expect(pin).toBeEnabled();
   await pin.click();
   await expect(pin).toBeChecked();
-  // The controls are disabled while a write is in flight: enabled again means
-  // the second PUT has answered, so one read is enough.
-  await expect(pin).toBeEnabled();
   await page.keyboard.press("Escape");
-  await expect(popover).toBeHidden();
 
-  const res = await apiClient.get("/chat/sessions");
-  const body = (await res.json()) as { data: SessionRow[] };
-  expect(
-    body.data.map((s) => ({ skill_mode: s.skill_mode, pinned_skills: s.pinned_skills })),
-  ).toEqual([{ skill_mode: "manual", pinned_skills: [packageId] }]);
+  // Choosing created nothing: same page, no conversation, no write.
+  await expect(page).toHaveURL(/\/chat$/);
+  const sessions = (await (await apiClient.get("/chat/sessions")).json()) as { data: unknown[] };
+  expect(sessions.data).toEqual([]);
+  expect(writes).toEqual([]);
 
-  // The URL holds the conversation the pins were written to; a reload reopens it.
-  const sessionId = body.data[0]!.id;
-  await expect(page).toHaveURL(new RegExp(`/chat/${sessionId}$`));
-  await page.reload();
-  await trigger.click();
-  await expect(popover.getByTestId("skills-mode-manual")).toHaveAttribute("data-state", "active");
-  await expect(popover.getByTestId(`skill-pin-${packageId}`)).toBeChecked();
-});
-
-test("says a refused write, and shows the stored mode again", async ({ authedPage: page }) => {
-  await page.route("**/api/chat/sessions/*/skills", (route) =>
-    route.fulfill({ status: 500, body: "" }),
+  // The first message carries the selection; the turn itself is not the subject.
+  const sent = page.waitForRequest(
+    (req) => req.method() === "POST" && new URL(req.url()).pathname === "/api/chat",
   );
-  await page.goto("/chat");
-  await page.getByTestId("skills-picker-trigger").click();
-  const popover = page.getByTestId("skills-picker-popover");
-  await popover.getByTestId("skills-mode-manual").click();
-  await expect(popover.getByTestId("skills-save-error")).toBeVisible();
-  await expect(popover.getByTestId("skills-mode-auto")).toHaveAttribute("data-state", "active");
+  await page.route("**/api/chat", (route) => route.fulfill({ status: 503, body: "" }));
+  await page.getByPlaceholder("Message Appstrate…").fill("bonjour");
+  await page.keyboard.press("Enter");
+  const body = (await sent).postDataJSON() as { skill_mode?: string; pinned_skills?: string[] };
+  expect(body.skill_mode).toBe("manual");
+  expect(body.pinned_skills).toEqual([packageId]);
 });

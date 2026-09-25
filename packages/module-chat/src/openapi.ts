@@ -46,7 +46,7 @@ export const chatComponentSchemas = {
         type: "string",
         enum: [...chatSkillModeValues],
         description:
-          "How turns use skills. `auto`: the space's skills are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:read`, so it lists, loads and declares no other. Set via PUT /api/chat/sessions/{id}/skills.",
+          "How turns use skills. `auto`: the space's skills are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:read`, so it lists, loads and declares no other. Written by the turn that carries it (POST /api/chat).",
       },
       pinned_skills: {
         type: "array",
@@ -250,52 +250,6 @@ export const chatPaths = {
       },
     },
   },
-  "/api/chat/sessions/{id}/skills": {
-    put: {
-      operationId: "setChatSessionSkills",
-      tags: ["Chat"],
-      summary: "Set a chat session's skill selection",
-      description: `Replaces the conversation's skill mode and chosen skills in one call (the body is the state you want, not a patch). Duplicate ids are deduped server-side; at most ${MAX_PINNED_SKILLS} chosen skills. The session row is created if the client-minted id has none yet — exactly as the first turn would.`,
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { name: "id", in: "path", required: true, schema: { type: "string" } },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["skill_mode", "pinned_skills"],
-              properties: {
-                skill_mode: { type: "string", enum: [...chatSkillModeValues] },
-                pinned_skills: {
-                  type: "array",
-                  maxItems: MAX_PINNED_SKILLS,
-                  items: {
-                    type: "string",
-                    pattern: scopedNameRegex.source,
-                    description: "`@scope/name` package id",
-                  },
-                  description:
-                    "Package ids to choose. Deduped server-side; the cap applies to the array as sent.",
-                },
-              },
-              additionalProperties: false,
-            },
-          },
-        },
-      },
-      responses: {
-        "204": { description: "Selection replaced" },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "429": { description: "Rate limited (60/min per caller)" },
-      },
-    },
-  },
   "/api/chat/sessions/{id}/read": {
     put: {
       operationId: "markChatSessionRead",
@@ -377,6 +331,23 @@ export const chatPaths = {
                   type: "boolean",
                   description:
                     "Lets the assistant author agents (create, edit, compose inline) this turn; absent = on. Narrows the caller's own grants, never widens them.",
+                },
+                skill_mode: {
+                  type: "string",
+                  enum: [...chatSkillModeValues],
+                  description:
+                    "The conversation's skill mode (see ChatSession `skill_mode`), written onto the session by this turn. Sent with `pinned_skills` or not at all; absent = the stored selection (`auto` for a new conversation).",
+                },
+                pinned_skills: {
+                  type: "array",
+                  maxItems: MAX_PINNED_SKILLS,
+                  items: {
+                    type: "string",
+                    pattern: scopedNameRegex.source,
+                    description: "`@scope/name` package id",
+                  },
+                  description:
+                    "The skills chosen for the conversation, written with `skill_mode`. Deduped server-side; the cap applies to the array as sent.",
                 },
                 id: { type: "string", description: "Session id (the assistant-ui thread id)" },
               },
