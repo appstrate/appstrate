@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The `packages sync` command suites' harness: a throw-away config, data and
+ * The `code sync` command suites' harness: a throw-away config, data and
  * `HOME` (so `~/.agents/skills` and `~/.claude/skills` land in a tmpdir), a
  * fake keyring and a logged-in profile pinned to `spaceId`. It registers its
  * own hooks, so call it once at a suite's top level.

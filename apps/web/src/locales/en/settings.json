@@ -114,7 +114,7 @@
   "orgSettings.orgTitle": "Organization",
   "orgSettings.advancedSection": "Advanced",
   "orgSettings.restrictCopyTitle": "Restrict package copying",
-  "orgSettings.restrictCopyDesc": "Forking and downloading a published version then require the share permission in the package's home space. Skills stay exempt (the CLI's packages sync is a local copy by design) and runs are unaffected.",
+  "orgSettings.restrictCopyDesc": "Forking and downloading a published version then require the share permission in the package's home space. Skills stay exempt (the CLI's code sync is a local copy by design) and runs are unaffected.",
   "orgSettings.restrictCopyEnable": "Enable",
   "orgSettings.restrictCopyDisable": "Disable",
   "orgSettings.restrictCopyEnabled": "Package copying restricted.",

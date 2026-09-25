@@ -57,7 +57,7 @@ export async function listSpaces(profileName: string): Promise<Space[]> {
  *
  * `access` / `permissions` arrived with granular space roles, so a server that
  * predates them serves neither — and a blind cast would hand that row on as a
- * space whose standing reads `undefined`. `packages sync` compares that against
+ * space whose standing reads `undefined`. `code sync` compares that against
  * `"member"`, finds no space that supplies skills, and deletes every skill it
  * had installed. An older server is a version mismatch to say out loud, never
  * an emptied set of grants, so the standing is checked, not cast.

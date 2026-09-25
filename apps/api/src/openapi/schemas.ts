@@ -77,7 +77,7 @@ export const ORG_SETTINGS_PROPERTIES = {
   restrict_package_copy: {
     type: "boolean",
     description:
-      "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space: `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's `packages sync` downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about.",
+      "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space: `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's `code sync` downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about.",
   },
   api_version: {
     type: "string",

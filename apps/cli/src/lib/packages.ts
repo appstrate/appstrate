@@ -4,7 +4,7 @@
  * The authoring loop's view of a package: where it lives and who may write it
  * (`GET …/home`), what its draft's version (`ETag`) is, and how a local working
  * folder compares to one of its definitions. Definitions themselves are read
- * through `./package-definition.ts`, the path `packages sync` reads them through.
+ * through `./package-definition.ts`, the path `code sync` reads them through.
  */
 
 import { mkdir, readdir, readFile, realpath, stat } from "node:fs/promises";

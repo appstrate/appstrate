@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A stand-in for the package routes `appstrate packages sync` reads,
+ * A stand-in for the package routes `appstrate code sync` reads,
  * driven by a table of skills and agents rather than by per-test URL matching.
  *
  * The artifacts are REAL `.afps` archives built with `zipArtifact` and hashed

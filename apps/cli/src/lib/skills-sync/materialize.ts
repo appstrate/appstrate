@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The pure half of `appstrate packages sync`. Output is a function of the input —
+ * The pure half of `appstrate code sync`. Output is a function of the input —
  * sorted keys, no timestamps — because a `mode: "copy"` plugin's version IS the
  * hash of its contents, so a byte-identical re-run must hash identically.
  */
@@ -20,7 +20,7 @@ import { isValidVersion } from "@appstrate/core/semver";
 import { isSafeArchivePath } from "@appstrate/core/zip";
 import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import { SIGNATURE_RECORD } from "../package-definition.ts";
-import { pluginTool } from "./targets.ts";
+import { PLUGIN_UPDATE_COMMAND, pluginTool } from "./targets.ts";
 
 /** Appstrate packaging, not skill content: both archives carry them, no skill directory does. */
 const DROPPED_ENTRIES: ReadonlySet<string> = new Set([PACKAGE_MANIFEST_FILE, SIGNATURE_RECORD]);
@@ -259,7 +259,7 @@ function agentBody(view: AgentLaunchView, scope: string, name: string, files: bo
       "- `connect_url` or `must_choose_connection`: follow the Appstrate server's instructions.",
       "- `404` `agent_not_found`, `agent_not_active_in_space` or `no_published_version`, or the " +
         "pinned version not found: this command is out of date. Tell the user to run " +
-        "`appstrate packages sync`; do not retry.",
+        `\`${PLUGIN_UPDATE_COMMAND}\`; do not retry.`,
       "- Another `404`, or a `400`: fix `input` with the user, then retry.",
       "- Anything else: report it and stop.",
       `Once a run \`id\` exists, never call \`${RUN_AND_WAIT}\` again.`,
