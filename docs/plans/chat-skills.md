@@ -94,9 +94,8 @@ adopts its id on that first write, as on a first send — and it never bumps
 `updatedAt`. Every session DTO carries both fields. There is no chat-specific
 skill listing: the picker reads `GET /api/packages/skills`.
 
-UI: a picker in the composer — a segmented control for the mode (a setting the
-turn obeys, not a view, hence not tabs) with the chosen mode's explanation, and
-one checkbox per skill, inert in `auto`. Mounted when `canPinSkills` holds
+UI: a picker in the composer — the mode as the model picker's tabs (one look
+across the composer) with the chosen mode's explanation, and one checkbox per skill, inert in `auto`. Mounted when `canPinSkills` holds
 (`chat:write` ∧ `skills:read`) and the session read succeeded — a failed read
 would let the first click write the defaults over the stored choice. The
 selection lives in local state seeded from the session detail; one write at a

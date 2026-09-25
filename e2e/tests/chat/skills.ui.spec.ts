@@ -34,12 +34,12 @@ test("switches to manual and chooses a skill before the first message", async ({
   await expect(popover).toBeVisible();
   const auto = popover.getByTestId("skills-mode-auto");
   const manual = popover.getByTestId("skills-mode-manual");
-  await expect(auto).toHaveAttribute("data-state", "on");
+  await expect(auto).toHaveAttribute("data-state", "active");
   // In auto the assistant chooses: the list is inert.
   const pin = popover.getByTestId(`skill-pin-${packageId}`);
   await expect(pin).toBeDisabled();
   await manual.click();
-  await expect(manual).toHaveAttribute("data-state", "on");
+  await expect(manual).toHaveAttribute("data-state", "active");
   await expect(pin).toBeEnabled();
   await pin.click();
   await expect(pin).toBeChecked();
@@ -60,6 +60,6 @@ test("switches to manual and chooses a skill before the first message", async ({
   await expect(page).toHaveURL(new RegExp(`/chat/${sessionId}$`));
   await page.reload();
   await trigger.click();
-  await expect(popover.getByTestId("skills-mode-manual")).toHaveAttribute("data-state", "on");
+  await expect(popover.getByTestId("skills-mode-manual")).toHaveAttribute("data-state", "active");
   await expect(popover.getByTestId(`skill-pin-${packageId}`)).toBeChecked();
 });

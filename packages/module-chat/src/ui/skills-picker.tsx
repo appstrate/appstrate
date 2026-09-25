@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { BookOpenIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { ToggleGroup, ToggleGroupItem } from "@appstrate/ui/components/toggle-group";
+import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import {
   Tooltip,
@@ -147,33 +147,30 @@ export function SkillsPicker({
       >
         <p className="shrink-0 text-sm font-medium">{t("skills.title")}</p>
 
-        {/* A segmented control, not tabs: picking a mode is a setting the turn
-            obeys, not a view to switch to. Single-select that cannot be emptied. */}
-        <ToggleGroup
-          type="single"
-          variant="outline"
-          size="sm"
+        {/* The model picker's control, for one look across the composer. */}
+        <Tabs
           value={selection.skillMode}
           onValueChange={(mode) => {
-            if (mode && mode !== selection.skillMode) {
+            if (mode !== selection.skillMode) {
               apply({ ...selection, skillMode: mode as ChatSkillMode });
             }
           }}
-          disabled={saving}
-          aria-label={t("skills.modeLabel")}
-          className="mt-2 w-full shrink-0 gap-0"
+          className="mt-2 shrink-0"
         >
-          {MODES.map((mode) => (
-            <ToggleGroupItem
-              key={mode}
-              value={mode}
-              data-testid={`skills-mode-${mode}`}
-              className="flex-1 text-xs first:rounded-r-none last:rounded-l-none [&:not(:first-child):not(:last-child)]:rounded-none"
-            >
-              {t(MODE_COPY[mode].label)}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+          <TabsList aria-label={t("skills.modeLabel")} className="grid h-8 w-full grid-cols-3">
+            {MODES.map((mode) => (
+              <TabsTrigger
+                key={mode}
+                value={mode}
+                disabled={saving}
+                data-testid={`skills-mode-${mode}`}
+                className="h-6 px-2 text-xs"
+              >
+                {t(MODE_COPY[mode].label)}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
         <p className="text-muted-foreground mt-1.5 shrink-0 px-1 text-[0.7rem] leading-snug">
           {t(MODE_COPY[selection.skillMode].hint)}
         </p>
