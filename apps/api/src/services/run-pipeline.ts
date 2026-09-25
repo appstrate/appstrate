@@ -151,16 +151,6 @@ interface RunPipelineParams {
   manifestCache?: IntegrationManifestCache;
 }
 
-interface RunPipelineSuccess {
-  runId: string;
-  /**
-   * Resolved model label snapshot — same value persisted on
-   * `runs.model_label`.
-   */
-  modelLabel: string;
-  modelSource: string | null;
-}
-
 // ---------------------------------------------------------------------------
 // Preflight — shared by run route and scheduler
 // ---------------------------------------------------------------------------
@@ -351,7 +341,7 @@ export async function freezeRunSpawnDependencies(params: {
  * can surface RFC 9457 problem details directly. Background callers (scheduler)
  * catch `ApiError` to translate into their own failure semantics.
  */
-export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<RunPipelineSuccess> {
+export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<void> {
   const {
     runId,
     orgId,
@@ -728,6 +718,4 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       error: getErrorMessage(err),
     });
   });
-
-  return { runId, modelLabel, modelSource };
 }

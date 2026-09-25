@@ -91,7 +91,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `Stored generation settings refused by the model, dropped for this scheduled run`
     now ends `dropped for this run`, and also covers space defaults;
   - `failed to append dropped-integration run log` is now
-    `failed to append drop marker run log`.
+    `failed to append drop marker run log`;
+  - a run the stall watchdog stops now always fails with the watchdog's own
+    error (`Runner stopped reporting — …` or `Run never started executing — …`,
+    visible to users and webhooks), never `Agent container exited with code N`
+    from a lost race; the launcher no longer logs
+    `Agent container exited non-zero` or a sidecar crash for such a run;
+  - the run abort signal now also carries watchdog stops (still on the
+    `runs:cancel` channel), so a non-owning replica logs its cross-instance
+    abort for watchdog sweeps too, and its messages are renamed:
+    `Aborting run via cross-instance cancel` →
+    `Aborting run on a cross-instance stop request`,
+    `Failed to publish run cancel after retries` →
+    `Failed to publish run abort after retries`,
+    `Retrying run cancel publish` → `Retrying run abort publish`.
 
 - **BREAKING (operators): runs on a platform-provided model are served through
   the platform's metered LLM proxy, like chat.** A run whose model is a
