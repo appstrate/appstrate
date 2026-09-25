@@ -67,9 +67,10 @@ COPY --from=uv /uv /uvx /usr/local/bin/
 COPY --from=sidecar /usr/local/bin/sidecar /usr/local/bin/sidecar
 
 # Guest supervisor, pre-bundled to a single file for cold-start speed.
-# It only imports node builtins plus the type-only wire contract
-# (guest-config.ts, erased at bundle), so the bundle is self-contained.
-COPY apps/api/src/modules/firecracker/guest/supervisor.ts apps/api/src/modules/firecracker/guest/guest-config.ts /tmp/guest/
+# It only imports node builtins, the pure firewall builder (firewall.ts,
+# inlined at bundle) and the type-only wire contract (guest-config.ts, erased
+# at bundle), so the bundle is self-contained.
+COPY apps/api/src/modules/firecracker/guest/supervisor.ts apps/api/src/modules/firecracker/guest/firewall.ts apps/api/src/modules/firecracker/guest/guest-config.ts /tmp/guest/
 RUN bun build /tmp/guest/supervisor.ts --target=bun --outfile=/runtime/guest/supervisor.js \
  && rm -r /tmp/guest
 

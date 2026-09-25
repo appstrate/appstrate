@@ -49,7 +49,6 @@ export interface GuestConfig {
   exit_marker_nonce: string;
   network: GuestNetworkConfig;
   sidecar: {
-    enabled: boolean;
     env: Record<string, string>;
   };
   /** The supervisor confines the agent to loopback (sidecar) + the platform sink. */

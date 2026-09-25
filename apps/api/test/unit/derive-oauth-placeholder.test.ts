@@ -101,3 +101,14 @@ describe("deriveOauthPlaceholder", () => {
     });
   });
 });
+
+describe("deriveKeyPlaceholder — never the key itself", () => {
+  // The container env refuses a placeholder equal to the key, so the derivation
+  // must never land on one — including for a key already shaped like its output.
+  it.each(["sk-placeholder", "a-placeholder", "sk-placeholder-placeholder"])(
+    "differs from %s",
+    (key) => {
+      expect(deriveKeyPlaceholder(key)).not.toBe(key);
+    },
+  );
+});

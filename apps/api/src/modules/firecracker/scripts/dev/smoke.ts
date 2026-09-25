@@ -295,8 +295,8 @@ try {
         ? join(state.chrootPath, "config.img")
         : join(boundary.id, "config.img");
     await assertConfigDriveOmitsSecret(imagePath, FAKE_RUN_TOKEN);
-    // Agent-env secret: the model API key (real on direct-provider runs)
-    // must be brokered off the drive too.
+    // Agent-env key named for a credential: brokered off the drive too,
+    // whatever its value.
     await assertConfigDriveOmitsSecret(imagePath, FAKE_MODEL_KEY);
   }
 
@@ -343,9 +343,9 @@ try {
   await orch.removeWorkload(agent);
 
   // ---------------------------------------------------------------------
-  // Second minimal VM: non-zero exit-code propagation. Agent-only (no
-  // createSidecar), trivial agent — the guest's `exit 42` must round-
-  // trip through the nonce-authenticated marker to waitForExit.
+  // Second minimal VM: non-zero exit-code propagation. Trivial agent — the
+  // guest's `exit 42` must round-trip through the nonce-authenticated marker
+  // to waitForExit.
   // ---------------------------------------------------------------------
   console.log("==> second microVM (exit-code propagation)");
   const RUN_ID2 = `${RUN_ID}_exit42`;
@@ -354,6 +354,7 @@ try {
   Reflect.set(orch, "agentArgvOverride", ["/bin/sh", "-c", "exit 42"]);
   const boundary2 = await orch.createIsolationBoundary(RUN_ID2);
   try {
+    const sidecar2 = await orch.createSidecar(RUN_ID2, boundary2, { runToken: FAKE_RUN_TOKEN });
     const agent2 = await orch.createWorkload(
       {
         runId: RUN_ID2,
@@ -374,6 +375,7 @@ try {
     if (exitCode2 !== 42) {
       fail(`expected exit marker 42 from the second VM, got ${exitCode2}`);
     }
+    await orch.removeWorkload(sidecar2);
     await orch.removeWorkload(agent2);
   } catch (err) {
     await dumpConsole(boundary2.id, "vm2 exception");
@@ -385,7 +387,7 @@ try {
   // ---------------------------------------------------------------------
   // Third VM (B4): the REAL agent entrypoint — NO argv override, so the
   // supervisor runs the baked default `bun run /runtime/dist/entrypoint.js`.
-  // Agent-only + a minimal agent env (no valid platform sink) makes the
+  // A minimal agent env (no valid platform sink) makes the
   // bundle LOAD, run under bun in-guest, and fail env validation — leaving
   // runtime-pi's `[runtime-pi fatal]` last-resort line on the serial
   // console. This catches module-resolution / transpiler breakage that the
@@ -397,8 +399,9 @@ try {
   Reflect.set(orch, "agentArgvOverride", undefined);
   const boundary3 = await orch.createIsolationBoundary(RUN_ID3);
   try {
-    // No createSidecar → agent-only VM. Minimal env: the entrypoint's
-    // parseRuntimeEnv fails fast on the missing APPSTRATE_SINK_* contract.
+    // Minimal env: the entrypoint's parseRuntimeEnv fails fast on the
+    // missing APPSTRATE_SINK_* contract.
+    const sidecar3 = await orch.createSidecar(RUN_ID3, boundary3, { runToken: FAKE_RUN_TOKEN });
     const agent3 = await orch.createWorkload(
       {
         runId: RUN_ID3,
@@ -422,6 +425,7 @@ try {
       );
     }
     console.log("==> real entrypoint loaded + reported its fatal diagnostic ok");
+    await orch.removeWorkload(sidecar3);
     await orch.removeWorkload(agent3);
   } catch (err) {
     await dumpConsole(boundary3.id, "vm3 exception");

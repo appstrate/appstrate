@@ -1387,10 +1387,11 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     const fcEnv = getFirecrackerEnv();
     const vm = this.vms.get(handle.runId);
     const agentSpec = this.pendingAgentSpecs.get(handle.runId);
-    if (!vm || !agentSpec) {
+    const sidecarEnv = this.pendingSidecarEnv.get(handle.runId);
+    if (!vm || !agentSpec || !sidecarEnv) {
       throw new Error(
-        `Firecracker orchestrator: no boundary/agent spec for run ${handle.runId} — ` +
-          `createIsolationBoundary + createWorkload must run before startWorkload`,
+        `Firecracker orchestrator: no boundary/sidecar/agent spec for run ${handle.runId} — ` +
+          `createIsolationBoundary + createSidecar + createWorkload must run before startWorkload`,
       );
     }
 
@@ -1401,10 +1402,6 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // supervisor's platform endpoint must target the override, not the
     // host lo alias (which nothing listens on in that topology).
     const aliasIp = platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR);
-    // No pending entry when createSidecar was never called (the smoke
-    // harness's agent-only VMs).
-    const sidecarEnv = this.pendingSidecarEnv.get(handle.runId);
-
     // Credential broker: with FIRECRACKER_CREDENTIAL_BROKER=mmds (default)
     // the secret keys are stripped off the config drive and served in-memory
     // via MMDS after boot; config-drive mode keeps today's inline delivery.
@@ -1449,7 +1446,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     const configDrivePath = join(vm.runDir, "config.img");
     await this.buildConfigDrive(vm.runDir, configDrivePath, guestConfig);
 
-    const sizing = vmSizing(agentSpec.resources, sidecarEnv !== undefined);
+    const sizing = vmSizing(agentSpec.resources);
     const proc = await this.spawnVmm(
       vm,
       configDrivePath,

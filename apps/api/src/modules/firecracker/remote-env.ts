@@ -97,7 +97,7 @@ const remoteEnvSchema = z.object({
   // trivially guessable token is refused outright.
   FIRECRACKER_RUNNER_TOKEN: z.string().min(16),
   // Transport-security gate (SEC-2): the wire carries the bearer token
-  // plus per-run credentials (MODEL_API_KEY, APPSTRATE_SINK_SECRET,
+  // plus per-run credentials (RUN_TOKEN, PI_API_KEY, APPSTRATE_SINK_SECRET,
   // CONNECT_LOGIN_JSON), so plaintext http:// to a NON-loopback daemon is
   // an on-path capture + replay exposure. SECURE BY DEFAULT: a non-loopback
   // http:// runner URL is REFUSED at boot. The only escape is an explicit

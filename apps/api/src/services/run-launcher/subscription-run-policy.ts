@@ -18,7 +18,8 @@
  * This module owns the two things that still differ for an OAuth run: the
  * credential is delivered via the sidecar `/llm` bearer-swap (not a static
  * placeholder→key substitution), and the run MUST execute under an isolating
- * orchestrator because that swap only exists on the sidecar path.
+ * orchestrator, the only kind that keeps the sidecar's credential apart from
+ * the agent.
  */
 
 import type { LlmProxyOauthConfig } from "@appstrate/core/sidecar-types";
@@ -71,8 +72,7 @@ type CredentialDelivery =
  * whether a credential id happens to be present. An OAuth provider WITHOUT a
  * stored credential id is an invalid configuration and throws
  * {@link OauthProviderMissingCredentialError} (fail-closed — it must never be
- * downgraded to API-key handling, which would hand the raw token to the agent
- * container). Everything else is a static API-key provider whose placeholder
+ * downgraded to API-key handling, which cannot refresh the token). Everything else is a static API-key provider whose placeholder
  * is substituted for the real key inline.
  */
 export function resolveCredentialDelivery(params: {
@@ -89,12 +89,12 @@ export function resolveCredentialDelivery(params: {
 /**
  * Thrown when an OAuth-subscription run is launched without an isolation
  * boundary (e.g. RUN_ADAPTER=process). An OAuth run delivers its credential via
- * the sidecar `/llm` bearer-swap: the real subscription token is fetched by the
- * sidecar and never enters the agent container. That swap only exists on the
- * sidecar path, which only an isolating orchestrator (Docker container /
- * Firecracker microVM) provisions. Under the in-host process orchestrator there
- * is no sidecar to swap the bearer, so the run cannot deliver its credential.
- * Fail-closed: refuse rather than run unauthenticated.
+ * the sidecar `/llm` bearer-swap: the sidecar holds what it needs to fetch the
+ * real subscription token, and the agent only ever sees a placeholder. That
+ * separation holds only under an isolating orchestrator (Docker container /
+ * Firecracker microVM). The process orchestrator runs the agent and its sidecar
+ * as host processes of one user, so nothing keeps the agent from the sidecar's
+ * environment. Fail-closed: refuse rather than run without that boundary.
  */
 export class OauthRunRequiresIsolationError extends Error {
   constructor(
@@ -106,9 +106,9 @@ export class OauthRunRequiresIsolationError extends Error {
       .join(" or ");
     super(
       `Provider "${providerId}" uses an OAuth subscription credential, which is ` +
-        `delivered through the sidecar (${isolating}). The current execution mode ` +
-        `"${orchestratorMode}" does not provision a sidecar to swap the bearer — ` +
-        `the run could not authenticate. Switch RUN_ADAPTER, or run this agent ` +
+        `kept apart from the agent by an isolating orchestrator (${isolating}). The ` +
+        `current execution mode "${orchestratorMode}" runs the agent and its sidecar ` +
+        `as host processes of one user. Switch RUN_ADAPTER, or run this agent ` +
         `with an API-key model provider.`,
     );
     this.name = "OauthRunRequiresIsolationError";

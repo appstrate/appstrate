@@ -426,9 +426,9 @@ export const envSchema = z
     INTEGRATION_REFRESH_MAX_FAILURES: z.coerce.number().int().positive().default(5),
     INTEGRATION_REFRESH_GRACE_SECONDS: z.coerce.number().int().nonnegative().default(3600),
 
-    // Modules (comma-separated specifiers). API-key LLM calls are routed
-    // directly to the upstream provider — retry is handled by the Pi SDK
-    // natively (Retry-After honoring + jitter). The default set is the
+    // Modules (comma-separated specifiers). LLM calls go through the run's
+    // sidecar `/llm` proxy — retry is handled by the Pi SDK natively
+    // (Retry-After honoring + jitter). The default set is the
     // built-in OSS modules ONLY. The two reference OAuth-subscription modules
     // — `@appstrate/module-codex` (ChatGPT/Codex) and
     // `@appstrate/module-claude-code` (Claude Pro/Max/Team) — are OPT-IN: a

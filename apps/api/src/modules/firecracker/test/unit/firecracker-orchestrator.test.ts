@@ -881,6 +881,21 @@ describe("MMDS credential broker (FIRECRACKER_CREDENTIAL_BROKER)", () => {
     await orch.shutdown();
   });
 
+  // Every VM boots its sidecar: an agent staged without one is refused before
+  // any VMM is spawned.
+  it("refuses to start an agent whose run has no sidecar", async () => {
+    process.env.FIRECRACKER_CREDENTIAL_BROKER = "config-drive";
+    _resetCacheForTesting();
+    const { orch, start, guestConfigs } = await primeToStart(
+      "run_no_sidecar",
+      async () => {},
+      false,
+    );
+    await expect(start()).rejects.toThrow(/createSidecar/);
+    expect(guestConfigs).toHaveLength(0);
+    await orch.shutdown();
+  });
+
   // The agent is confined to loopback (its sidecar) + the platform sink on
   // every run, whatever extra field an older client still sends on the loose
   // workload-spec wire.

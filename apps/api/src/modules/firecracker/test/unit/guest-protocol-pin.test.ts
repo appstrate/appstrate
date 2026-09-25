@@ -63,7 +63,6 @@ const CONTRACT_BY_PROTOCOL: Record<number, string[]> = {
     "network.platform_port",
     "run_id",
     "sidecar",
-    "sidecar.enabled",
     "sidecar.env",
     "sidecar.env.RUN_TOKEN",
   ],

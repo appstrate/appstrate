@@ -91,10 +91,10 @@ The one honest narrowing: the upstream TLS request is made by the **sidecar's
 claim transport-level client identity. The token is genuine and per-user/org
 (never pooled across tenants); no impersonation of another client, no forging.
 
-Because the bearer-swap exists **only on the sidecar path**, subscription runs
-still require an isolating orchestrator (docker / firecracker) — there is no
-sidecar in the plain `process` adapter, so subscription credentials are not
-delivered there.
+Subscription runs require an isolating orchestrator (docker / firecracker): the
+plain `process` adapter runs the agent and its sidecar as host processes of one
+user, so nothing keeps the agent from the sidecar's environment, and
+subscription credentials are not delivered there.
 
 ### 1.4 Zero platform-side subscription API calls — offline validation only
 

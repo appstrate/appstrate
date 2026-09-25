@@ -49,6 +49,7 @@ import { startBootHeartbeat } from "../run-boot-heartbeat.ts";
 import { runWithSpan, currentTraceparent, recordContainerSpawn } from "@appstrate/core/telemetry";
 
 import { getEnv } from "@appstrate/env";
+import { isBlockedEgressUrl } from "../../lib/egress-host-guard.ts";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { LlmProxyConfig, ModelSwap, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 
@@ -71,6 +72,24 @@ import type { LlmProxyConfig, ModelSwap, SidecarLaunchSpec } from "@appstrate/co
  */
 function platformTimeoutBootGraceMs(): number {
   return getEnv().RUN_BOOT_DEADLINE_SECONDS * 1000;
+}
+
+/**
+ * Thrown before provisioning when the model's base URL targets a network range
+ * the sidecar's egress floor refuses (loopback, private, link-local, internal
+ * names) and `EGRESS_ALLOW_INTERNAL_HOSTS` does not list its host.
+ */
+class LlmBaseUrlBlockedError extends Error {
+  constructor(baseUrl: string) {
+    const host = URL.parse(baseUrl)?.hostname ?? "(unparseable URL)";
+    super(
+      `The model's base URL targets a blocked network range (host "${host}"). Model ` +
+        `inference goes through the run's sidecar, which reaches a private or local ` +
+        `endpoint only when EGRESS_ALLOW_INTERNAL_HOSTS lists its host. Add "${host}" ` +
+        `to EGRESS_ALLOW_INTERNAL_HOSTS, or point the model at a public endpoint.`,
+    );
+    this.name = "LlmBaseUrlBlockedError";
+  }
 }
 
 /** Terminal state reported back to the caller once the container has exited. */
@@ -177,11 +196,10 @@ async function runPlatformContainerImpl(
   // is NOT a spawn failure) must not also emit a spawn data point.
   let spawnRecorded = false;
   try {
-    // Fail-closed BEFORE provisioning any isolation boundary: an OAuth run
-    // delivers its credential via the sidecar `/llm` bearer-swap, which only an
-    // isolating orchestrator (docker, firecracker) provisions. The in-host
-    // process orchestrator has no sidecar to swap the bearer. API-key providers
-    // are unaffected.
+    // Fail-closed BEFORE provisioning any isolation boundary: an OAuth run's
+    // subscription credential sits with the sidecar, which only an isolating
+    // orchestrator (docker, firecracker) keeps apart from the agent. API-key
+    // providers are unaffected.
     assertOauthRunIsolation({
       isOauthCredential: delivery.kind === "oauth",
       providerId: llmConfig.providerId,
@@ -198,6 +216,13 @@ async function runPlatformContainerImpl(
     });
 
     const llmApiKey = llmConfig.apiKey;
+
+    // Inference rides the sidecar's `/llm`, whose egress floor refuses a base
+    // URL on a blocked range. Same guard, same allowlist, checked here so the
+    // run fails with the remedy instead of a 403 inside the container.
+    if ((delivery.kind === "oauth" || llmApiKey) && isBlockedEgressUrl(llmConfig.baseUrl)) {
+      throw new LlmBaseUrlBlockedError(llmConfig.baseUrl);
+    }
 
     // Boot-phase liveness (see services/run-boot-heartbeat.ts). From here to
     // the runner's first event the platform — not the runner — owns this
@@ -642,11 +667,12 @@ const PLACEHOLDER_PREFIX_SEGMENTS = 2;
 function deriveKeyPlaceholder(key: string | undefined): string {
   if (!key) return "sk-placeholder";
   const parts = key.split("-");
-  if (parts.length <= 1) return "sk-placeholder";
   const kept = parts.slice(0, Math.min(PLACEHOLDER_PREFIX_SEGMENTS, parts.length - 1)).join("-");
   const ceiling = Math.floor(key.length / 2);
   const bounded = kept.length > ceiling ? kept.slice(0, ceiling) : kept;
-  return bounded ? `${bounded}-placeholder` : "sk-placeholder";
+  const placeholder = bounded ? `${bounded}-placeholder` : "sk-placeholder";
+  // A key already shaped like its placeholder still gets a different value.
+  return placeholder === key ? `${placeholder}-0` : placeholder;
 }
 
 /**

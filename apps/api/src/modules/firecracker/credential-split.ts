@@ -84,12 +84,8 @@ export interface MmdsPayload {
 }
 
 interface CredentialSplit {
-  /**
-   * Sidecar env for the config drive — the input minus the brokered
-   * secrets. `undefined` when the input sidecar env was `undefined`
-   * (an agent-only VM).
-   */
-  driveSidecarEnv: Record<string, string> | undefined;
+  /** Sidecar env for the config drive — the input minus the brokered secrets. */
+  driveSidecarEnv: Record<string, string>;
   /** Agent env for the config drive — the input minus the brokered secrets. */
   driveAgentEnv: Record<string, string>;
   /** Secrets served in-memory via MMDS. */
@@ -108,19 +104,17 @@ export function mmdsPayloadBytes(payload: MmdsPayload): number {
  * doc-comment) — this function never moves a secret back to the drive.
  */
 export function splitCredentials(
-  sidecarEnv: Record<string, string> | undefined,
+  sidecarEnv: Record<string, string>,
   agentEnv: Record<string, string>,
 ): CredentialSplit {
-  const driveSidecarEnv = sidecarEnv ? { ...sidecarEnv } : undefined;
+  const driveSidecarEnv = { ...sidecarEnv };
   const driveAgentEnv = { ...agentEnv };
   const payload: MmdsPayload = { sidecar_env: {}, agent_env: {} };
 
-  if (driveSidecarEnv) {
-    for (const key of SIDECAR_SECRET_KEYS) {
-      if (key in driveSidecarEnv) {
-        payload.sidecar_env[key] = driveSidecarEnv[key] as string;
-        delete driveSidecarEnv[key];
-      }
+  for (const key of SIDECAR_SECRET_KEYS) {
+    if (key in driveSidecarEnv) {
+      payload.sidecar_env[key] = driveSidecarEnv[key] as string;
+      delete driveSidecarEnv[key];
     }
   }
   for (const key of AGENT_SECRET_KEYS) {

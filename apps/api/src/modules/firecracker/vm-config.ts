@@ -24,8 +24,7 @@ interface BuildGuestConfigInput {
   exitMarkerNonce: string;
   platformIp: string;
   platformPort: number;
-  /** Absent when no sidecar was created (the smoke harness's agent-only VMs). */
-  sidecarEnv?: Record<string, string>;
+  sidecarEnv: Record<string, string>;
   agentEnv: Record<string, string>;
   /**
    * Where the guest's secrets come from — `"mmds"` (broker; the drive env
@@ -43,7 +42,7 @@ export function buildGuestConfig(input: BuildGuestConfigInput): GuestConfig {
     credentials: { source: input.credentialSource },
     exit_marker_nonce: input.exitMarkerNonce,
     network: { platform_ip: input.platformIp, platform_port: input.platformPort },
-    sidecar: { enabled: !!input.sidecarEnv, env: input.sidecarEnv ?? {} },
+    sidecar: { env: input.sidecarEnv },
     agent: {
       env: input.agentEnv,
       ...(input.agentArgv ? { argv: input.agentArgv } : {}),
@@ -193,27 +192,23 @@ export function buildVmConfig(input: BuildVmConfigInput): Record<string, unknown
 
 /**
  * VM sizing from the agent's workload resources. The microVM hosts the
- * agent AND (usually) the sidecar (+ kernel/init overhead), so the guest
- * budget is the agent budget plus a fixed envelope. An agent-only VM
- * (`hasSidecar: false`, the smoke harness) drops the sidecar's share.
+ * agent AND the sidecar (+ kernel/init overhead), so the guest budget is
+ * the agent budget plus a fixed envelope.
  */
-export function vmSizing(
-  agent: { memoryBytes: number; nanoCpus: number },
-  hasSidecar: boolean,
-): {
+export function vmSizing(agent: { memoryBytes: number; nanoCpus: number }): {
   vcpuCount: number;
   memSizeMib: number;
 } {
   const agentMib = Math.ceil(agent.memoryBytes / (1024 * 1024));
-  const sidecarMib = hasSidecar ? 256 : 0;
+  const sidecarMib = 256;
   const systemMib = 256; // kernel + init + tmpfs overlay headroom
   const vcpuFromSpec = Math.ceil(agent.nanoCpus / 1_000_000_000);
   return {
     // The sidecar and the agent cold-start concurrently — on a single
     // vCPU they starve each other and the agent's first sink event can
     // slip past the platform's heartbeat deadline. Budget one extra
-    // vCPU for the sidecar (when there is one) and never go below two.
-    vcpuCount: Math.min(8, Math.max(2, vcpuFromSpec + (hasSidecar ? 1 : 0))),
+    // vCPU for the sidecar and never go below two.
+    vcpuCount: Math.min(8, Math.max(2, vcpuFromSpec + 1)),
     memSizeMib: agentMib + sidecarMib + systemMib,
   };
 }

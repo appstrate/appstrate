@@ -29,15 +29,13 @@ describe("firecracker module orchestrator contribution", () => {
     });
   });
 
-  it("keeps the declared agent CPU maximum below the VM cap when a sidecar is present", () => {
+  it("keeps the declared agent CPU maximum below the VM cap alongside the sidecar", () => {
     const maxAgentCpu =
       firecrackerModule.orchestrators?.()?.firecracker?.agentResources?.maxAgentCpu;
     expect(maxAgentCpu).toBe(7);
     if (maxAgentCpu === undefined) throw new Error("missing Firecracker agent CPU maximum");
 
-    expect(
-      vmSizing({ memoryBytes: 1, nanoCpus: maxAgentCpu * 1_000_000_000 }, true).vcpuCount,
-    ).toBe(8);
+    expect(vmSizing({ memoryBytes: 1, nanoCpus: maxAgentCpu * 1_000_000_000 }).vcpuCount).toBe(8);
   });
 
   it("keeps the declared writable-root tmpfs budget in sync with guest init", async () => {

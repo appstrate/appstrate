@@ -187,18 +187,19 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
       }
 
       // ENFORCED INVARIANT: SYSTEM_PROVIDER_KEYS entries are static API keys.
-      // An OAuth provider's token must never be configured here — a system
-      // model carries no `credentialId`, so the raw subscription token would
-      // bypass the sidecar bearer-swap and land in MODEL_API_KEY inside the
-      // agent container. Declared-but-invalid = boot crash (throw, not skip):
+      // A system key is shared by every organization on the instance, while a
+      // subscription token is per-user/org and never pooled across tenants
+      // (docs/architecture/SUBSCRIPTION_COMPLIANCE.md). It also has no stored
+      // credential row, which the sidecar's OAuth delivery refreshes the token
+      // from. Declared-but-invalid = boot crash (throw, not skip):
       // silently dropping the entry would leave the operator believing the
       // model exists while runs mysteriously fall through the cascade.
       if (provider.authMode === "oauth2") {
         throw new Error(
           `[model-registry] SYSTEM_PROVIDER_KEYS entry "${validCredential.id}" binds providerId ` +
             `"${validCredential.providerId}", which declares authMode "oauth2". OAuth ` +
-            `subscription tokens cannot be configured as static system API keys — the token ` +
-            `would leak into agent containers. Store it as an org model provider credential ` +
+            `subscription tokens cannot be configured as static system API keys — a system key ` +
+            `is shared by every organization, a subscription is not. Store it as an org model provider credential ` +
             `instead and remove this entry from SYSTEM_PROVIDER_KEYS.`,
         );
       }

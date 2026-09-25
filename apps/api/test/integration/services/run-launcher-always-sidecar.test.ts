@@ -30,6 +30,7 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { defaultTestAgentResources } from "../../helpers/run-resources.ts";
 
 interface CallCounts {
+  createBoundaryCalls: number;
   createSidecarCalls: number;
   createWorkloadCalls: number;
   capturedAgentEnv: Record<string, string> | null;
@@ -42,6 +43,7 @@ function createCountingFake(): {
   counts: CallCounts;
 } {
   const counts: CallCounts = {
+    createBoundaryCalls: 0,
     createSidecarCalls: 0,
     createWorkloadCalls: 0,
     capturedAgentEnv: null,
@@ -57,6 +59,7 @@ function createCountingFake(): {
     },
     async ensureImages() {},
     async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
+      counts.createBoundaryCalls++;
       return {
         id: `net_${runId}`,
         name: `appstrate-exec-${runId}`,
@@ -152,9 +155,7 @@ describe("run-launcher — sidecar wiring", () => {
     await truncateAll();
   });
 
-  // A static API key, no integrations, no proxy: the shape that once ran
-  // without a sidecar. It gets one now, for the platform's own key (system
-  // model) as for an org's (BYOK) alike.
+  // One run topology, for every credential source.
   for (const isSystemModel of [true, false]) {
     it(`boots the sidecar and hands the agent only the placeholder (isSystemModel: ${isSystemModel})`, async () => {
       const { orchestrator, counts } = createCountingFake();
@@ -166,7 +167,7 @@ describe("run-launcher — sidecar wiring", () => {
         workload: { memoryBytes: 805_306_368, nanoCpus: 1_000_000_000 },
       };
       const realKey = "sk-ant-api03-real-secret-1234";
-      const runId = `run_static_key_${isSystemModel ? "system" : "byok"}`;
+      const runId = `run_placeholder_${isSystemModel ? "system" : "org"}`;
       const plan = buildRunPlan({
         resources,
         llmConfig: { ...buildRunPlan().llmConfig, apiKey: realKey, isSystemModel },
@@ -555,5 +556,52 @@ describe("run-launcher — sidecar wiring", () => {
     expect(env.MODEL_ID).toBe("appstrate-adaptive");
     expect(env).not.toHaveProperty("MODEL_PROVIDER");
     expect(JSON.stringify(env)).not.toContain("claude-sonnet-4-6");
+  });
+
+  // Inference rides the sidecar's `/llm`, whose egress floor refuses a base URL
+  // on a blocked range unless EGRESS_ALLOW_INTERNAL_HOSTS lists the host. The
+  // launcher applies the same guard before provisioning anything.
+  describe("LLM base URL on a blocked network range", () => {
+    const localModel = (baseUrl: string): AppstrateRunPlan["llmConfig"] => ({
+      providerId: "openai-compatible",
+      piProvider: null,
+      apiShape: "openai-completions",
+      baseUrl,
+      modelId: "llama3",
+      apiKey: "sk-local",
+      label: "Local",
+      isSystemModel: false,
+      aliased: false,
+      aliasId: "llama3",
+    });
+
+    const launch = (runId: string, baseUrl: string, orchestrator: RunOrchestrator) =>
+      runPlatformContainer({
+        runId,
+        context: buildContext(runId),
+        plan: buildRunPlan({ llmConfig: localModel(baseUrl) }),
+        sinkCredentials: mintSinkCredentials({
+          runId,
+          appUrl: "http://platform:3000",
+          ttlSeconds: 60,
+        }),
+        orchestrator,
+      });
+
+    it("fails the run before provisioning, naming EGRESS_ALLOW_INTERNAL_HOSTS", async () => {
+      const { orchestrator, counts } = createCountingFake();
+      await expect(
+        launch("run_blocked_llm", "http://host.docker.internal:11434/v1", orchestrator),
+      ).rejects.toThrow(/host\.docker\.internal.*EGRESS_ALLOW_INTERNAL_HOSTS/s);
+      expect(counts.createBoundaryCalls).toBe(0);
+      expect(counts.createSidecarCalls).toBe(0);
+    });
+
+    it("launches when the operator allowlisted the host", async () => {
+      // `localhost` is on the test preload's EGRESS_ALLOW_INTERNAL_HOSTS.
+      const { orchestrator, counts } = createCountingFake();
+      await launch("run_allowlisted_llm", "http://localhost:11434/v1", orchestrator);
+      expect(counts.createSidecarCalls).toBe(1);
+    });
   });
 });
