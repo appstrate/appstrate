@@ -599,13 +599,12 @@ describe("persistRunEvent", () => {
       expect(await runnerRow()).toBeUndefined();
     });
 
-    // The cutover instrument: while the container still reports a cost of its
-    // own, a disagreement with the server's number is the only way a formula
-    // divergence becomes visible on real traffic. Its FIRING POLICY is the
-    // tested part — one line per run, at the terminal write, carrying the full
-    // gap — because the alternative (one per metric event) buries the very
-    // incident it reports: a broken formula diverges on every platform run at
-    // once.
+    // The standing runner-vs-server parity monitor: on a server-priced run whose
+    // container reports a cost (org-credential runs — platform-model runs are
+    // metered by the LLM proxy), a disagreement is the only live sign the two
+    // formulas drifted. Its FIRING POLICY is the tested part — one line per
+    // run, at the terminal write, carrying the full gap — because one per
+    // metric event would bury the incident under its own repeats.
     describe("reported-cost divergence warn", () => {
       const DIVERGENCE_MESSAGE =
         "llm_usage: runner-reported cost diverges from the server-computed cost";

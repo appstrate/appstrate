@@ -133,7 +133,7 @@ export async function buildRunContext(params: {
   versionLabel: string | null;
   versionRef: string;
   proxyLabel: string | null;
-  modelLabel: string | null;
+  modelLabel: string;
   modelSource: string | null;
   modelCost: ModelCost | null;
   generationConfig: ModelGenerationSettings;
@@ -143,6 +143,12 @@ export async function buildRunContext(params: {
    * caller MUST surface these — see {@link recordDroppedIntegrations}.
    */
   droppedIntegrations: DroppedIntegration[];
+  /**
+   * Stored generation settings (space defaults, a schedule's override) that
+   * `modelLabel`'s model refuses, dropped for this run. The caller MUST surface
+   * these — see {@link recordDroppedGenerationSettings}.
+   */
+  droppedGenerationSettings: DroppedGenerationSetting[];
 }> {
   const { runId, agent, orgId, spaceId, actor, input, files } = params;
 
@@ -243,22 +249,27 @@ export async function buildRunContext(params: {
     ? { ...storedDefaults, ...withoutInherited(params.generationConfigOverride) }
     : storedDefaults;
   const generationDefaults = reconcileModelGenerationSettings(storedLayers, modelResult.generation);
-  if (params.scheduleId) {
-    const dropped = Object.keys(storedLayers).filter((key) => !(key in generationDefaults));
-    if (dropped.length > 0) {
-      logger.warn(
-        "Stored generation settings refused by the model, dropped for this scheduled run",
-        {
-          scheduleId: params.scheduleId,
-          dropped,
-        },
-      );
-    }
+  const requestOverride = params.scheduleId ? null : params.generationConfigOverride;
+  // A key the request sets supersedes its stored value, so that drop is moot.
+  const overridden = withoutInherited(requestOverride);
+  // Null means "inherit": reconcile keeps it, so only set values can drop.
+  const droppedGenerationSettings: DroppedGenerationSetting[] = Object.entries(
+    storedLayers,
+  ).flatMap(([setting, value]) =>
+    value != null && !(setting in generationDefaults) && !(setting in overridden)
+      ? [{ setting, value }]
+      : [],
+  );
+  if (droppedGenerationSettings.length > 0) {
+    logger.warn("Stored generation settings refused by the model, dropped for this run", {
+      ...(params.scheduleId ? { scheduleId: params.scheduleId } : {}),
+      dropped: droppedGenerationSettings.map((entry) => entry.setting),
+    });
   }
   const generationConfig = resolveModelGenerationSettings({
     capabilities: modelResult.generation,
     defaults: generationDefaults,
-    override: params.scheduleId ? null : params.generationConfigOverride,
+    override: requestOverride,
   });
 
   // Step 3: resolve the persisted version display fields.
@@ -350,6 +361,7 @@ export async function buildRunContext(params: {
     modelCost,
     generationConfig,
     droppedIntegrations,
+    droppedGenerationSettings,
   };
 }
 
@@ -389,29 +401,75 @@ export async function recordDroppedIntegrations(
   dropped: readonly DroppedIntegration[],
 ): Promise<void> {
   for (const entry of dropped) {
-    try {
-      await appendRunLog(
-        scope,
-        runId,
-        "system",
-        INTEGRATION_DROPPED_EVENT,
-        `integration '${entry.integrationId}' is declared by this agent but was not started (${entry.reason})` +
-          (entry.detail ? `: ${entry.detail}` : "") +
-          " — its tools are unavailable to this run",
-        {
-          platform: true,
-          integrationId: entry.integrationId,
-          reason: entry.reason,
-          ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
-        },
-        "warn",
-      );
-    } catch (err) {
-      logger.warn("failed to append dropped-integration run log", {
-        runId,
+    await appendDropMarker(
+      scope,
+      runId,
+      INTEGRATION_DROPPED_EVENT,
+      `integration '${entry.integrationId}' is declared by this agent but was not started (${entry.reason})` +
+        (entry.detail ? `: ${entry.detail}` : "") +
+        " — its tools are unavailable to this run",
+      {
         integrationId: entry.integrationId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+        reason: entry.reason,
+        ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
+      },
+    );
+  }
+}
+
+/**
+ * Run-log `event` name for a stored generation setting the run's model
+ * refuses. One row per setting, so `data.setting` is never a list.
+ */
+export const GENERATION_SETTING_DROPPED_EVENT = "generation_setting_dropped";
+
+/** A stored setting the model refused, with the value it would have sent. */
+export interface DroppedGenerationSetting {
+  setting: string;
+  value: NonNullable<ModelGenerationSettings[keyof ModelGenerationSettings]>;
+}
+
+/**
+ * Same marker as {@link recordDroppedIntegrations}, for the stored generation
+ * settings {@link buildRunContext} dropped: a scheduled fire has no user to
+ * refuse, so the run proceeds and the owner learns why from its log.
+ */
+export async function recordDroppedGenerationSettings(
+  scope: OrgScope,
+  runId: string,
+  model: string,
+  dropped: readonly DroppedGenerationSetting[],
+): Promise<void> {
+  // One reason: the reconcile step does not say which rule refused the value
+  // (unsupported setting, unsupported level, temperature vs reasoning).
+  for (const { setting, value } of dropped) {
+    const shown = typeof value === "string" ? `'${value}'` : String(value);
+    await appendDropMarker(
+      scope,
+      runId,
+      GENERATION_SETTING_DROPPED_EVENT,
+      `generation setting '${setting}' = ${shown} is not accepted by model '${model}' — ignored for this run`,
+      { setting, value, model, reason: "refused_by_model" },
+    );
+  }
+}
+
+/** Best-effort `warn` system row: a failed write is logged, never thrown. */
+async function appendDropMarker(
+  scope: OrgScope,
+  runId: string,
+  event: string,
+  message: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await appendRunLog(scope, runId, "system", event, message, { platform: true, ...data }, "warn");
+  } catch (err) {
+    logger.warn("failed to append drop marker run log", {
+      runId,
+      event,
+      ...data,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }

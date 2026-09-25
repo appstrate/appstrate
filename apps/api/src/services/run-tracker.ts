@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Tracks in-flight runs for graceful shutdown and cancellation.
-// Cross-instance cancel signaling via PubSub adapter (Redis or local EventEmitter).
+// Tracks in-flight runs for graceful shutdown and platform-requested stops
+// (cancel route, stall watchdog).
+// Cross-instance abort signaling via PubSub adapter (Redis or local EventEmitter).
 
 import { getPubSub } from "../infra/index.ts";
 import { logger } from "../lib/logger.ts";
@@ -28,9 +29,9 @@ export function abortRun(runId: string): void {
   const controller = inFlight.get(runId);
   if (controller) controller.abort();
 
-  // Cross-instance: publish cancel signal with linear backoff retry
+  // Cross-instance: publish abort signal with linear backoff retry
   publishCancelWithRetry(runId).catch((err) => {
-    logger.error("Failed to publish run cancel after retries", {
+    logger.error("Failed to publish run abort after retries", {
       runId,
       retries: PUBLISH_MAX_RETRIES,
       error: getErrorMessage(err),
@@ -46,7 +47,7 @@ async function publishCancelWithRetry(runId: string): Promise<void> {
       return;
     } catch (err) {
       if (attempt === PUBLISH_MAX_RETRIES - 1) throw err;
-      logger.warn("Retrying run cancel publish", {
+      logger.warn("Retrying run abort publish", {
         runId,
         attempt: attempt + 1,
         error: getErrorMessage(err),
@@ -69,7 +70,7 @@ export async function initCancelSubscriber(): Promise<void> {
     ).subscribe(CANCEL_CHANNEL, (runId: string) => {
       const controller = inFlight.get(runId);
       if (controller) {
-        logger.info("Aborting run via cross-instance cancel", { runId });
+        logger.info("Aborting run on a cross-instance stop request", { runId });
         controller.abort();
       }
     });

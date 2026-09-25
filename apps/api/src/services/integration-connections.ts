@@ -2217,8 +2217,8 @@ export async function persistCredentialBundle(
     credentialsEncrypted: ciphertext,
     expiresAt: input.expiresAt ?? null,
     needsReconnection: input.needsReconnection ?? false,
-    // Any successful credential write clears the transient-refresh streak — a
-    // working refresh (or a user reconnect) proves the connection is healthy
+    // Any successful credential write clears the failure count — a working
+    // refresh (or a user reconnect) proves the connection is healthy
     // again, so the escalation counter must not carry over. See
     // `recordIntegrationRefreshFailure`.
     refreshFailureCount: 0,
@@ -2354,9 +2354,11 @@ export async function markIntegrationConnectionNeedsReconnection(
  * of an unrefreshable credential (`graceSeconds: null`). Increment and
  * escalation are one statement, so concurrent failures cannot lose a count.
  *
- * Escalates once the streak reaches `maxFailures` AND, with `graceSeconds`,
+ * Escalates once the count reaches `maxFailures` AND, with `graceSeconds`,
  * the token expired more than `graceSeconds` ago — so an outage on a valid
  * token never bricks the connection. `needsReconnection` is OR'd, never cleared.
+ * Only a credential write resets the count, so for an unrefreshable auth it is
+ * cumulative since the last reconnect, not a streak.
  */
 export async function recordIntegrationRefreshFailure(
   connectionId: string,

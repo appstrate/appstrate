@@ -76,6 +76,9 @@ import type { CredentialBundle } from "./strategy.ts";
 const RESULT_SENTINEL = "APPSTRATE_CONNECT_RESULT:";
 const ERROR_SENTINEL = "APPSTRATE_CONNECT_ERROR:";
 
+/** Log lines kept for the operator when the sidecar dies without a sentinel. */
+const CRASH_TAIL_LINES = 30;
+
 /** Cap on the integration-authored diagnostic we echo back to the caller. */
 const MAX_DIAGNOSTIC_CHARS = 300;
 
@@ -346,8 +349,9 @@ function decryptConnectResult(payloadB64: string, resultKey: Buffer): string {
 /**
  * Parse the connect-run sidecar's stdout for the result sentinel. Returns the
  * {@link CredentialBundle} on `APPSTRATE_CONNECT_RESULT:` (decrypting its
- * ciphertext payload with `resultKey`), throws on `APPSTRATE_CONNECT_ERROR:`
- * or when neither sentinel was emitted (sidecar died before producing a result).
+ * ciphertext payload with `resultKey`), throws on `APPSTRATE_CONNECT_ERROR:`,
+ * and returns `null` when neither sentinel was emitted (sidecar died before
+ * producing a result) — the caller owns that diagnosis.
  *
  * The throw is typed by audience, not by convenience:
  *   - a login-tool rejection (see {@link loginToolDiagnostic}) throws an
@@ -359,7 +363,10 @@ function decryptConnectResult(payloadB64: string, resultKey: Buffer): string {
  *     log and collapse into the generic 500 — sidecar internals must never
  *     reach an end user on the hosted connect form.
  */
-export function parseConnectResult(lines: readonly string[], resultKey: Buffer): CredentialBundle {
+export function parseConnectResult(
+  lines: readonly string[],
+  resultKey: Buffer,
+): CredentialBundle | null {
   // Scan from the end — the sentinel is the last meaningful line the sidecar
   // writes before exiting.
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -410,7 +417,7 @@ export function parseConnectResult(lines: readonly string[], resultKey: Buffer):
       throw new Error(`connect-run failed: ${msg || "unknown error"}`);
     }
   }
-  throw new Error("connect-run: sidecar exited without emitting a result");
+  return null;
 }
 
 class ConnectRunExecutor implements ConnectToolExecutor {
@@ -437,7 +444,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
       });
       // The configured execution backend cannot host a connect-run (sidecar-only
       // workload). Thrown BEFORE any boundary is created so the caller gets a
-      // clear diagnosis instead of "sidecar exited without emitting a result".
+      // clear diagnosis instead of a sidecar that silently never reports.
       //
       // It IS an `ApiError` so it rides the connect routes' existing
       // `if (err instanceof ApiError) throw err` passthrough and reaches the
@@ -523,7 +530,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
         connectResultKey: resultKey.toString("base64"),
       });
 
-      const bundle = await this.captureBundle(orch, sidecar, resultKey);
+      const bundle = await this.captureBundle(orch, sidecar, resultKey, connectId);
       logger.info("connect-run completed", {
         connectId,
         integrationId: execution.integrationId,
@@ -570,6 +577,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     orch: RunOrchestrator,
     sidecar: WorkloadHandle,
     resultKey: Buffer,
+    connectId: string,
   ): Promise<CredentialBundle> {
     await orch.startWorkload(sidecar);
 
@@ -594,7 +602,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     }, this.timeoutMs);
 
     try {
-      await orch.waitForExit(sidecar);
+      const exitCode = await orch.waitForExit(sidecar);
       // Drain remaining buffered log lines before parsing.
       logAbort.abort();
       await logStream;
@@ -614,7 +622,21 @@ class ConnectRunExecutor implements ConnectToolExecutor {
       }
       // Parse regardless of exit code: on a non-zero exit the sidecar emits
       // the ERROR sentinel before exiting 1, which carries the real cause.
-      return parseConnectResult(lines, resultKey);
+      const bundle = parseConnectResult(lines, resultKey);
+      // null = no sentinel: the sidecar died before reporting (OOM, boot
+      // failure). Only then is the tail logged — no line carries ciphertext.
+      if (bundle === null) {
+        logger.error("connect-run: sidecar exited without emitting a result", {
+          connectId,
+          exitCode,
+          tail: lines.slice(-CRASH_TAIL_LINES).join("\n"),
+        });
+        // Operator-facing only: the routes log it and answer a generic 500.
+        throw new Error(
+          `connect-run: sidecar exited with code ${exitCode} without emitting a result`,
+        );
+      }
+      return bundle;
     } finally {
       clearTimeout(timer);
       logAbort.abort();

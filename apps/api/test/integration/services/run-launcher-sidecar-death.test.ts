@@ -11,7 +11,7 @@
  * deterministic.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import type {
   RunOrchestrator,
   IsolationBoundary,
@@ -21,6 +21,7 @@ import type {
   StopResult,
 } from "@appstrate/core/platform-types";
 import { truncateAll } from "../../helpers/db.ts";
+import { logger } from "../../../src/lib/logger.ts";
 import { runPlatformContainer } from "../../../src/services/run-launcher/pi.ts";
 import { mintSinkCredentials } from "../../../src/lib/mint-sink-credentials.ts";
 import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.ts";
@@ -48,9 +49,16 @@ function exit(): Exit {
  * exit is always observed FIRST, the ordering that must not be misread as a
  * sidecar death.
  */
-function createFake(opts: { sidecarExitsIndependently?: boolean }) {
+function createFake(opts: {
+  sidecarExitsIndependently?: boolean;
+  sidecarLogs?: string[];
+  /** The sidecar's log stream yields `sidecarLogs`, then never ends, as on a wedged daemon. */
+  sidecarLogsHang?: boolean;
+}) {
   const agent = exit();
   const sidecar = exit();
+  // An exit the in-flight wait has not observed yet, as between Docker polls.
+  let unobservedSidecarExit: number | undefined;
   const stopped: string[] = [];
   const orchestrator: RunOrchestrator = {
     ...(opts.sidecarExitsIndependently !== undefined
@@ -93,9 +101,17 @@ function createFake(opts: { sidecarExitsIndependently?: boolean }) {
       if (handle.role === "sidecar") sidecar.reject(new Error("container disappeared"));
     },
     waitForExit(handle: WorkloadHandle): Promise<number> {
-      return handle.role === "sidecar" ? sidecar.promise : agent.promise;
+      if (handle.role !== "sidecar") return agent.promise;
+      // A fresh wait inspects at once, like Docker's first poll.
+      return unobservedSidecarExit !== undefined
+        ? Promise.resolve(unobservedSidecarExit)
+        : sidecar.promise;
     },
-    async *streamLogs(): AsyncGenerator<string> {},
+    async *streamLogs(handle: WorkloadHandle): AsyncGenerator<string> {
+      if (handle.role !== "sidecar") return;
+      yield* opts.sidecarLogs ?? [];
+      if (opts.sidecarLogsHang) await new Promise<never>(() => {});
+    },
     async stopByRunId(): Promise<StopResult> {
       return "stopped";
     },
@@ -103,7 +119,10 @@ function createFake(opts: { sidecarExitsIndependently?: boolean }) {
       return "http://platform:3000";
     },
   };
-  return { orchestrator, agent, sidecar, stopped };
+  const exitSidecarUnobserved = (code: number) => {
+    unobservedSidecarExit = code;
+  };
+  return { orchestrator, agent, sidecar, stopped, exitSidecarUnobserved };
 }
 
 function buildRunPlan(timeout = 60): AppstrateRunPlan {
@@ -172,6 +191,8 @@ function launch(
 /** Let the launcher reach its wait before the test moves an exit. */
 const settle = () => new Promise((r) => setTimeout(r, 50));
 
+const SIDECAR_CRASH_LOG = "Sidecar exited while the run was in progress";
+
 describe("run launcher — sidecar death", () => {
   beforeEach(async () => {
     await truncateAll();
@@ -186,6 +207,86 @@ describe("run launcher — sidecar death", () => {
     expect(fake.stopped).toContain("agent");
   });
 
+  it("logs the sidecar's exit code and the tail of its logs", async () => {
+    const logs = Array.from({ length: 40 }, (_, i) => `line ${i}`);
+    const fake = createFake({ sidecarExitsIndependently: true, sidecarLogs: logs });
+    const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const run = launch("run_sidecar_tail", fake.orchestrator);
+      await settle();
+      fake.sidecar.resolve(1);
+      await expect(run).rejects.toThrow("Sidecar exited with code 1");
+      const call = errorSpy.mock.calls.find(([msg]) => msg === SIDECAR_CRASH_LOG);
+      expect(call?.[1]).toEqual({
+        runId: "run_sidecar_tail",
+        exitCode: 1,
+        tail: logs.slice(-30).join("\n"),
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("still fails the run when the sidecar's log stream hangs", async () => {
+    const fake = createFake({
+      sidecarExitsIndependently: true,
+      sidecarLogs: ["partial"],
+      sidecarLogsHang: true,
+    });
+    const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const run = launch("run_sidecar_logs_hang", fake.orchestrator);
+      await settle();
+      fake.sidecar.resolve(1);
+      await expect(run).rejects.toThrow("Sidecar exited with code 1");
+      const call = errorSpy.mock.calls.find(([msg]) => msg === SIDECAR_CRASH_LOG);
+      // The time bound won: what was read is reported, flagged as not the log's end.
+      expect(call?.[1]).toEqual({
+        runId: "run_sidecar_logs_hang",
+        exitCode: 1,
+        tail: "partial",
+        truncated: true,
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  }, 8_000);
+
+  it("reports the sidecar's crash when the agent's exit wins the race", async () => {
+    const fake = createFake({ sidecarExitsIndependently: true, sidecarLogs: ["boom"] });
+    const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const run = launch("run_both_exit", fake.orchestrator);
+      await settle();
+      fake.exitSidecarUnobserved(1);
+      fake.agent.resolve(1);
+      expect(await run).toEqual({ exitCode: 1, timedOut: false, stopRequested: false });
+      const call = errorSpy.mock.calls.find(([msg]) => msg === SIDECAR_CRASH_LOG);
+      expect(call?.[1]).toEqual({ runId: "run_both_exit", exitCode: 1, tail: "boom" });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("reports no sidecar crash when the agent fails alone", async () => {
+    const fake = createFake({ sidecarExitsIndependently: true, sidecarLogs: ["fine"] });
+    const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const run = launch("run_agent_fails_alone", fake.orchestrator);
+      await settle();
+      const start = performance.now();
+      fake.agent.resolve(1);
+      expect(await run).toEqual({ exitCode: 1, timedOut: false, stopRequested: false });
+      // A healthy sidecar must not hold up a failed run's teardown.
+      expect(performance.now() - start).toBeLessThan(1_000);
+      const messages = errorSpy.mock.calls.map(([msg]) => msg);
+      expect(messages).toContain("Agent container exited non-zero");
+      expect(messages).not.toContain(SIDECAR_CRASH_LOG);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it("ignores the sidecar on an orchestrator that cannot observe it on its own", async () => {
     const fake = createFake({});
     const run = launch("run_shared_lifecycle", fake.orchestrator);
@@ -193,7 +294,7 @@ describe("run launcher — sidecar death", () => {
     fake.sidecar.resolve(1);
     await settle();
     fake.agent.resolve(0);
-    expect(await run).toEqual({ exitCode: 0, timedOut: false, cancelled: false });
+    expect(await run).toEqual({ exitCode: 0, timedOut: false, stopRequested: false });
     expect(fake.stopped).not.toContain("agent");
   });
 
@@ -202,7 +303,7 @@ describe("run launcher — sidecar death", () => {
     const run = launch("run_agent_first", fake.orchestrator);
     await settle();
     fake.agent.resolve(0);
-    expect(await run).toEqual({ exitCode: 0, timedOut: false, cancelled: false });
+    expect(await run).toEqual({ exitCode: 0, timedOut: false, stopRequested: false });
   });
 
   it("falls back to waiting for the agent when the sidecar's exit cannot be observed", async () => {
@@ -212,7 +313,7 @@ describe("run launcher — sidecar death", () => {
     fake.sidecar.reject(new Error("daemon unreachable"));
     await settle();
     fake.agent.resolve(0);
-    expect(await run).toEqual({ exitCode: 0, timedOut: false, cancelled: false });
+    expect(await run).toEqual({ exitCode: 0, timedOut: false, stopRequested: false });
   });
 
   it("reports a timeout, not a sidecar death, when the timeout stops the sidecar first", async () => {
@@ -221,7 +322,7 @@ describe("run launcher — sidecar death", () => {
       timeout: 0,
       timeoutBootGraceMs: 50,
     });
-    expect(result).toEqual({ exitCode: 137, timedOut: true, cancelled: false });
+    expect(result).toEqual({ exitCode: 137, timedOut: true, stopRequested: false });
   });
 
   it("reports a cancel, not a sidecar death, when the cancel stops the sidecar first", async () => {
@@ -230,6 +331,6 @@ describe("run launcher — sidecar death", () => {
     const run = launch("run_cancel", fake.orchestrator, { signal: controller.signal });
     await settle();
     controller.abort();
-    expect(await run).toEqual({ exitCode: 137, timedOut: false, cancelled: true });
+    expect(await run).toEqual({ exitCode: 137, timedOut: false, stopRequested: true });
   });
 });

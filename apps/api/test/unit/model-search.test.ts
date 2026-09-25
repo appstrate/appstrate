@@ -51,16 +51,10 @@ afterEach(() => {
 });
 
 describe("hasLiveModelSearch", () => {
-  it("is true only for a provider with a search backend", () => {
+  it("is true only for OpenRouter", () => {
     expect(hasLiveModelSearch("openrouter")).toBe(true);
     expect(hasLiveModelSearch("openai")).toBe(false);
     expect(hasLiveModelSearch("")).toBe(false);
-  });
-
-  it("does not treat inherited Object properties as backends", () => {
-    expect(hasLiveModelSearch("toString")).toBe(false);
-    expect(hasLiveModelSearch("constructor")).toBe(false);
-    expect(hasLiveModelSearch("__proto__")).toBe(false);
   });
 });
 

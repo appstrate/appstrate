@@ -343,18 +343,20 @@ function resolveRunnerCost(
 const REPORTED_COST_DIVERGENCE_USD = 1e-6;
 
 /**
- * Divergence probe on the container's advisory `cost`. The server number is
- * authoritative either way — this only reports that the two formulas disagreed.
+ * Standing parity monitor between the runner's Pi `calculateCost` and server
+ * pricing. The server number is authoritative either way — this only reports
+ * that the two disagreed. The reported `cost` field itself is permanent: a
+ * remote-origin run (NULL `model_source`) is billed from it verbatim.
  *
- * It retires with the `cost` field on the `appstrate.metric` envelope, in the
- * same commit: the probe is the evidence for dropping that field, and dropping
- * the field is what makes the probe unreachable. Concrete signal to do both: a
- * deployment window over which `runner-reported cost diverges` appears zero
- * times in the platform logs. Until the field is gone the probe stays, because
- * a container is otherwise free to report a number nothing looks at.
+ * Population: server-priced runs whose container reported a cost — in practice
+ * org-credential (BYOK) runs. A platform-model run is metered by the LLM proxy
+ * and writes no runner row; an aliased run gets no `MODEL_COST` and reports no
+ * cost. The container prices at the base rate (`tiers` dropped from
+ * `MODEL_COST`), matching the server, so a tiered model raises no divergence.
  *
- * `apps/api/test/unit/runner-cost-parity.test.ts` pins the two formulas against
- * each other on constructed input; this catches the inputs that test does not
+ * It is the only live check that `@appstrate/runner-pi` (also the CLI's remote
+ * runner) prices as the server does. `runner-cost-parity.test.ts` pins the two
+ * formulas on constructed input; this catches the inputs that test does not
  * model.
  *
  * Fires at most once per run, on the terminal write: the counters are

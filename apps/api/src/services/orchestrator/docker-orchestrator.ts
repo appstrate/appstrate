@@ -15,10 +15,8 @@ import type {
 import * as docker from "../docker.ts";
 import { createNetworkWithPoolRetry } from "../docker-errors.ts";
 import { logger } from "../../lib/logger.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { SIDECAR_MEMORY_BYTES, SIDECAR_NANO_CPUS } from "./constants.ts";
 import { buildBaseSidecarEnv } from "./sidecar-env.ts";
-import { SidecarExitWatcher } from "./sidecar-exit-watcher.ts";
 import { warnOnRuntimeImageRevisionDrift } from "./runtime-image-pair.ts";
 
 class DockerWorkloadHandle implements WorkloadHandle {
@@ -74,31 +72,6 @@ const DOCKER_SIDECAR_ENDPOINTS: SidecarEndpoints = {
 export class DockerOrchestrator implements RunOrchestrator {
   readonly sidecarExitsIndependently = true;
   /**
-   * One in-flight exit poll per container. The sidecar has two waiters — the
-   * exit watcher below and the run launcher — and `docker.waitForExit` polls
-   * the daemon; without this each would poll it on its own.
-   */
-  private readonly exitWaits = new Map<string, Promise<number>>();
-  private readonly sidecarExitWatcher = new SidecarExitWatcher({
-    waitForExit: (containerId) => this.waitForContainerExit(containerId),
-    streamLogs: (containerId, signal) => docker.streamLogs(containerId, signal),
-    onUnexpectedExit: ({ runId, containerId, exitCode, tail }) => {
-      logger.error("Sidecar exited before run completed", {
-        runId,
-        containerId,
-        exitCode,
-        ...(tail ? { tail } : {}),
-      });
-    },
-    onWatcherError: ({ runId, containerId, error }) => {
-      logger.debug("Sidecar exit watcher errored", {
-        runId,
-        containerId,
-        error: getErrorMessage(error),
-      });
-    },
-  });
-  /**
    * Images verified present in this process's lifetime (pre-pulled at
    * {@link initialize} or ensured by a prior run). {@link ensureImages}
    * skips these — the per-run `imageExists` inspect round-trip was pure
@@ -152,8 +125,6 @@ export class DockerOrchestrator implements RunOrchestrator {
     // infra shared with any other Appstrate process on this daemon (#834).
     // Removing it here used to break the runs of a concurrently-running
     // instance, whose cached network ID went stale.
-    //
-    this.sidecarExitWatcher.clearExpectedExits();
   }
 
   async ensureImages(images: string[]): Promise<void> {
@@ -378,13 +349,10 @@ export class DockerOrchestrator implements RunOrchestrator {
     // a retrying MCP handshake against `sidecar:8080/mcp`, which absorbs:
     //   - ECONNREFUSED while the sidecar is wiring its listener
     //   - ENOTFOUND while the Docker bridge propagates the "sidecar" alias
-    // Sidecar exit detection still happens loudly: a non-blocking watcher
-    // races `waitForExit` against the run. If the sidecar dies before MCP
-    // connects, the watcher logs `exitCode` + buffered stderr/stdout, so
-    // operators see "sidecar exited 1 (npm not found)" rather than the
-    // agent's eventual "deadline exceeded" hand-wave.
+    // A sidecar that dies early is caught by the run launcher, which races
+    // its exit against the agent's and fails the run with the sidecar's
+    // exit code and log tail.
     await docker.startContainer(containerId);
-    void this.sidecarExitWatcher.watch(runId, containerId);
 
     return new DockerWorkloadHandle(containerId, runId, "sidecar");
   }
@@ -436,36 +404,15 @@ export class DockerOrchestrator implements RunOrchestrator {
   }
 
   async stopWorkload(handle: WorkloadHandle): Promise<void> {
-    if (handle.role === "sidecar") {
-      await this.sidecarExitWatcher.expectExitDuring(handle.id, () =>
-        docker.stopContainer(handle.id),
-      );
-      return;
-    }
     await docker.stopContainer(handle.id);
   }
 
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
-    if (handle.role === "sidecar") {
-      await this.sidecarExitWatcher.expectExitDuring(handle.id, () =>
-        docker.removeContainer(handle.id),
-      );
-      return;
-    }
     await docker.removeContainer(handle.id);
   }
 
   async waitForExit(handle: WorkloadHandle): Promise<number> {
-    return this.waitForContainerExit(handle.id);
-  }
-
-  private waitForContainerExit(containerId: string): Promise<number> {
-    let wait = this.exitWaits.get(containerId);
-    if (!wait) {
-      wait = docker.waitForExit(containerId).finally(() => this.exitWaits.delete(containerId));
-      this.exitWaits.set(containerId, wait);
-    }
-    return wait;
+    return docker.waitForExit(handle.id);
   }
 
   async *streamLogs(handle: WorkloadHandle, signal?: AbortSignal): AsyncGenerator<string> {
@@ -473,9 +420,7 @@ export class DockerOrchestrator implements RunOrchestrator {
   }
 
   async stopByRunId(runId: string): Promise<StopResult> {
-    return this.sidecarExitWatcher.expectRunExitDuring(runId, () =>
-      docker.stopContainersByRun(runId),
-    );
+    return docker.stopContainersByRun(runId);
   }
 
   /**

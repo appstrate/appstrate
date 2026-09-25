@@ -99,8 +99,11 @@ export interface PlatformContainerResult {
   exitCode: number;
   /** Whether the agent container was stopped because the run timed out. */
   timedOut: boolean;
-  /** Whether the run was cancelled by the caller's `AbortSignal`. */
-  cancelled: boolean;
+  /**
+   * Whether the caller's `AbortSignal` fired: the platform asked for this stop
+   * (cancel route or stall watchdog), which then owns the run's terminal state.
+   */
+  stopRequested: boolean;
 }
 
 interface RunPlatformContainerInput {
@@ -109,7 +112,7 @@ interface RunPlatformContainerInput {
   plan: AppstrateRunPlan;
   /** Sink credentials minted by the caller (`createRun`). Required. */
   sinkCredentials: SinkCredentials;
-  /** Cancellation token — aborted = the run was cancelled by user. */
+  /** Stop token — aborted = the platform asked for this stop (cancel route or stall watchdog). */
   signal?: AbortSignal;
   /** Injectable orchestrator — production defaults to the global singleton. */
   orchestrator?: RunOrchestrator;
@@ -581,7 +584,7 @@ async function runPlatformContainerImpl(
 /**
  * Drive the agent container lifecycle: start, enforce the SAFETY-NET timeout
  * (`timeoutSeconds` + {@link platformTimeoutBootGraceMs} — the runner owns
- * the primary, boot-excluded budget), propagate cancellation, wait for exit.
+ * the primary, boot-excluded budget), propagate a requested stop, wait for exit.
  * Sidecar is stopped alongside the agent on any terminal condition so neither
  * lingers after the run has ended.
  */
@@ -635,8 +638,7 @@ async function waitForWorkload(
   try {
     const agentExit = orch.waitForExit(agent);
     const sidecarDeath = await firstUnexpectedSidecarExit(
-      orch,
-      sidecar,
+      observeSidecarExit(orch, sidecar),
       agentExit,
       () => timedOut || (signal?.aborted ?? false),
     );
@@ -645,17 +647,17 @@ async function waitForWorkload(
       // and forward proxy all sat behind the sidecar. Stop it rather than let
       // it wait out its MCP handshake deadline, then fail on the real cause.
       orch.stopWorkload(agent).catch(() => {});
-      await agentExit.catch(() => {});
-      logger.error("Sidecar exited while the run was in progress", {
-        runId: agent.runId,
-        exitCode: sidecarDeath,
-      });
+      await Promise.all([agentExit.catch(() => {}), logSidecarCrash(orch, sidecar, sidecarDeath)]);
       throw new Error(
         `Sidecar exited with code ${sidecarDeath} while the run was in progress; the agent was stopped`,
       );
     }
     const exitCode = await agentExit;
     if (exitCode !== 0 && !timedOut && !signal?.aborted) {
+      // A sidecar crash can take the agent down in the same poll round, and
+      // the agent's exit may win the race: report the sidecar's too.
+      const code = await exitedSidecarCode(orch, sidecar);
+      if (code !== undefined && code !== 0) await logSidecarCrash(orch, sidecar, code);
       logAbort.abort();
       await logStream;
       logger.error("Agent container exited non-zero", {
@@ -666,7 +668,7 @@ async function waitForWorkload(
     return {
       exitCode,
       timedOut,
-      cancelled: signal?.aborted ?? false,
+      stopRequested: signal?.aborted ?? false,
     };
   } finally {
     clearTimeout(timeoutHandle);
@@ -678,14 +680,26 @@ async function waitForWorkload(
 // --- Helpers ---
 
 /**
+ * The sidecar's exit, on an orchestrator that observes it on its own
+ * ({@link RunOrchestrator.sidecarExitsIndependently}); `null` otherwise. A
+ * wait that rejects (container gone, daemon error) says nothing about how the
+ * sidecar ended, so it never settles.
+ */
+function observeSidecarExit(
+  orch: RunOrchestrator,
+  sidecar: WorkloadHandle,
+): Promise<number> | null {
+  if (!orch.sidecarExitsIndependently) return null;
+  return orch.waitForExit(sidecar).catch(() => new Promise<never>(() => {}));
+}
+
+/**
  * Resolve with the sidecar's exit code if it exits before the agent does and
- * the platform did not ask for it (timeout, cancel); `null` once the agent
- * exits first. An orchestrator that cannot observe the sidecar on its own
- * ({@link RunOrchestrator.sidecarExitsIndependently}) only ever yields `null`.
+ * the platform did not ask for it (timeout, aborted signal); `null` once the agent
+ * exits first, or always when the sidecar is not observed.
  */
 async function firstUnexpectedSidecarExit(
-  orch: RunOrchestrator,
-  sidecar: WorkloadHandle | undefined,
+  sidecarExit: Promise<number> | null,
   agentExit: Promise<number>,
   stopRequested: () => boolean,
 ): Promise<number | null> {
@@ -693,16 +707,90 @@ async function firstUnexpectedSidecarExit(
     () => null,
     () => null,
   );
-  if (!sidecar || !orch.sidecarExitsIndependently) return agentDone;
-  // A wait that rejects (container gone, daemon error) says nothing about how
-  // the sidecar ended: fall back to waiting for the agent, as before.
-  const sidecarDone = orch.waitForExit(sidecar).then(
-    (code) => code,
-    () => new Promise<never>(() => {}),
-  );
-  const first = await Promise.race([agentDone, sidecarDone]);
+  if (!sidecarExit) return agentDone;
+  const first = await Promise.race([agentDone, sidecarExit]);
   if (first === null || stopRequested()) return agentDone;
   return first;
+}
+
+const SIDECAR_TAIL_LINES = 30;
+const SIDECAR_TAIL_TIMEOUT_MS = 2_000;
+// Bounds one immediate exit check (a local Docker inspect); waiting longer
+// would delay every failed run and catch stops issued after the agent's exit.
+const SIDECAR_EXIT_PROBE_MS = 250;
+
+/**
+ * The sidecar's exit code if it has already exited, `undefined` otherwise. A
+ * fresh wait answers at once (Docker inspects before its first backoff, a
+ * process's `exited` is already settled), where the in-flight one can be a
+ * whole poll behind.
+ */
+async function exitedSidecarCode(
+  orch: RunOrchestrator,
+  sidecar: WorkloadHandle,
+): Promise<number | undefined> {
+  const exit = observeSidecarExit(orch, sidecar);
+  return exit ? withTimeout(exit, SIDECAR_EXIT_PROBE_MS) : undefined;
+}
+
+/** `promise`'s value, or `undefined` once `ms` elapse first. */
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function logSidecarCrash(
+  orch: RunOrchestrator,
+  sidecar: WorkloadHandle,
+  exitCode: number,
+): Promise<void> {
+  const { tail, truncated } = await readLogTail(orch, sidecar);
+  logger.error("Sidecar exited while the run was in progress", {
+    runId: sidecar.runId,
+    exitCode,
+    ...(tail ? { tail } : {}),
+    ...(truncated ? { truncated: true } : {}),
+  });
+}
+
+/**
+ * Last lines of an exited workload's logs, for the crash report. Bounded in
+ * time whatever the orchestrator does with the signal (Docker's only checks
+ * it once the response arrives); best-effort, so a log read failure never
+ * masks the exit itself. The stream reads from the start, so when the time
+ * bound wins `tail` is the last lines READ, not the log's end: `truncated`.
+ */
+async function readLogTail(
+  orch: RunOrchestrator,
+  handle: WorkloadHandle,
+): Promise<{ tail: string; truncated: boolean }> {
+  const abort = new AbortController();
+  const lines: string[] = [];
+  const read = (async () => {
+    try {
+      for await (const line of orch.streamLogs(handle, abort.signal)) {
+        lines.push(line);
+        if (lines.length > SIDECAR_TAIL_LINES) lines.shift();
+      }
+    } catch {
+      // Diagnostics only.
+    }
+  })();
+  const done = await withTimeout(
+    read.then(() => true),
+    SIDECAR_TAIL_TIMEOUT_MS,
+  );
+  abort.abort();
+  return { tail: lines.join("\n"), truncated: done === undefined };
 }
 
 /** Leading dash-separated segments a placeholder may keep. */

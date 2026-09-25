@@ -493,7 +493,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     ]);
   });
 
-  it("a reconnect resets the rejection streak of an unrefreshable auth", async () => {
+  it("a reconnect resets the rejection count of an unrefreshable auth", async () => {
     await db
       .update(packages)
       .set({
@@ -505,15 +505,15 @@ describe("resolveLiveIntegrationCredentials", () => {
       })
       .where(eq(packages.id, INTEGRATION_ID));
     const connId = await seedConnection({ userId: ctx.user.id });
-    const forcedStatus = () =>
+    const forced = () =>
       resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
         forceRefresh: true,
       }).then(
         () => undefined,
-        (err: { status?: number }) => err.status,
+        (err: { status?: number; message?: string }) => err,
       );
     const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
-    for (let i = 1; i < max; i++) expect(await forcedStatus()).toBe(502);
+    for (let i = 1; i < max; i++) expect((await forced())?.status).toBe(502);
 
     await saveIntegrationConnection(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
@@ -526,7 +526,13 @@ describe("resolveLiveIntegrationCredentials", () => {
         connectionId: connId,
       },
     );
-    expect(await forcedStatus()).toBe(502);
+    // The count restarts from the reconnect — it is cumulative since the last
+    // (re)connect, not a streak — and the 502 says so.
+    const afterReconnect = await forced();
+    expect(afterReconnect?.status).toBe(502);
+    expect(afterReconnect?.message).toContain(
+      `1/${max} upstream rejections since the connection was last (re)connected`,
+    );
     expect(await needsReconnection(connId)).toBe(false);
   });
 

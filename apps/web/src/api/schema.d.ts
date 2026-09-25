@@ -23453,7 +23453,7 @@ export interface operations {
                 };
             };
             500: components["responses"]["InternalServerError"];
-            /** @description Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected fewer than `INTEGRATION_REFRESH_MAX_FAILURES` consecutive times; the rejection is counted and the connection is flagged (`410`) once the streak reaches the threshold. */
+            /** @description Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` rejections accumulate since it was last (re)connected. Not a streak: only a reconnect resets the count. */
             502: {
                 headers: {
                     [name: string]: unknown;

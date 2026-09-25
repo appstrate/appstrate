@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`generation_setting_dropped` — a run's log now says when a stored
+  generation setting was ignored** (#1571). A schedule's override or a space
+  default (`temperature`, `reasoning_level`) that the run's model
+  refuses (the setting, that value, or a temperature alongside reasoning) is
+  still dropped for that run rather than refused, but it no longer lives only in
+  server logs: one `warn` run log per setting, next to `integration_dropped`,
+  carrying `setting`, `value`, `model` and `reason: "refused_by_model"`.
 - **`appstrate code sync` installs the pinned space's agents as Claude Code
   commands** (#1268). Each agent active in the pinned space becomes
   `/appstrate:run-<agent>` in the plugin: Claude builds the input from your
@@ -65,6 +72,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   fails before touching `system-packages/`.
 
 ### Changed
+
+- **Operator-visible log and error text changed** (#1571) — update any alert
+  or grep keyed on the old wording:
+  - the error log `Sidecar exited before run completed` and the debug log
+    `Sidecar exit watcher errored` are gone. An agent run's launcher reports
+    the sidecar's exit code and log tail as
+    `Sidecar exited while the run was in progress`; a connect run whose sidecar
+    dies before printing a result logs
+    `connect-run: sidecar exited without emitting a result` with `connectId`,
+    `exitCode` and the last 30 log lines, and its error now names the exit
+    code (`connect-run: sidecar exited with code N without emitting a result`);
+  - the internal credentials-refresh `502` now reads
+    `N/M upstream rejections since the connection was last (re)connected before it is flagged`
+    (was `N/M consecutive rejections before the connection is flagged`) — the
+    count was never a streak;
+  - the server `warn`
+    `Stored generation settings refused by the model, dropped for this scheduled run`
+    now ends `dropped for this run`, and also covers space defaults;
+  - `failed to append dropped-integration run log` is now
+    `failed to append drop marker run log`;
+  - a run the stall watchdog stops now always fails with the watchdog's own
+    error (`Runner stopped reporting — …` or `Run never started executing — …`,
+    visible to users and webhooks), never `Agent container exited with code N`
+    from a lost race; the launcher no longer logs
+    `Agent container exited non-zero` or a sidecar crash for such a run;
+  - the run abort signal now also carries watchdog stops (still on the
+    `runs:cancel` channel), so a non-owning replica logs its cross-instance
+    abort for watchdog sweeps too, and its messages are renamed:
+    `Aborting run via cross-instance cancel` →
+    `Aborting run on a cross-instance stop request`,
+    `Failed to publish run cancel after retries` →
+    `Failed to publish run abort after retries`,
+    `Retrying run cancel publish` → `Retrying run abort publish`.
 
 - **BREAKING (operators): runs on a platform-provided model are served through
   the platform's metered LLM proxy, like chat.** A run whose model is a

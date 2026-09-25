@@ -279,7 +279,7 @@ describe("runPlatformContainer — sink env-var injection", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.timedOut).toBe(false);
-    expect(result.cancelled).toBe(false);
+    expect(result.stopRequested).toBe(false);
 
     const env = fake.capturedAgentEnv!;
     expect(env.APPSTRATE_SINK_URL).toBe("http://platform:3000/api/runs/run_test/events");
@@ -337,7 +337,7 @@ describe("runPlatformContainer — sink env-var injection", () => {
     expect(result.timedOut).toBe(false);
   });
 
-  it("reports cancelled=true when the AbortSignal fires before exit", async () => {
+  it("reports stopRequested=true when the AbortSignal fires before exit", async () => {
     const fake = createFakeOrchestrator({ exitCode: 137, exitDelayMs: 200 });
     const controller = new AbortController();
     // Abort shortly after start.
@@ -356,7 +356,7 @@ describe("runPlatformContainer — sink env-var injection", () => {
       signal: controller.signal,
     });
 
-    expect(result.cancelled).toBe(true);
+    expect(result.stopRequested).toBe(true);
   });
 
   it("teardown enqueues NO workspace deletion — that belongs to finalizeRun", async () => {

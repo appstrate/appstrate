@@ -9,6 +9,8 @@ import { logger } from "../lib/logger.ts";
 import {
   buildRunContext,
   recordDroppedIntegrations,
+  recordDroppedGenerationSettings,
+  type DroppedGenerationSetting,
   ModelNotConfiguredError,
   ModelCredentialMissingError,
 } from "./run-context-builder.ts";
@@ -147,17 +149,6 @@ interface RunPipelineParams {
    * intra-pipeline dedupe via the default Map created below.
    */
   manifestCache?: IntegrationManifestCache;
-}
-
-interface RunPipelineSuccess {
-  runId: string;
-  /**
-   * Resolved model label snapshot — same value persisted on
-   * `runs.model_label`. Echoed by the run route so callers can detect
-   * org-default drift at trigger time (#635).
-   */
-  modelLabel: string | null;
-  modelSource: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -350,7 +341,7 @@ export async function freezeRunSpawnDependencies(params: {
  * can surface RFC 9457 problem details directly. Background callers (scheduler)
  * catch `ApiError` to translate into their own failure semantics.
  */
-export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<RunPipelineSuccess> {
+export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<void> {
   const {
     runId,
     orgId,
@@ -492,7 +483,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   let versionLabel: string | null;
   let versionRef: string;
   let proxyLabel: string | null;
-  let modelLabel: string | null;
+  let modelLabel: string;
   let modelSource: string | null;
   let modelCost: ModelCost | null;
   let generationConfig: ModelGenerationSettings;
@@ -500,6 +491,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // after `createRun` below — the `run_logs.run_id` FK forbids writing them
   // any earlier.
   let droppedIntegrations: DroppedIntegration[];
+  let droppedGenerationSettings: DroppedGenerationSetting[];
   let contextMs: number;
   const contextStart = Date.now();
   try {
@@ -515,6 +507,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       modelCost,
       generationConfig,
       droppedIntegrations,
+      droppedGenerationSettings,
     } = await runWithSpan("appstrate.run.context", { attributes: spanAttributes }, () =>
       buildRunContext({
         runId,
@@ -607,7 +600,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         versionLabel: versionLabel ?? undefined,
         versionRef,
         proxyLabel: proxyLabel ?? undefined,
-        modelLabel: modelLabel ?? undefined,
+        modelLabel,
         modelSource: modelSource ?? undefined,
         modelId: plan.llmConfig.aliasId,
         // Kickoff pricing snapshot — see `run-context-builder.ts`. Persisted on
@@ -698,13 +691,15 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
 
   // Degradation marker — one `warn` run log per integration the agent
   // declared but that could not be resolved (not active / not connected /
-  // unresolvable reference). Without it a run that started with a subset of
-  // its tools is indistinguishable from an agent that chose not to call them.
+  // unresolvable reference), and per stored generation setting the model
+  // refuses. Without it a degraded run is indistinguishable from a healthy
+  // one: an agent that chose not to call a tool, a setting that took effect.
   // Awaited (not fire-and-forget like the breadcrumbs above) so the marker is
   // ordered BEFORE the container's own logs; it is the empty-array no-op on
   // every healthy run, and it swallows its own write failures, so it can
   // neither slow down nor fail a normal kickoff.
   await recordDroppedIntegrations({ orgId }, runId, droppedIntegrations);
+  await recordDroppedGenerationSettings({ orgId }, runId, modelLabel, droppedGenerationSettings);
 
   // --- Step 6: Fire-and-forget execution ---
   executeAgentInBackground({
@@ -723,6 +718,4 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       error: getErrorMessage(err),
     });
   });
-
-  return { runId, modelLabel, modelSource };
 }
