@@ -57,11 +57,12 @@ import {
   buildPiModelFromEnv,
   parseRuntimeEnv,
   RuntimeEnvError,
-  scrubSinkEnv,
   HEARTBEAT_INTERVAL_MS,
   MCP_CONNECT_DEADLINE_MS,
 } from "./env.ts";
 import { createRuntimePiRunner } from "./pi-runner.ts";
+import { makeProcessNonDumpable } from "./non-dumpable.ts";
+import { receiveSecrets } from "@appstrate/runner-pi/secret-env";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 import {
   createRuntimeEventDrainer,
@@ -109,16 +110,31 @@ function lastResortStderr(exitCode: number | null, reason: string, cause?: unkno
   }
 }
 
+// --- Process hardening (before anything else) ---
+// Before the secrets are read from stdin: this process holds them in memory,
+// and the agent's tools run as its uid. See `non-dumpable.ts`. No agent without it.
+// Its working directory is the read-only code directory, never the workspace:
+// the Pi SDK resolves some module paths against it (its image-resize worker).
+// Pi and its tools get the workspace explicitly (`cwd: WORKSPACE`).
+process.chdir(import.meta.dir);
+try {
+  makeProcessNonDumpable();
+} catch (err) {
+  lastResortStderr(1, "could not make the runtime process non-dumpable", err);
+  process.exit(1);
+}
+
 // --- 0. Env validation + sink bootstrap ---
 // Every runtime-pi invocation MUST come from a platform run that has
 // already minted sink credentials + inserted a pending run row. We
 // validate the full env contract once, fail-fast with a structured
 // list of issues (better DX than first-failure), and bail out before
-// touching any heavy module.
+// touching any heavy module. The run-scoped secrets are not in this
+// process's environment: its starter hands them over on stdin (`launcher.ts`).
 
 let env: ReturnType<typeof parseRuntimeEnv>;
 try {
-  env = parseRuntimeEnv(process.env);
+  env = parseRuntimeEnv(receiveSecrets(await Bun.stdin.text(), process.env));
 } catch (err) {
   // Before the sink is live, stderr is the only channel — the platform's
   // container monitor will synthesise a `failed` finalize from the exit
@@ -141,11 +157,6 @@ try {
 for (const warning of env.warnings) {
   logLine("warn", "runtime_env_warning", { warning });
 }
-
-// Zero-knowledge, part 1 (part 2 is `delete process.env.SIDECAR_URL` below):
-// the sink URL/secret are now captured in `env.sink`, so drop them from the
-// environment before any agent-controlled code can run. See `scrubSinkEnv`.
-scrubSinkEnv();
 
 const AGENT_RUN_ID = env.runId;
 
@@ -598,7 +609,7 @@ try {
 // --- 2c-bis. Integration boot gate + per-phase observability ---
 // The sidecar booted each declared integration in parallel with this
 // container. Fetch its authoritative boot report (uses the captured
-// `sidecarUrl` const — the env var is deleted just below), relay every
+// `sidecarUrl` const — never in this process's environment), relay every
 // per-phase breadcrumb into the run log, and ABORT the run if any declared
 // integration failed to start OR came up with nothing callable — the
 // platform contract, every tier. A run that can't even confirm integration
@@ -624,22 +635,7 @@ if ("error" in bootResult) {
   }
 }
 
-// --- 2d. Zero-knowledge enforcement ---
-// The sidecar URL and the token that opens it are runtime implementation
-// details. Now that the MCP client, the runtime-event drainer and the Pi
-// model record each hold their own copy, remove BOTH env vars so the Pi bash
-// extension cannot leak them via `echo $SIDECAR_URL` / `env | grep SIDECAR`.
-//
-// The token goes with the URL rather than surviving it, and that is the whole
-// point: together they are the capability to spend the org's provider
-// credential through `/llm/*`, and the agent loop runs model-chosen shell
-// commands over attacker-influenced input. Nothing downstream in this process
-// re-reads either from the environment — pi-ai reads `Model.headers` off the
-// model object built above, not `process.env`.
-delete process.env.SIDECAR_URL;
-delete process.env.SIDECAR_AUTH_TOKEN;
-
-// --- 2e. publish_file runtime tool (opt-in via manifest.runtime_tools) ---
+// --- 2d. publish_file runtime tool (opt-in via manifest.runtime_tools) ---
 // Unlike the four pure event-emitter runtime tools (served by the sidecar over
 // MCP), `publish_file` performs an HTTP upload back to the platform — so it is
 // ALWAYS registered

@@ -94,6 +94,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - the API, `PI_IMAGE`, `SIDECAR_IMAGE` and the Firecracker runner daemon must
     be deployed together.
 
+- **Run-scoped secrets are never in the environment of the process that runs
+  the agent.** The agent image's first process is now `runtime-pi/launcher.ts`
+  (Docker ENTRYPOINT and Firecracker guest argv): it starts the entrypoint
+  without the sink credentials, `SIDECAR_URL` and `SIDECAR_AUTH_TOKEN` and
+  hands them over on the entrypoint's stdin; the process orchestrator does the
+  same handover itself. Both the launcher and the entrypoint set
+  `prctl(PR_SET_DUMPABLE, 0)` first, so no other process of the agent uid can
+  read their `/proc/<pid>/environ`, `mem` or `fd`, and they exit rather than run
+  the agent without it. The entrypoint refuses to start with any of these keys
+  in its environment. The secrets live only in that process's memory, and the
+  code it runs comes only from the read-only runtime image: `/runtime` (bundle,
+  `node_modules`, transpiler cache) is root-owned and not writable by the agent
+  uid, and the entrypoint's working directory is that read-only tree, so the
+  agent cannot load code into the process that holds the secrets. The launcher,
+  as PID 1, reaps orphaned processes. The `prctl` flag is Linux-only: the
+  process orchestrator on a macOS dev host isolates nothing, as before.
+- **The sidecar's forward proxy exempts only the platform API endpoint (host
+  and port) from the egress policy.** Any other port on the platform host goes
+  through the same internal-range policy as every other destination, including
+  the upstream-proxy routing; a platform URL without a port matches its
+  scheme's default port. In local dev, an agent that reached another service on
+  `host.docker.internal` through the proxy now gets 403, and
+  `EGRESS_ALLOW_INTERNAL_HOSTS` does not change that — the agent's forward
+  proxy never reads it. That variable covers the sidecar's own egress to the `/llm` upstream
+  and to remote MCP servers, so an internal service meant for the agent is
+  declared as a remote MCP integration with its host in
+  `EGRESS_ALLOW_INTERNAL_HOSTS`. Integration runners never use this proxy.
 - **BREAKING (operators): one run topology — every run boots its sidecar.**
   The agent container gets a placeholder credential and the restricted
   network, like every run: inference goes through the sidecar's `/llm` proxy

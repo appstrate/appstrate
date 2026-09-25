@@ -69,9 +69,9 @@ export interface RuntimePiEnvOptions {
    *
    * A DISCLOSURE the agent is meant to have, unlike the sink secret or the run
    * token: it is the container's own identity toward its own sidecar, carries
-   * no platform authority, and is useless outside the run's network. The
-   * bootloader deletes it from `process.env` once captured, alongside
-   * `SIDECAR_URL` — see `runtime-pi/entrypoint.ts` §2d.
+   * no platform authority, and is useless outside the run's network. Like the
+   * sink credentials and `SIDECAR_URL`, it is handed to the runtime over stdin,
+   * never in its environment — see `./secret-env.ts`.
    */
   sidecarAuthToken: string;
   /** The sidecar's LLM proxy → `MODEL_BASE_URL`. */

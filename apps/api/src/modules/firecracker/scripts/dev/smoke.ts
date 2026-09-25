@@ -386,7 +386,7 @@ try {
 
   // ---------------------------------------------------------------------
   // Third VM (B4): the REAL agent entrypoint — NO argv override, so the
-  // supervisor runs the baked default `bun run /runtime/dist/entrypoint.js`.
+  // supervisor runs the baked default (`launcher.js` → `entrypoint.js`).
   // A minimal agent env (no valid platform sink) makes the
   // bundle LOAD, run under bun in-guest, and fail env validation — leaving
   // runtime-pi's `[runtime-pi fatal]` last-resort line on the serial

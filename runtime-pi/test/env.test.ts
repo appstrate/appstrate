@@ -3,7 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/runner-pi/pi-model";
-import { buildPiModelFromEnv, parseRuntimeEnv, RuntimeEnvError, scrubSinkEnv } from "../env.ts";
+import { buildPiModelFromEnv, parseRuntimeEnv, RuntimeEnvError } from "../env.ts";
 
 const VALID = {
   AGENT_RUN_ID: "run_test123",
@@ -322,50 +322,6 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
 describe("parseRuntimeEnv — empty strings count as missing", () => {
   it.each(["SIDECAR_URL", "MODEL_BASE_URL", "MODEL_API_KEY"])("refuses an empty %s", (key) => {
     expect(() => parseRuntimeEnv({ ...VALID, [key]: "" })).toThrow(`${key}: required`);
-  });
-});
-
-describe("scrubSinkEnv", () => {
-  it("removes the sink credentials the parser has already captured", () => {
-    const source: NodeJS.ProcessEnv = { ...VALID };
-    const env = parseRuntimeEnv(source);
-
-    scrubSinkEnv(source);
-
-    // The captured struct still has everything the sink and the file
-    // uploader need.
-    expect(env.sink.secret).toBe(VALID.APPSTRATE_SINK_SECRET);
-    expect(env.sink.url).toBe(VALID.APPSTRATE_SINK_URL);
-    expect(env.sink.finalizeUrl).toBe(VALID.APPSTRATE_SINK_FINALIZE_URL);
-    // The environment no longer does. An agent driven by a prompt injection
-    // (an email body, a fetched page, an input file) that runs
-    // `env | grep SINK` gets nothing: without the run HMAC key it cannot forge
-    // a `status: "success"` finalize, nor POST files straight to
-    // `/api/runs/:id/files` past the `runtime_tools` gate.
-    expect(source.APPSTRATE_SINK_SECRET).toBeUndefined();
-    expect(source.APPSTRATE_SINK_URL).toBeUndefined();
-    expect(source.APPSTRATE_SINK_FINALIZE_URL).toBeUndefined();
-    expect(Object.keys(source).some((k) => k.includes("SINK"))).toBe(false);
-  });
-
-  it("leaves every other variable alone", () => {
-    const source: NodeJS.ProcessEnv = { ...VALID, MODEL_BASE_URL: "https://proxy.local" };
-    scrubSinkEnv(source);
-    expect(source.AGENT_RUN_ID).toBe(VALID.AGENT_RUN_ID);
-    expect(source.AGENT_PROMPT).toBe(VALID.AGENT_PROMPT);
-    expect(source.MODEL_BASE_URL).toBe("https://proxy.local");
-  });
-
-  it("defaults to process.env", () => {
-    process.env.APPSTRATE_SINK_SECRET = VALID.APPSTRATE_SINK_SECRET;
-    process.env.APPSTRATE_SINK_URL = VALID.APPSTRATE_SINK_URL;
-    process.env.APPSTRATE_SINK_FINALIZE_URL = VALID.APPSTRATE_SINK_FINALIZE_URL;
-
-    scrubSinkEnv();
-
-    expect(process.env.APPSTRATE_SINK_SECRET).toBeUndefined();
-    expect(process.env.APPSTRATE_SINK_URL).toBeUndefined();
-    expect(process.env.APPSTRATE_SINK_FINALIZE_URL).toBeUndefined();
   });
 });
 

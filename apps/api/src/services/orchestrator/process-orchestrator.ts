@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { getEnv } from "@appstrate/env";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { splitSecretEnv } from "@appstrate/runner-pi/secret-env";
 import { logger } from "../../lib/logger.ts";
 import type {
   RunOrchestrator,
@@ -569,12 +570,23 @@ export class ProcessOrchestrator implements RunOrchestrator {
 
     const stdoutPath = join(pending.workDir, ".stdout.jsonl");
 
+    // This orchestrator plays the runtime launcher's part (`runtime-pi/launcher.ts`)
+    // itself: the run-scoped secrets go over stdin, never into the environment.
+    // No launcher process in between, so every kill below reaches the agent.
+    const { env, payload } = splitSecretEnv(pending.env);
     const proc = Bun.spawn(["bun", "run", pending.entrypoint], {
       cwd: pending.workDir,
-      env: pending.env,
+      env,
+      stdin: "pipe",
       stdout: Bun.file(stdoutPath),
       stderr: "pipe",
     });
+    try {
+      await proc.stdin.write(payload);
+      await proc.stdin.end();
+    } catch {
+      // The agent died before reading; its exit is reported below like any other.
+    }
 
     const stderrTail: string[] = [];
     ph.stderrTail = stderrTail;

@@ -479,14 +479,14 @@ describe("ProcessOrchestrator", () => {
       return (orchestrator as unknown as { pendingSpecs: Map<string, unknown> }).pendingSpecs.size;
     }
 
-    async function stageAgent(runId: string) {
+    async function stageAgent(runId: string, env: Record<string, string> = {}) {
       const boundary = await orchestrator.createIsolationBoundary(runId);
       const handle = await orchestrator.createWorkload(
         {
           runId,
           role: "agent",
           image: "unused-in-process-mode",
-          env: { RUN_TOKEN: "run-token-that-must-not-be-retained" },
+          env: { RUN_TOKEN: "run-token-that-must-not-be-retained", ...env },
           resources: { memoryBytes: 512 * 1024 * 1024, nanoCpus: 1_000_000_000 },
         },
         boundary,
@@ -494,10 +494,14 @@ describe("ProcessOrchestrator", () => {
       return { boundary, handle };
     }
 
-    /** Swap the agent entrypoint for an idle script so no real run boots. */
-    async function withFakeEntrypoint<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+    /** Swap the agent entrypoint for a fake script (idle by default) so no real run boots. */
+    async function withFakeEntrypoint<T>(
+      dir: string,
+      fn: () => Promise<T>,
+      source = "setInterval(()=>{},60000);",
+    ): Promise<T> {
       const fake = join(dir, "fake-agent.ts");
-      await writeFile(fake, "setInterval(()=>{},60000);");
+      await writeFile(fake, source);
       const originalSpawn = Bun.spawn;
       const patched = ((cmd: string[], opts: Parameters<typeof Bun.spawn>[1]) =>
         originalSpawn(
@@ -523,6 +527,25 @@ describe("ProcessOrchestrator", () => {
 
       expect(await readdir(boundary.id)).toContain("agent.pid");
       expect(pendingSpecCount()).toBe(0);
+    }, 10_000);
+
+    it("startWorkload hands the run-scoped secrets over on stdin, not in the environment", async () => {
+      const { boundary, handle } = await stageAgent("test-run-secret-handover", {
+        APPSTRATE_SINK_SECRET: "dummy-sink-secret",
+        AGENT_RUN_ID: "test-run-secret-handover",
+      });
+      const report = join(boundary.id, "report.json");
+      await withFakeEntrypoint(
+        boundary.id,
+        () => orchestrator.startWorkload(handle),
+        `await Bun.write(${JSON.stringify(report)}, JSON.stringify({ env: process.env, stdin: await Bun.stdin.text() }));`,
+      );
+
+      for (let i = 0; i < 100 && !(await Bun.file(report).exists()); i++) await Bun.sleep(50);
+      const { env, stdin } = await Bun.file(report).json();
+      expect(env.AGENT_RUN_ID).toBe("test-run-secret-handover");
+      expect(env.APPSTRATE_SINK_SECRET).toBeUndefined();
+      expect(JSON.parse(stdin)).toEqual({ APPSTRATE_SINK_SECRET: "dummy-sink-secret" });
     }, 10_000);
 
     it("removeWorkload drops the pending spec, not just the process entry", async () => {

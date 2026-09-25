@@ -35,7 +35,13 @@ const GUEST_AGENT_USER = "pi"; // uid 1001, baked into the rootfs
 const SIDECAR_BIN = "/usr/local/bin/sidecar";
 /** setuid(1002) wrapper the sidecar uses to spawn integration runners. */
 const RUNNER_EXEC_WRAPPER = "/usr/local/bin/appstrate-runner-exec";
-const AGENT_ENTRY = "/runtime/dist/entrypoint.js";
+/** The image's ENTRYPOINT: the launcher hands the secrets to the entrypoint over stdin. */
+const AGENT_ARGV = [
+  "/usr/local/bin/bun",
+  "run",
+  "/runtime/dist/launcher.js",
+  "/runtime/dist/entrypoint.js",
+];
 const CONFIG_PATH = "/config/config.json";
 /**
  * Pre-warmed Bun transpiler cache baked into the rootfs at image build (see
@@ -269,7 +275,7 @@ async function main(): Promise<void> {
   // retries with backoff (same parallel-boot contract as docker/process).
   const agent = spawnAs(
     GUEST_AGENT_USER,
-    cfg.agent.argv ?? ["/usr/local/bin/bun", "run", AGENT_ENTRY],
+    cfg.agent.argv ?? AGENT_ARGV,
     { BUN_RUNTIME_TRANSPILER_CACHE_PATH: TRANSPILER_CACHE_PATH, ...cfg.agent.env },
     "/workspace",
   );
