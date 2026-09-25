@@ -513,7 +513,7 @@ Ownership is recorded per target **together with its profile context — profile
 
 #### Agent commands
 
-With the `claude-plugin` target, sync also installs one command per agent ACTIVE in the **pinned** space, system agents included. Type it with your request; Claude builds the input, launches the agent through the plugin's MCP server with `run_and_wait`, and reports the result and every file it produced:
+With the `claude-plugin` target, sync also installs one command per agent ACTIVE in the **pinned** space, system agents included. Type it with your request, or just ask in plain words and let Claude pick the command; Claude builds the input, launches the agent through the plugin's MCP server with `run_and_wait`, and reports the result and every file it produced:
 
 ```text
 /appstrate:run-invoice-extractor extract the totals from ~/Downloads/march-invoice.pdf
@@ -521,9 +521,9 @@ With the `claude-plugin` target, sync also installs one command per agent ACTIVE
 
 **Who gets them.** Agents come from the pinned space alone — `--space` and `syncSpaces` never change it — because an MCP session, its uploads and its runs belong to one space. You need `agents:run`, `runs:read` (or `runs:read-all`) and `mcp:invoke` there (the `runner` role has them); otherwise sync installs none and says so on stderr. `codex` and `claude-user` never get agent commands: nothing configures the MCP server there.
 
-**What a command contains.** `skills/run-<agent>/SKILL.md` and `input.json`, the space's launch contract — the dashboard launch form's split into `prompted` fields (taken from your request; Claude asks only for a missing required one), `prefilled` (sent only when you override them) and `locked` (never sent). Stored values are never written to disk. `disable-model-invocation: true`: only you launch an agent.
+**What a command contains.** `skills/run-<agent>/SKILL.md` and `input.json`, the space's launch contract — the dashboard launch form's split into `prompted` fields (taken from your request; Claude asks only for a missing required one), `prefilled` (sent only when you override them) and `locked` (never sent). Stored values are never written to disk. Its description ("Launches a metered run of the Appstrate agent …") sits in each session's context, so Claude can choose it on its own.
 
-**The run asks for permission.** Nothing is pre-approved: Claude Code's prompt for `run_and_wait` shows the exact `input` before the metered run, unless you allowed the tool permanently or run in an auto-accept mode. A command never launches twice once a run exists.
+**The run asks for permission.** Whoever picks the command, nothing is pre-approved: Claude Code's prompt for `run_and_wait` shows the exact `input` before the metered run, unless you allowed the tool permanently or run in an auto-accept mode. A command never launches twice once a run exists.
 
 **File inputs.** Claude uploads a local file with `curl` and passes its `upload://` URI. Keep the file in the session's working directory, or start Claude Code with `--add-dir <dir>`: elsewhere, shell access prompts, or the file is copied through the model's context.
 

@@ -294,7 +294,7 @@ export function materializeAgent(slug: string, view: AgentLaunchView): Record<st
 
   const summary = view.description.trim();
   const description = truncateCodePoints(
-    `Run the Appstrate agent "${view.title}"${summary ? `: ${summary}` : ""}`,
+    `Launches a metered run of the Appstrate agent "${view.title}"${summary ? `: ${summary}` : ""}`,
     SKILL_DESCRIPTION_MAX_LENGTH,
   );
   const required = new Set(schema.required ?? []);
@@ -309,7 +309,6 @@ export function materializeAgent(slug: string, view: AgentLaunchView): Record<st
     `name: ${slug}`,
     `description: ${yamlString(description)}`,
     ...(argumentHint ? [`argument-hint: ${yamlString(argumentHint)}`] : []),
-    "disable-model-invocation: true",
     "metadata:",
     `  appstrate-package: ${yamlString(view.packageId)}`,
     `  appstrate-space: ${yamlString(view.spaceId)}`,

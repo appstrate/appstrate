@@ -328,13 +328,7 @@ describe("collisionSlug with the run- prefix", () => {
 const SPACE_ID = "spc_0f8fad5b-d9cb-469f-a165-70867728950e";
 const SENTINEL = "SECRET-SENTINEL";
 const CONTRACT_REF = "$" + "{CLAUDE_SKILL_DIR}/input.json";
-const FRONTMATTER_KEYS = [
-  "name",
-  "description",
-  "argument-hint",
-  "disable-model-invocation",
-  "metadata",
-];
+const FRONTMATTER_KEYS = ["name", "description", "argument-hint", "metadata"];
 
 function agentView(overrides: Partial<AgentLaunchView> = {}): AgentLaunchView {
   return {
@@ -411,9 +405,9 @@ describe("materializeAgent", () => {
     expect(Object.keys(frontmatter)).toEqual(FRONTMATTER_KEYS);
     expect(frontmatter).toEqual({
       name: "run-weekly-report",
-      description: 'Run the Appstrate agent "Weekly report": Summarize the week.',
+      description:
+        'Launches a metered run of the Appstrate agent "Weekly report": Summarize the week.',
       "argument-hint": "<topic> [audience]",
-      "disable-model-invocation": true,
       metadata: {
         "appstrate-package": "@acme/weekly-report",
         "appstrate-space": SPACE_ID,
@@ -460,7 +454,9 @@ describe("materializeAgent", () => {
     const { skillMd, frontmatter, body } = renderAgent(view);
 
     expect(Object.keys(frontmatter)).toEqual(FRONTMATTER_KEYS);
-    expect(frontmatter.description).toBe(`Run the Appstrate agent "${hostile}": ${hostile}`);
+    expect(frontmatter.description).toBe(
+      `Launches a metered run of the Appstrate agent "${hostile}": ${hostile}`,
+    );
     expect(frontmatter["argument-hint"]).toBe("<topic> [audience] [x\n---\n!`id` $1]");
     // The raw terminators never appear, so no line-based splitter sees a `---` line early.
     expect(skillMd).not.toMatch(/[\u0085\u2028\u2029]/);
@@ -538,7 +534,9 @@ describe("materializeAgent", () => {
 
   it("uses the title as given and drops the separator when there is no description", () => {
     const { frontmatter } = renderAgent(agentView({ description: " " }));
-    expect(frontmatter.description).toBe('Run the Appstrate agent "Weekly report"');
+    expect(frontmatter.description).toBe(
+      'Launches a metered run of the Appstrate agent "Weekly report"',
+    );
   });
 
   it("truncates the whole description to 1024 code points", () => {
