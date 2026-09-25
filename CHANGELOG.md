@@ -10,11 +10,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **`generation_setting_dropped` — a run's log now says when a stored
   generation setting was ignored** (#1571). A schedule's override or a space
-  default (`temperature`, `reasoning_level`) that the run's model does not
-  support is still dropped for that run rather than refused, but it no longer
-  lives only in server logs: one `warn` run log per setting, next to
-  `integration_dropped`, carrying `setting`, `model` and
-  `reason: "unsupported_by_model"`.
+  default (`temperature`, `reasoning_level`) that the run's model
+  refuses (the setting, that value, or a temperature alongside reasoning) is
+  still dropped for that run rather than refused, but it no longer lives only in
+  server logs: one `warn` run log per setting, next to `integration_dropped`,
+  carrying `setting`, `value`, `model` and `reason: "refused_by_model"`.
 - **`appstrate code sync` installs the pinned space's agents as Claude Code
   commands** (#1268). Each agent active in the pinned space becomes
   `/appstrate:run-<agent>` in the plugin: Claude builds the input from your
@@ -72,6 +72,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   fails before touching `system-packages/`.
 
 ### Changed
+
+- **Operator-visible log and error text changed** (#1571) — update any alert
+  or grep keyed on the old wording:
+  - the error log `Sidecar exited before run completed` and the debug log
+    `Sidecar exit watcher errored` are gone: the run launcher reports the
+    sidecar's exit code and log tail (`Sidecar exited while the run was in
+progress`);
+  - the internal credentials-refresh `502` now reads `N/M upstream rejections
+since the connection was last (re)connected before it is flagged` (was
+    `N/M consecutive rejections before the connection is flagged`) — the count
+    was never a streak;
+  - the server `warn` `Stored generation settings refused by the model, dropped
+for this scheduled run` now ends `dropped for this run`, and also covers
+    space defaults;
+  - `failed to append dropped-integration run log` is now `failed to append
+drop marker run log`.
 
 - **BREAKING (operators): runs on a platform-provided model are served through
   the platform's metered LLM proxy, like chat.** A run whose model is a

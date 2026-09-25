@@ -148,7 +148,7 @@ export async function buildRunContext(params: {
    * `modelLabel`'s model refuses, dropped for this run. The caller MUST surface
    * these — see {@link recordDroppedGenerationSettings}.
    */
-  droppedGenerationSettings: string[];
+  droppedGenerationSettings: DroppedGenerationSetting[];
 }> {
   const { runId, agent, orgId, spaceId, actor, input, files } = params;
 
@@ -252,13 +252,18 @@ export async function buildRunContext(params: {
   const requestOverride = params.scheduleId ? null : params.generationConfigOverride;
   // A key the request sets supersedes its stored value, so that drop is moot.
   const overridden = withoutInherited(requestOverride);
-  const droppedGenerationSettings = Object.keys(storedLayers).filter(
-    (key) => !(key in generationDefaults) && !(key in overridden),
+  // Null means "inherit": reconcile keeps it, so only set values can drop.
+  const droppedGenerationSettings: DroppedGenerationSetting[] = Object.entries(
+    storedLayers,
+  ).flatMap(([setting, value]) =>
+    value != null && !(setting in generationDefaults) && !(setting in overridden)
+      ? [{ setting, value }]
+      : [],
   );
   if (droppedGenerationSettings.length > 0) {
     logger.warn("Stored generation settings refused by the model, dropped for this run", {
       ...(params.scheduleId ? { scheduleId: params.scheduleId } : {}),
-      dropped: droppedGenerationSettings,
+      dropped: droppedGenerationSettings.map((entry) => entry.setting),
     });
   }
   const generationConfig = resolveModelGenerationSettings({
@@ -418,6 +423,12 @@ export async function recordDroppedIntegrations(
  */
 export const GENERATION_SETTING_DROPPED_EVENT = "generation_setting_dropped";
 
+/** A stored setting the model refused, with the value it would have sent. */
+export interface DroppedGenerationSetting {
+  setting: string;
+  value: NonNullable<ModelGenerationSettings[keyof ModelGenerationSettings]>;
+}
+
 /**
  * Same marker as {@link recordDroppedIntegrations}, for the stored generation
  * settings {@link buildRunContext} dropped: a scheduled fire has no user to
@@ -427,15 +438,18 @@ export async function recordDroppedGenerationSettings(
   scope: OrgScope,
   runId: string,
   model: string,
-  dropped: readonly string[],
+  dropped: readonly DroppedGenerationSetting[],
 ): Promise<void> {
-  for (const setting of dropped) {
+  // One reason: the reconcile step does not say which rule refused the value
+  // (unsupported setting, unsupported level, temperature vs reasoning).
+  for (const { setting, value } of dropped) {
+    const shown = typeof value === "string" ? `'${value}'` : String(value);
     await appendDropMarker(
       scope,
       runId,
       GENERATION_SETTING_DROPPED_EVENT,
-      `generation setting '${setting}' is not supported by model '${model}' — ignored for this run`,
-      { setting, model, reason: "unsupported_by_model" },
+      `generation setting '${setting}' = ${shown} is not accepted by model '${model}' — ignored for this run`,
+      { setting, value, model, reason: "refused_by_model" },
     );
   }
 }

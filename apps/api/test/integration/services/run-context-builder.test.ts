@@ -21,6 +21,7 @@ import {
   ModelCredentialMissingError,
   modelCredentialIsPresent,
   recordDroppedGenerationSettings,
+  type DroppedGenerationSetting,
 } from "../../../src/services/run-context-builder.ts";
 import { getPackage } from "../../../src/services/package-catalog.ts";
 import { logger } from "../../../src/lib/logger.ts";
@@ -262,7 +263,9 @@ describe("buildRunContext generation settings", () => {
       );
       expect(built.generationConfig).toEqual({ temperature: 0.3 });
       expect(built.plan.generationConfig).toEqual({ temperature: 0.3 });
-      expect(built.droppedGenerationSettings).toEqual(["reasoning_level"]);
+      expect(built.droppedGenerationSettings).toEqual([
+        { setting: "reasoning_level", value: "medium" },
+      ]);
       const call = warn.mock.calls.find(([, data]) =>
         JSON.stringify(data ?? {}).includes("sched_1"),
       );
@@ -278,7 +281,9 @@ describe("buildRunContext generation settings", () => {
     const stored = { reasoning_level: "medium" } as const;
 
     const fromDefault = await build(modelId, {}, undefined, stored);
-    expect(fromDefault.droppedGenerationSettings).toEqual(["reasoning_level"]);
+    expect(fromDefault.droppedGenerationSettings).toEqual([
+      { setting: "reasoning_level", value: "medium" },
+    ]);
 
     const overridden = await build(modelId, { reasoning_level: "high" }, undefined, stored);
     expect(overridden.droppedGenerationSettings).toEqual([]);
@@ -296,7 +301,7 @@ describe("recordDroppedGenerationSettings — run_logs marker", () => {
     await seedPackage({ id: agentId, orgId: ctx.orgId, type: "agent", source: "local" });
   });
 
-  async function markerRows(dropped: string[]) {
+  async function markerRows(dropped: DroppedGenerationSetting[]) {
     const run = await seedRun({
       packageId: agentId,
       orgId: ctx.orgId,
@@ -309,18 +314,26 @@ describe("recordDroppedGenerationSettings — run_logs marker", () => {
       .where(and(eq(runLogs.runId, run.id), eq(runLogs.event, GENERATION_SETTING_DROPPED_EVENT)));
   }
 
-  it("writes ONE warn row per dropped setting, naming the setting and the model", async () => {
-    const rows = await markerRows(["reasoning_level", "temperature"]);
+  it("writes ONE warn row per dropped setting, naming the setting, its value and the model", async () => {
+    const rows = await markerRows([
+      { setting: "reasoning_level", value: "high" },
+      { setting: "temperature", value: 0.3 },
+    ]);
     expect(rows).toHaveLength(2);
     const row = rows.find((r) => r.data?.setting === "reasoning_level");
     expect(row).toMatchObject({ level: "warn", type: "system" });
     expect(row!.data).toMatchObject({
       platform: true,
+      value: "high",
       model: "DeepSeek Flash",
-      reason: "unsupported_by_model",
+      reason: "refused_by_model",
     });
-    expect(row!.message).toContain("reasoning_level");
-    expect(row!.message).toContain("DeepSeek Flash");
+    expect(row!.message).toBe(
+      "generation setting 'reasoning_level' = 'high' is not accepted by model 'DeepSeek Flash' — ignored for this run",
+    );
+    const temperature = rows.find((r) => r.data?.setting === "temperature");
+    expect(temperature!.data).toMatchObject({ value: 0.3, reason: "refused_by_model" });
+    expect(temperature!.message).toContain("'temperature' = 0.3 ");
   });
 
   it("writes nothing when nothing was dropped", async () => {

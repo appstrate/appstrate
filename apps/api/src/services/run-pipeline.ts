@@ -10,6 +10,7 @@ import {
   buildRunContext,
   recordDroppedIntegrations,
   recordDroppedGenerationSettings,
+  type DroppedGenerationSetting,
   ModelNotConfiguredError,
   ModelCredentialMissingError,
 } from "./run-context-builder.ts";
@@ -501,7 +502,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // after `createRun` below — the `run_logs.run_id` FK forbids writing them
   // any earlier.
   let droppedIntegrations: DroppedIntegration[];
-  let droppedGenerationSettings: string[];
+  let droppedGenerationSettings: DroppedGenerationSetting[];
   let contextMs: number;
   const contextStart = Date.now();
   try {
