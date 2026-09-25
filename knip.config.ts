@@ -561,7 +561,7 @@ const config: KnipConfig = {
 
     // Docker entrypoints: the image CMD runs them directly. Neither manifest
     // declares `exports`, `bin` or `main`, so nothing is derived.
-    "runtime-pi": { entry: [...manifestEntries("runtime-pi"), "entrypoint.ts!"] },
+    "runtime-pi": { entry: [...manifestEntries("runtime-pi"), "entrypoint.ts!", "launcher.ts!"] },
     "runtime-pi/sidecar": {
       entry: [...manifestEntries("runtime-pi/sidecar"), "server.ts!", "test/fixtures/**/server.ts"],
     },

@@ -81,10 +81,9 @@ interface RuntimeEnv {
    * `/integrations/boot-report`, `/runtime-events`). The platform mints and
    * emits it together with {@link sidecarUrl}.
    *
-   * Captured here so `entrypoint.ts` can delete the env var alongside
-   * `SIDECAR_URL` once the model and the clients hold it: the two together are
-   * the capability to reach the sidecar, and the Pi bash extension must not be
-   * able to `env | grep SIDECAR` its way to a free `/llm` call.
+   * Never in the runtime's environment (`@appstrate/runner-pi/secret-env`):
+   * with `SIDECAR_URL` it is the capability to reach the sidecar, and nothing
+   * the agent spawns may inherit a free `/llm` call.
    */
   sidecarAuthToken: string;
   /**
@@ -470,36 +469,8 @@ export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
     // the bytes in `packages/runner-pi/test/alias-provider-registration.test.ts`
     // and `runtime-pi/test/pi-runner-transport.test.ts`.
     //
-    // Carried on the model rather than read from `process.env` at request time,
-    // so the bootloader can delete the variable once the run is wired.
+    // Carried on the model: the token is never in `process.env`
+    // (`@appstrate/runner-pi/secret-env`).
     headers: { [SIDECAR_AUTH_HEADER]: env.sidecarAuthToken },
   });
-}
-
-/** Sink variables captured into {@link RuntimeEnv.sink} and then scrubbed. */
-const SINK_ENV_KEYS = [
-  "APPSTRATE_SINK_SECRET",
-  "APPSTRATE_SINK_URL",
-  "APPSTRATE_SINK_FINALIZE_URL",
-] as const;
-
-/**
- * Remove the run's sink credentials from the environment once
- * {@link parseRuntimeEnv} has captured them into {@link RuntimeEnv.sink}.
- *
- * Same zero-knowledge reasoning as the `delete process.env.SIDECAR_URL` in
- * `entrypoint.ts`: the agent loop runs arbitrary model-chosen commands through
- * the Pi bash extension, and the agent's input (an email body, a fetched page,
- * an input file) is attacker-controllable. `env | grep SINK` would hand a
- * prompt-injected agent the HMAC key for its own run, which is enough to forge
- * a `status: "success"` finalize the platform cannot distinguish from the real
- * one, or to POST files straight to `/api/runs/:id/files` past the
- * `runtime_tools` gate up to the per-run cap.
- *
- * Safe: nothing downstream re-reads these from the environment. The sink, the
- * file uploader and the provisioning fetches all take the captured
- * `env.sink` struct.
- */
-export function scrubSinkEnv(source: NodeJS.ProcessEnv = process.env): void {
-  for (const key of SINK_ENV_KEYS) delete source[key];
 }

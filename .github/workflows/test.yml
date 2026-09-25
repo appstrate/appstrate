@@ -313,7 +313,7 @@ jobs:
 
   runtime-e2e:
     name: Runtime container e2e
-    # The only pre-merge job that runs the REAL runtime images, and it gates two
+    # The only pre-merge job that runs the REAL runtime images, and it gates three
     # regressions that live exclusively there:
     #
     #   1. The runtime-pi file-provisioning spin only reproduces in the BUNDLED
@@ -327,6 +327,9 @@ jobs:
     #      correct on its own and only their combination fails — invisible to
     #      every in-process test, because those wire the two halves together
     #      from one source tree, the configuration that never breaks.
+    #   3. Run-scoped secrets out of reach of the agent uid
+    #      (`runtime-secrets-container.e2e.test.ts`): the launcher/entrypoint
+    #      split and `/proc` access of the built image, invisible in-process.
     #
     # Hence both images are built here, from the same checkout: a pair is only
     # comparable when both halves come from the code under test. Same
@@ -374,7 +377,7 @@ jobs:
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
 
       - name: Run runtime container e2e suites
-        run: bun test runtime-pi/test/provision-container.e2e.test.ts runtime-pi/test/inference-container.e2e.test.ts
+        run: bun test runtime-pi/test/provision-container.e2e.test.ts runtime-pi/test/inference-container.e2e.test.ts runtime-pi/test/runtime-secrets-container.e2e.test.ts
 
   e2e:
     name: E2E tests

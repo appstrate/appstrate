@@ -59,11 +59,12 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   const MAX_CONNECT_HEADER_SIZE = 16_384; // 16 KB — CONNECT response headers should be tiny
 
   function getUpstreamProxy(
-    targetHost?: string,
+    targetHost: string,
+    targetPort: number,
   ): { host: string; port: number; auth: string | null } | null {
     if (!config.proxyUrl) return null;
-    // Bypass the upstream proxy when the target is the platform host.
-    // Same rationale as isAllowedHost() below: platform traffic is internal,
+    // Bypass the upstream proxy when the target is the platform endpoint.
+    // Same rationale as isAllowedTarget() below: platform traffic is internal,
     // trusted by construction (HMAC-signed run events scoped to a single
     // run). Residential / datacenter egress proxies (Decodo, Bright Data,
     // Smartproxy, …) typically refuse RFC1918 or docker-bridge hostnames
@@ -72,10 +73,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     // its very first action. Keeping platform traffic off the upstream
     // proxy preserves the proxy's purpose (mask outbound IP for tracked
     // upstreams) without breaking internal comms.
-    if (targetHost) {
-      const platformHost = getPlatformHost();
-      if (platformHost && targetHost.toLowerCase() === platformHost) return null;
-    }
+    if (isPlatformEndpoint(targetHost, targetPort)) return null;
     try {
       const url = new URL(config.proxyUrl);
       // HTTPS upstream proxies are not supported — the forward proxy connects via plain TCP.
@@ -128,44 +126,37 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   // The platform API is a trusted destination: the agent can only send
   // HMAC-signed messages there (the run secret is scoped to a single run).
   // In local dev the platform URL resolves to `host.docker.internal`, which
-  // is in the SSRF blocklist — exempt that specific host so sink/finalize
-  // traffic can reach the platform. Other internal hosts remain blocked.
-  function getPlatformHost(): string | null {
-    try {
-      return new URL(config.platformApiUrl).hostname.toLowerCase();
-    } catch {
-      return null;
-    }
+  // is in the SSRF blocklist — exempt that exact endpoint (host AND port) so
+  // sink/finalize traffic can reach the platform. Any other port on the same
+  // host, like every other internal host, stays under the egress policy.
+  const platform = URL.parse(config.platformApiUrl);
+  const platformPort = Number(platform?.port) || (platform?.protocol === "https:" ? 443 : 80);
+  function isPlatformEndpoint(hostname: string, port: number): boolean {
+    return hostname.toLowerCase() === platform?.hostname.toLowerCase() && port === platformPort;
   }
 
-  function isPlatformHost(hostname: string): boolean {
-    const platformHost = getPlatformHost();
-    return platformHost !== null && hostname.toLowerCase() === platformHost;
-  }
-
-  function isAllowedHost(hostname: string): boolean {
-    const h = hostname.toLowerCase();
-    // The platform host is always reachable (HMAC-scoped internal traffic).
-    if (isPlatformHost(h)) return true;
+  function isAllowedTarget(hostname: string, port: number): boolean {
+    // The platform endpoint is always reachable (HMAC-scoped internal traffic).
+    if (isPlatformEndpoint(hostname, port)) return true;
     // Always-on SSRF blocklist (private ranges, link-local, metadata, …).
-    return !isBlockedHostFn(h);
+    return !isBlockedHostFn(hostname.toLowerCase());
   }
 
   /**
    * DNS-rebind guard for the DIRECT egress paths (resolve-and-pin): a DNS
    * name whose A/AAAA record points inside (10.x, 169.254.169.254, …) passes
-   * the literal `isAllowedHost` check but must NOT reach the boundary.
+   * the literal `isAllowedTarget` check but must NOT reach the boundary.
    * Returns the address to connect to — the PINNED resolved IP for DNS names
    * (so the actual connect can't re-resolve to a different answer), the
    * literal itself for IPs, or `null` when the target must be refused (any
    * blocked record, or resolution failure — fail closed).
    *
-   * The trusted platform host is exempt and keeps its name-based connect: in
-   * local dev it is `host.docker.internal`/an internal name by design, and
-   * platform traffic is HMAC-scoped (same rationale as `isAllowedHost`).
+   * The trusted platform endpoint is exempt and keeps its name-based connect:
+   * in local dev it is `host.docker.internal`/an internal name by design, and
+   * platform traffic is HMAC-scoped (same rationale as `isAllowedTarget`).
    */
-  async function pinDirectTarget(hostname: string): Promise<string | null> {
-    if (isPlatformHost(hostname)) return hostname;
+  async function pinDirectTarget(hostname: string, port: number): Promise<string | null> {
+    if (isPlatformEndpoint(hostname, port)) return hostname;
     const check = await resolveAndCheckHost(hostname.toLowerCase(), {
       resolve: resolveHostFn,
       isBlockedHostFn,
@@ -193,7 +184,8 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
 
     // SSRF protection — block requests to internal/private networks,
     // except the trusted platform API (handles local-dev host.docker.internal).
-    if (!isAllowedHost(parsed.hostname)) {
+    const targetPort = parseInt(parsed.port) || 80;
+    if (!isAllowedTarget(parsed.hostname, targetPort)) {
       res.writeHead(403);
       res.end("Blocked: internal network");
       return;
@@ -201,7 +193,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
 
     // Resolve the upstream proxy with the target hostname — internal platform
     // traffic bypasses the upstream proxy (see getUpstreamProxy docstring).
-    const upstream = getUpstreamProxy(parsed.hostname);
+    const upstream = getUpstreamProxy(parsed.hostname, targetPort);
 
     const cleaned = forwardHeaders(req.headers);
 
@@ -250,9 +242,9 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     }
 
     // Direct: resolve-and-pin to close the DNS-rebind gap — the literal
-    // isAllowedHost() check above does not resolve names. The Host header
+    // isAllowedTarget() check above does not resolve names. The Host header
     // keeps the original name; only the TCP target is pinned.
-    void pinDirectTarget(parsed.hostname).then((pinned) => {
+    void pinDirectTarget(parsed.hostname, targetPort).then((pinned) => {
       if (pinned === null) {
         res.writeHead(403);
         res.end("Blocked: internal network");
@@ -260,7 +252,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       }
       forward({
         hostname: pinned,
-        port: parseInt(parsed.port) || 80,
+        port: targetPort,
         path: parsed.pathname + parsed.search,
         method: req.method,
         headers: { ...cleaned, host: parsed.host },
@@ -282,7 +274,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
 
     // SSRF protection — block CONNECT tunnels to internal/private networks,
     // except the trusted platform API (handles local-dev host.docker.internal).
-    if (!isAllowedHost(host)) {
+    if (!isAllowedTarget(host, port)) {
       clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       clientSocket.destroy();
       return;
@@ -290,7 +282,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
 
     // Resolve the upstream proxy with the target hostname — internal platform
     // traffic bypasses the upstream proxy (see getUpstreamProxy docstring).
-    const upstream = getUpstreamProxy(host);
+    const upstream = getUpstreamProxy(host, port);
 
     if (upstream) {
       // Chain through authenticated upstream proxy
@@ -353,11 +345,11 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       clientSocket.on("error", () => proxySocket.destroy());
     } else {
       // Direct connection (pass-through). Resolve-and-pin to close the
-      // DNS-rebind gap — the literal isAllowedHost() check above does not
+      // DNS-rebind gap — the literal isAllowedTarget() check above does not
       // resolve names. Pinning is safe: this is a blind CONNECT tunnel (no
       // TLS termination here), the client's own handshake carries SNI/Host
-      // for the original name. The platform host keeps a name-based connect.
-      void pinDirectTarget(host).then((pinned) => {
+      // for the original name. The platform endpoint keeps a name-based connect.
+      void pinDirectTarget(host, port).then((pinned) => {
         if (clientSocket.destroyed) return; // client gave up during resolution
         if (pinned === null) {
           clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");

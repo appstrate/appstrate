@@ -545,28 +545,6 @@ describe("platform host exemption", () => {
     expect(res.status).toBe(200);
   });
 
-  it("HTTP: re-reads platformApiUrl on every request (pool reconfiguration)", async () => {
-    const echo = await startEchoServer();
-    const config = {
-      platformApiUrl: "http://placeholder:1",
-      runToken: "tok",
-      proxyUrl: "",
-    };
-    const proxy = makeProxy({ config, isBlockedHostFn: undefined });
-    await proxy.ready;
-    const { port } = proxy.address();
-
-    // Initially 127.0.0.1 is blocked because platformApiUrl points elsewhere
-    const blocked = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/before`);
-    expect(blocked.status).toBe(403);
-
-    // Mutate config to simulate a late platform-API resolution
-    config.platformApiUrl = `http://127.0.0.1:${echo.port}`;
-
-    const allowed = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/after`);
-    expect(allowed.status).toBe(200);
-  });
-
   it("HTTP: tolerates an invalid platformApiUrl without crashing (falls back to blocklist only)", async () => {
     const proxy = makeProxy({
       config: { platformApiUrl: "::not a url::", runToken: "tok", proxyUrl: "" },
@@ -611,6 +589,57 @@ describe("platform host exemption", () => {
 
     const res = await connectViaProxy(port, "169.254.169.254:80");
     expect(res.statusCode).toBe(403);
+  });
+
+  // The exemption is the platform API endpoint, not the whole host: another
+  // service listening on the same host keeps the normal egress policy.
+  it("HTTP: blocks another port on the platform host", async () => {
+    const platform = await startEchoServer();
+    const other = await startEchoServer();
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: `http://127.0.0.1:${platform.port}`,
+        runToken: "tok",
+        proxyUrl: "",
+      },
+      isBlockedHostFn: undefined,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await httpViaProxy(port, `http://127.0.0.1:${other.port}/x`);
+    expect(res.status).toBe(403);
+  });
+
+  it("CONNECT: blocks another port on the platform host", async () => {
+    const platform = await startEchoServer();
+    const other = await startEchoServer();
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: `http://127.0.0.1:${platform.port}`,
+        runToken: "tok",
+        proxyUrl: "",
+      },
+      isBlockedHostFn: undefined,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await connectViaProxy(port, `127.0.0.1:${other.port}`);
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("CONNECT: a platform URL without a port exempts only its scheme's default port", async () => {
+    const proxy = makeProxy({
+      config: { platformApiUrl: "https://127.0.0.1", runToken: "tok", proxyUrl: "" },
+      isBlockedHostFn: undefined,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    // 443 is exempt: the proxy dials it (nothing listens → 502, not a 403 refusal).
+    expect((await connectViaProxy(port, "127.0.0.1:443")).statusCode).not.toBe(403);
+    expect((await connectViaProxy(port, "127.0.0.1:80")).statusCode).toBe(403);
   });
 });
 
@@ -663,6 +692,26 @@ describe("upstream proxy bypass for platform host", () => {
 
     const res = await httpViaProxy(port, `http://127.0.0.1:${target.port}/external`);
     expect(res.status).toBe(200);
+    expect(res.headers["x-via-upstream"]).toBe("true");
+    expect(upstream.receivedHttpHosts).toContain("127.0.0.1");
+  });
+
+  it("HTTP: another port on the platform host is routed through the upstream proxy", async () => {
+    const platform = await startEchoServer();
+    const other = await startEchoServer();
+    const upstream = await startFakeUpstream();
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: `http://127.0.0.1:${platform.port}`,
+        runToken: "tok",
+        proxyUrl: `http://127.0.0.1:${upstream.port}`,
+      },
+      isBlockedHostFn: () => false,
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+
+    const res = await httpViaProxy(port, `http://127.0.0.1:${other.port}/x`);
     expect(res.headers["x-via-upstream"]).toBe("true");
     expect(upstream.receivedHttpHosts).toContain("127.0.0.1");
   });

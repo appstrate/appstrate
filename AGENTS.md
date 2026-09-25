@@ -179,7 +179,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |   ├─ Agent Container (Pi Coding Agent, Bun) ───────────┤
      |   │  AGENT_PROMPT, LLM_*; SIDECAR_AUTH_TOKEN (sidecar- │
      |   │  only bearer, NOT the run token); it + SIDECAR_URL │
-     |   │  deleted after bootstrap; NO RUN_TOKEN             │
+     |   │  handed over on stdin, never in env; NO RUN_TOKEN  │
      |   └────────────────────────────────────────────────────┘
 ```
 
@@ -204,7 +204,7 @@ Agent manifest splits dependency from config: version on `dependencies.integrati
 - The sidecar exposes `/mcp` (Streamable HTTP, stateless JSON-RPC) as the agent's exclusive cross-boundary surface, alongside `/health`, `GET /integrations/boot-report` and `ALL /llm/*`
 - Tools are registered as Pi tools at container boot (`runtime-pi/mcp/direct.ts`): `{ns}__api_call` (+ `{ns}__api_upload`) per opted-in integration auth, plus the first-party `run_history` and `recall_memory`
 - Every route except `/health` requires the per-run `x-appstrate-sidecar-auth` token; deny-by-default middleware in `runtime-pi/sidecar/app.ts`
-- Zero-knowledge enforcement: after MCP bootstrap, `runtime-pi` deletes BOTH `process.env.SIDECAR_URL` and `process.env.SIDECAR_AUTH_TOKEN` — the URL removes the convenience, the token removes the capability
+- Zero-knowledge enforcement: `runtime-pi/launcher.ts` hands `SIDECAR_URL`, `SIDECAR_AUTH_TOKEN` and the sink credentials to the entrypoint over stdin, never in its environment, and both processes are non-dumpable — withholding the URL removes the convenience, the token removes the capability
 - The legacy HTTP `/proxy` and `/run-history` routes are fully retired — runners 1.x are not compatible
 
 ### Docker Integration
