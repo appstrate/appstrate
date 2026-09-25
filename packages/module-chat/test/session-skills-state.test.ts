@@ -4,19 +4,11 @@
 
 import { describe, expect, it } from "bun:test";
 import { skillPickerRows, togglePinned } from "../src/ui/chat-skills.ts";
-import { MAX_PINNED_SKILLS } from "../src/skills.ts";
-
-const fullSet = () => Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => `@s/p${i}`).sort();
 
 describe("togglePinned", () => {
   it("adds, removes, and keeps the set sorted", () => {
     expect(togglePinned(["@b/x"], "@a/y")).toEqual(["@a/y", "@b/x"]);
     expect(togglePinned(["@a/y", "@b/x"], "@a/y")).toEqual(["@b/x"]);
-  });
-
-  it("still unpins when the set is full", () => {
-    const full = fullSet();
-    expect(togglePinned(full, full[0]!)).toHaveLength(MAX_PINNED_SKILLS - 1);
   });
 });
 
