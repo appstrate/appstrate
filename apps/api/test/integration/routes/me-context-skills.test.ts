@@ -23,6 +23,7 @@ const SWITCHED_OFF = "@ctxskill/off";
 
 interface ContextBody {
   skills: { packageId: string }[];
+  skills_truncated: boolean;
   requested_skills: { packageId: string; version: string | null; source: string }[];
 }
 
@@ -74,6 +75,25 @@ describe("GET /api/me/context?skills=", () => {
 
     expect(body.requested_skills.map((s) => s.packageId).sort()).toEqual([FIRST, SECOND]);
     expect(body.requested_skills[0]?.version).toBe("1.0.0");
+  });
+
+  it("resolves a pin the capped `skills` listing leaves out", async () => {
+    // The reason `?skills=` exists: past the listing's cap, a pin still resolves.
+    const extra = Array.from({ length: 15 }, (_, i) => `@ctxskill/many-${i}`);
+    for (const id of extra) await createSkill(ctx, id);
+    const all = [FIRST, SECOND, ...extra];
+
+    const res = await app.request(`/api/me/context?skills=${encodeURIComponent(all.join(","))}`, {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ContextBody;
+
+    // Control: the listing is capped, so some pins are absent from it.
+    expect(body.skills_truncated).toBe(true);
+    const listed = new Set(body.skills.map((s) => s.packageId));
+    expect(all.filter((id) => !listed.has(id)).length).toBeGreaterThan(0);
+    expect(body.requested_skills.map((s) => s.packageId).sort()).toEqual([...all].sort());
   });
 
   it("returns no requested skill when the parameter is absent", async () => {
