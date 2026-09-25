@@ -626,6 +626,8 @@ interface PortResolverDeps {
    * error cleanly and let the user pass `--port <n>` explicitly.
    */
   autoPick?: boolean;
+  /** Port probe — tests inject a deterministic one, production binds for real. */
+  isPortAvailable?: (port: number) => Promise<boolean>;
 }
 
 /**
@@ -701,6 +703,7 @@ export async function resolveAppstratePort(
     "Appstrate",
     nonInteractive,
     deps.autoPick ?? false,
+    deps.isPortAvailable ?? isPortAvailable,
   );
 }
 
@@ -746,11 +749,14 @@ export function parsePort(
  * window is busy or the scan walks past 65535 — the caller decides
  * whether that's fatal or just a fallback to the strict error.
  */
-async function findNextFreePort(startExclusive: number): Promise<number | null> {
+async function findNextFreePort(
+  startExclusive: number,
+  probe: (port: number) => Promise<boolean>,
+): Promise<number | null> {
   for (let offset = 1; offset <= AUTO_PICK_MAX_ATTEMPTS; offset++) {
     const candidate = startExclusive + offset;
     if (candidate > 65535) return null;
-    if (await isPortAvailable(candidate)) return candidate;
+    if (await probe(candidate)) return candidate;
   }
   return null;
 }
@@ -773,14 +779,15 @@ async function ensurePortFree(
   label: string,
   nonInteractive: boolean,
   autoPick = false,
+  probe: (port: number) => Promise<boolean> = isPortAvailable,
 ): Promise<number> {
-  if (await isPortAvailable(port)) return port;
+  if (await probe(port)) return port;
 
   const holder = await describeProcessOnPort(port);
   const holderHint = holder ? ` Held by ${holder}.` : "";
 
   if (nonInteractive && autoPick) {
-    const next = await findNextFreePort(port);
+    const next = await findNextFreePort(port, probe);
     if (next !== null) {
       // log.info (not warn) because this is the designed happy path of
       // --yes — "just pick a free port". The message still names the
@@ -819,7 +826,7 @@ async function ensurePortFree(
   }
   // Recurse so the newly-picked port is checked again — cheap, and
   // covers the "user typed the same conflicting port twice" case.
-  return ensurePortFree(next, envVar, flagName, label, nonInteractive);
+  return ensurePortFree(next, envVar, flagName, label, nonInteractive, false, probe);
 }
 
 /**
