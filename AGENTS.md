@@ -410,6 +410,8 @@ bun test packages/core/           # Core library tests (no DB)
 bun test packages/afps-runtime/   # AFPS bundle runtime tests
 ```
 
+**Locally, run only the tests your change touches** — the test files you edited plus the ones covering the code you changed (`bun test <file-or-dir>`). Do not run the full `bun test` suite locally to validate a change: CI (`.github/workflows/test.yml`) runs every tier on each PR, in parallel, against the merge with `main`. A local full run is slow and not a reliable signal anyway (shared test DB across sessions, port contention, filesystem ordering). `bun run check` runs no tests at all.
+
 ### Test Conventions
 
 **`.claude/skills/testing/SKILL.md` owns the conventions table** — framework,
