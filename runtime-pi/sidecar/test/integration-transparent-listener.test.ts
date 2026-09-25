@@ -74,7 +74,11 @@ async function makeListener(
   return listener;
 }
 
-/** Connect, write chunks, collect echoed bytes until `expected` total or close. */
+/**
+ * Connect, write chunks, collect echoed bytes until `expected` total or close.
+ * `closed` means the listener closed the socket — giving up after 3 s is not
+ * a close, so a listener that never hangs up fails `expect(closed)`.
+ */
 async function driveClient(
   port: number,
   chunks: Buffer[],
@@ -106,7 +110,7 @@ async function driveClient(
     });
     socket.on("close", () => finish(true));
     socket.on("error", () => finish(true));
-    setTimeout(() => finish(true), 3_000);
+    setTimeout(() => finish(false), 3_000);
   });
 }
 
