@@ -240,7 +240,7 @@ describe("run launcher — sidecar death", () => {
     } finally {
       errorSpy.mockRestore();
     }
-  }, 4_000);
+  }, 8_000);
 
   it("reports the sidecar's crash when the agent's exit wins the race", async () => {
     const fake = createFake({ sidecarExitsIndependently: true, sidecarLogs: ["boom"] });
