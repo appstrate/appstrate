@@ -32,8 +32,9 @@ import { buildBaseSidecarEnv } from "../../../../services/orchestrator/sidecar-e
  * secret and belongs in SIDECAR_SECRET_KEYS instead.
  */
 const CLASSIFIED_NON_SECRET: readonly string[] = [
-  // Listen port — plain configuration.
+  // Listen ports — plain configuration.
   "PORT",
+  "FORWARD_PROXY_PORT",
   // Run identifier — an opaque id, not a credential.
   "RUN_ID",
   // Platform base URL — reachable-address configuration, no credential.
@@ -117,6 +118,7 @@ function emittedKeys(spec: SidecarLaunchSpec): string[] {
       spec,
       baseEnv: {},
       port: "8080",
+      forwardProxyPort: "8081",
       runId: "run_test",
       platformApiUrl: "http://10.0.0.1:3000",
       workspace: { kind: "directory", path: "/tmp/ws" },

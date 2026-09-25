@@ -6,11 +6,11 @@
  *
  * Two layers:
  *   - {@link buildBaseSidecarEnv} — the common per-run block (PORT,
- *     RUN_TOKEN, PLATFORM_API_URL, WORKSPACE_HANDLE_JSON, then the
- *     spec-driven assignments). Topology-owned differences are explicit
- *     params: the starting env (`pickOperatorSidecarEnv()` for
+ *     FORWARD_PROXY_PORT, RUN_TOKEN, PLATFORM_API_URL, WORKSPACE_HANDLE_JSON,
+ *     then the spec-driven assignments). Topology-owned differences are
+ *     explicit params: the starting env (`pickOperatorSidecarEnv()` for
  *     containers/VMs vs `cleanProcessEnv()` for host subprocesses), the
- *     port, and whether `RUN_ID` is stamped.
+ *     ports, and whether `RUN_ID` is stamped.
  *   - {@link applySpecToSidecarEnv} — ONLY the env vars derived from the
  *     `SidecarLaunchSpec` whose semantics are identical across topologies.
  *
@@ -33,6 +33,12 @@ interface BaseSidecarEnvParams {
   baseEnv: Record<string, string>;
   /** Sidecar listen port, as the env string (`"8080"` in-container/in-guest, dynamic on the host). */
   port: string;
+  /**
+   * The agent's forward proxy listener (`"8081"` in-container/in-guest, dynamic
+   * on the host). Its own port, not `port + 1`: on the host two adjacent free
+   * ports are a gamble, two free ports are not.
+   */
+  forwardProxyPort: string;
   platformApiUrl: string;
   /**
    * Handed to the sidecar as WORKSPACE_HANDLE_JSON so its integration
@@ -58,6 +64,7 @@ export function buildBaseSidecarEnv(params: BaseSidecarEnvParams): Record<string
   const env: Record<string, string> = {
     ...params.baseEnv,
     PORT: params.port,
+    FORWARD_PROXY_PORT: params.forwardProxyPort,
     RUN_TOKEN: params.spec.runToken,
     ...(params.runId !== undefined ? { RUN_ID: params.runId } : {}),
     PLATFORM_API_URL: params.platformApiUrl,

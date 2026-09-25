@@ -12,6 +12,8 @@ export interface SidecarEnv {
   platformApiUrl: string;
   runToken: string;
   port: number;
+  /** The agent's forward proxy listener — its own port, never derived from `port`. */
+  forwardProxyPort: number;
   /** Absent on a connect-run, which never serves the agent surface. */
   sidecarAuthToken?: string;
   /** Upstream egress proxy — set only when the run resolved one. */
@@ -39,20 +41,32 @@ export function parseSidecarEnv(source: NodeJS.ProcessEnv = process.env): Sideca
   const runToken = source.RUN_TOKEN;
   if (!runToken) issues.push("RUN_TOKEN: required");
 
-  const port = Number(source.PORT);
-  if (!source.PORT) issues.push("PORT: required");
-  else if (!Number.isInteger(port) || port <= 0 || port >= 65535)
-    issues.push(
-      `PORT: must be an integer in 1-65534, the next port hosts the forward proxy (got "${source.PORT}")`,
-    );
+  const port = parsePort("PORT", source.PORT, issues);
+  const forwardProxyPort = parsePort("FORWARD_PROXY_PORT", source.FORWARD_PROXY_PORT, issues);
+  if (port !== null && port === forwardProxyPort)
+    issues.push(`FORWARD_PROXY_PORT: must differ from PORT (both "${port}")`);
 
   if (issues.length > 0) throw new SidecarEnvError(issues);
 
   return {
     platformApiUrl: platformApiUrl!,
     runToken: runToken!,
-    port,
+    port: port!,
+    forwardProxyPort: forwardProxyPort!,
     ...(source.SIDECAR_AUTH_TOKEN ? { sidecarAuthToken: source.SIDECAR_AUTH_TOKEN } : {}),
     ...(source.PROXY_URL ? { proxyUrl: source.PROXY_URL } : {}),
   };
+}
+
+function parsePort(name: string, raw: string | undefined, issues: string[]): number | null {
+  if (!raw) {
+    issues.push(`${name}: required`);
+    return null;
+  }
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    issues.push(`${name}: must be an integer in 1-65535 (got "${raw}")`);
+    return null;
+  }
+  return port;
 }

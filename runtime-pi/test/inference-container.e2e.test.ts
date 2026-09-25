@@ -200,6 +200,7 @@ describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verb
           networkAlias: "sidecar",
           env: {
             PORT: "8080",
+            FORWARD_PROXY_PORT: "8081",
             RUN_ID: RID,
             RUN_TOKEN,
             PLATFORM_API_URL: platformUrl,
