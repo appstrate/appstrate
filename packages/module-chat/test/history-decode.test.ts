@@ -14,7 +14,7 @@ describe("loadHistory decode", () => {
       new Response(
         JSON.stringify({
           id: "chs_1",
-          skill_catalogue: true,
+          skill_mode: "auto",
           pinned_skills: [],
           messages: [
             { id: "m1", content: { role: "user", parts: [{ type: "text", text: "hi" }] } },
@@ -37,7 +37,7 @@ describe("loadHistory decode", () => {
         JSON.stringify({
           id: "chs_1",
           messages: [],
-          skill_catalogue: false,
+          skill_mode: "manual",
           pinned_skills: ["@scope/a", "@scope/b"],
         }),
         { status: 200, headers: { "content-type": "application/json" } },
@@ -45,7 +45,7 @@ describe("loadHistory decode", () => {
 
     const loaded = await loadHistory(() => ({}), "chs_1");
     expect(loaded.skills).toEqual({
-      skillCatalogue: false,
+      skillMode: "manual",
       pinnedSkills: ["@scope/a", "@scope/b"],
     });
   });
@@ -54,7 +54,7 @@ describe("loadHistory decode", () => {
     globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
     expect(await loadHistory(() => ({}), "chs_new")).toEqual({
       messages: [],
-      skills: { skillCatalogue: true, pinnedSkills: [] },
+      skills: { skillMode: "auto", pinnedSkills: [] },
     });
   });
 

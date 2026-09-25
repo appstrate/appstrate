@@ -199,6 +199,17 @@ async function collectUiChunks(
   return chunks;
 }
 
+/** The permission set the turn's platform-MCP bearer actually carries. */
+async function tokenPermissions(input: PiChatInput): Promise<string[]> {
+  const authorization = input.platformMcp?.headers?.Authorization;
+  expect(typeof authorization).toBe("string");
+  const resolved = await chatLoopbackStrategy.authenticate({
+    headers: new Headers({ authorization: authorization as string }),
+  } as never);
+  expect(resolved).not.toBeNull();
+  return [...(resolved!.permissions ?? [])].sort();
+}
+
 describe("handleChatStream", () => {
   let ctx: TestContext;
   /** What `app.onError` saw, so a thrown invariant can be asserted on its message. */
@@ -512,9 +523,9 @@ describe("handleChatStream", () => {
     }
   });
 
-  it("carries the session's own catalogue switch and pins into the system prompt", async () => {
-    // Persona and context block must agree within one turn; both are wired from
-    // the one session-row read, which only this end-to-end test can prove.
+  it("reads the skill mode off the session row: strict injects the chosen skill and withholds `skills:read`", async () => {
+    // Persona, context block and token must agree within one turn; all three
+    // are wired from the one session-row read, which only this test can prove.
     const sessionId = mintSessionId();
     const PIN = "@acme/pinned-skill";
     await db.insert(chatSessions).values({
@@ -523,15 +534,18 @@ describe("handleChatStream", () => {
       userId: ctx.user.id,
       spaceId: ctx.defaultSpaceId,
       title: null,
-      skillCatalogue: false,
+      skillMode: "strict",
       pinnedSkills: [PIN],
     });
 
-    // Echo back whatever `?skills=` asked for, so the rendered index is a
-    // function of what the handler requested.
+    // Echo back whatever `?skills=` asked for, and serve each chosen skill's
+    // content, so the rendered block is a function of what the handler read.
     const requested: string[][] = [];
     const dispatch = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
+      if (url.pathname.startsWith("/api/packages/skills/")) {
+        return Response.json({ content: "Always answer in haiku.", version: "1.0.0" });
+      }
       if (url.pathname !== "/api/me/context") return scriptedDispatch()(req);
       const ids = (url.searchParams.get("skills") ?? "").split(",").filter(Boolean);
       requested.push(ids);
@@ -540,14 +554,9 @@ describe("handleChatStream", () => {
         org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
         connections: [],
         agents: [],
-        // Non-empty on purpose: the catalogue switch is off, so it must not render.
+        // Non-empty on purpose: strict lists no skill, so it must not render.
         skills: [{ packageId: "@acme/catalogued", display_name: "Catalogued" }],
-        requested_skills: ids.map((id) => ({
-          packageId: id,
-          display_name: id,
-          description: "fixture",
-          version: null,
-        })),
+        requested_skills: ids.map((id) => ({ packageId: id })),
       });
     };
 
@@ -559,14 +568,39 @@ describe("handleChatStream", () => {
     expect(res.status).toBe(200);
     await collectUiChunks(res);
 
-    // The pin was asked for by exact id.
-    expect(requested[0]).toContain(PIN);
+    expect(requested[0]).toEqual([PIN]);
+    const input = calls[0]!;
+    expect(input.system).toContain(
+      `<skill id="${PIN}" version="1.0.0">\nAlways answer in haiku.\n</skill>`,
+    );
+    expect(input.system).not.toContain("@acme/catalogued");
+    // No skill tool is taught, and the token cannot reach one.
+    expect(input.system).not.toContain("getSkill");
+    expect(input.system).not.toContain("listSkills");
+    expect(await tokenPermissions(input)).toEqual(["mcp:invoke", "mcp:read"]);
 
-    const system = calls[0]!.system;
-    // The catalogue is off, so the block drops it; pins are still indexed.
-    expect(system).not.toContain("Other skills in this space");
-    expect(system).not.toContain("@acme/catalogued");
-    expect(system).toContain(`\`${PIN}\` (pinned)`);
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("keeps `skills:read` on the token in manual, where the model may look for more", async () => {
+    const sessionId = mintSessionId();
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      spaceId: ctx.defaultSpaceId,
+      title: null,
+      skillMode: "manual",
+      pinnedSkills: [],
+    });
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      permissions: new Set(["mcp:read", "mcp:invoke", "skills:read"]),
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    expect(await tokenPermissions(calls[0]!)).toEqual(["mcp:invoke", "mcp:read", "skills:read"]);
+    expect(calls[0]!.system).toContain("listSkills");
 
     await waitForAssistantPersist(sessionId);
   });
@@ -813,17 +847,6 @@ describe("handleChatStream", () => {
   }, 20_000);
 
   describe("the composer's agent-authoring switch", () => {
-    /** The permission set the turn's platform-MCP bearer actually carries. */
-    async function tokenPermissions(input: PiChatInput): Promise<string[]> {
-      const authorization = input.platformMcp?.headers?.Authorization;
-      expect(typeof authorization).toBe("string");
-      const resolved = await chatLoopbackStrategy.authenticate({
-        headers: new Headers({ authorization: authorization as string }),
-      } as never);
-      expect(resolved).not.toBeNull();
-      return [...(resolved!.permissions ?? [])].sort();
-    }
-
     /** The one argument a model needs to compose an inline agent, whatever the prose. */
     const INLINE_MARKER = 'kind:"inline"';
     const REDUCED_MARKER = "Do not create or modify an agent in this turn";

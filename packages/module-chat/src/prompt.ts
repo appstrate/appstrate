@@ -23,8 +23,10 @@ import { reaches, type TurnCapabilities } from "./capabilities.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 import {
   DEFAULT_SKILL_SELECTION,
+  injectsSkills,
   resolveChatSkills,
   type ChatSkillSelection,
+  type SkillContent,
   type SkillHint,
 } from "./skills.ts";
 
@@ -82,7 +84,8 @@ export type ChatEnv = {
 
 // Named by the persona and rendered by the context block: one string for both.
 const SKILLS_HEADING = "## Skills";
-const SKILL_CATALOGUE_LEAD = "Other skills in this space (not loaded):";
+const SKILLS_INJECTED_LEAD =
+  "The user chose these skills for this conversation. Each is a procedure for YOU: follow it whenever it applies.";
 
 /**
  * Instructions for an act the turn cannot perform are ABSENT rather than
@@ -189,7 +192,7 @@ ${runs(`Everything a run writes under \`outputs/\` is published when it ends: th
 `)}Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected${runs(", the agents they can run")}${skills(", and the skills available")}. How to act on it:
 - Use the current date to resolve relative dates.
 ${idVerbatimBullet}${runs(`- ${inline("Prefer running an existing agent over doing the work inline when one fits the task", "Run an existing agent whenever one fits the task")}. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
-`)}${skills(`- The skills listed under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. When one clearly matches the request, LOAD IT BEFORE acting: call \`invoke_operation\` with \`operation_id: "getSkill"\` and the path params \`scope\` (KEEP the leading \`@\`, e.g. \`@appstrate\`) and \`name\`, then follow the \`content\` it returns. Load ONE at a time, and none when none clearly matches. Never call \`getSkill\` for a skill whose content already appears in this conversation. A skill marked \`(pinned)\` is one the user chose for this conversation: prefer it. Call \`listSkills\` only when the user asks for a skill you do not see listed.
+`)}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by name clearly matches the request, LOAD IT BEFORE acting: call \`invoke_operation\` with \`operation_id: "getSkill"\` and the path params \`scope\` (KEEP the leading \`@\`, e.g. \`@appstrate\`) and \`name\`, then follow the \`content\` it returns. Load ONE at a time, and none when none clearly matches. Never call \`getSkill\` for a skill whose content already appears in this conversation. Call \`listSkills\` only when the user asks for a skill you do not see.
 `)}${skills(
     author(`- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
 `),
@@ -258,16 +261,19 @@ export function normalizeChatLocale(raw: string | undefined): string {
   return /^[a-z]{2}$/.test(primary) ? primary : "fr";
 }
 
-/** `` - `@scope/name` (v1.2.0) (pinned) — Label: desc ``, minus the parts that say nothing. */
-function skillLine(skill: SkillHint, pinned = false): string {
+/** `` - `@scope/name` (v1.2.0) — Label: desc ``, minus the parts that say nothing. */
+function skillLine(skill: SkillHint): string {
   const description = skill.description?.trim();
   const label = skill.display_name?.trim() || skill.packageId;
-  const head =
-    `- \`${skill.packageId}\`` +
-    (skill.version ? ` (v${skill.version})` : "") +
-    (pinned ? " (pinned)" : "");
+  const head = `- \`${skill.packageId}\`` + (skill.version ? ` (v${skill.version})` : "");
   if (label === skill.packageId) return description ? `${head} — ${description}` : head;
   return `${head} — ${label}${description ? `: ${description}` : ""}`;
+}
+
+/** The whole `SKILL.md`, front matter included, tagged with its id and version. */
+function skillBlock(skill: SkillContent): string {
+  const version = skill.version ? ` version="${skill.version}"` : "";
+  return `<skill id="${skill.packageId}"${version}>\n${skill.content.trim()}\n</skill>`;
 }
 
 /**
@@ -304,23 +310,25 @@ export function formatCallerContext(
     /** The TURN's set (post-`turnPermissions`): the authoring toggle narrows it. */
     permissions: readonly string[];
     skills: ChatSkillSelection;
+    /** The chosen skills' `SKILL.md`, read by {@link buildCallerContextBlock}. */
+    skillContents?: ReadonlyMap<string, SkillContent>;
   },
 ): string {
   const author = opts.capabilities.authors;
   const runnable = reaches(opts.capabilities.runLevel, "run");
   const ctx = (raw ?? {}) as CallerContext;
   // Before the emptiness check: a payload holding only skills deserves a block.
-  // A turn that cannot load a skill is shown none, as it is shown no agent it
-  // cannot launch.
+  // A listed skill the turn cannot load is noise, as an agent it cannot launch
+  // is; an injected one needs no tool.
   const skills = resolveChatSkills({
     selection: opts.skills,
     requested: ctx.requested_skills ?? [],
+    contents: opts.skillContents ?? new Map(),
     catalogue: ctx.skills ?? [],
     catalogueTruncated: ctx.skills_truncated ?? false,
   });
-  const hasSkillSection =
-    opts.capabilities.readsSkills &&
-    (skills.pinned.length > 0 || skills.catalogue.length > 0 || skills.notices.length > 0);
+  const listsSkills = opts.capabilities.readsSkills && skills.catalogue.length > 0;
+  const hasSkillSection = listsSkills || skills.injected.length > 0 || skills.notices.length > 0;
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();
   const role = ctx.org?.role?.trim();
@@ -430,14 +438,16 @@ export function formatCallerContext(
     }
     if (ctx.agents_truncated) lines.push("(list truncated)");
   }
-  // Rendered whatever the authoring grant: the chat loads skills for itself.
+  // Rendered whatever the authoring grant: the chat uses skills for itself.
   if (hasSkillSection) {
     lines.push("", SKILLS_HEADING);
-    for (const skill of skills.pinned) lines.push(skillLine(skill, true));
-    if (skills.catalogue.length) {
-      lines.push("", SKILL_CATALOGUE_LEAD);
+    if (listsSkills) {
       for (const skill of skills.catalogue) lines.push(skillLine(skill));
       if (skills.catalogueTruncated) lines.push("(list truncated)");
+    }
+    if (skills.injected.length) {
+      lines.push(SKILLS_INJECTED_LEAD);
+      for (const skill of skills.injected) lines.push("", skillBlock(skill));
     }
     if (skills.notices.length) lines.push("", ...skills.notices);
   }
@@ -445,6 +455,36 @@ export function formatCallerContext(
   // rewrites itself on every launch, busting the system prompt's single cache breakpoint.
   // `buildSystemPrompt` tells the model to call `listRuns` instead (when the turn reads runs).
   return lines.join("\n");
+}
+
+/**
+ * Each chosen skill's `SKILL.md` through `getSkill`, with the caller's own
+ * headers — the version the caller would read, even in `strict`, whose token
+ * holds no `skills:read`. A refusal or a failure leaves the skill out.
+ */
+async function loadSkillContents(
+  deps: ChatPlatformDeps,
+  origin: string,
+  headers: Headers,
+  ids: readonly string[],
+): Promise<Map<string, SkillContent>> {
+  const loaded = await Promise.all(
+    ids.map(async (id): Promise<SkillContent | null> => {
+      try {
+        const res = await deps.dispatch(
+          new Request(new URL(`/api/packages/skills/${id}`, origin).toString(), { headers }),
+        );
+        if (!res.ok) return null;
+        const body = (await res.json()) as { content?: unknown; version?: unknown };
+        if (typeof body.content !== "string") return null;
+        const version = typeof body.version === "string" ? body.version : null;
+        return { packageId: id, version, content: body.content };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return new Map(loaded.filter((skill) => skill !== null).map((skill) => [skill.packageId, skill]));
 }
 
 /** The preset, or a custom bundle's name (its id when unnamed). */
@@ -512,15 +552,19 @@ export async function buildCallerContextBlock(
       },
     );
 
-  // Pins are stored sorted and deduped: the same session asks the same question.
+  // Stored sorted and deduped: the same session asks the same question. The
+  // listing answers which chosen skills are active here; `getSkill` their content.
   const url = new URL("/api/me/context", origin);
-  const requested = capabilities.readsSkills ? skills.pinnedSkills : [];
+  const requested = injectsSkills(skills.skillMode) ? skills.pinnedSkills : [];
   if (requested.length > 0) url.searchParams.set("skills", requested.join(","));
   try {
     const ctxHeaders = new Headers();
     for (const [k, v] of Object.entries(headers)) ctxHeaders.set(k, v);
     ctxHeaders.set("x-space-id", spaceId);
-    const res = await deps.dispatch(new Request(url.toString(), { headers: ctxHeaders }));
+    const [res, skillContents] = await Promise.all([
+      deps.dispatch(new Request(url.toString(), { headers: ctxHeaders })),
+      loadSkillContents(deps, origin, ctxHeaders, requested),
+    ]);
     if (res.ok) {
       return formatCallerContext((await res.json()) as CallerContext, {
         locale,
@@ -530,6 +574,7 @@ export async function buildCallerContextBlock(
         spaceId,
         permissions: args.permissions,
         skills,
+        skillContents,
       });
     }
     // No space context, or `?skills=` refused (a chat-side bug): keep identity.

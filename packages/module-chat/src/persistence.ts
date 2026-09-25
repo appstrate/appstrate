@@ -59,7 +59,7 @@ export async function ensureSession(
   selection?: ChatSkillSelection,
 ): Promise<ChatSkillSelection> {
   const skills = selection && {
-    skillCatalogue: selection.skillCatalogue,
+    skillMode: selection.skillMode,
     pinnedSkills: [...selection.pinnedSkills],
   };
   // The id is client-minted, so a caller could send an id that already belongs
@@ -99,13 +99,13 @@ export async function ensureSession(
       orgId: chatSessions.orgId,
       userId: chatSessions.userId,
       spaceId: chatSessions.spaceId,
-      skillCatalogue: chatSessions.skillCatalogue,
+      skillMode: chatSessions.skillMode,
       pinnedSkills: chatSessions.pinnedSkills,
     });
   if (!row || row.orgId !== orgId || row.userId !== userId || row.spaceId !== spaceId) {
     throw notFound("Chat session not found");
   }
-  return { skillCatalogue: row.skillCatalogue, pinnedSkills: row.pinnedSkills };
+  return { skillMode: row.skillMode, pinnedSkills: row.pinnedSkills };
 }
 
 /** Most recent message id in a session — the one a new message follows, or null. */

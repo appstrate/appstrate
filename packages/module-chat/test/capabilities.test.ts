@@ -50,13 +50,13 @@ describe("canAuthorAgents", () => {
 });
 
 describe("canPinSkills", () => {
-  it("needs the turn to write the conversation, dispatch, and read skills", () => {
-    const pinner = ["chat:write", "mcp:read", "mcp:invoke", "skills:read"];
+  it("needs the caller to write the conversation and read skills, not to dispatch", () => {
+    const pinner = ["chat:write", "skills:read"];
     const held = (set: string[]) => (p: string) => set.includes(p);
+    // The chosen skills are read by the chat with the caller's own authority,
+    // so a caller without the MCP pair still injects them.
     expect(canPinSkills(held(pinner))).toBe(true);
-    // Each conjunct on its own: the selection is a `chat:write`, `getSkill`
-    // dispatches through `mcp:invoke`, and the picker lists `skills:read` rows.
-    for (const missing of ["chat:write", "mcp:invoke", "skills:read"]) {
+    for (const missing of pinner) {
       expect(canPinSkills(held(pinner.filter((p) => p !== missing)))).toBe(false);
     }
   });

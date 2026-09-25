@@ -8954,12 +8954,13 @@
           "notNull": true,
           "default": "now()"
         },
-        "skill_catalogue": {
-          "name": "skill_catalogue",
-          "type": "boolean",
+        "skill_mode": {
+          "name": "skill_mode",
+          "type": "chat_skill_mode",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": true
+          "default": "'auto'"
         },
         "pinned_skills": {
           "name": "pinned_skills",
@@ -9071,6 +9072,11 @@
     }
   },
   "enums": {
+    "public.chat_skill_mode": {
+      "name": "chat_skill_mode",
+      "schema": "public",
+      "values": ["auto", "manual", "strict"]
+    },
     "public.credential_source": {
       "name": "credential_source",
       "schema": "public",

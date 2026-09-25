@@ -29,7 +29,7 @@ import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions } from "@appstrate/db/schema";
+import { chatMessages, chatSessions, chatSkillModeValues } from "@appstrate/db/schema";
 import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
 import { invalidRequest, notFound, parseBody } from "@appstrate/core/api-errors";
 import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
@@ -63,13 +63,13 @@ export const renameSessionSchema = z.object({
   title: z.string().min(1).max(200),
 });
 
-/** An unknown id is a pin the turn names as unavailable, never a 400. */
+/** An unknown id is a chosen skill the turn names as unavailable, never a 400. */
 export const sessionSkillsSchema = z
   .object({
-    skill_catalogue: z.boolean(),
+    skill_mode: z.enum(chatSkillModeValues),
     pinned_skills: z
       .array(packageIdSchema)
-      .max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} pinned skills` }),
+      .max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} chosen skills` }),
   })
   .strict();
 
@@ -91,7 +91,7 @@ function toSessionDto(row: SessionRow) {
     unread:
       row.lastAssistantSeq != null &&
       (row.lastReadSeq == null || row.lastReadSeq < row.lastAssistantSeq),
-    skill_catalogue: row.skillCatalogue,
+    skill_mode: row.skillMode,
     pinned_skills: row.pinnedSkills,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -285,7 +285,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       const id = c.req.param("id");
       const data = parseBody(sessionSkillsSchema, await c.req.json().catch(() => null));
       await ensureSession(id, scope.orgId, scope.userId, scope.spaceId, {
-        skillCatalogue: data.skill_catalogue,
+        skillMode: data.skill_mode,
         pinnedSkills: [...new Set(data.pinned_skills)].sort(),
       });
       notifySessionUpdate(id, scope.orgId, scope.userId);

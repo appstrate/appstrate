@@ -82,7 +82,7 @@ describe("putSessionSkills", () => {
     const capture = scripted(() => new Response(null, { status: 204 }));
 
     await putSessionSkills(() => ({ "X-Space-Id": "spc_a" }), "chs_1", {
-      skillCatalogue: false,
+      skillMode: "manual",
       pinnedSkills: ["@scope/a", "@scope/b"],
     });
 
@@ -94,7 +94,7 @@ describe("putSessionSkills", () => {
       "X-Space-Id": "spc_a",
     });
     expect(JSON.parse(String(capture.init?.body))).toEqual({
-      skill_catalogue: false,
+      skill_mode: "manual",
       pinned_skills: ["@scope/a", "@scope/b"],
     });
   });
@@ -102,7 +102,7 @@ describe("putSessionSkills", () => {
   it("throws when the server refuses the write", async () => {
     scripted(() => new Response(null, { status: 400 }));
     await expect(
-      putSessionSkills(() => ({}), "chs_1", { skillCatalogue: true, pinnedSkills: [] }),
+      putSessionSkills(() => ({}), "chs_1", { skillMode: "auto", pinnedSkills: [] }),
     ).rejects.toThrow("HTTP 400");
   });
 });
@@ -116,7 +116,7 @@ describe("skillWriteSettled", () => {
           answer = () => resolve(new Response(null, { status }));
         })) as unknown as typeof fetch;
       const write = putSessionSkills(() => ({}), "chs_w", {
-        skillCatalogue: true,
+        skillMode: "auto",
         pinnedSkills: [],
       }).catch(() => {});
       let settled = false;

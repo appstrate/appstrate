@@ -311,18 +311,24 @@ export async function handleChatStream(
   // answer (it also ignored an API key's pinned space).
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
 
-  // Flipping the switch changes the system prompt and, through the narrowed token, the
-  // MCP `run_and_wait` descriptor on the same turn: one prompt-cache miss.
-  const permissions = turnPermissions(c.get("permissions"), body.agent_authoring !== false);
-  const capabilities = turnCapabilities((permission) => permissions.includes(permission));
+  // Flipping a switch changes the system prompt and, through the narrowed token, the
+  // MCP tool descriptors on the same turn: one prompt-cache miss. The skill mode
+  // lives on the session row, so the turn's grants follow its upsert.
+  const turn = sessionSkills.then((skills) => {
+    const permissions = turnPermissions(c.get("permissions"), {
+      authoring: body.agent_authoring !== false,
+      skillMode: skills.skillMode,
+    });
+    const capabilities = turnCapabilities((permission) => permissions.includes(permission));
+    return { skills, permissions, capabilities };
+  });
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
   // Only the caller-context block. It depends on the space id and the caller's
-  // headers — never on the chosen model or the admission gate. A turn that
-  // reads skills chains it on the session row (it renders the pins); any other
-  // turn starts it at once. Either way it overlaps the model list, the attachment
-  // materialization, the
+  // headers and the session row (the turn's grants and its skills) — never on the
+  // chosen model or the admission gate — so it starts the moment the row
+  // resolves, overlapping the model list, the attachment materialization, the
   // credential resolution and the gate rather than waiting behind them. It is a
   // READ (`/api/me/context`); a turn the gate rejects has dispatched it for
   // nothing, which is acceptable — what a rejected turn must not do is persist
@@ -342,13 +348,9 @@ export async function handleChatStream(
   // handler. The error is rethrown where the block is consumed.
   const phaseBStart = Date.now();
   let phaseBMs = 0;
-  // Not chained on `sessionSkills` otherwise: its rejection is joined below.
-  const contextSkills = capabilities.readsSkills
-    ? sessionSkills
-    : Promise.resolve(DEFAULT_SKILL_SELECTION);
   const contextBlockPromise: Promise<{ ok: true; block: string } | { ok: false; error: unknown }> =
-    contextSkills
-      .then((skills) =>
+    turn
+      .then(({ skills, permissions, capabilities }) =>
         buildCallerContextBlock(c, {
           origin,
           headers,
@@ -369,9 +371,9 @@ export async function handleChatStream(
         (error: unknown) => ({ ok: false as const, error }),
       );
 
-  const [models] = await Promise.all([
+  const [models, { permissions, capabilities }] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
-    sessionSkills,
+    turn,
   ]);
   const chosen = pickModel(models, modelId);
   let generationSettings;

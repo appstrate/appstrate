@@ -1101,7 +1101,7 @@ export interface paths {
         get?: never;
         /**
          * Set a chat session's skill selection
-         * @description Replaces whether the conversation lists the space's skill catalogue and its pinned skills in one call (the body is the state you want, not a patch). Duplicate ids are deduped server-side; at most 20 pins. The session row is created if the client-minted id has none yet — exactly as the first turn would.
+         * @description Replaces the conversation's skill mode and chosen skills in one call (the body is the state you want, not a patch). Duplicate ids are deduped server-side; at most 5 chosen skills. The session row is created if the client-minted id has none yet — exactly as the first turn would.
          */
         put: operations["setChatSessionSkills"];
         post?: never;
@@ -5400,9 +5400,12 @@ export interface components {
             generating: boolean;
             /** @description Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read. */
             unread: boolean;
-            /** @description Whether turns also list the space's skill catalogue. Pins are always indexed. A context-budget control, never an authorization boundary. Set via PUT /api/chat/sessions/{id}/skills. */
-            skill_catalogue: boolean;
-            /** @description Package ids (`@scope/name`) pinned to this conversation, sorted. */
+            /**
+             * @description How turns use skills. `auto`: the space's skills are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:read`, so it lists, loads and declares no other. Set via PUT /api/chat/sessions/{id}/skills.
+             * @enum {string}
+             */
+            skill_mode: "auto" | "manual" | "strict";
+            /** @description Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`. */
             pinned_skills: string[];
             /** Format: date-time */
             createdAt: string;
@@ -10163,8 +10166,9 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    skill_catalogue: boolean;
-                    /** @description Package ids to pin. Deduped server-side; the cap applies to the array as sent. */
+                    /** @enum {string} */
+                    skill_mode: "auto" | "manual" | "strict";
+                    /** @description Package ids to choose. Deduped server-side; the cap applies to the array as sent. */
                     pinned_skills: string[];
                 };
             };

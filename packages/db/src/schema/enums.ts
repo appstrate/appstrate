@@ -97,6 +97,15 @@ export const inferenceRouteEnum = pgEnum("inference_route", inferenceRouteValues
 export type InferenceRoute = (typeof inferenceRouteValues)[number];
 
 /**
+ * How a chat conversation uses skills: `auto` lists the space's skills and the
+ * model loads what fits; `manual` injects the chosen ones and the model may
+ * still find others on request; `strict` injects the chosen ones and nothing else.
+ */
+export const chatSkillModeValues = ["auto", "manual", "strict"] as const;
+export const chatSkillModeEnum = pgEnum("chat_skill_mode", chatSkillModeValues);
+export type ChatSkillMode = (typeof chatSkillModeValues)[number];
+
+/**
  * What a `files` row is: `user_upload` (a staged upload materialized into
  * durable storage when consumed by a run/chat session) or `agent_output` (a
  * deliverable an agent published from a run). Drives the `downloadable`

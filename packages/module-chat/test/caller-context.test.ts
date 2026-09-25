@@ -298,111 +298,103 @@ describe("formatCallerContext", () => {
     }
   });
 
-  it("indexes the pins, tagged (pinned) and sorted by package id", () => {
-    const out = formatCallerContext(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        requested_skills: [
-          {
-            packageId: "@acme/zeta",
-            display_name: "Zeta",
-            description: "Last.",
-            version: "1.0.0",
-          },
-          { packageId: "@acme/mine", display_name: "Mine", description: "Pinned.", version: null },
-        ],
-      },
-      {
+  it("injects the chosen skills in full, sorted, tagged with id and version, in manual and strict", () => {
+    const raw = {
+      user: { name: "Ada" },
+      org: { role: "member" },
+      requested_skills: [{ packageId: "@acme/zeta" }, { packageId: "@acme/mine" }],
+      skills: [{ packageId: "@acme/pdf", display_name: "PDF" }],
+      skills_truncated: true,
+    };
+    const skillContents = new Map([
+      [
+        "@acme/zeta",
+        { packageId: "@acme/zeta", version: "1.0.0", content: "---\nname: zeta\n---\nZeta body." },
+      ],
+      ["@acme/mine", { packageId: "@acme/mine", version: null, content: "Mine body.\n" }],
+    ]);
+    // Strict turns hold no `skills:read`: the injected skills need no tool.
+    for (const [skillMode, permissions] of [
+      ["manual", BUILDER],
+      ["strict", BUILDER.filter((p) => p !== "skills:read")],
+    ] as const) {
+      const out = formatCallerContext(raw, {
         ...BASE_OPTS,
-        skills: { skillCatalogue: true, pinnedSkills: ["@acme/mine", "@acme/zeta"] },
-      },
-    );
-    expect(out).toContain("## Skills");
-    expect(out).toContain("- `@acme/mine` (pinned) — Mine: Pinned.");
-    expect(out).toContain("- `@acme/zeta` (v1.0.0) (pinned) — Zeta: Last.");
-    expect(out.indexOf("@acme/mine")).toBeLessThan(out.indexOf("@acme/zeta"));
+        capabilities: caps(permissions),
+        skills: { skillMode, pinnedSkills: ["@acme/zeta", "@acme/mine"] },
+        skillContents,
+      });
+      expect(out.split("## Skills")).toHaveLength(2);
+      expect(out).toContain("The user chose these skills for this conversation.");
+      expect(out).toContain('<skill id="@acme/mine">\nMine body.\n</skill>');
+      expect(out).toContain(
+        '<skill id="@acme/zeta" version="1.0.0">\n---\nname: zeta\n---\nZeta body.\n</skill>',
+      );
+      expect(out.indexOf("@acme/mine")).toBeLessThan(out.indexOf("@acme/zeta"));
+      // No listing next to the chosen skills.
+      expect(out).not.toContain("@acme/pdf");
+      expect(out).not.toContain("(list truncated)");
+    }
   });
 
-  it("renders the catalogue under its lead line, minus what is already pinned", () => {
-    const out = formatCallerContext(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        requested_skills: [{ packageId: "@acme/mine", display_name: "Mine" }],
-        skills: [
-          { packageId: "@acme/mine", display_name: "Mine" },
-          { packageId: "@acme/pdf", display_name: "PDF", description: "Reads PDFs." },
-        ],
-        skills_truncated: true,
-      },
-      { ...BASE_OPTS, skills: { skillCatalogue: true, pinnedSkills: ["@acme/mine"] } },
-    );
-    expect(out).toContain("Other skills in this space (not loaded):");
+  it("lists the space's skills in auto, and none when the turn cannot load one", () => {
+    const raw = {
+      user: { name: "Ada" },
+      org: { role: "member" },
+      skills: [{ packageId: "@acme/pdf", display_name: "PDF", description: "Reads PDFs." }],
+      skills_truncated: true,
+    };
+    const out = formatCallerContext(raw, BASE_OPTS);
+    expect(out.split("## Skills")).toHaveLength(2);
     expect(out).toContain("- `@acme/pdf` — PDF: Reads PDFs.");
     expect(out).toContain("(list truncated)");
-    // The pinned one is NOT repeated in the catalogue.
-    expect(out.split("@acme/mine")).toHaveLength(2);
-    expect(out).not.toContain("###");
-    // A catalogue line is not a pin.
-    expect(out).not.toContain("`@acme/pdf` (pinned)");
+    expect(out).not.toContain("<skill");
+
+    const noDispatch = formatCallerContext(raw, {
+      ...BASE_OPTS,
+      capabilities: caps(BUILDER.filter((p) => p !== "mcp:invoke")),
+    });
+    expect(noDispatch).not.toContain("## Skills");
   });
 
-  it("renders ONE `## Skills` heading when only the catalogue has rows", () => {
+  it("says a chosen skill could not be included", () => {
     const out = formatCallerContext(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        requested_skills: [],
-        skills: [{ packageId: "@acme/pdf", display_name: "PDF" }],
-      },
-      { ...BASE_OPTS, skills: { skillCatalogue: true, pinnedSkills: [] } },
+      { user: { name: "Ada" }, org: { role: "member" }, requested_skills: [] },
+      { ...BASE_OPTS, skills: { skillMode: "manual", pinnedSkills: ["@acme/gone"] } },
     );
-    expect(out.split("## Skills")).toHaveLength(2);
-    expect(out).not.toContain("###");
-    expect(out.indexOf("## Skills")).toBeLessThan(
-      out.indexOf("Other skills in this space (not loaded):"),
+    expect(out).toContain("## Skills");
+    expect(out).toContain(
+      "`@acme/gone` was chosen for this conversation but is not available here",
     );
-    expect(out).toContain("- `@acme/pdf` — PDF");
+    expect(out).not.toContain("The user chose these skills");
   });
 
-  it("drops the catalogue (and its truncation marker) when the catalogue is off, keeping the pins", () => {
-    const out = formatCallerContext(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        requested_skills: [
-          { packageId: "@acme/mine", display_name: "Mine", description: "Pinned." },
-        ],
-        skills: [{ packageId: "@acme/pdf", display_name: "PDF" }],
-        skills_truncated: true,
-      },
-      { ...BASE_OPTS, skills: { skillCatalogue: false, pinnedSkills: ["@acme/mine"] } },
+  it("is byte-identical whatever order the chosen skills arrive in", () => {
+    const opts = (order: string[]) => ({
+      ...BASE_OPTS,
+      skills: { skillMode: "manual" as const, pinnedSkills: order },
+      skillContents: new Map(
+        order.map((id) => [id, { packageId: id, version: "1.0.0", content: `${id} body` }]),
+      ),
+    });
+    const raw = (order: string[]) => ({
+      user: { name: "Ada" },
+      org: { role: "member" },
+      requested_skills: order.map((packageId) => ({ packageId })),
+    });
+    expect(formatCallerContext(raw(["@a/b", "@a/a"]), opts(["@a/b", "@a/a"]))).toEqual(
+      formatCallerContext(raw(["@a/a", "@a/b"]), opts(["@a/a", "@a/b"])),
     );
-    expect(out).toContain("- `@acme/mine` (pinned) — Mine: Pinned.");
-    expect(out).not.toContain("Other skills in this space");
-    expect(out).not.toContain("@acme/pdf");
-    expect(out).not.toContain("(list truncated)");
   });
 
-  it("says a pinned skill could not be resolved", () => {
-    const out = formatCallerContext(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        requested_skills: [],
-      },
-      { ...BASE_OPTS, skills: { skillCatalogue: true, pinnedSkills: ["@acme/gone"] } },
-    );
-    expect(out).toContain("`@acme/gone` is pinned to this conversation but is not available here");
-  });
-
-  it("omits the heading entirely when nothing resolves and nothing is catalogued", () => {
-    const out = formatCallerContext(
-      { user: { name: "Ada" }, org: { role: "member" }, skills: [], requested_skills: [] },
-      { ...BASE_OPTS, skills: { skillCatalogue: true, pinnedSkills: [] } },
-    );
-    expect(out).not.toContain("## Skills");
+  it("omits the heading entirely when nothing is chosen and nothing is listed", () => {
+    for (const skillMode of ["auto", "manual", "strict"] as const) {
+      const out = formatCallerContext(
+        { user: { name: "Ada" }, org: { role: "member" }, skills: [], requested_skills: [] },
+        { ...BASE_OPTS, skills: { skillMode, pinnedSkills: [] } },
+      );
+      expect(out).not.toContain("## Skills");
+    }
   });
 
   it("says nothing about the draft for a PUBLISHED agent", () => {
@@ -674,48 +666,6 @@ describe("formatCallerContext", () => {
     ).toBe("");
   });
 
-  it("is byte-identical whatever order the resolved pins arrive in", () => {
-    // The whole block is ONE prompt-cache breakpoint, and `requested_skills`
-    // comes back in no particular order: a section that followed the payload's
-    // order would invalidate the cached prefix between two turns of one session.
-    const ctx = {
-      user: { name: "Ada" },
-      org: { role: "member" },
-      requested_skills: [
-        { packageId: "@acme/zeta", display_name: "Zeta", version: "1.0.0" },
-        { packageId: "@acme/beta", display_name: "Beta", version: "1.0.0" },
-        { packageId: "@acme/mine", display_name: "Mine" },
-      ],
-      skills: [{ packageId: "@acme/pdf", display_name: "PDF" }],
-    };
-    const opts = {
-      ...BASE_OPTS,
-      skills: {
-        skillCatalogue: true,
-        pinnedSkills: ["@acme/beta", "@acme/gone", "@acme/mine", "@acme/zeta"],
-      },
-    };
-    const at = new Date("2026-06-25T09:05:00.000Z");
-    const reversed = { ...ctx, requested_skills: [...ctx.requested_skills].reverse() };
-    expect(formatCallerContext(reversed, { ...opts, now: at })).toBe(
-      formatCallerContext(ctx, { ...opts, now: at }),
-    );
-    // And the rendered section is the one the resolver decided, in id order.
-    const out = formatCallerContext(ctx, { ...opts, now: at });
-    const ids = out
-      .split("\n")
-      .filter((line) => line.startsWith("- `@"))
-      .map((line) => line.slice(3, line.indexOf("`", 3)));
-    expect(ids).toEqual([
-      "@acme/beta",
-      "@acme/mine",
-      "@acme/zeta",
-      // …then the catalogue block.
-      "@acme/pdf",
-    ]);
-    expect(out).toContain("`@acme/gone` is pinned to this conversation");
-  });
-
   it("is byte-identical across a 45-minute gap (the cache invariant)", () => {
     const ctx = {
       user: { name: "Ada", email: "ada@acme.com" },
@@ -780,28 +730,81 @@ describe("buildCallerContextBlock", () => {
     expect(req.headers.get("cookie")).toBe("session=abc");
   });
 
-  it("asks the platform to resolve the session's pins, and nothing without `skills:read`", async () => {
-    const { deps, lastRequest } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
-    const args = {
+  it("resolves the chosen skills and reads their content with the caller's headers", async () => {
+    const seen: string[] = [];
+    const { deps } = fakeDeps((req) => {
+      const url = new URL(req.url);
+      seen.push(`${url.pathname}${url.search} ${req.headers.get("cookie")}`);
+      if (url.pathname === "/api/me/context") {
+        // `@acme/off` reads fine through `getSkill` but is not active here.
+        return Response.json({
+          user: { name: "Ada" },
+          requested_skills: [{ packageId: "@acme/a" }],
+        });
+      }
+      const id = url.pathname.replace("/api/packages/skills/", "");
+      return Response.json({ content: `${id} body`, version: "2.0.0" });
+    });
+    const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+      origin: "http://127.0.0.1:3000",
+      headers: { cookie: "session=abc" },
+      spaceId: "spc_1",
+      user,
+      deps,
+      // Strict: the turn holds no `skills:read`, the caller's headers still read.
+      capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
+      permissions: ["mcp:read", "mcp:invoke"],
+      skills: { skillMode: "strict", pinnedSkills: ["@acme/a", "@acme/off"] },
+    });
+    expect(seen.sort()).toEqual([
+      "/api/me/context?skills=%40acme%2Fa%2C%40acme%2Foff session=abc",
+      "/api/packages/skills/@acme/a session=abc",
+      "/api/packages/skills/@acme/off session=abc",
+    ]);
+    expect(out).toContain('<skill id="@acme/a" version="2.0.0">\n@acme/a body\n</skill>');
+    expect(out).not.toContain("@acme/off body");
+    expect(out).toContain("`@acme/off` was chosen for this conversation but is not available here");
+  });
+
+  it("asks nothing about the chosen skills in auto", async () => {
+    const seen: string[] = [];
+    const { deps } = fakeDeps((req) => {
+      seen.push(new URL(req.url).pathname + new URL(req.url).search);
+      return Response.json({ user: { name: "Ada" } });
+    });
+    await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: {},
       spaceId: "spc_1",
       user,
       deps,
-      permissions: ["mcp:read", "mcp:invoke"],
-      skills: { skillCatalogue: true, pinnedSkills: ["@acme/a", "@acme/b"] },
-    };
-    await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
-      ...args,
       capabilities: caps(BUILDER),
+      permissions: ["mcp:read", "mcp:invoke"],
+      skills: { skillMode: "auto", pinnedSkills: ["@acme/a"] },
     });
-    expect(new URL(lastRequest()!.url).searchParams.get("skills")).toBe("@acme/a,@acme/b");
-    await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
-      ...args,
-      capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
-    });
-    expect(new URL(lastRequest()!.url).searchParams.has("skills")).toBe(false);
+    expect(seen).toEqual(["/api/me/context"]);
   });
+
+  it("leaves out a chosen skill whose content read is refused", async () => {
+    const { deps } = fakeDeps((req) =>
+      new URL(req.url).pathname === "/api/me/context"
+        ? Response.json({ user: { name: "Ada" }, requested_skills: [{ packageId: "@acme/a" }] })
+        : new Response(null, { status: 403 }),
+    );
+    const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+      origin: "http://127.0.0.1:3000",
+      headers: {},
+      spaceId: "spc_1",
+      user,
+      deps,
+      capabilities: caps(BUILDER),
+      permissions: ["mcp:read", "mcp:invoke"],
+      skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
+    });
+    expect(out).not.toContain("<skill");
+    expect(out).toContain("`@acme/a` was chosen for this conversation but is not available here");
+  });
+
   it("drops the runnable-agents section for a turn that cannot launch", async () => {
     const payload = {
       user: { name: "Ada", email: "ada@acme.com" },
@@ -913,8 +916,8 @@ describe("buildCallerContextBlock", () => {
       deps,
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
-      // Nothing was resolved, so a pin must not read as unavailable.
-      skills: { skillCatalogue: true, pinnedSkills: ["@acme/mine"] },
+      // Nothing was resolved, so a chosen skill must not read as unavailable.
+      skills: { skillMode: "manual", pinnedSkills: ["@acme/mine"] },
     });
     expect(out).toContain("Ada (ada@acme.com)");
     expect(out).toContain("Current space: `spc_1`");

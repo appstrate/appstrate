@@ -8,6 +8,7 @@
  */
 
 import { scopedNameRegex } from "@appstrate/core/validation";
+import { chatSkillModeValues } from "@appstrate/db/schema";
 import { MAX_PINNED_SKILLS } from "./skills.ts";
 
 const stdHeaders = {
@@ -23,7 +24,7 @@ export const chatComponentSchemas = {
       "id",
       "generating",
       "unread",
-      "skill_catalogue",
+      "skill_mode",
       "pinned_skills",
       "createdAt",
       "updatedAt",
@@ -41,15 +42,17 @@ export const chatComponentSchemas = {
         description:
           "Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read.",
       },
-      skill_catalogue: {
-        type: "boolean",
+      skill_mode: {
+        type: "string",
+        enum: [...chatSkillModeValues],
         description:
-          "Whether turns also list the space's skill catalogue. Pins are always indexed. A context-budget control, never an authorization boundary. Set via PUT /api/chat/sessions/{id}/skills.",
+          "How turns use skills. `auto`: the space's skills are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:read`, so it lists, loads and declares no other. Set via PUT /api/chat/sessions/{id}/skills.",
       },
       pinned_skills: {
         type: "array",
         items: { type: "string" },
-        description: "Package ids (`@scope/name`) pinned to this conversation, sorted.",
+        description:
+          "Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`.",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -252,7 +255,7 @@ export const chatPaths = {
       operationId: "setChatSessionSkills",
       tags: ["Chat"],
       summary: "Set a chat session's skill selection",
-      description: `Replaces whether the conversation lists the space's skill catalogue and its pinned skills in one call (the body is the state you want, not a patch). Duplicate ids are deduped server-side; at most ${MAX_PINNED_SKILLS} pins. The session row is created if the client-minted id has none yet — exactly as the first turn would.`,
+      description: `Replaces the conversation's skill mode and chosen skills in one call (the body is the state you want, not a patch). Duplicate ids are deduped server-side; at most ${MAX_PINNED_SKILLS} chosen skills. The session row is created if the client-minted id has none yet — exactly as the first turn would.`,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -264,9 +267,9 @@ export const chatPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["skill_catalogue", "pinned_skills"],
+              required: ["skill_mode", "pinned_skills"],
               properties: {
-                skill_catalogue: { type: "boolean" },
+                skill_mode: { type: "string", enum: [...chatSkillModeValues] },
                 pinned_skills: {
                   type: "array",
                   maxItems: MAX_PINNED_SKILLS,
@@ -276,7 +279,7 @@ export const chatPaths = {
                     description: "`@scope/name` package id",
                   },
                   description:
-                    "Package ids to pin. Deduped server-side; the cap applies to the array as sent.",
+                    "Package ids to choose. Deduped server-side; the cap applies to the array as sent.",
                 },
               },
               additionalProperties: false,

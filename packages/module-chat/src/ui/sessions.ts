@@ -8,7 +8,12 @@
 
 import type { InfiniteData } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
-import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection, type SkillHint } from "../skills.ts";
+import {
+  DEFAULT_SKILL_SELECTION,
+  type ChatSkillMode,
+  type ChatSkillSelection,
+  type SkillHint,
+} from "../skills.ts";
 import type { GetHeaders } from "./runtime-context.ts";
 
 /** Fresh session id, minted client-side (`chs_` shape) — re-exported from the shared module. */
@@ -180,13 +185,13 @@ export async function loadHistory(
   if (!res.ok) throw new Error(`Failed to load session (HTTP ${res.status})`);
   const body = (await res.json()) as {
     messages?: StoredMessage[];
-    skill_catalogue: boolean;
+    skill_mode: ChatSkillMode;
     pinned_skills: string[];
   };
   return {
     // Row `id` LAST: a stray `id` inside a stored `content` must not win.
     messages: (body.messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage),
-    skills: { skillCatalogue: body.skill_catalogue, pinnedSkills: body.pinned_skills },
+    skills: { skillMode: body.skill_mode, pinnedSkills: body.pinned_skills },
   };
 }
 
@@ -198,7 +203,7 @@ interface SkillListRow {
   version: string | null;
 }
 
-/** The space's skills, the catalogue the picker pins from. */
+/** The space's active skills, the ones the picker chooses from. */
 export async function fetchSkills(getHeaders: GetHeaders | null | undefined): Promise<SkillHint[]> {
   const res = await fetch("/api/packages/skills", {
     credentials: "include",
@@ -250,7 +255,7 @@ async function writeSessionSkills(
     credentials: "include",
     headers: headers(getHeaders, true),
     body: JSON.stringify({
-      skill_catalogue: selection.skillCatalogue,
+      skill_mode: selection.skillMode,
       pinned_skills: selection.pinnedSkills,
     }),
   });

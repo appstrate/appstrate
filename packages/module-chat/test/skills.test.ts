@@ -3,9 +3,11 @@
 import { describe, expect, it } from "bun:test";
 import {
   DEFAULT_SKILL_SELECTION,
+  MAX_SKILL_CONTENT_CHARS,
   resolveChatSkills,
   type ChatSkillSelection,
   type ResolveChatSkillsInput,
+  type SkillContent,
   type SkillHint,
 } from "../src/skills.ts";
 
@@ -16,78 +18,105 @@ const hint = (id: string): SkillHint => ({
   version: "1.0.0",
 });
 
+const content = (id: string, body = `# ${id}`): SkillContent => ({
+  packageId: id,
+  version: "1.0.0",
+  content: body,
+});
+
 function resolve(
-  over: Omit<Partial<ResolveChatSkillsInput>, "selection"> & {
+  over: Omit<Partial<ResolveChatSkillsInput>, "selection" | "contents"> & {
     selection?: Partial<ChatSkillSelection>;
+    contents?: SkillContent[];
   } = {},
 ) {
-  const { selection, ...rest } = over;
+  const { selection, contents = [], ...rest } = over;
   return resolveChatSkills({
     selection: { ...DEFAULT_SKILL_SELECTION, ...selection },
     requested: [],
+    contents: new Map(contents.map((skill) => [skill.packageId, skill])),
     catalogue: [],
     catalogueTruncated: false,
     ...rest,
   });
 }
 
-describe("resolveChatSkills", () => {
-  it("indexes the pins, sorted by package id whatever order they arrive in", () => {
-    const out = resolve({
-      selection: { pinnedSkills: ["@a/mike", "@a/alpha", "@a/zulu"] },
-      requested: [hint("@a/mike"), hint("@a/zulu"), hint("@a/alpha")],
-    });
-    expect(out.pinned.map((s) => s.packageId)).toEqual(["@a/alpha", "@a/mike", "@a/zulu"]);
-  });
-
-  it("drops a requested hint nothing pinned, and de-duplicates the rest", () => {
-    const out = resolve({
-      selection: { pinnedSkills: ["@a/alpha"] },
-      requested: [hint("@a/alpha"), hint("@a/alpha"), hint("@a/stray")],
-    });
-    expect(out.pinned.map((s) => s.packageId)).toEqual(["@a/alpha"]);
-  });
-
-  it("catalogue on: shows the catalogue minus what is pinned, with its truncation", () => {
-    const out = resolve({
-      selection: { pinnedSkills: ["@a/alpha"] },
-      requested: [hint("@a/alpha")],
-      catalogue: [hint("@a/alpha"), hint("@a/other")],
+describe("resolveChatSkills — auto", () => {
+  it("lists the space's skills with their truncation, and injects nothing", () => {
+    const result = resolve({
+      selection: { pinnedSkills: ["@a/one"] },
+      requested: [hint("@a/one")],
+      contents: [content("@a/one")],
+      catalogue: [hint("@a/one"), hint("@a/two")],
       catalogueTruncated: true,
     });
-    expect(out.catalogue.map((s) => s.packageId)).toEqual(["@a/other"]);
-    expect(out.catalogueTruncated).toBe(true);
+    expect(result.catalogue.map((s) => s.packageId)).toEqual(["@a/one", "@a/two"]);
+    expect(result.catalogueTruncated).toBe(true);
+    // The chosen skills are kept on the row but unused in `auto`.
+    expect(result.injected).toEqual([]);
+    expect(result.notices).toEqual([]);
+  });
+});
+
+describe("resolveChatSkills — manual and strict", () => {
+  for (const skillMode of ["manual", "strict"] as const) {
+    it(`${skillMode}: injects the chosen skills that resolved, sorted, and lists no catalogue`, () => {
+      const result = resolve({
+        selection: { skillMode, pinnedSkills: ["@z/last", "@a/first"] },
+        requested: [hint("@z/last"), hint("@a/first")],
+        contents: [content("@z/last"), content("@a/first")],
+        catalogue: [hint("@b/other")],
+        catalogueTruncated: true,
+      });
+      expect(result.injected.map((s) => s.packageId)).toEqual(["@a/first", "@z/last"]);
+      expect(result.catalogue).toEqual([]);
+      expect(result.catalogueTruncated).toBe(false);
+      expect(result.notices).toEqual([]);
+    });
+  }
+
+  it("notices a chosen skill that is not active here, even when its content was read", () => {
+    // `getSkill` reads a switched-off skill; only `requested_skills` says it is active.
+    const result = resolve({
+      selection: { skillMode: "manual", pinnedSkills: ["@a/off"] },
+      requested: [],
+      contents: [content("@a/off")],
+    });
+    expect(result.injected).toEqual([]);
+    expect(result.notices).toHaveLength(1);
+    expect(result.notices[0]).toContain("`@a/off`");
+    expect(result.notices[0]).toContain("not available");
   });
 
-  it("catalogue off: still indexes the pins, and shows no catalogue at all", () => {
-    const out = resolve({
-      selection: { skillCatalogue: false, pinnedSkills: ["@a/mine"] },
-      requested: [hint("@a/mine")],
-      catalogue: [hint("@a/other")],
-      catalogueTruncated: true,
+  it("notices an active chosen skill whose content could not be read", () => {
+    const result = resolve({
+      selection: { skillMode: "manual", pinnedSkills: ["@a/one"] },
+      requested: [hint("@a/one")],
     });
-    expect(out.pinned.map((s) => s.packageId)).toEqual(["@a/mine"]);
-    expect(out.catalogue).toEqual([]);
-    expect(out.catalogueTruncated).toBe(false);
+    expect(result.injected).toEqual([]);
+    expect(result.notices[0]).toContain("not available");
   });
 
-  it("notices a pin the context did not resolve, and nothing else", () => {
-    const out = resolve({
-      selection: { pinnedSkills: ["@a/gone-pin", "@a/here"] },
-      requested: [hint("@a/here")],
-      catalogue: [hint("@a/other")],
+  it("leaves out a skill longer than the cap, with a notice naming both lengths", () => {
+    const long = "x".repeat(MAX_SKILL_CONTENT_CHARS + 1);
+    const exact = "y".repeat(MAX_SKILL_CONTENT_CHARS);
+    const result = resolve({
+      selection: { skillMode: "strict", pinnedSkills: ["@a/long", "@a/exact"] },
+      requested: [hint("@a/long"), hint("@a/exact")],
+      contents: [content("@a/long", long), content("@a/exact", exact)],
     });
-    expect(out.pinned.map((s) => s.packageId)).toEqual(["@a/here"]);
-    expect(out.notices).toHaveLength(1);
-    expect(out.notices[0]).toContain("@a/gone-pin");
+    expect(result.injected.map((s) => s.packageId)).toEqual(["@a/exact"]);
+    expect(result.notices).toEqual([
+      `The skill \`@a/long\` was chosen for this conversation but is too long to include (${MAX_SKILL_CONTENT_CHARS + 1} characters, limit ${MAX_SKILL_CONTENT_CHARS}).`,
+    ]);
   });
 
-  it("orders notices deterministically and de-duplicates the pin list", () => {
-    const out = resolve({
-      selection: { pinnedSkills: ["@a/zulu", "@a/alpha", "@a/zulu"] },
+  it("orders notices deterministically and de-duplicates the chosen list", () => {
+    const result = resolve({
+      selection: { skillMode: "manual", pinnedSkills: ["@z/gone", "@a/gone", "@z/gone"] },
     });
-    expect(out.notices).toHaveLength(2);
-    expect(out.notices[0]).toContain("@a/alpha");
-    expect(out.notices[1]).toContain("@a/zulu");
+    expect(result.notices).toHaveLength(2);
+    expect(result.notices[0]).toContain("`@a/gone`");
+    expect(result.notices[1]).toContain("`@z/gone`");
   });
 });

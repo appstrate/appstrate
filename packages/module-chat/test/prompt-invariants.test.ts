@@ -152,7 +152,8 @@ describe("full persona invariants", () => {
     expect(FULL).toContain("KEEP the leading `@`");
     expect(FULL).toContain("Load ONE at a time");
     expect(FULL).toContain("Never call `getSkill` for a skill whose content already appears");
-    expect(FULL).toContain("`(pinned)` is one the user chose for this conversation");
+    // The injected ones are already loaded; `getSkill` is for a skill listed by name.
+    expect(FULL).toContain("One shown in full, inside a `<skill>` tag, is already loaded");
   });
 
   it("names the same heading the context block renders", () => {
@@ -174,9 +175,7 @@ describe("full persona invariants", () => {
   });
 
   it("names `listSkills` for an unlisted request here, and for a truncated list only in the list bullet", () => {
-    expect(FULL).toContain(
-      "Call `listSkills` only when the user asks for a skill you do not see listed",
-    );
+    expect(FULL).toContain("Call `listSkills` only when the user asks for a skill you do not see.");
     expect(FULL.split("listSkills")).toHaveLength(3);
   });
 

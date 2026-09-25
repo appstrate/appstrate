@@ -29,7 +29,10 @@ export function canAuthorAgents(has: (permission: string) => boolean): boolean {
   return has("chat:write") && turnCapabilities(has).authors;
 }
 
-/** The skill picker: it writes the conversation and lists skills the turn can load. */
+/**
+ * The skill picker: it writes the conversation and lists the space's skills,
+ * whose content the chat then reads with the caller's own `skills:read`.
+ */
 export function canPinSkills(has: (permission: string) => boolean): boolean {
-  return has("chat:write") && turnCapabilities(has).readsSkills;
+  return has("chat:write") && has("skills:read");
 }

@@ -49,7 +49,7 @@ column chat_sessions.last_assistant_seq bigint
 column chat_sessions.last_read_seq bigint
 column chat_sessions.org_id uuid not null
 column chat_sessions.pinned_skills text[] not null default '{}'::text[]
-column chat_sessions.skill_catalogue boolean not null default true
+column chat_sessions.skill_mode chat_skill_mode not null default 'auto'::chat_skill_mode
 column chat_sessions.space_id text not null
 column chat_sessions.title text
 column chat_sessions.updated_at timestamp with time zone not null default now()
@@ -890,6 +890,7 @@ constraint webhooks webhooks_package_id_packages_id_fk FOREIGN KEY (package_id) 
 constraint webhooks webhooks_payload_mode_valid CHECK ((payload_mode = ANY (ARRAY['full'::text, 'summary'::text])))
 constraint webhooks webhooks_pkey PRIMARY KEY (id)
 constraint webhooks webhooks_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+enum chat_skill_mode auto,manual,strict
 enum credential_source system,org
 enum file_purpose user_upload,agent_output
 enum inference_route proxy,sidecar
