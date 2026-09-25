@@ -52,8 +52,8 @@ export interface ExecuteAgentInBackgroundInput {
  * All event + state persistence happens inside the container (via
  * {@link HttpSink}) or inside {@link finalizeRun} (the convergence
  * point). The only state this function owns is the in-process abort
- * controller used to propagate user-triggered cancellation to the
- * Docker workload.
+ * controller (`abortRun`), aborted by the cancel route and the stall
+ * watchdog: it stops the workload, and whoever aborted writes the terminal.
  *
  * The body runs inside the `appstrate.run.execute` span — parented from the
  * launching request's trace so the whole API→run→container path shares one
@@ -157,8 +157,8 @@ async function executeAgentInBackgroundImpl(input: ExecuteAgentInBackgroundInput
       });
     } catch (err) {
       // Orchestrator-level failure (Docker unreachable, image missing, ...)
-      // before the container even exited. Cancel case is handled below in
-      // the `finally` — we only synthesise a terminal failure here for
+      // before the container even exited. On an aborted signal the aborter
+      // owns the terminal — we only synthesise a terminal failure here for
       // genuine infrastructure errors.
       if (signal.aborted) return;
       const message = getErrorMessage(err);
@@ -175,12 +175,11 @@ async function executeAgentInBackgroundImpl(input: ExecuteAgentInBackgroundInput
     }
 
     // Container exited normally. If it finalised itself over HTTP, our
-    // synthesis is a CAS no-op. If it didn't (crash, timeout, cancel),
-    // we fill in the terminal state the platform observed.
+    // synthesis is a CAS no-op. If it didn't (crash, timeout), we fill in
+    // the terminal state the platform observed — except on an aborted stop.
     if (lifecycle.cancelled) {
-      // Cancel route already routed the run through `synthesiseFinalize`,
-      // which CAS'd the sink closed and drove the terminal transition. Nothing
-      // to do here.
+      // Aborted: the aborter owns the terminal — the cancel route writes
+      // `cancelled`, the stall watchdog `failed`. Nothing to do here.
       return;
     }
 

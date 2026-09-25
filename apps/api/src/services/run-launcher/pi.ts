@@ -99,7 +99,10 @@ export interface PlatformContainerResult {
   exitCode: number;
   /** Whether the agent container was stopped because the run timed out. */
   timedOut: boolean;
-  /** Whether the run was cancelled by the caller's `AbortSignal`. */
+  /**
+   * Whether the caller's `AbortSignal` fired — a platform-requested stop
+   * (cancel route or stall watchdog), not only a user cancel.
+   */
   cancelled: boolean;
 }
 
@@ -109,7 +112,7 @@ interface RunPlatformContainerInput {
   plan: AppstrateRunPlan;
   /** Sink credentials minted by the caller (`createRun`). Required. */
   sinkCredentials: SinkCredentials;
-  /** Cancellation token — aborted = the run was cancelled by user. */
+  /** Stop token — aborted = the platform asked for this stop (cancel route or stall watchdog). */
   signal?: AbortSignal;
   /** Injectable orchestrator — production defaults to the global singleton. */
   orchestrator?: RunOrchestrator;
@@ -581,7 +584,7 @@ async function runPlatformContainerImpl(
 /**
  * Drive the agent container lifecycle: start, enforce the SAFETY-NET timeout
  * (`timeoutSeconds` + {@link platformTimeoutBootGraceMs} — the runner owns
- * the primary, boot-excluded budget), propagate cancellation, wait for exit.
+ * the primary, boot-excluded budget), propagate a requested stop, wait for exit.
  * Sidecar is stopped alongside the agent on any terminal condition so neither
  * lingers after the run has ended.
  */
@@ -692,7 +695,7 @@ function observeSidecarExit(
 
 /**
  * Resolve with the sidecar's exit code if it exits before the agent does and
- * the platform did not ask for it (timeout, cancel); `null` once the agent
+ * the platform did not ask for it (timeout, aborted signal); `null` once the agent
  * exits first, or always when the sidecar is not observed.
  */
 async function firstUnexpectedSidecarExit(
