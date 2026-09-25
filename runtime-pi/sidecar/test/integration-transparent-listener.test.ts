@@ -335,13 +335,10 @@ describe("transparent egress listener — TLS SNI path", () => {
   });
 
   it("emits tunnel-error when the upstream connection fails", async () => {
-    // Grab a port that refuses connections: bind + close a server.
-    const probe = createServer();
-    await new Promise<void>((res) => probe.listen(0, "127.0.0.1", () => res()));
-    const addr = probe.address();
-    const deadPort = addr && typeof addr === "object" ? addr.port : 1;
-    await new Promise<void>((res) => probe.close(() => res()));
-
+    // Port 1 sits below every ephemeral range, so no `listen(0)` — this
+    // listener's included — can take it. A freed ephemeral port can: when the
+    // listener got it, it dialled itself and emitted `tunnel-opened`.
+    const deadPort = 1;
     const events: EgressListenerEvent[] = [];
     const listener = await makeListener({
       upstreamPort: deadPort,
