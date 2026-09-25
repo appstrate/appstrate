@@ -822,9 +822,9 @@ it carries no licence):
 - **No animation library.** tw-animate-css plus these tokens is the whole
   system; a new animation starts from the same four values.
 
-Left as they were, on purpose: the four `transition-opacity duration-200`
-cross-fades in app code (settings layout, panel dialog header, catalogue
-modal, connections chevron). 200 against 150 is not a defect worth a conflict
+Left as they were, on purpose: the five `duration-200` transitions in app
+code (the catalogue modal twice, the settings layout, the panel dialog header,
+the connections chevron). 200 against 150 is not a defect worth a conflict
 with the dashboard branch; align them to `duration-fast` when next touched.
 
 ## Settings
@@ -3892,6 +3892,87 @@ Open on this surface:
 - **The title still opens on a pencil**, not the field itself — the one place
   the form pattern's rule is not applied. A breadcrumb is not a form, so it may
   be right; it is at least worth deciding on purpose.
+
+## Agent UI, audited against beautiful-ui
+
+Written 25 September 2026, WITHOUT code: a map of what the chat and the run
+surfaces already draw, read against the primitives of
+[beautiful-ui](https://github.com/slev12397/beautiful-ui) (MIT). None of its
+code, `globals.css` or tokens is to be imported: it is a checklist of shapes,
+and everything built from it goes through shadcn, assistant-ui and our tokens.
+**Nothing below gets built before the product owner validates the list at the
+end.**
+
+Three verdicts: **have** (where), **have, worse** (what exactly), **absent**.
+
+| primitive          | verdict     | what we have, and the gap                                                                                                                                                                                                                                                |
+| ------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ApprovalCard       | absent      | The thread's disclaimer says "vérifiez avant de confirmer", and there is nothing to confirm: every tool call executes. `structured-session.ts` already maps an `output-denied` part, so the wire shape is half there; no gate and no card.                               |
+| ThinkingState      | have, worse | Three bouncing dots (`ThinkingIndicator`, `thread.tsx`). The engine streams `reasoning-delta` (`pi-chat/ui-stream-mapper.ts`), and assistant-ui's default `Reasoning` renderer is `() => null`, so the reasoning is sent and thrown away on screen. No step trace.       |
+| StreamingText      | have, worse | The typewriter reveal is there (`markdown-text.tsx`, `smooth`). No inline sources (`Source` parts also render `null`), the action bar has Copy only (no Reload), follow-ups exist only after an error (`MessageError`) and on the welcome screen.                        |
+| ToolChips          | have, worse | `ToolCallCard` (`tool-uis.tsx`): phase glyph, verb icon, label, id, HTTP status, duration, error inline, fixed height. Gaps: the detail is raw JSON in a modal rather than an inline expand, and consecutive calls are not grouped (assistant-ui `ToolGroup` is unused). |
+| TaskRows           | have        | `ChatRunProgressCard` in the chat (status glyph, paced log line, live elapsed in tabular figures, constant height); the runs table and `run-card` in Studio.                                                                                                             |
+| ContextCards       | absent      | `recall_memory` and `run_history` results fall through to `ToolFallback`, i.e. a JSON modal. The memory tab of an agent lists memories, but nothing shows the chat which ones a turn actually used.                                                                      |
+| DiffTable          | have, worse | `DraftDiffView` (Monaco) diffs package TEXT between versions. Nothing shows a proposed change to DATA, row by row, with a per-row include/exclude before applying.                                                                                                       |
+| RecordsTable       | have        | `DataTable` + `ListToolbar` (faceted filters, column menu, tiered columns). No sort, and no AI-computed column, which nothing asks for.                                                                                                                                  |
+| FilterTable        | have        | The same `ListToolbar` faceted filters.                                                                                                                                                                                                                                  |
+| LoadingState       | have, worse | `LoadingState` (35 files), bare `Spinner` (45), `Skeleton` (6) coexist; see "The grammar". A long-running loader with elapsed time exists only in the chat's run card.                                                                                                   |
+| ChatComposer       | have        | `Thread` + `Composer` + the conversation list and context panel of the chat shell.                                                                                                                                                                                       |
+| PromptBar          | have, worse | Attach, send, cancel, model picker (`model-select.tsx`). No `@` sources and no `/` commands.                                                                                                                                                                             |
+| SearchList         | have        | shadcn `Command` (cmdk) in the faceted filters and the actor picker.                                                                                                                                                                                                     |
+| SidebarNav         | have        | shadcn `Sidebar` through `ShellSidebar`, shared by Studio and the chat. The gliding hover is decoration, not a gap.                                                                                                                                                      |
+| CodeBlock          | have        | Monaco, `JsonView`, markdown code blocks.                                                                                                                                                                                                                                |
+| InsightCards       | have, worse | The dashboard's KPI cards (branch `feat/uxui-dashboard-prototype`, not audited here). No charts.                                                                                                                                                                         |
+| RecommendationCard | absent      | Nothing proposes; not asked for.                                                                                                                                                                                                                                         |
+| SelectionActions   | absent      | No selected-text actions; not asked for.                                                                                                                                                                                                                                 |
+| Flowchart          | absent      | The agent logic map is its own proposal (`satellites/internal-docs/proposals/logic-map.md`), not this list.                                                                                                                                                              |
+| FineTuneCard       | absent      | Not relevant to this product.                                                                                                                                                                                                                                            |
+| AgentScreen        | absent      | Would belong to the desktop bridge, when it has a UI.                                                                                                                                                                                                                    |
+| atoms              | have        | StatusPill, EntityChip, ValuePill, Switch and SegmentedControl map onto the status/origin badges, mono chips, shadcn `Switch`, `Tabs` and `ToggleGroup`. `Shimmer` (animated text) is absent, and only matters if the thinking state gets a status line.                 |
+
+**Transverse practices**, the part worth taking whatever gets built:
+
+- **Reduced motion**: done, see "Motion". Their loader freezes under reduced
+  motion and the timer keeps ticking; same principle as ours.
+- **Height that does not jump**: already a rule here, and applied more
+  thoroughly than in the reference (the tool card, the run card, the connect
+  card and the action bar all hold their height across states).
+- **Tabular figures** on every number that changes in place: 29 sites use
+  `tabular-nums`, including the chat's elapsed time. Worth making a rule of it
+  rather than a habit: durations, costs, counts, timers.
+- **Loading states**: three treatments coexist (see "The grammar"). The
+  reference uses one loader per long task, with elapsed time; ours should
+  converge on skeletons for layout and one loader for work.
+- **Hairlines**: they draw a 1px ring as a shadow; we draw a 1px `border`
+  token. Equivalent, nothing to change.
+- **`text-wrap: balance` / `pretty`** on headings and empty-state copy: one
+  use today. Cheap, and a candidate for the empty-state component only.
+- **Exit faster than enter**, one easing for surfaces: done, see "Motion".
+
+**What deserves building, in order** (for validation, none started):
+
+1. **ApprovalCard, a gate before a mutating call.** The disclaimer already
+   promises it. Anchor: AI SDK tool approval (`needsApproval`, part state
+   `approval-requested`) and assistant-ui's `respondToApproval` on the tool
+   part's props, rendered inside the existing `ToolCallCard` slot through
+   `makeAssistantToolUI`; body in shadcn `Button` (+ `RadioGroup` when the
+   request carries options). Cost to know up front: the chat runs on the Pi
+   engine, so the gate is a SERVER change (pause the turn on a write verb of
+   `invoke_operation`, resume on the answer), not a card alone.
+2. **Reasoning, shown.** The stream already carries it; the missing piece is a
+   `Reasoning` / `ReasoningGroup` component passed to `MessagePrimitive.Parts`,
+   collapsed by default in a shadcn `Collapsible`, replacing the bouncing dots
+   while it streams. The cheapest item on the list and pure UI.
+3. **ContextCards for memory and history.** A `makeAssistantToolUI` for
+   `recall_memory` and `run_history` that draws the returned items as compact
+   cards (the `item-list.tsx` row shape) instead of a JSON modal. Pure UI.
+4. **DiffTable, as the body of the approval for an update.** Before/after per
+   field of a PUT or PATCH, each row includable, in shadcn `Table` +
+   `Checkbox`. Depends on 1, and on knowing the "before", which the tool call
+   does not carry today.
+5. **Tool calls grouped.** assistant-ui `ToolGroup` with a shadcn
+   `Collapsible`, so a turn of eight calls reads as one line that opens. Only
+   if long turns prove noisy in use.
 
 ## Rule of thumb that decided several of these
 
