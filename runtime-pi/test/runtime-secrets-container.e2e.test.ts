@@ -155,7 +155,7 @@ describe.skipIf(!RUN)("runtime-pi keeps run-scoped secrets out of reach after bo
       async fetch(req) {
         const path = new URL(req.url).pathname;
 
-        if (path.startsWith("/upstream/")) {
+        if (path.startsWith("/internal/llm-proxy/")) {
           upstreamBodies.push(await req.text());
           if (upstreamBodies.length === 1) {
             // The model is being called: bootstrap is over. Probe from a
@@ -230,12 +230,9 @@ describe.skipIf(!RUN)("runtime-pi keeps run-scoped secrets out of reach after bo
             RUN_TOKEN: "secrets-e2e-run-token",
             PLATFORM_API_URL: platformUrl,
             SIDECAR_AUTH_TOKEN,
-            PI_BASE_URL: `${platformUrl}/upstream`,
-            PI_API_KEY: "secrets-e2e-upstream-key",
-            PI_PLACEHOLDER: PLACEHOLDER,
-            // `host.docker.internal` is a private address: without this the
-            // sidecar refuses the upstream base URL.
-            EGRESS_ALLOW_INTERNAL_HOSTS: "host.docker.internal",
+            // Platform mode: inference goes to this stub's `/internal/llm-proxy`.
+            PI_LLM_PLATFORM_API_SHAPE: "anthropic-messages",
+            PI_BASE_URL: "https://api.anthropic.com",
           },
         });
         expect(sidecar.status, `docker run sidecar failed: ${sidecar.stderr}`).toBe(0);

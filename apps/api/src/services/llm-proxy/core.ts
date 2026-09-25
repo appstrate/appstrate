@@ -20,7 +20,7 @@
 
 import { loadModel, type ResolvedModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
-import { invalidRequest } from "../../lib/errors.ts";
+import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
 import { lookupResponse } from "./response-cache.ts";
 import {
@@ -89,8 +89,8 @@ export class LlmProxyUnsupportedModelError extends Error {
    * @param presetId - The preset the caller asked for
    * @param options - Standard `ErrorOptions`; pass `{ cause }` when raising
    *   this from a `catch`. The message is a CONCLUSION ("not enabled"), and
-   *   the catch below reaches it for any `loadModel` failure — a DB outage
-   *   included. Without the cause that misdiagnosis is unfalsifiable.
+   *   the catch below reaches it for any non-`ApiError` `loadModel` failure —
+   *   a DB outage included. Without the cause that misdiagnosis is unfalsifiable.
    */
   constructor(presetId: string, options?: ErrorOptions) {
     super(`Model preset "${presetId}" is not enabled for this organization.`, options);
@@ -351,18 +351,13 @@ async function resolvePresetForOrg(
   orgId: string,
   expectedApi: string,
 ): Promise<ResolvedModel> {
-  // `loadModel` hits `org_models` by UUID — passing a string that isn't a
-  // UUID raises a DB-level error rather than returning null. Catch and
-  // normalise into "preset not found" so the caller sees a clean 400
-  // instead of a 500.
   let loaded: Awaited<ReturnType<typeof loadModel>>;
   try {
     loaded = await loadModel(orgId, presetId);
   } catch (err) {
-    // The comment above names ONE expected failure (a non-UUID presetId), but
-    // this catch swallows every other one too — a dropped connection, a
-    // migration mid-flight — and reports all of them to the operator as
-    // "preset not found". Keep what actually failed.
+    // An `ApiError` is `loadModel`'s own verdict (409 `model_provider_unregistered`)
+    // and keeps its status; anything else reads as "not enabled", cause kept.
+    if (err instanceof ApiError) throw err;
     throw new LlmProxyUnsupportedModelError(presetId, { cause: err });
   }
   if (!loaded) {

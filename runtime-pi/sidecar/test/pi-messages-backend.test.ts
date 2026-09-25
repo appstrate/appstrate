@@ -128,8 +128,15 @@ const BACKINGS: Backing[] = [
 const CONTEXT_WINDOW = 200_000;
 const MAX_TOKENS = 32_768;
 
+/** The platform proxy's auth — the only headers the re-originated call may carry. */
+const PROXY_HEADERS = { authorization: "Bearer run-token" };
+
 function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessagesBackendDeps {
-  const upstream = { baseUrl: backing.baseUrl, apiKey: "sk-real-key" };
+  const upstream = {
+    modelBaseUrl: backing.baseUrl,
+    proxyBaseUrl: "https://platform.invalid/internal/llm-proxy/x",
+    headers: PROXY_HEADERS,
+  };
   const swap: ModelSwap = {
     alias: "appstrate-medium",
     real: backing.modelId,
@@ -598,21 +605,22 @@ describe("event projection", () => {
  * them" but "hold them sidecar-side behind opaque handles", a redesign.
  * `docs/architecture/MODEL_ALIASES.md` (tier 1) records them and what closing
  * them would cost. Each note below says what its field narrows to, measured
- * against the five shapes an alias can be backed by (`ALIAS_BACKING_SHAPES`:
- * anthropic-messages, openai-completions, openai-responses,
- * openai-codex-responses, mistral-conversations).
+ * against the four shapes that can actually back an alias: anthropic-messages,
+ * openai-completions, openai-responses, mistral-conversations.
+ * `AliasBackingApiShape` also admits openai-codex-responses, but that is an
+ * OAuth-subscription shape — aliases are refused there and the proxy does not
+ * serve it.
  */
 
 /**
  * A tool call carrying BOTH of its optional members, so the projection's
  * treatment of each is observable rather than vacuously absent.
  *
- * Residual (2 of 5): `namespace` is written only by the shared openai-responses
- * adapter, so its presence narrows the backing to `openai-responses` /
- * `openai-codex-responses`.
- * Residual (1 of 5): `thoughtSignature` is written by `openai-completions` (from
+ * Residual (1 of 4): `namespace` is written only by the shared openai-responses
+ * adapter, so its presence names `openai-responses` outright.
+ * Residual (1 of 4): `thoughtSignature` is written by `openai-completions` (from
  * an OpenRouter-style reasoning detail) and by the Google adapters, which cannot
- * back an alias — so among the five it names `openai-completions` outright.
+ * back an alias — so among the four it names `openai-completions` outright.
  */
 const RESIDUAL_TOOL_CALL: ToolCall = {
   type: "toolCall",
@@ -673,8 +681,8 @@ const PROJECTION: Record<
       content: "hi",
       partial: partialMessage([RESIDUAL_TEXT]),
     },
-    // Residual (2 of 5): `contentSignature` here is the block's `textSignature`,
-    // written only by the shared openai-responses adapter among the five.
+    // Residual (1 of 4): `contentSignature` here is the block's `textSignature`,
+    // written only by the shared openai-responses adapter among the four.
     fields: ["type", "contentIndex", "content", "contentSignature"],
   },
   thinking_start: {
@@ -701,10 +709,10 @@ const PROJECTION: Record<
       content: "…",
       partial: partialMessage([RESIDUAL_THINKING]),
     },
-    // Residual (1 of 5): `redacted` is set by the Anthropic adapter alone —
+    // Residual (1 of 4): `redacted` is set by the Anthropic adapter alone —
     // it is how that vendor's safety-filtered thinking is carried back as
     // `redacted_thinking` — so its presence identifies the backing outright.
-    // Residual (4 of 5): `contentSignature` here is the block's
+    // Residual (3 of 4): `contentSignature` here is the block's
     // `thinkingSignature`, which every backing shape but `mistral-conversations`
     // emits; the tell is the weaker one of never seeing it on a reasoning run.
     fields: ["type", "contentIndex", "content", "contentSignature", "redacted"],
@@ -1140,11 +1148,9 @@ describe("handlePiMessagesRequest", () => {
   //
   // The alias path re-originates through pi-ai and consumes a GENERATOR, so it
   // does not go through `passUpstream` and inherited none of its bounds. It is
-  // also exactly the population that needs one: `pi-messages` is one of the four
-  // api shapes that ignore pi-ai's own `timeoutMs`, and the backing rebuilt here
-  // can be another (`google-vertex`, `bedrock-converse-stream`). Without the
-  // bound a stalled backing burned the whole run budget and died on the
-  // wall-clock watchdog with nothing to show.
+  // also exactly the population that needs one: `pi-messages` ignores pi-ai's own
+  // `timeoutMs`. Without the bound a stalled backing burned the whole run budget
+  // and died on the wall-clock watchdog with nothing to show.
   //
   // Same instrument as `passUpstream`'s (see `app.test.ts`): armed against the
   // PENDING `next()` and cleared the moment it settles — never a long-lived
@@ -1598,7 +1604,7 @@ describe("pi-ai version drift", () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatchObject({ container: "0.85.0", sidecar: PI_SDK_VERSION });
     // The inbound header is a container↔sidecar fact; it must not ride upstream.
-    expect(forwarded).toEqual({ modelHeaders: undefined, optionHeaders: undefined });
+    expect(forwarded).toEqual({ modelHeaders: undefined, optionHeaders: PROXY_HEADERS });
   });
 });
 

@@ -376,28 +376,6 @@ describe("Models API", () => {
       expect(rows).toHaveLength(0);
     });
 
-    it("rejects an alias on a url-model protocol (the swap can't hide it) — 400", async () => {
-      // google-generative-ai carries the model id in the URL path, not the
-      // request body, so the body-`model` swap would never fire.
-      const providerKey = await seedOrgModelProviderKey({
-        orgId: ctx.orgId,
-        apiShape: "google-generative-ai",
-        baseUrl: "https://generativelanguage.googleapis.test",
-        apiKey: "g-key",
-      });
-      const res = await app.request("/api/models", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          label: "Appstrate Large",
-          modelId: "gemini-2.0-flash",
-          credentialId: providerKey.id,
-          aliased: true,
-        }),
-      });
-      expect(res.status).toBe(400);
-    });
-
     it("rejects an alias on an oauth-subscription credential (bearer-swap-only path) — 400", async () => {
       // The oauth run path is a pure sidecar bearer-swap: no body rewrite
       // exists there, so an alias could neither be swapped nor masked.

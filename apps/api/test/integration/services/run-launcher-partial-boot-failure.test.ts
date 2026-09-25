@@ -156,7 +156,8 @@ function buildRunPlan(): AppstrateRunPlan {
       providerId: "anthropic",
       piProvider: "anthropic",
       apiShape: "anthropic-messages",
-      baseUrl: "https://api.anthropic.com",
+      // Allowlisted in the test preload: the launch-time egress check resolves no DNS.
+      baseUrl: "https://api.anthropic.test",
       modelId: "claude-3-5-sonnet-latest",
       apiKey: "sk-test-secret",
       label: "Test Model",

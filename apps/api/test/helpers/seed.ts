@@ -526,8 +526,6 @@ function defaultProviderId(apiShape: string | undefined, baseUrl: string | undef
       return "cerebras";
     case "mistral-conversations":
       return "mistral";
-    case "google-generative-ai":
-      return "google-ai";
   }
   return "openai-compatible";
 }

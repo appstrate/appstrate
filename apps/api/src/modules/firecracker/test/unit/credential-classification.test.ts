@@ -45,10 +45,8 @@ const CLASSIFIED_NON_SECRET: readonly string[] = [
   "MODEL_CONTEXT_WINDOW",
   // Model max tokens — a number, plain configuration.
   "MODEL_MAX_TOKENS",
-  // Provider base URL — an endpoint, not a credential (the key rides PI_API_KEY).
+  // The model's own endpoint — an address, not a credential (platform mode holds none).
   "PI_BASE_URL",
-  // A placeholder by definition — the real key never enters it.
-  "PI_PLACEHOLDER",
   // Backing model ids (alias↔real) — a masking concern, not a credential.
   "PI_MODEL_SWAP_JSON",
   // Api shape of the platform llm-proxy route — a protocol name; the sidecar
@@ -101,11 +99,10 @@ const oauthSpec = buildSpec({
   credentialId: "cred_1",
 });
 
-const apiKeySpec = buildSpec({
-  authMode: "api_key",
-  baseUrl: "https://api.openai.com",
-  apiKey: "sk-real-key",
-  placeholder: "PLACEHOLDER",
+const platformSpec = buildSpec({
+  authMode: "platform",
+  apiShape: "openai-completions",
+  baseUrl: "https://api.openai.com/v1",
   modelSwap: {
     alias: "public-alias",
     real: "real-model-id",
@@ -113,12 +110,6 @@ const apiKeySpec = buildSpec({
     backingApiShape: "openai-completions" as const,
     backing: { providerId: "openai", reasoning: false, input: ["text"] },
   },
-});
-
-const platformSpec = buildSpec({
-  authMode: "platform",
-  apiShape: "openai-completions",
-  baseUrl: "https://api.openai.com/v1",
 });
 
 function emittedKeys(spec: SidecarLaunchSpec): string[] {
@@ -138,7 +129,6 @@ function emittedKeys(spec: SidecarLaunchSpec): string[] {
 describe("sidecar env key classification (MMDS broker coverage)", () => {
   const allEmitted = new Set<string>([
     ...emittedKeys(oauthSpec),
-    ...emittedKeys(apiKeySpec),
     ...emittedKeys(platformSpec),
     // Orchestrator-local — layered after the base build (see sidecar-env.ts
     // module doc), so the builders never emit it; include it by hand.
@@ -172,7 +162,6 @@ describe("sidecar env key classification (MMDS broker coverage)", () => {
     expect([...SIDECAR_SECRET_KEYS].sort()).toEqual([
       "CONNECT_LOGIN_JSON",
       "INTEGRATIONS_TO_SPAWN_JSON",
-      "PI_API_KEY",
       "PI_LLM_OAUTH_CONFIG_JSON",
       "PROXY_URL",
       "RUN_TOKEN",
@@ -180,16 +169,9 @@ describe("sidecar env key classification (MMDS broker coverage)", () => {
     ]);
   });
 
-  it("emits the api-key secrets only on the api-key branch and the oauth secret only on oauth", () => {
-    const oauthKeys = new Set(emittedKeys(oauthSpec));
-    const apiKeyKeys = new Set(emittedKeys(apiKeySpec));
-    expect(oauthKeys.has("PI_LLM_OAUTH_CONFIG_JSON")).toBe(true);
-    expect(oauthKeys.has("PI_API_KEY")).toBe(false);
-    expect(apiKeyKeys.has("PI_API_KEY")).toBe(true);
-    expect(apiKeyKeys.has("PI_LLM_OAUTH_CONFIG_JSON")).toBe(false);
-    const platformKeys = new Set(emittedKeys(platformSpec));
-    expect(platformKeys.has("PI_API_KEY")).toBe(false);
-    expect(platformKeys.has("PI_LLM_OAUTH_CONFIG_JSON")).toBe(false);
+  it("emits the oauth secret only on the oauth branch", () => {
+    expect(new Set(emittedKeys(oauthSpec)).has("PI_LLM_OAUTH_CONFIG_JSON")).toBe(true);
+    expect(new Set(emittedKeys(platformSpec)).has("PI_LLM_OAUTH_CONFIG_JSON")).toBe(false);
   });
 });
 

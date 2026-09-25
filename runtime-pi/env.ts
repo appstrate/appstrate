@@ -43,7 +43,7 @@ interface RuntimeEnv {
   modelId: string;
   /** The sidecar's LLM proxy. */
   modelBaseUrl: string;
-  /** The placeholder the sidecar swaps for the real credential upstream. */
+  /** The placeholder the sidecar replaces with its own upstream auth. */
   modelApiKey: string;
   /** Whether the model emits reasoning tokens. */
   modelReasoning?: boolean;
@@ -464,8 +464,8 @@ export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
     // the Pi SDK owns the request and takes no per-call headers from us.
     // `ModelRuntime`'s provider composer folds `Model.headers` into the
     // per-request options, so this reaches the wire for every api shape —
-    // including `pi-messages` (aliased runs) and `bedrock-converse-stream`,
-    // whose pi-ai adapters read `options.headers` and nothing else. Pinned on
+    // including `pi-messages` (aliased runs), whose pi-ai adapter reads
+    // `options.headers` and nothing else. Pinned on
     // the bytes in `packages/runner-pi/test/alias-provider-registration.test.ts`
     // and `runtime-pi/test/pi-runner-transport.test.ts`.
     //

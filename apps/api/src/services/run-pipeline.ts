@@ -20,6 +20,7 @@ import { createRun, appendRunLog } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./files.ts";
 import { resolveModel } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
+import { inferenceRouteOf } from "./run-launcher/subscription-run-policy.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
 import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
 import {
@@ -603,6 +604,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         modelLabel,
         modelSource: modelSource ?? undefined,
         modelId: plan.llmConfig.aliasId,
+        inferenceRoute: inferenceRouteOf(plan.llmConfig),
         // Kickoff pricing snapshot — see `run-context-builder.ts`. Persisted on
         // the run row so the runner's ledger row (whose cost the container
         // computes) can be classified without trusting the container.

@@ -4,7 +4,7 @@ import { createCipheriv, randomBytes } from "node:crypto";
 
 import { createApp, buildSidecarRuntimeDeps, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
-import type { LlmProxyConfig } from "./helpers.ts";
+import type { LlmProxyConfig, LlmProxyOauthConfig } from "./helpers.ts";
 import { parseModelSwapEnv } from "./model-swap.ts";
 import { isProxiedApiShape } from "@appstrate/runner-pi/llm-proxy-routes";
 import { logger } from "./logger.ts";
@@ -48,14 +48,13 @@ function readOutputSchemaFromEnv(): Record<string, unknown> | null {
 
 /**
  * Validate the parsed credential config crossing into the sidecar (the
- * credential-handling process). A blind `as` cast would let union drift (a
- * renamed `authMode`, a removed required field) parse cleanly and surface far
- * later as a confusing 401/503 from `/llm`. We assert the discriminant + the
- * per-mode required fields here so drift fails at boot, at the cause. No Zod:
- * the sidecar deliberately
- * carries no validation dependency; this is a focused shape guard.
+ * credential-handling process). A blind `as` cast would let drift (a renamed
+ * `authMode`, a removed required field) parse cleanly and surface far later as
+ * a confusing 401/503 from `/llm`. We assert the discriminant + the required
+ * fields here so drift fails at boot, at the cause. No Zod: the sidecar
+ * deliberately carries no validation dependency; this is a focused shape guard.
  */
-function assertLlmProxyConfig(value: unknown): LlmProxyConfig {
+function assertLlmOauthConfig(value: unknown): LlmProxyOauthConfig {
   if (!value || typeof value !== "object") {
     throw new Error("PI_LLM_OAUTH_CONFIG_JSON: expected an object");
   }
@@ -65,30 +64,21 @@ function assertLlmProxyConfig(value: unknown): LlmProxyConfig {
       throw new Error(`PI_LLM_OAUTH_CONFIG_JSON: ${String(c.authMode)} config missing "${field}"`);
     }
   };
-  switch (c.authMode) {
-    case "api_key":
-      need("baseUrl");
-      need("apiKey");
-      need("placeholder");
-      break;
-    case "oauth":
-      need("baseUrl");
-      need("credentialId");
-      break;
-    default:
-      throw new Error(`PI_LLM_OAUTH_CONFIG_JSON: unknown authMode "${String(c.authMode)}"`);
+  if (c.authMode !== "oauth") {
+    throw new Error(`PI_LLM_OAUTH_CONFIG_JSON: unknown authMode "${String(c.authMode)}"`);
   }
-  return value as LlmProxyConfig;
+  need("baseUrl");
+  need("credentialId");
+  return value as LlmProxyOauthConfig;
 }
 
 function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
   // OAuth credentials ship as a single JSON env var carrying the full
-  // LlmProxyConfig. A malformed payload here is a launcher bug — let JSON.parse
-  // throw (and assertLlmProxyConfig reject shape drift) rather than fall through
-  // silently to the API-key path.
+  // LlmProxyOauthConfig. A malformed payload here is a launcher bug — let
+  // JSON.parse throw (and assertLlmOauthConfig reject shape drift) rather than
+  // fall through silently to the platform path.
   const oauthJson = process.env.PI_LLM_OAUTH_CONFIG_JSON;
-  if (oauthJson) return assertLlmProxyConfig(JSON.parse(oauthJson));
-  const modelSwapJson = process.env.PI_MODEL_SWAP_JSON;
+  if (oauthJson) return assertLlmOauthConfig(JSON.parse(oauthJson));
   const platformApiShape = process.env.PI_LLM_PLATFORM_API_SHAPE;
   if (platformApiShape) {
     if (!isProxiedApiShape(platformApiShape)) {
@@ -97,21 +87,11 @@ function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
       );
     }
     if (!process.env.PI_BASE_URL) throw new Error("PI_BASE_URL: required in platform mode");
+    const modelSwapJson = process.env.PI_MODEL_SWAP_JSON;
     return {
       authMode: "platform",
       apiShape: platformApiShape,
       baseUrl: process.env.PI_BASE_URL,
-      ...(modelSwapJson ? { modelSwap: parseModelSwapEnv(modelSwapJson) } : {}),
-    };
-  }
-  if (process.env.PI_BASE_URL && process.env.PI_API_KEY) {
-    return {
-      authMode: "api_key",
-      baseUrl: process.env.PI_BASE_URL,
-      apiKey: process.env.PI_API_KEY,
-      placeholder: process.env.PI_PLACEHOLDER || "sk-placeholder",
-      // Model-alias swap (the oauth mode carries no modelSwap; aliases are
-      // rejected platform-side for oauth providers).
       // A malformed or incomplete payload is a launcher bug: `parseModelSwapEnv`
       // throws at boot rather than silently disabling the swap and leaking the real id.
       ...(modelSwapJson ? { modelSwap: parseModelSwapEnv(modelSwapJson) } : {}),

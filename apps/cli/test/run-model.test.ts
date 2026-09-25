@@ -24,7 +24,6 @@ const ENV_KEYS = [
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
   "MISTRAL_API_KEY",
-  "GOOGLE_API_KEY",
 ];
 
 let saved: Partial<Record<string, string | undefined>>;
@@ -429,10 +428,10 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
         bearerToken: "ask_test",
         orgId: "org_1",
         presetsLoader: async () => [
-          makePreset({ id: "preset_gemini", apiShape: "google-generative-ai" }),
+          makePreset({ id: "preset_codex", apiShape: "openai-codex-responses" }),
         ],
       }),
-    ).rejects.toThrow(/google-generative-ai/);
+    ).rejects.toThrow(/openai-codex-responses/);
   });
 
   it("picks the org default from a GET /api/models body (snake_case `is_default`)", async () => {

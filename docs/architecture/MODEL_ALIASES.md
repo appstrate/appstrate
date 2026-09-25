@@ -83,8 +83,7 @@ handles both that key and `openai-codex` through the same door.
 
 The **sidecar** is the `pi-messages` backend. An aliased run's inference call is
 **terminated and re-originated, never proxied**: `POST /llm/messages` — inside
-the same `/llm/*` handler the surface allowlist already guards, reusing its
-placeholder→real-key swap and SSRF check — deserialises `{model, context,
+the same `/llm/*` handler the surface allowlist already guards — deserialises `{model, context,
 options}`, rebuilds the REAL backing's pi-ai `Model` record from the private
 swap descriptor and Pi's registry record for it (`backing.providerId` is the
 Pi provider key, `null` for a gateway), calls pi-ai's own `streamSimple`, and projects the resulting
@@ -178,7 +177,7 @@ the alias never reaches upstream. Two layers hide the backing from users:
      rewrites `model` alias→real on the request and real→alias on every
      response branch, including the cached body.
 
-   For a **system** alias the two paths chain: the sidecar re-originates in the
+   For every alias (an API-key model by construction) the two paths chain: the sidecar re-originates in the
    backing's protocol and sends that call to the gateway's run entry,
    `/internal/llm-proxy/*`, which serves the run's pinned model and meters it.
    The sidecar's Model keeps the backing's own base URL so pi-ai still derives
@@ -265,20 +264,27 @@ differently — and neither does it by "letting the headers flow".**
   transaction, not the vendor) — and why the ALIAS, which does not, is kept out
   of that same string.
 
-Non-aliased models keep full verbatim passthrough (bodies, headers, hostnames)
-— the opacity cost applies only to aliases, whose contract is precisely that
-opacity. The trade-off: aliased callers lose upstream error detail (e.g. a
+Non-aliased models keep the upstream's error bodies verbatim: relayed by the
+platform LLM proxy for an API-key run, which reaches only that proxy's inference
+endpoint, or passed through from the subscription provider for an OAuth run.
+Either way the sidecar cuts response headers to `LLM_PASSTHROUGH_RESPONSE_HEADERS`.
+The synthesized-error cost applies only to aliases, whose contract is precisely
+that opacity. The trade-off: aliased callers lose upstream error detail (e.g. a
 provider's "max_tokens too large" prose); the detail remains in server logs.
 
 ## Constraints
 
 - **Body-`model` protocols only, and BACKING and CLIENT are separate sets.**
-  `isAliasBackingShape` — the invariant `POST/PUT /api/models` and the env-seeded
-  registry both check — admits exactly `anthropic-messages`,
+  An alias's backing shape is its credential's provider shape, and provider
+  registration refuses `pi-messages` on any provider, so every backing is in
+  `AliasBackingApiShape`, which the sidecar re-checks on `PI_MODEL_SWAP_JSON` at
+  boot (`isAliasBackingShape`). It admits exactly `anthropic-messages`,
   `openai-completions`, `openai-responses`, `openai-codex-responses`,
-  `mistral-conversations` (`ALIAS_BACKING_SHAPES`). `google-*`, `azure-*`, and
-  `bedrock-*` carry the model id in the URL path, so an alias there is
-  **rejected** (it would forward the alias verbatim and 404). `pi-messages` is
+  `mistral-conversations` (every `ModelApiShape` but the client dialect) — every vendor protocol the platform maps, each carrying the
+  model id in the body. Of these, `openai-codex-responses` never backs an alias
+  in practice: it is an OAuth-subscription shape (see the next constraint) and
+  the platform LLM proxy does not serve it, so the real backing set is four.
+  `pi-messages` is
   **not** a backing shape: it is the CLIENT dialect, matched by the separate
   `isAliasClientShape` / `ALIAS_CLIENT_API_SHAPE`. Because sidecar boot pins
   `clientApiShape` to that dialect, the inference allowlist is a single path
@@ -320,8 +326,8 @@ entry `id` is the public alias.
 ]
 ```
 
-A misconfigured alias (no label, or a url-model protocol) is **skipped and
-logged** at boot rather than registered half-working.
+A misconfigured alias (no label) is **skipped and logged** at boot rather than registered
+half-working.
 
 ### 2. Custom (DB) models — `POST /api/models`
 
@@ -358,15 +364,15 @@ a NEW sidecar image gets its aliased runs refused, with the offending field
 named in an operator log (never its value). Aliased runs stop; nothing leaks.
 Non-aliased runs are unaffected — they carry no descriptor.
 
-The reverse is the dangerous direction, and nothing but the tag rule detects it.
-A NEW platform against OLD runtime images means the container is told to speak
-`pi-messages` and the sidecar has no `pi-messages` backend to terminate it, and
-the `/llm/*` surface allowlist is not there either — an old sidecar is a total
-passthrough. The aliased run does fail, because its inference call has no route;
-but it fails _after_ the container has had a verbatim proxy to the vendor's own
-endpoints for as long as it lived, which is long enough for one
-`GET /v1/models`. The platform's own side of the contract looks entirely
-satisfied throughout, so there is no runtime signal to act on.
+The reverse direction fails too, and nothing but the tag rule detects it before
+a run does. A NEW platform against OLD runtime images means the container is
+told to speak `pi-messages` and the sidecar may have no `pi-messages` backend to
+terminate it. Such a sidecar predates the platform LLM proxy route as well, and
+its only other API-key upstream needed a vendor key the platform no longer
+ships to any sidecar — so it has no LLM upstream at all, and every run on an
+API-key model fails at its first inference call having reached nothing. The
+platform's own side of the contract looks entirely satisfied throughout, so
+there is no runtime signal to act on.
 
 **Where ordering is still the only control.** The tag rule reads configuration
 at boot, so it is blind wherever the tag stops identifying the build. Two of its
@@ -504,10 +510,9 @@ Ordered by how cheap the attack is. The first item needs no prompt at all.
    a property of the vendors' live APIs, not of this source — which is exactly
    the argument the canonical-dialect section makes for the sidecar. It is worth
    trimming the known gifts anyway; it is not worth believing the trim is a
-   boundary. (Note that `google-*`, `azure-*` and `bedrock-*` cannot be alias
-   backings at all — `isAliasBackingShape` rejects them — so Google's
-   `modelVersion`, the textbook case of an identifying key not named `model`,
-   is out of scope here by construction rather than by masking.)
+   boundary. (The platform maps no Google shape, so Google's `modelVersion`,
+   the textbook case of an identifying key not named `model`, is out of scope
+   here by construction rather than by masking.)
 
 3. **SSE frame structure.** The gateway proxies the upstream stream. Anthropic
    emits `message_start` / `content_block_delta` / `message_delta`; the OpenAI
@@ -674,13 +679,13 @@ what the sandbox knows does not determine what is billed.
 The narrowed `/llm/*` surface is what keeps the disclosure list to that table.
 An aliased run gets exactly ONE call — the inference endpoint its client
 protocol uses — `POST /messages` (`isAliasInferenceCall`). Everything
-else is refused with the neutral envelope at 404, before any upstream fetch and
-before the placeholder is swapped for the real key, so the credential is never
-spent on a request being rejected. Without that narrowing a single
+else is refused with the neutral envelope at 404, before any upstream fetch, so
+no credential is spent on a request being rejected. Without that narrowing a single
 `GET /v1/models` returns the vendor's own catalogue in a **2xx** body, which
 neither the error synthesis (non-2xx only) nor any field rewrite looks at.
-Non-aliased runs keep the verbatim passthrough; their contract is reaching the
-provider, not hiding it.
+A non-aliased run on the platform proxy is narrowed as well, to that proxy's
+one inference endpoint; only an OAuth-subscription run keeps the verbatim
+passthrough — its contract is reaching the provider, not hiding it.
 
 Three values are sent **exact** rather than masked or withheld, each because
 masking costs something real and buys nothing measurable:
@@ -695,15 +700,16 @@ masking costs something real and buys nothing measurable:
   purpose by the read projection.
 
 Five fields of the response body are **known residuals** — on the list because
-they must be, not because they are neutral:
+they must be, not because they are neutral. Each is measured against the four
+shapes that can actually back an alias (§ Constraints):
 
-| field                           | emitted by                                                                                      | narrows the backing to                                 |
-| ------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `thinking_end.redacted`         | the Anthropic adapter alone — it is how safety-filtered thinking travels as `redacted_thinking` | `anthropic-messages` (1 of 5)                          |
-| `toolCall.thoughtSignature`     | `openai-completions`, and the Google shapes, which cannot back an alias                         | `openai-completions` (1 of 5)                          |
-| `text_end.contentSignature`     | the shared openai-responses adapter                                                             | `openai-responses` / `openai-codex-responses` (2 of 5) |
-| `toolCall.namespace`            | the same adapter                                                                                | the same two (2 of 5)                                  |
-| `thinking_end.contentSignature` | every backing shape but `mistral-conversations`                                                 | 4 of 5 — here the tell is its absence                  |
+| field                           | emitted by                                                                                      | narrows the backing to                |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `thinking_end.redacted`         | the Anthropic adapter alone — it is how safety-filtered thinking travels as `redacted_thinking` | `anthropic-messages` (1 of 4)         |
+| `toolCall.thoughtSignature`     | `openai-completions`                                                                            | `openai-completions` (1 of 4)         |
+| `text_end.contentSignature`     | the shared openai-responses adapter                                                             | `openai-responses` (1 of 4)           |
+| `toolCall.namespace`            | the same adapter                                                                                | the same one (1 of 4)                 |
+| `thinking_end.contentSignature` | every backing shape but `mistral-conversations`                                                 | 3 of 4 — here the tell is its absence |
 
 Their VALUES are opaque blobs and nothing is read out of them; it is their mere
 PRESENCE that narrows the candidate vendor. That is the same argument by which

@@ -9,6 +9,7 @@ import {
   OauthProviderMissingCredentialError,
   OauthRunRequiresIsolationError,
   buildOauthSidecarLlm,
+  inferenceRouteOf,
 } from "../../../src/services/run-launcher/subscription-run-policy.ts";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import {
@@ -179,26 +180,29 @@ describe("resolveCredentialDelivery (oauth-class classification)", () => {
     seedTestModelProviders();
   });
 
-  it("classifies an oauth subscription credential as oauth-class, carrying the credential id", () => {
-    // The oauth arm CARRIES the id — that is what removes the re-check plus
-    // non-null assertion the launcher used to need at the point of use.
+  it("routes an oauth subscription credential to the sidecar, carrying the credential id", () => {
     expect(
       resolveCredentialDelivery({ providerId: "claude-code", credentialId: "cred_1" }),
-    ).toEqual({ kind: "oauth", credentialId: "cred_1" });
-    // codex is now oauth-class and runs on Pi like claude-code (no refuse path).
+    ).toEqual({ route: "sidecar", credentialId: "cred_1" });
     expect(resolveCredentialDelivery({ providerId: "codex", credentialId: "cred_2" })).toEqual({
-      kind: "oauth",
+      route: "sidecar",
       credentialId: "cred_2",
     });
   });
 
-  it("classifies an api-key provider as api_key, credential id or not", () => {
+  it("routes an api-key provider to the proxy, credential id or not", () => {
     expect(resolveCredentialDelivery({ providerId: "openai", credentialId: "cred_3" })).toEqual({
-      kind: "api_key",
+      route: "proxy",
     });
     expect(resolveCredentialDelivery({ providerId: "openai", credentialId: null })).toEqual({
-      kind: "api_key",
+      route: "proxy",
     });
+  });
+
+  it("routes an oauth subscription to the sidecar and an api-key provider to the proxy", () => {
+    expect(inferenceRouteOf({ providerId: "claude-code" })).toBe("sidecar");
+    expect(inferenceRouteOf({ providerId: "codex" })).toBe("sidecar");
+    expect(inferenceRouteOf({ providerId: "openai" })).toBe("proxy");
   });
 
   it("throws rather than downgrading an oauth provider that resolved no credential id", () => {

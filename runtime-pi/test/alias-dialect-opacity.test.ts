@@ -41,7 +41,7 @@ interface Backing {
 
 /**
  * Spread across all three OpenAI-family quirk clusters plus the Anthropic and
- * Mistral families — the widest vendor spread `ALIAS_BACKING_SHAPES` supports.
+ * Mistral families — the widest vendor spread `AliasBackingApiShape` admits.
  * `openai-codex-responses` is omitted: it is an oauth-subscription protocol,
  * and aliases are rejected on oauth credentials at every entry point.
  */
@@ -116,8 +116,6 @@ function containerModelFor(
       api: backing.apiShape,
       modelId: aliased ? ALIAS_ID : backing.modelId,
       piProvider: backing.piProvider,
-      apiKey: "sk-real-key",
-      apiKeyPlaceholder: "sk-placeholder",
       input: ["text"],
       contextWindow: backing.contextWindow,
       maxTokens: backing.maxTokens,

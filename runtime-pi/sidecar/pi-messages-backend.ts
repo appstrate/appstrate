@@ -128,14 +128,18 @@ export type BackingStreamFn = (
   options: SimpleStreamOptions,
 ) => AssistantMessageEventStream;
 
-/** Where the re-originated call goes, and what pi-ai authenticates it with. */
+/** Where the re-originated call goes. */
 interface PiMessagesUpstream {
-  /** The backing's own endpoint — pi-ai derives vendor dialect from it. */
-  baseUrl: string;
-  apiKey: string;
-  /** Set when another endpoint serves the call: its base, and the headers it authenticates. */
-  via?: { baseUrl: string; headers: Record<string, string> };
+  /** The backing's own endpoint, never dialed — pi-ai derives vendor dialect from it. */
+  modelBaseUrl: string;
+  /** The platform LLM proxy endpoint that serves the call instead. */
+  proxyBaseUrl: string;
+  /** The headers that authenticate the call at the proxy. */
+  headers: Record<string, string>;
 }
+
+/** pi-ai needs a key to sign with; the proxy ignores it and reads the run token. */
+const PROXY_PLACEHOLDER_API_KEY = "appstrate-run";
 
 /**
  * Send pi-ai's calls to `to` instead of the `from` prefix it built them on.
@@ -325,7 +329,7 @@ export function buildBackingModel(deps: PiMessagesBackendDeps): Model<Api> {
     registryModelId: swap.real,
     apiShape: swap.backingApiShape,
     piProvider: backing.providerId,
-    baseUrl: upstream.baseUrl,
+    baseUrl: upstream.modelBaseUrl,
     reasoning: backing.reasoning,
     input: narrowInputModalities(backing.input),
     // Explicit, so the record's card never applies: the disclosure control above.
@@ -409,8 +413,8 @@ function projectRequestOptions(
 ): SimpleStreamOptions {
   const incoming = body.options ?? {};
   return {
-    apiKey: upstream.apiKey,
-    ...(upstream.via ? { headers: upstream.via.headers } : {}),
+    apiKey: PROXY_PLACEHOLDER_API_KEY,
+    headers: upstream.headers,
     signal,
     fetch: upstreamFetch,
     // NOT part of the client's payload and deliberately not derived from it:
@@ -624,9 +628,9 @@ export function handlePiMessagesRequest(
   const abort = llmUpstreamAbort(AbortSignal.any([request.signal, unwind.signal]));
   // Per REQUEST, never per process: the recorded status belongs to this turn.
   const transport = deps.fetchImpl ?? fetch;
-  const { baseUrl, via } = deps.upstream;
+  const { modelBaseUrl, proxyBaseUrl } = deps.upstream;
   const statusProbe = createUpstreamStatusProbe(
-    via ? redirectingFetch(transport, baseUrl, via.baseUrl) : transport,
+    redirectingFetch(transport, modelBaseUrl, proxyBaseUrl),
   );
   const upstream = stream(
     model,

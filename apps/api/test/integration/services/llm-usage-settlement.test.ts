@@ -45,7 +45,7 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { llmUsage, runs } from "@appstrate/db/schema";
+import { llmUsage, runs, type InferenceRoute } from "@appstrate/db/schema";
 import { encrypt } from "@appstrate/connect";
 import type { Db } from "@appstrate/db/client";
 import { truncateAll } from "../../helpers/db.ts";
@@ -96,6 +96,7 @@ async function seedSinkRun(
   overrides: {
     modelSource?: string | null;
     modelId?: string | null;
+    inferenceRoute?: InferenceRoute | null;
     runOrigin?: "platform" | "remote";
     tokenUsage?: Record<string, number> | null;
     /**
@@ -116,10 +117,11 @@ async function seedSinkRun(
     spaceId: ctx.defaultSpaceId,
     status: "running",
     runOrigin: overrides.runOrigin ?? "platform",
-    // BYOK: a platform run whose runner row is its ledger (a system run's is
-    // the proxy's per-call rows).
+    // An OAuth run: its sidecar serves it, so its runner row is its ledger (a
+    // proxy-served run's is the proxy's per-call rows).
     modelSource: overrides.modelSource ?? "org",
     modelId: overrides.modelId ?? null,
+    inferenceRoute: overrides.inferenceRoute === undefined ? "sidecar" : overrides.inferenceRoute,
     modelCost: overrides.modelCost ?? null,
     sinkSecretEncrypted: encrypt(RUN_SECRET),
     sinkExpiresAt: new Date(Date.now() + 3600_000),
@@ -231,26 +233,28 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     errorSpy.mockRestore();
   });
 
-  it("the terminal barrier skips a proxy-metered run and keeps a system run the proxy never served", async () => {
+  it("the terminal barrier skips a proxy-served run and keeps one with no recorded route", async () => {
     const usage = { input_tokens: 100, output_tokens: 50 };
     const rates = { input: 1, output: 2 };
     const proxied = await seedSinkRun(ctx, {
-      modelSource: "system",
-      modelId: "sys-preset",
+      modelSource: "org",
+      modelId: "org-preset",
+      inferenceRoute: "proxy",
       tokenUsage: usage,
       modelCost: rates,
     });
-    const direct = await seedSinkRun(ctx, {
+    const unrouted = await seedSinkRun(ctx, {
       modelSource: "system",
-      modelId: null,
+      modelId: "sys-preset",
+      inferenceRoute: null,
       tokenUsage: usage,
       modelCost: rates,
     });
     await synthesisedFinalize(proxied);
-    await synthesisedFinalize(direct);
+    await synthesisedFinalize(unrouted);
 
     expect(await runnerRow(proxied)).toBeUndefined();
-    expect((await runnerRow(direct))?.credentialSource).toBe("system");
+    expect((await runnerRow(unrouted))?.credentialSource).toBe("system");
   });
 
   it("a runner snapshot arriving after the run settled is refused, leaving the billed total intact", async () => {

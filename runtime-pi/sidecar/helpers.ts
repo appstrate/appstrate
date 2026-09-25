@@ -335,7 +335,6 @@ export async function readRequestBodyBounded(
 export type {
   SidecarConfig,
   LlmProxyConfig,
-  LlmProxyApiKeyConfig,
   LlmProxyOauthConfig,
   LlmProxyPlatformConfig,
   ModelSwap,

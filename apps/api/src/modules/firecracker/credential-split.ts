@@ -43,7 +43,7 @@ export const MMDS_STORE_LIMIT_BYTES = 51_200;
 export const MMDS_SAFETY_MARGIN_BYTES = 4_096;
 
 /**
- * Sidecar-env keys that carry secrets (LLM keys, run token, OAuth config,
+ * Sidecar-env keys that carry secrets (run token, OAuth config,
  * per-integration spawn env with live credentials, cookie-session logins,
  * the forward-proxy URL — it can embed `user:pass@host` credentials).
  * Everything else in the sidecar env is non-secret configuration.
@@ -58,7 +58,6 @@ export const SIDECAR_SECRET_KEYS: readonly string[] = [
   // the org's provider credential through `/llm/*` — it must not sit at rest
   // on the config drive.
   "SIDECAR_AUTH_TOKEN",
-  "PI_API_KEY",
   "PI_LLM_OAUTH_CONFIG_JSON",
   "CONNECT_LOGIN_JSON",
   "INTEGRATIONS_TO_SPAWN_JSON",

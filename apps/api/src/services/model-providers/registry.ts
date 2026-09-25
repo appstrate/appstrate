@@ -26,6 +26,8 @@
  */
 
 import type { ModelProviderDefinition } from "@appstrate/core/module";
+import { isAliasClientShape } from "@appstrate/core/model-swap";
+import { LLM_PROXY_ROUTES, isProxiedApiShape } from "@appstrate/runner-pi/llm-proxy-routes";
 import { listCatalogModels, lookupCatalogModel, piProviderOf } from "../model-catalog.ts";
 
 // ---------------------------------------------------------------------------
@@ -48,7 +50,10 @@ const _byId = new Map<string, ModelProviderDefinition>();
  * tables and Better Auth model names.
  *
  * Also throws when an `authMode: "oauth2"` provider omits
- * `modelDiscovery: { mode: "static" }` — see {@link assertSubscriptionNeverEnumerated}.
+ * `modelDiscovery: { mode: "static" }` — see {@link assertSubscriptionNeverEnumerated} —
+ * when an api-key provider's shape is not one the LLM proxy serves — see
+ * {@link assertApiKeyShapeProxied} — and when any provider declares the alias
+ * client dialect — see {@link assertNotAliasClientShape}.
  */
 export function registerModelProvider(def: ModelProviderDefinition): void {
   if (_byId.has(def.providerId)) {
@@ -58,6 +63,8 @@ export function registerModelProvider(def: ModelProviderDefinition): void {
     );
   }
   assertSubscriptionNeverEnumerated(def);
+  assertApiKeyShapeProxied(def);
+  assertNotAliasClientShape(def);
   validateCatalogReferences(def);
   assertInferenceProbeable(def);
   _byId.set(def.providerId, def);
@@ -76,6 +83,34 @@ function assertSubscriptionNeverEnumerated(def: ModelProviderDefinition): void {
         `and must declare modelDiscovery: { mode: "static" }. A subscription provider's models ` +
         `are never enumerated by the platform — without it, model discovery would spend the ` +
         `user's access token on an upstream model listing.`,
+    );
+  }
+}
+
+/**
+ * Every api-key model, platform-provided or an org's own, is served to runs by
+ * the LLM proxy, so an api-key provider's shape must be one the proxy routes.
+ */
+function assertApiKeyShapeProxied(def: ModelProviderDefinition): void {
+  if (def.authMode === "api_key" && !isProxiedApiShape(def.apiShape)) {
+    throw new Error(
+      `Model provider ${JSON.stringify(def.providerId)} is an api_key provider on apiShape ` +
+        `${JSON.stringify(def.apiShape)}, which the platform LLM proxy does not serve ` +
+        `(served: ${Object.keys(LLM_PROXY_ROUTES).join(", ")}).`,
+    );
+  }
+}
+
+/**
+ * `pi-messages` is what an aliased run's container speaks to its sidecar, never
+ * a vendor protocol, whatever the auth mode.
+ */
+function assertNotAliasClientShape(def: ModelProviderDefinition): void {
+  if (isAliasClientShape(def.apiShape)) {
+    throw new Error(
+      `Model provider ${JSON.stringify(def.providerId)} declares apiShape ` +
+        `${JSON.stringify(def.apiShape)}, the client dialect of aliased runs — not a vendor ` +
+        `protocol a provider can serve.`,
     );
   }
 }

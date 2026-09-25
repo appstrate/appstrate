@@ -50,7 +50,7 @@ describe("resolveCatalogDefaults", () => {
   });
 
   it("carries no cost for a model the catalog leaves unpriced", () => {
-    const out = resolveCatalogDefaults("google-ai", "gemma-4-31b-it");
+    const out = resolveCatalogDefaults("mistral", "labs-devstral-small-2512");
     expect(out.contextWindow).toBeGreaterThan(0);
     expect(out).not.toHaveProperty("cost");
   });
@@ -81,7 +81,9 @@ describe("resolveCatalogDefaults", () => {
 
     it("resolves the core providers whose key differs from Pi's", () => {
       expect(resolveCatalogDefaults("moonshot", "kimi-k3").label).toBeString();
-      expect(resolveCatalogDefaults("google-ai", "gemini-3.8-flash").label).toBeString();
+      expect(
+        resolveCatalogDefaults("fireworks-ai", "accounts/fireworks/models/kimi-k3").label,
+      ).toBeString();
     });
   });
 

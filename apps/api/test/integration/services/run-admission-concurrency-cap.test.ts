@@ -60,6 +60,7 @@ describe("createRun — per-org concurrency reservation", () => {
       actor: null,
       input: null,
       modelId: null,
+      inferenceRoute: null,
     });
   }
 

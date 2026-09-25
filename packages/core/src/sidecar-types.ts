@@ -27,8 +27,8 @@ export type ManifestDeliveryHttp = NonNullable<
  * carrying {@link SidecarConfig.sidecarAuthToken}.
  *
  * A dedicated header rather than `Authorization`: on `/llm/*` that slot already
- * carries the vendor credential placeholder the sidecar swaps for the real key,
- * so reusing it would collide with the one thing that surface exists to do.
+ * carries the placeholder credential the sidecar replaces with its own upstream
+ * auth, so reusing it would collide with the one thing that surface exists to do.
  *
  * Container → sidecar only: the `/llm/*` passthrough strips it (and the
  * `x-appstrate-pi-sdk` sibling) from the forwarded header set, so the sidecar's
@@ -524,8 +524,6 @@ export interface IntegrationSpawnSpec {
 /**
  * Discriminated union covering the two LLM auth modes the sidecar can serve:
  *
- *   - `api_key`: the agent SDK builds the auth header with a placeholder and
- *     the sidecar swaps the placeholder for the real key.
  *   - `oauth`: the no-forging OAuth path for subscription runs. The in-container
  *     Pi engine (`pi-ai`) emits the provider's own subscription request shape
  *     from its OAuth-shaped placeholder token; the sidecar fetches a fresh
@@ -533,16 +531,14 @@ export interface IntegrationSpawnSpec {
  *     and swaps the request bearer for it verbatim — no identity headers, no
  *     body transforms. There is deliberately no fingerprint-forging mode: the
  *     platform itself never synthesises a provider fingerprint.
- *
  *   - `platform`: the upstream is the platform's metered LLM proxy, which holds
  *     the credential; the sidecar's run token authorises the run's inference.
  *
- * The model-alias swap ({@link ModelSwap}) exists on the `api_key` and
- * `platform` modes. Aliases are rejected for oauth-subscription providers (at
- * alias creation and again at run launch) so the oauth path stays a pure
- * bearer-swap.
+ * The model-alias swap ({@link ModelSwap}) exists on the `platform` mode only.
+ * Aliases are rejected for oauth-subscription providers (at alias creation and
+ * again at run launch) so the oauth path stays a pure bearer-swap.
  */
-export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig | LlmProxyPlatformConfig;
+export type LlmProxyConfig = LlmProxyOauthConfig | LlmProxyPlatformConfig;
 
 /**
  * Canonical wire-format identifier for every LLM model provider Appstrate
@@ -562,10 +558,6 @@ export const MODEL_API_SHAPES = [
   "openai-responses",
   "openai-codex-responses",
   "mistral-conversations",
-  "google-generative-ai",
-  "google-vertex",
-  "azure-openai-responses",
-  "bedrock-converse-stream",
 ] as const;
 
 /**
@@ -635,16 +627,6 @@ export interface ModelSwapBacking {
   input: ReadonlyArray<string>;
 }
 
-export interface LlmProxyApiKeyConfig {
-  authMode: "api_key";
-  /** Upstream provider base URL the sidecar forwards to. */
-  baseUrl: string;
-  apiKey: string;
-  placeholder: string;
-  /** Set for model aliases — rewrite `model` alias↔real in req/resp. See {@link ModelSwap}. */
-  modelSwap?: ModelSwap;
-}
-
 /** Platform mode — see {@link LlmProxyConfig}. No provider credential. */
 export interface LlmProxyPlatformConfig {
   authMode: "platform";
@@ -652,6 +634,7 @@ export interface LlmProxyPlatformConfig {
   apiShape: ModelApiShape;
   /** The model's own endpoint, never dialed: pi-ai derives vendor dialect from it. */
   baseUrl: string;
+  /** Set for model aliases — rewrite `model` alias↔real in req/resp. See {@link ModelSwap}. */
   modelSwap?: ModelSwap;
 }
 

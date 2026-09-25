@@ -16,16 +16,17 @@
  * docs/architecture/SUBSCRIPTION_COMPLIANCE.md).
  *
  * This module owns the two things that still differ for an OAuth run: the
- * credential is delivered via the sidecar `/llm` bearer-swap (not a static
- * placeholder→key substitution), and the run MUST execute under an isolating
- * orchestrator, the only kind that keeps the sidecar's credential apart from
- * the agent.
+ * credential is delivered via the sidecar `/llm` bearer-swap (an API-key run is
+ * served by the platform LLM proxy instead), and the run MUST execute under an
+ * isolating orchestrator, the only kind that keeps the sidecar's credential
+ * apart from the agent.
  */
 
 import type { LlmProxyOauthConfig } from "@appstrate/core/sidecar-types";
 import type { ExecutionMode } from "../../infra/mode.ts";
 import { orchestratorIsolatesWorkloads, isolatingOrchestratorIds } from "../orchestrator/index.ts";
 import { isOAuthModelProvider } from "../model-providers/registry.ts";
+import type { InferenceRoute } from "@appstrate/db/schema";
 
 /**
  * Thrown when a run resolves to an OAuth provider (`authMode: "oauth2"`) with
@@ -48,42 +49,26 @@ export class OauthProviderMissingCredentialError extends Error {
 }
 
 /**
- * How a run's model credential reaches the upstream provider.
- *
- * A discriminated union, not a boolean flag: the `oauth` arm CARRIES the
- * credential id, so a caller that takes the oauth branch has the id in hand by
- * construction. The previous shape (`{ isOauthCredential: boolean }`) forced
- * every consumer to re-derive "oauth implies a credential id" — in practice
- * with a re-check plus a non-null assertion at the point of use, duplicating
- * the invariant this resolver already enforces.
+ * `runs.inference_route`: an OAuth subscription keeps its own request shape
+ * through the sidecar bearer-swap.
  */
-type CredentialDelivery =
-  /** Oauth-class credential — bearer swapped server-side by the sidecar `/llm` gateway. */
-  | { readonly kind: "oauth"; readonly credentialId: string }
-  /** Static API-key provider — the placeholder is substituted for the real key inline. */
-  | { readonly kind: "api_key" };
+export function inferenceRouteOf(model: { providerId: string }): InferenceRoute {
+  return isOAuthModelProvider(model.providerId) ? "sidecar" : "proxy";
+}
 
 /**
- * Single resolver for "what kind of credential is this and how is it delivered".
- *
- * Classification is by the provider's declared `authMode` FIRST: any provider
- * registered with `authMode: "oauth2"` is an oauth-class credential whose
- * bearer is swapped server-side by the sidecar `/llm` gateway — regardless of
- * whether a credential id happens to be present. An OAuth provider WITHOUT a
- * stored credential id is an invalid configuration and throws
- * {@link OauthProviderMissingCredentialError} (fail-closed — it must never be
- * downgraded to API-key handling, which cannot refresh the token). Everything else is a static API-key provider whose placeholder
- * is substituted for the real key inline.
+ * The run's {@link inferenceRouteOf}, with the stored credential a sidecar run
+ * swaps in. An OAuth provider without one throws rather than falling to the
+ * proxy, which cannot use a subscription token.
  */
-export function resolveCredentialDelivery(params: {
+export function resolveCredentialDelivery(model: {
   providerId: string;
-  /** The stored credential id the run resolved, if any. */
-  credentialId: string | null | undefined;
-}): CredentialDelivery {
-  const { providerId, credentialId } = params;
-  if (!isOAuthModelProvider(providerId)) return { kind: "api_key" };
-  if (!credentialId) throw new OauthProviderMissingCredentialError(providerId);
-  return { kind: "oauth", credentialId };
+  credentialId?: string | null;
+}): { readonly route: "proxy" } | { readonly route: "sidecar"; readonly credentialId: string } {
+  const route = inferenceRouteOf(model);
+  if (route === "proxy") return { route };
+  if (!model.credentialId) throw new OauthProviderMissingCredentialError(model.providerId);
+  return { route, credentialId: model.credentialId };
 }
 
 /**

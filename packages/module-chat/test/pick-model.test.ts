@@ -66,7 +66,7 @@ describe("pickModel liveness", () => {
 
   it("keeps the family fallback for a configured but unusable family", () => {
     // Unchanged path: nothing chat-usable at all is a different diagnosis.
-    expect(() => pickModel([model("preset_1", { apiShape: "google-generative-ai" })])).toThrow(
+    expect(() => pickModel([model("preset_1", { apiShape: "some-future-api" })])).toThrow(
       /No chat-usable model is configured/,
     );
   });

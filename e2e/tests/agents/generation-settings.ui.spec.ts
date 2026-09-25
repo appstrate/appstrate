@@ -24,8 +24,12 @@ const CONFIG_TAB = "Paramètres par défaut";
 const SAVE_MODEL_SETTINGS = "Enregistrer les réglages du modèle";
 /** `models.generation.levels.high` — the toggle's aria-label. */
 const HIGH = "Élevé";
-/** `models.generation.inherit` — aria-label of the "Auto" toggle. */
-const INHERIT = "Valeur du fournisseur";
+/**
+ * `models.generation.reasoningInherit` interpolated with
+ * `models.generation.levels.medium` (`DEFAULT_MODEL_REASONING_LEVEL`) —
+ * aria-label of the reasoning "Auto" toggle.
+ */
+const REASONING_INHERIT = "Par défaut (Moyen)";
 
 function waitForModelPatch(page: Page, scope: string, name: string) {
   return page.waitForResponse(
@@ -77,7 +81,7 @@ test("an agent's reasoning level set in the UI persists across a reload and on t
   await page.reload();
   await page.getByRole("tab", { name: CONFIG_TAB }).click();
   await expect(page.getByRole("radio", { name: HIGH, exact: true })).toBeChecked();
-  await expect(page.getByRole("radio", { name: INHERIT, exact: true })).not.toBeChecked();
+  await expect(page.getByRole("radio", { name: REASONING_INHERIT, exact: true })).not.toBeChecked();
 
   const agentModel = await apiClient.get(`/agents/${scope}/${name}/model`);
   expect(agentModel.status()).toBe(200);
@@ -95,8 +99,8 @@ test("an agent's reasoning level set in the UI persists across a reload and on t
 
   // Back to "Auto": the level is removed rather than sent under another name,
   // and an empty settings object is saved as "inherit everything".
-  await page.getByRole("radio", { name: INHERIT, exact: true }).click();
-  await expect(page.getByRole("radio", { name: INHERIT, exact: true })).toBeChecked();
+  await page.getByRole("radio", { name: REASONING_INHERIT, exact: true }).click();
+  await expect(page.getByRole("radio", { name: REASONING_INHERIT, exact: true })).toBeChecked();
   const cleared = waitForModelPatch(page, scope, name);
   await page.getByRole("button", { name: SAVE_MODEL_SETTINGS }).click();
   const clearedResponse = await cleared;
@@ -105,7 +109,7 @@ test("an agent's reasoning level set in the UI persists across a reload and on t
 
   await page.reload();
   await page.getByRole("tab", { name: CONFIG_TAB }).click();
-  await expect(page.getByRole("radio", { name: INHERIT, exact: true })).toBeChecked();
+  await expect(page.getByRole("radio", { name: REASONING_INHERIT, exact: true })).toBeChecked();
   await expect(page.getByRole("radio", { name: HIGH, exact: true })).not.toBeChecked();
 
   const afterClear = await apiClient.get(`/agents/${scope}/${name}/model`);

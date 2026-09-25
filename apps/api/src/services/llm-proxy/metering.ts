@@ -608,9 +608,9 @@ export function guardSseTeardown(
         return;
       }
       if (result === STREAM_IDLE) {
-        // Four of the ten api shapes this platform maps ignore pi-ai's own
-        // `timeoutMs`, so this proxy is the only provider-agnostic place a
-        // stalled stream can be caught at all.
+        // Not every pi-ai adapter honours its own `timeoutMs`, so this proxy
+        // is the only provider-agnostic place a stalled stream can be caught
+        // at all.
         //
         // THIS MESSAGE NEVER LEAVES THE SERVER: `onTeardownError` is a logger
         // call at its only call site (`forwardMeteredResponse` below), and by
@@ -621,9 +621,8 @@ export function guardSseTeardown(
         // classifies as retryable without help from this text: pi-ai's adapters
         // throw on a premature end — `openai-completions.js` "Stream ended
         // without finish_reason" (whenever `compat.supportsFinishReason`, its
-        // default), `google-generative-ai.js` "Google stream ended without a
-        // finish reason", `anthropic-messages.js` "Anthropic stream ended
-        // before message_stop" — and those match
+        // default), `anthropic-messages.js` "Anthropic stream ended before
+        // message_stop" — and those match
         // `RETRYABLE_PROVIDER_ERROR_PATTERN` (`dist/utils/retry.js`:
         // `ended without`, `stream ended before message_stop`). So the wording
         // below is free to change; keep it operator-legible.

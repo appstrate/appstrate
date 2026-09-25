@@ -2,7 +2,7 @@
 
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgModels } from "@appstrate/db/schema";
+import { modelProviderCredentials, orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import { listCatalogModels, lookupCatalogModel, piProviderOf } from "./model-catalog.ts";
 import { buildPiModel, clampPiReasoningLevel } from "@appstrate/runner-pi/pi-model";
@@ -925,9 +925,8 @@ async function loadModelFromDb(orgId: string, modelDbId: string): Promise<Resolv
   // raise `invalid input syntax for type uuid` rather than returning no rows.
   // Normalise that one cast failure into "not found" (null) so callers see a
   // clean 4xx instead of a 500; rethrow any other error (e.g. a real DB outage)
-  // rather than masking it as a missing model. Same hazard handled in
-  // `llm-proxy/core.ts`.
-  let row: (DbOrgModelRow & { enabled: boolean }) | undefined;
+  // rather than masking it as a missing model.
+  let row: (DbOrgModelRow & { enabled: boolean; providerId: string }) | undefined;
   try {
     [row] = await db
       .select({
@@ -942,8 +941,10 @@ async function loadModelFromDb(orgId: string, modelDbId: string): Promise<Resolv
         reasoning: orgModels.reasoning,
         cost: orgModels.cost,
         aliased: orgModels.aliased,
+        providerId: modelProviderCredentials.providerId,
       })
       .from(orgModels)
+      .innerJoin(modelProviderCredentials, eq(modelProviderCredentials.id, orgModels.credentialId))
       .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
       .limit(1);
   } catch (err) {
@@ -953,6 +954,17 @@ async function loadModelFromDb(orgId: string, modelDbId: string): Promise<Resolv
   }
 
   if (!row || !row.enabled) return null;
+  // A stored credential naming a provider this instance does not register must
+  // not resolve to null: every caller reads null as "fall through to the org or
+  // system default", which would silently run on — and bill — another model.
+  if (!getModelProvider(row.providerId)) {
+    throw conflict(
+      "model_provider_unregistered",
+      `Model '${modelDbId}' is bound to a credential of provider '${row.providerId}', which this ` +
+        `instance does not register. Load that provider's module again (MODULES), or have an ` +
+        `operator remove the model and its credential.`,
+    );
+  }
 
   const creds = await loadInferenceCredentials(orgId, row.credentialId);
   if (!creds) return null;
@@ -977,7 +989,8 @@ async function loadModelFromDb(orgId: string, modelDbId: string): Promise<Resolv
  * credential row is gone, or whose `providerId` has no registry entry (its
  * provider module was dropped from `MODULES`), is not listed at all — and its
  * credential is fine, so "reconnect it" would be advice that fixes nothing
- * about a row the client cannot even see. The fix there is to restore the
+ * about a row the client cannot even see (`loadModel` refuses the latter with
+ * 409 `model_provider_unregistered`). The fix there is to restore the
  * provider.
  *
  * One divergence from the list is deliberate: a DISABLED row on a dead
@@ -1142,20 +1155,6 @@ export function buildModelTestRequest(config: {
       url = `${base}/v1/models`;
       headers["Authorization"] = `Bearer ${config.apiKey}`;
       break;
-    case "google-generative-ai":
-      url = `${base}/models?key=${encodeURIComponent(config.apiKey)}`;
-      break;
-    case "google-vertex":
-      url = `${base}/models`;
-      headers["Authorization"] = `Bearer ${config.apiKey}`;
-      break;
-    case "azure-openai-responses":
-      url = `${base}/models`;
-      headers["api-key"] = config.apiKey;
-      break;
-    case "openai-completions":
-    case "openai-responses":
-    case "bedrock-converse-stream":
     default:
       url = `${base}/models`;
       headers["Authorization"] = `Bearer ${config.apiKey}`;

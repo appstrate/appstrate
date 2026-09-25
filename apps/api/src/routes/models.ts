@@ -158,7 +158,7 @@ export const testInlineSchema = z
  * Map an alias-invariant violation to its 400 — shared by the create and
  * update handlers so PATCH cannot accept a state POST rejects (issue #727).
  */
-function throwOnAliasViolation(violation: AliasInvariantViolation | null, apiShape: string): void {
+function throwOnAliasViolation(violation: AliasInvariantViolation | null): void {
   // 1. Require an explicit label. The derive-from-catalog fallback (POST) —
   //    or a label derived at creation time and kept on update — would name
   //    the alias after its REAL backing ("DeepSeek Chat"), and `label`
@@ -170,17 +170,7 @@ function throwOnAliasViolation(violation: AliasInvariantViolation | null, apiSha
       "label",
     );
   }
-  // 2. The swap only rewrites the body `model` field, which exists for
-  //    openai/anthropic/mistral shapes; google/azure/bedrock carry the
-  //    model id in the URL path, so an alias there forwards verbatim and
-  //    404s upstream (and never gets swapped). Reject up front.
-  if (violation === "non_aliasable_shape") {
-    throw invalidRequest(
-      `Model aliases are not supported for the "${apiShape}" protocol (the model id is carried in the URL, not the request body).`,
-      "aliased",
-    );
-  }
-  // 3. The oauth-subscription run path is a pure sidecar bearer-swap —
+  // 2. The oauth-subscription run path is a pure sidecar bearer-swap —
   //    it never rewrites the body, so an alias there could not be
   //    swapped (nor masked). Reject up front.
   if (violation === "oauth_provider") {
@@ -288,10 +278,8 @@ export function createModelsRouter() {
         throwOnAliasViolation(
           checkAliasInvariants({
             label: data.label,
-            apiShape: creds.apiShape,
             authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
           }),
-          creds.apiShape,
         );
       }
       // Token-budget invariant on the EFFECTIVE state: an override omitted
@@ -566,7 +554,7 @@ export function createModelsRouter() {
 
     // Model-alias guards on the EFFECTIVE post-update state (issue #727) —
     // without this, PATCH is a bypass of every invariant POST enforces: flip
-    // `aliased` on an oauth-subscription or url-model row, or re-point an
+    // `aliased` on an oauth-subscription or non-backing row, or re-point an
     // aliased row to such a credential, and the row becomes a state creation
     // rejects (runs then fail-close late at launch; chat would diverge).
     const current = await getOrgModelRow(orgId, modelId);
@@ -590,10 +578,8 @@ export function createModelsRouter() {
           // already-aliased row's label is explicit by construction (POST
           // enforced it), so it stays valid when this PATCH omits `label`.
           label: data.label ?? (current.aliased ? current.label : undefined),
-          apiShape: creds.apiShape,
           authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
         }),
-        creds.apiShape,
       );
     }
 

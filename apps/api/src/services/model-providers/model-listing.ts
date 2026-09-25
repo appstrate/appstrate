@@ -2,11 +2,11 @@
 
 /**
  * What a credential's provider serves: guarded `GET <baseUrl>/models` requests
- * (`fetchModelListing`, the credential test's transport), parsed per
- * `apiShape`. Per-entry capability fields some servers publish (vLLM
- * `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` /
- * `architecture` / `supported_parameters`, LM Studio `max_context_length`)
- * are read from the entry in hand as hints.
+ * (`fetchModelListing`, the credential test's transport), parsed from the
+ * `{ data: [{ id }] }` body every supported shape answers. Per-entry capability
+ * fields some servers publish (vLLM `max_model_len`, Mistral `capabilities`,
+ * OpenRouter `context_length` / `architecture` / `supported_parameters`, LM
+ * Studio `max_context_length`) are read from the entry in hand as hints.
  *
  * A listing that declares a next page is followed to its end, under a page cap,
  * a model cap and a per-page byte budget; a result cut by any of them is
@@ -68,60 +68,17 @@ interface PageQuery {
 }
 
 /**
- * How a `/models` response body is laid out, per `apiShape`: where the ids sit,
- * and how it points at its next page.
+ * What a listing body says about a next page, on the OpenAI/Anthropic cursor
+ * (`has_more` + `last_id`, spent as `?after_id=`). `more` without a `query` is
+ * an endpoint that declares more and gives nothing to ask with: unfollowable,
+ * and therefore truncated rather than complete.
  */
-function listingShape(apiShape: string): {
-  key: "data" | "models";
-  field: "id" | "name";
-  prefix: string;
-  /** Field whose `true` declares a next page; `null` when the cursor's presence is the signal. */
-  moreFlag: string | null;
-  /** Field carrying the cursor, and the query parameter that spends it. */
-  cursorField: string;
-  cursorParam: string;
-} {
-  // Google enumerates `{ models: [{ name: "models/<id>" }] }` and pages with
-  // `nextPageToken` / `?pageToken=`; every other shape answers
-  // `{ data: [{ id: "<id>" }] }` and pages on the OpenAI/Anthropic cursor
-  // (`has_more` + `last_id`, spent as `?after_id=`).
-  return apiShape === "google-generative-ai" || apiShape === "google-vertex"
-    ? {
-        key: "models",
-        field: "name",
-        prefix: "models/",
-        moreFlag: null,
-        cursorField: "nextPageToken",
-        cursorParam: "pageToken",
-      }
-    : {
-        key: "data",
-        field: "id",
-        prefix: "",
-        moreFlag: "has_more",
-        cursorField: "last_id",
-        cursorParam: "after_id",
-      };
-}
-
-/**
- * What a listing body says about a next page. `more` without a `query` is an
- * endpoint that declares more and gives nothing to ask with: unfollowable, and
- * therefore truncated rather than complete.
- */
-function nextPage(apiShape: string, body: unknown): { more: boolean; query: PageQuery | null } {
-  const { moreFlag, cursorField, cursorParam } = listingShape(apiShape);
+function nextPage(body: unknown): { more: boolean; query: PageQuery | null } {
   const container = readRecord(body);
-  if (container === null) return { more: false, query: null };
-  const cursor = container[cursorField];
+  if (container?.has_more !== true) return { more: false, query: null };
+  const cursor = container.last_id;
   const usable = typeof cursor === "string" && cursor.length > 0;
-  if (moreFlag === null) {
-    return usable
-      ? { more: true, query: { name: cursorParam, value: cursor } }
-      : { more: false, query: null };
-  }
-  if (container[moreFlag] !== true) return { more: false, query: null };
-  return { more: true, query: usable ? { name: cursorParam, value: cursor } : null };
+  return { more: true, query: usable ? { name: "after_id", value: cursor } : null };
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
@@ -192,11 +149,10 @@ export interface ParsedServedModels {
  * worth; `listServedModels` holds the same cap across a paginated listing and
  * carries `capped` into its own `truncated` verdict.
  */
-export function parseServedModels(apiShape: string, body: unknown): ParsedServedModels | null {
-  const { key, field, prefix } = listingShape(apiShape);
+export function parseServedModels(body: unknown): ParsedServedModels | null {
   const container = readRecord(body);
   if (container === null) return null;
-  const entries = container[key];
+  const entries = container.data;
   if (!Array.isArray(entries)) return null;
 
   const models: ServedModel[] = [];
@@ -205,10 +161,8 @@ export function parseServedModels(apiShape: string, body: unknown): ParsedServed
   for (const entry of entries) {
     const record = readRecord(entry);
     if (record === null) continue;
-    const raw = record[field];
-    if (typeof raw !== "string") continue;
-    const id = prefix && raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
-    if (id.length === 0 || seen.has(id)) continue;
+    const id = record.id;
+    if (typeof id !== "string" || id.length === 0 || seen.has(id)) continue;
     if (models.length === MAX_SERVED_MODELS) {
       capped = true;
       break;
@@ -334,7 +288,7 @@ async function readServedModels(config: ListingConfig): Promise<ListServedModels
     const fetched = await fetchListingPage(config, pageQuery);
     if (!fetched.ok) return fetched;
 
-    const parsed = parseServedModels(config.apiShape, fetched.body);
+    const parsed = parseServedModels(fetched.body);
     if (!parsed) {
       return {
         ok: false,
@@ -354,7 +308,7 @@ async function readServedModels(config: ListingConfig): Promise<ListServedModels
     }
     if (parsed.capped) return truncatedListing(config, models, "model cap reached");
 
-    const next = nextPage(config.apiShape, fetched.body);
+    const next = nextPage(fetched.body);
     if (!next.more) return { ok: true, models, truncated: false };
     if (next.query === null) {
       return truncatedListing(

@@ -3,10 +3,11 @@
 /**
  * Integration tests for the run launcher's sidecar wiring.
  *
- * Every run boots its sidecar: the agent container is handed only the
- * placeholder credential, reaches inference through the sidecar's `/llm`
- * proxy, and egresses through its forward proxy. The model-alias cases below
- * pin what the container env may and may not name.
+ * Every run boots its sidecar: the agent container is handed no credential,
+ * reaches inference through the sidecar's `/llm` proxy, and egresses through its
+ * forward proxy. An API-key run's sidecar holds no key either — it relays to the
+ * platform LLM proxy. The model-alias cases below pin what the container env may
+ * and may not name.
  *
  * This complements `run-launcher-parallel-boot.test.ts`, which asserts the
  * parallel-create contract.
@@ -29,6 +30,9 @@ import { mintSinkCredentials } from "../../../src/lib/mint-sink-credentials.ts";
 import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { defaultTestAgentResources } from "../../helpers/run-resources.ts";
+
+// Every model host below is on the test preload's EGRESS_ALLOW_INTERNAL_HOSTS,
+// so the launch-time egress check resolves no DNS.
 
 interface CallCounts {
   createBoundaryCalls: number;
@@ -133,7 +137,7 @@ function buildRunPlan(overrides: Partial<AppstrateRunPlan> = {}): AppstrateRunPl
       providerId: "anthropic",
       piProvider: "anthropic",
       apiShape: "anthropic-messages",
-      baseUrl: "https://api.anthropic.com",
+      baseUrl: "https://api.anthropic.test",
       modelId: "claude-3-5-sonnet-latest",
       apiKey: "sk-test-secret",
       label: "Test Model",
@@ -197,30 +201,24 @@ describe("run-launcher — sidecar wiring", () => {
     return counts;
   }
 
-  it("hands a BYOK run's key to the sidecar and only the placeholder to the agent", async () => {
-    const realKey = "sk-ant-api03-real-secret-1234";
-    const counts = await launchWithKey(realKey, false);
-    const llm = counts.capturedSidecarSpec?.llm;
-    if (llm?.authMode !== "api_key") throw new Error(`expected api_key llm, got ${llm?.authMode}`);
-    expect(llm.apiKey).toBe(realKey);
-    expect(counts.capturedAgentEnv?.MODEL_API_KEY).toBe(llm.placeholder);
-  });
-
-  it("routes a platform-credential run through the platform LLM proxy — the key reaches neither workload", async () => {
-    const realKey = "sk-ant-api03-platform-secret-5678";
-    const counts = await launchWithKey(realKey, true);
-    const spec = counts.capturedSidecarSpec;
-    expect(spec?.llm).toEqual({
-      authMode: "platform",
-      apiShape: "anthropic-messages",
-      baseUrl: "https://api.anthropic.com",
+  for (const isSystemModel of [true, false]) {
+    it(`routes a ${isSystemModel ? "platform-credential" : "BYOK"} run through the platform LLM proxy — the key reaches neither workload`, async () => {
+      const realKey = "sk-ant-api03-real-secret-5678";
+      const counts = await launchWithKey(realKey, isSystemModel);
+      const spec = counts.capturedSidecarSpec;
+      expect(spec?.llm).toEqual({
+        authMode: "platform",
+        apiShape: "anthropic-messages",
+        baseUrl: "https://api.anthropic.test",
+      });
+      const sidecarEnv: Record<string, string> = {};
+      applySpecToSidecarEnv(spec!, sidecarEnv);
+      const serialized = JSON.stringify([spec, sidecarEnv, counts.capturedAgentEnv]);
+      expect(serialized).not.toContain(realKey);
+      expect(serialized).not.toContain("sk-ant");
+      expect(counts.capturedAgentEnv?.MODEL_API_KEY).toBe("appstrate-placeholder");
     });
-    const sidecarEnv: Record<string, string> = {};
-    applySpecToSidecarEnv(spec!, sidecarEnv);
-    const serialized = JSON.stringify([spec, sidecarEnv, counts.capturedAgentEnv]);
-    expect(serialized).not.toContain(realKey);
-    expect(counts.capturedAgentEnv?.MODEL_API_KEY).toBeDefined();
-  });
+  }
 
   // The sidecar looks Pi's record up by the backing's Pi provider key — here
   // one that differs from the Appstrate id (`moonshot`).
@@ -234,7 +232,7 @@ describe("run-launcher — sidecar wiring", () => {
           providerId: "moonshot",
           piProvider: "moonshotai",
           apiShape: "openai-completions",
-          baseUrl: "https://api.moonshot.ai/v1",
+          baseUrl: "https://api.example.com/v1",
           modelId: "kimi-k2.6",
           apiKey: "sk-real-secret",
           label: "Appstrate Kimi",
@@ -267,7 +265,7 @@ describe("run-launcher — sidecar wiring", () => {
           providerId: "moonshot",
           piProvider: "moonshotai",
           apiShape: "openai-completions",
-          baseUrl: "https://api.moonshot.ai/v1",
+          baseUrl: "https://api.example.com/v1",
           modelId: "kimi-k2.6",
           apiKey: "sk-real-secret",
           label: "Kimi",
@@ -293,7 +291,7 @@ describe("run-launcher — sidecar wiring", () => {
       providerId: "openai-compatible",
       piProvider: null,
       apiShape: "openai-completions",
-      baseUrl: "https://gateway.example.test/v1",
+      baseUrl: "https://api.example.com/v1",
       modelId: "vendor/some-model",
       apiKey: "sk-real-secret",
       label: "Gateway",
@@ -332,7 +330,8 @@ describe("run-launcher — sidecar wiring", () => {
       orchestrator: aliased.orchestrator,
     });
     const llm = aliased.counts.capturedSidecarSpec?.llm;
-    if (llm?.authMode !== "api_key") throw new Error(`expected api_key llm, got ${llm?.authMode}`);
+    if (llm?.authMode !== "platform")
+      throw new Error(`expected platform llm, got ${llm?.authMode}`);
     expect(llm.modelSwap?.backing).toEqual({ providerId: null, input: ["text"] });
     expect(aliased.counts.capturedAgentEnv).not.toHaveProperty("MODEL_PROVIDER");
   });
@@ -350,7 +349,7 @@ describe("run-launcher — sidecar wiring", () => {
           providerId: "anthropic",
           piProvider: "anthropic",
           apiShape: "anthropic-messages",
-          baseUrl: "https://api.anthropic.com",
+          baseUrl: "https://api.anthropic.test",
           modelId: "claude-sonnet-4-6",
           apiKey: "sk-real-secret",
           label: "Appstrate Fast",
@@ -389,7 +388,7 @@ describe("run-launcher — sidecar wiring", () => {
           providerId: "deepseek",
           piProvider: "deepseek",
           apiShape: "openai-completions",
-          baseUrl: "https://api.deepseek.com/v1",
+          baseUrl: "https://api.example.com/v1",
           modelId: "deepseek-chat", // the hidden backing
           apiKey: "sk-real-secret",
           label: "Appstrate Medium",
@@ -427,7 +426,7 @@ describe("run-launcher — sidecar wiring", () => {
     expect(env.MODEL_ID).toBe("appstrate-medium");
     expect(env.MODEL_BASE_URL).toBe("http://fake-sidecar.test:19080/llm");
     expect(JSON.stringify(env)).not.toContain("deepseek-chat");
-    expect(JSON.stringify(env)).not.toContain("api.deepseek.com");
+    expect(JSON.stringify(env)).not.toContain("api.example.com");
   });
 
   it("masks the alias's identifying model metadata in the container env — but not in the sidecar's", async () => {
@@ -441,7 +440,7 @@ describe("run-launcher — sidecar wiring", () => {
           providerId: "deepseek",
           piProvider: "deepseek",
           apiShape: "openai-completions",
-          baseUrl: "https://api.deepseek.com/v1",
+          baseUrl: "https://api.example.com/v1",
           modelId: "deepseek-chat",
           apiKey: "sk-real-secret",
           label: "Appstrate Medium",
@@ -497,7 +496,7 @@ describe("run-launcher — sidecar wiring", () => {
           providerId: "deepseek",
           piProvider: "deepseek",
           apiShape: "openai-completions",
-          baseUrl: "https://api.deepseek.com/v1",
+          baseUrl: "https://api.example.com/v1",
           modelId: "deepseek-chat",
           apiKey: "sk-real-secret",
           label: "DeepSeek Chat",
@@ -540,7 +539,7 @@ describe("run-launcher — sidecar wiring", () => {
           providerId: "anthropic",
           piProvider: "anthropic",
           apiShape: "anthropic-messages",
-          baseUrl: "https://api.anthropic.com",
+          baseUrl: "https://api.anthropic.test",
           modelId: "claude-sonnet-4-6",
           apiKey: "sk-real-secret",
           label: "Appstrate Adaptive",
@@ -575,9 +574,9 @@ describe("run-launcher — sidecar wiring", () => {
     expect(JSON.stringify(env)).not.toContain("claude-sonnet-4-6");
   });
 
-  // Inference rides the sidecar's `/llm`, whose egress floor refuses a base URL
-  // on a blocked range unless EGRESS_ALLOW_INTERNAL_HOSTS lists the host. The
-  // launcher applies the same guard before provisioning anything.
+  // The platform proxy refuses a base URL on a blocked range unless
+  // EGRESS_ALLOW_INTERNAL_HOSTS lists the host. The launcher applies the same
+  // literal blocklist and allowlist before provisioning anything.
   describe("LLM base URL on a blocked network range", () => {
     const localModel = (baseUrl: string): AppstrateRunPlan["llmConfig"] => ({
       providerId: "openai-compatible",
@@ -592,11 +591,16 @@ describe("run-launcher — sidecar wiring", () => {
       aliasId: "llama3",
     });
 
-    const launch = (runId: string, baseUrl: string, orchestrator: RunOrchestrator) =>
+    const launch = (
+      runId: string,
+      baseUrl: string,
+      orchestrator: RunOrchestrator,
+      overrides: Partial<AppstrateRunPlan["llmConfig"]> = {},
+    ) =>
       runPlatformContainer({
         runId,
         context: buildContext(runId),
-        plan: buildRunPlan({ llmConfig: localModel(baseUrl) }),
+        plan: buildRunPlan({ llmConfig: { ...localModel(baseUrl), ...overrides } }),
         sinkCredentials: mintSinkCredentials({
           runId,
           appUrl: "http://platform:3000",
@@ -614,27 +618,40 @@ describe("run-launcher — sidecar wiring", () => {
       expect(counts.createSidecarCalls).toBe(0);
     });
 
-    it("does not apply the sidecar's egress floor to a platform-provided model", async () => {
-      // The sidecar never dials it: the platform proxy does, behind its own guard.
+    it("refuses a private address, whoever's key the run spends", async () => {
+      for (const isSystemModel of [true, false]) {
+        const { orchestrator, counts } = createCountingFake();
+        await expect(
+          runPlatformContainer({
+            runId: "run_private_llm",
+            context: buildContext("run_private_llm"),
+            plan: buildRunPlan({
+              llmConfig: { ...localModel("http://10.0.0.7:8000/v1"), isSystemModel },
+            }),
+            sinkCredentials: mintSinkCredentials({
+              runId: "run_private_llm",
+              appUrl: "http://platform:3000",
+              ttlSeconds: 60,
+            }),
+            orchestrator,
+          }),
+        ).rejects.toMatchObject({ name: "LlmBaseUrlBlockedError" });
+        expect(counts.createBoundaryCalls).toBe(0);
+      }
+    });
+
+    it("never names an aliased model's host in the run error", async () => {
       const { orchestrator, counts } = createCountingFake();
-      await runPlatformContainer({
-        runId: "run_blocked_system_llm",
-        context: buildContext("run_blocked_system_llm"),
-        plan: buildRunPlan({
-          llmConfig: {
-            ...localModel("http://host.docker.internal:11434/v1"),
-            isSystemModel: true,
-          },
-        }),
-        sinkCredentials: mintSinkCredentials({
-          runId: "run_blocked_system_llm",
-          appUrl: "http://platform:3000",
-          ttlSeconds: 60,
-        }),
+      const error = await launch(
+        "run_aliased_blocked_llm",
+        "http://10.0.0.7:8000/v1",
         orchestrator,
-      });
-      expect(counts.createSidecarCalls).toBe(1);
-      expect(counts.capturedSidecarSpec?.llm?.authMode).toBe("platform");
+        { aliased: true, aliasId: "appstrate-local" },
+      ).catch((e: unknown) => e);
+      expect(error).toMatchObject({ name: "LlmBaseUrlBlockedError" });
+      expect((error as Error).message).toContain("EGRESS_ALLOW_INTERNAL_HOSTS");
+      expect((error as Error).message).not.toContain("10.0.0.7");
+      expect(counts.createBoundaryCalls).toBe(0);
     });
 
     it("launches when the operator allowlisted the host", async () => {

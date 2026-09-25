@@ -351,4 +351,24 @@ describe("/llm/* oauth — no forging", () => {
     expect(upstreamCalls).toHaveLength(2);
     expect(upstreamCalls[1]!.headers["authorization"]).toBe("Bearer oat-refreshed");
   });
+
+  it("names the subscription provider host in a fetch-level 502", async () => {
+    const { fetchFn } = setupFetchMock((url) => {
+      if (url.startsWith(PLATFORM_API)) return upstreamOk(url);
+      throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ConnectionRefused" });
+    });
+    const deps = makeDeps(fetchFn);
+    deps.config.llm = OAUTH_CFG;
+    const app = createTestApp(deps);
+
+    const res = await app.request("/llm/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "m", messages: [] }),
+    });
+    expect(res.status).toBe(502);
+    const text = await res.text();
+    expect(text).toContain("ConnectionRefused (api.anthropic.com)");
+    expect(text).not.toContain("platform-mock");
+  });
 });

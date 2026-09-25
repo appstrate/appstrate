@@ -41,9 +41,9 @@
  *   - Body size capped via `LLM_PROXY_LIMITS.max_request_bytes`
  *     (default 10 MiB).
  *
- * A platform run whose model spends a platform-provided credential reaches the
- * same pipeline at `/internal/llm-proxy/<api>/*` with its run token — see
- * {@link createRunLlmProxyRouter}.
+ * A platform run on an API-key model — platform-provided or the org's own —
+ * reaches the same pipeline at `/internal/llm-proxy/<api>/*` with its run token —
+ * see {@link createRunLlmProxyRouter}.
  *
  * Observability:
  *   - `X-Run-Id` request header (optional; Phase 4 populates it) pins
@@ -63,7 +63,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, forbidden, notFound } from "../lib/errors.ts";
 import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { LLM_PROXY_ROUTES, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
-import { getRunAttribution, isMeteredByPlatformProxy } from "../services/state/runs.ts";
+import { getRunAttribution, isServedByLlmProxy } from "../services/state/runs.ts";
 import { enforceSystemProxyAdmission } from "../services/system-proxy-admission.ts";
 import { recordLlmLatency } from "@appstrate/core/telemetry";
 import {
@@ -130,8 +130,8 @@ export function createRunLlmProxyRouter() {
   for (const apiShape of PROXIED_API_SHAPES) {
     router.post(llmProxyUrlPath(apiShape), async (c) => {
       const { runId, run } = await verifyRunToken(c);
-      if (!isMeteredByPlatformProxy(run)) {
-        throw forbidden("This run's model is not served by the platform LLM proxy");
+      if (!isServedByLlmProxy(run) || run.modelId === null) {
+        throw forbidden("This run's inference is not served by the platform LLM proxy");
       }
       const orgId = run.orgId;
       return proxyAndLog(c, apiShape, limits, {

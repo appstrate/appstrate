@@ -82,6 +82,12 @@ describe("deriveOauthPlaceholder", () => {
       expect(placeholder).not.toContain(sentinel);
     });
 
+    it("refuses a hook placeholder equal to the token", () => {
+      expect(() => deriveOauthPlaceholder(SYNTH_PLACEHOLDER_SENTINEL, SYNTH_PROVIDER_ID)).toThrow(
+        /equal to the credential/,
+      );
+    });
+
     it("falls back to deriveKeyPlaceholder when the hook returns null", () => {
       const placeholder = deriveOauthPlaceholder("opaque-token", SYNTH_PROVIDER_ID);
       expect(placeholder).toBe(deriveKeyPlaceholder("opaque-token"));
@@ -99,7 +105,7 @@ describe("deriveOauthPlaceholder", () => {
 });
 
 describe("deriveKeyPlaceholder — never the key itself", () => {
-  // The container env refuses a placeholder equal to the key, so the derivation
+  // The launcher refuses a placeholder equal to the key, so the derivation
   // must never land on one — including for a key already shaped like its output.
   it.each(["sk-placeholder", "a-placeholder", "sk-placeholder-placeholder"])(
     "differs from %s",

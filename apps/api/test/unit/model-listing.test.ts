@@ -15,62 +15,25 @@ import {
   type ParsedServedModels,
 } from "../../src/services/model-providers/model-listing.ts";
 
-const DATA_SHAPES = [
-  "openai-completions",
-  "openai-responses",
-  "azure-openai-responses",
-  "bedrock-converse-stream",
-  "mistral-conversations",
-  "anthropic-messages",
-  "some-unknown-shape",
-];
-
 /** Ids only — the shape assertions below are about the container, not the hints. */
 function ids(parsed: ParsedServedModels | null): string[] | null {
   return parsed?.models.map((m) => m.id) ?? null;
 }
 
 describe("parseServedModels", () => {
-  for (const apiShape of DATA_SHAPES) {
-    it(`${apiShape}: reads ids from { data: [{ id }] } in response order`, () => {
-      expect(
-        ids(
-          parseServedModels(apiShape, {
-            data: [{ id: "gpt-5" }, { id: "gpt-4o", display_name: "GPT-4o" }],
-          }),
-        ),
-      ).toEqual(["gpt-5", "gpt-4o"]);
-    });
-  }
-
-  it("google-generative-ai: strips the `models/` prefix from `name`", () => {
+  it("reads ids from { data: [{ id }] } in response order", () => {
     expect(
-      ids(
-        parseServedModels("google-generative-ai", {
-          models: [{ name: "models/gemini-3-pro" }, { name: "models/gemini-3-flash" }],
-        }),
-      ),
-    ).toEqual(["gemini-3-pro", "gemini-3-flash"]);
+      ids(parseServedModels({ data: [{ id: "gpt-5" }, { id: "gpt-4o", display_name: "GPT-4o" }] })),
+    ).toEqual(["gpt-5", "gpt-4o"]);
   });
 
-  it("google-vertex: reads the same shape and leaves an unprefixed name alone", () => {
-    expect(
-      ids(
-        parseServedModels("google-vertex", {
-          models: [{ name: "models/gemini-3-pro" }, { name: "gemini-3-flash" }],
-        }),
-      ),
-    ).toEqual(["gemini-3-pro", "gemini-3-flash"]);
-  });
-
-  it("google shapes ignore a `data` array (and vice versa)", () => {
-    expect(parseServedModels("google-vertex", { data: [{ id: "gpt-5" }] })).toBeNull();
-    expect(parseServedModels("openai-responses", { models: [{ name: "m" }] })).toBeNull();
+  it("ignores a body that lists under any other key", () => {
+    expect(parseServedModels({ models: [{ name: "m" }] })).toBeNull();
   });
 
   it("dedupes, keeping the first occurrence and its hints", () => {
     expect(
-      parseServedModels("openai-responses", {
+      parseServedModels({
         data: [{ id: "a", max_model_len: 4096 }, { id: "b" }, { id: "a", max_model_len: 8192 }],
       })?.models,
     ).toEqual([
@@ -81,7 +44,7 @@ describe("parseServedModels", () => {
 
   it("caps a runaway listing at 1000 models and says it cut one", () => {
     const data = Array.from({ length: 1500 }, (_, i) => ({ id: `m-${i}` }));
-    const parsed = parseServedModels("openai-responses", { data });
+    const parsed = parseServedModels({ data });
     expect(parsed?.models).toHaveLength(1000);
     expect(parsed?.models[999]?.id).toBe("m-999");
     expect(parsed?.capped).toBe(true);
@@ -89,7 +52,7 @@ describe("parseServedModels", () => {
 
   it("a listing of exactly 1000 fills the cap without being cut", () => {
     const data = Array.from({ length: 1000 }, (_, i) => ({ id: `m-${i}` }));
-    const parsed = parseServedModels("openai-responses", { data });
+    const parsed = parseServedModels({ data });
     expect(parsed?.models).toHaveLength(1000);
     expect(parsed?.capped).toBe(false);
   });
@@ -100,56 +63,46 @@ describe("parseServedModels", () => {
       { id: "m-0" },
       { id: "m-1" },
     ];
-    const parsed = parseServedModels("openai-responses", { data });
+    const parsed = parseServedModels({ data });
     expect(parsed?.models).toHaveLength(1000);
     expect(parsed?.capped).toBe(false);
   });
 
   it("accepts an empty listing as an empty list, not an unreadable one", () => {
-    expect(parseServedModels("openai-responses", { data: [] })?.models).toEqual([]);
-    expect(parseServedModels("google-vertex", { models: [] })?.models).toEqual([]);
+    expect(parseServedModels({ data: [] })?.models).toEqual([]);
   });
 
   it("returns null for a body that is not an object", () => {
     for (const body of [null, undefined, "models", 42, [{ id: "a" }]]) {
-      expect(parseServedModels("openai-responses", body)).toBeNull();
+      expect(parseServedModels(body)).toBeNull();
     }
   });
 
   it("returns null when the array is missing or not an array", () => {
-    expect(parseServedModels("openai-responses", {})).toBeNull();
-    expect(parseServedModels("openai-responses", { data: { id: "a" } })).toBeNull();
-    expect(parseServedModels("google-generative-ai", {})).toBeNull();
+    expect(parseServedModels({})).toBeNull();
+    expect(parseServedModels({ data: { id: "a" } })).toBeNull();
   });
 
   it("skips entries with no usable id and keeps the readable ones", () => {
     expect(
       ids(
-        parseServedModels("openai-responses", {
+        parseServedModels({
           data: [{ id: "a" }, { id: 7 }, "b", null, { display_name: "no id" }, { id: "c" }],
         }),
       ),
     ).toEqual(["a", "c"]);
-    expect(
-      ids(parseServedModels("google-vertex", { models: [{ id: "a" }, { name: "m" }] })),
-    ).toEqual(["m"]);
   });
 
-  it("skips an empty id (or one that is nothing but the `models/` prefix)", () => {
-    expect(parseServedModels("openai-responses", { data: [{ id: "" }] })?.models).toEqual([]);
-    expect(parseServedModels("openai-responses", { data: [{}] })?.models).toEqual([]);
-    expect(
-      ids(
-        parseServedModels("google-vertex", { models: [{ name: "models/" }, { name: "models/m" }] }),
-      ),
-    ).toEqual(["m"]);
+  it("skips an empty id", () => {
+    expect(parseServedModels({ data: [{ id: "" }] })?.models).toEqual([]);
+    expect(parseServedModels({ data: [{}] })?.models).toEqual([]);
   });
 });
 
 describe("parseServedModels hints", () => {
   /** One entry through the parser — the sniffing is what is under test. */
   function hintsOf(entry: Record<string, unknown>): unknown {
-    return parseServedModels("openai-completions", { data: [entry] })?.models[0]?.hints;
+    return parseServedModels({ data: [entry] })?.models[0]?.hints;
   }
 
   it("plain OpenAI: an entry that publishes nothing carries no hint", () => {

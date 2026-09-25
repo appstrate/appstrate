@@ -27,7 +27,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
-  ALIAS_API_KEY_PLACEHOLDER,
+  API_KEY_PLACEHOLDER,
   buildRuntimePiEnv,
   SIDECAR_OPERATOR_ENV_KEYS,
 } from "../src/container-env.ts";
@@ -58,14 +58,8 @@ const RUN: RuntimePiEnvOptions = {
     // flag and the output difference is therefore the alias policy itself.
     modelId: "appstrate-medium",
     piProvider: "deepseek",
-    apiKey: "sk-real-backing-key",
-    // Vendor-REVEALING on purpose. The launcher derives this with
-    // `deriveKeyPlaceholder`, which preserves the key's dash-separated prefix so
-    // the SDK's prefix sniffing keeps working — and for a real key that prefix
-    // names the vendor. A neutral `"sk-placeholder"` here is what let
-    // `MODEL_API_KEY` ship unmasked: the fixture agreed with itself on both
-    // paths, so the value-diff below had nothing to catch.
-    apiKeyPlaceholder: "sk-ant-api03-placeholder",
+    // No `oauthApiKeyPlaceholder`: an OAuth run is never aliased (the launcher
+    // refuses the pair), and it changes a value, never the key set.
     input: ["text", "image"],
     // A real catalog pair, sent unchanged on both paths.
     contextWindow: 200_000,
@@ -107,8 +101,8 @@ const RUN: RuntimePiEnvOptions = {
  * - `MODEL_API` is the canonical `pi-messages` dialect for every alias, so it
  *   names no protocol family.
  * - `MODEL_ID` is the public alias id — the caller chose it.
- * - `MODEL_BASE_URL` is the sidecar's own proxy URL and `MODEL_API_KEY` the
- *   placeholder it swaps; neither reaches upstream.
+ * - `MODEL_BASE_URL` is the sidecar's own proxy URL and `MODEL_API_KEY` a
+ *   constant placeholder; neither reaches upstream.
  * - `MODEL_CONTEXT_WINDOW` / `MODEL_MAX_TOKENS` are the backing's real limits,
  *   which the container needs to size compaction. They narrow the candidate set
  *   without closing it, and the exact `usage.input` count the run reports
@@ -178,7 +172,7 @@ const ALIAS_WITHHELD_KEYS = ["MODEL_COST", "MODEL_PROVIDER"] as const;
  * difference alone would miss a variable that survives but starts carrying
  * something vendor-specific, so this is pinned as an exact set too.
  */
-const ALIAS_MASKED_VALUE_KEYS = ["MODEL_API", "MODEL_API_KEY"] as const;
+const ALIAS_MASKED_VALUE_KEYS = ["MODEL_API"] as const;
 
 const WHY_THIS_GATE_EXISTS = [
   "",
@@ -300,19 +294,10 @@ describe("aliased agent container env — exact allowlist (issue #1198, Threat B
     // The canonical dialect in place of the backing's protocol family.
     expect(aliased.MODEL_API).toBe("pi-messages");
     expect(byok.MODEL_API).toBe("openai-completions");
-    // The credential placeholder is a vendor tell in exactly the same way, and
-    // was the one that shipped: the launcher's placeholder keeps the key's
-    // prefix, so `sk-ant-…` / `sk-proj-…` / `sk-or-v1-…` names the backing to
-    // code that can read its own environment. An alias gets a constant instead;
-    // `pi-messages` authenticates with `Authorization: Bearer` and never reads
-    // the value's shape. BYOK keeps the derived one — that container is told its
-    // provider outright via MODEL_PROVIDER anyway.
-    expect(aliased.MODEL_API_KEY).toBe(ALIAS_API_KEY_PLACEHOLDER);
-    expect(aliased.MODEL_API_KEY).not.toContain("ant");
-    expect(byok.MODEL_API_KEY).toBe("sk-ant-api03-placeholder");
-    // Neither path ever carries the real upstream credential.
-    expect(aliased.MODEL_API_KEY).not.toContain("real-backing-key");
-    expect(byok.MODEL_API_KEY).not.toContain("real-backing-key");
+    // The credential placeholder would be a vendor tell in exactly the same
+    // way; an API-key run never gets a vendor-shaped one, aliased or not.
+    expect(aliased.MODEL_API_KEY).toBe(API_KEY_PLACEHOLDER);
+    expect(byok.MODEL_API_KEY).toBe(API_KEY_PLACEHOLDER);
     // The token limits are NOT masked: both paths carry the real numbers.
     expect(aliased.MODEL_CONTEXT_WINDOW).toBe(byok.MODEL_CONTEXT_WINDOW);
     expect(aliased.MODEL_MAX_TOKENS).toBe(byok.MODEL_MAX_TOKENS);

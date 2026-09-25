@@ -107,23 +107,17 @@ export function applySpecToSidecarEnv(
   if (spec.llm) {
     if (spec.llm.authMode === "oauth") {
       // OAuth config (non-forging — the driver signs its own fingerprint): ship
-      // the full LlmProxyConfig as JSON so server.ts parses it into config.llm
-      // at boot. Without this, /llm/* returns 503 "LLM proxy not configured".
+      // the full LlmProxyOauthConfig as JSON so server.ts parses it into
+      // config.llm at boot. Without this, /llm/* returns 503 "LLM proxy not configured".
       target.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(spec.llm);
     } else {
+      // No provider credential: the sidecar reaches the proxy with RUN_TOKEN.
       target.PI_BASE_URL = spec.llm.baseUrl;
-      if (spec.llm.authMode === "platform") {
-        // No provider credential: the sidecar reaches the proxy with RUN_TOKEN.
-        target.PI_LLM_PLATFORM_API_SHAPE = spec.llm.apiShape;
-      } else {
-        target.PI_API_KEY = spec.llm.apiKey;
-        target.PI_PLACEHOLDER = spec.llm.placeholder;
-      }
-      // Model-alias swap (api-key and platform paths) — the real backing id rides
-      // platform→sidecar only, never into the agent container. The OAuth
-      // config above carries NO modelSwap (`LlmProxyOauthConfig` has no such
-      // field): that mode is a pure bearer-swap and aliases are rejected for
-      // oauth-subscription providers.
+      target.PI_LLM_PLATFORM_API_SHAPE = spec.llm.apiShape;
+      // Model-alias swap — the real backing id rides platform→sidecar only,
+      // never into the agent container. The OAuth config above carries NO
+      // modelSwap (`LlmProxyOauthConfig` has no such field): that mode is a
+      // pure bearer-swap and aliases are rejected for oauth-subscription providers.
       if (spec.llm.modelSwap) {
         target.PI_MODEL_SWAP_JSON = JSON.stringify(spec.llm.modelSwap);
       }

@@ -14015,7 +14015,7 @@ export interface operations {
                             description?: string | null;
                             docsUrl?: string | null;
                             /** @enum {string} */
-                            apiShape?: "anthropic-messages" | "openai-completions" | "openai-responses" | "openai-codex-responses" | "mistral-conversations" | "google-generative-ai" | "google-vertex" | "azure-openai-responses" | "bedrock-converse-stream";
+                            apiShape?: "anthropic-messages" | "openai-completions" | "openai-responses" | "openai-codex-responses" | "mistral-conversations";
                             defaultBaseUrl?: string;
                             baseUrlOverridable?: boolean;
                             /** @enum {string} */

@@ -48,7 +48,6 @@ import { uploadRunBundle } from "../run-workspace-storage.ts";
 import { startBootHeartbeat } from "../run-boot-heartbeat.ts";
 import { runWithSpan, currentTraceparent, recordContainerSpawn } from "@appstrate/core/telemetry";
 
-import { isMeteredByPlatformProxy, modelSourceOf } from "../state/runs.ts";
 import { getEnv } from "@appstrate/env";
 import { isBlockedEgressUrl } from "../../lib/egress-host-guard.ts";
 import { getModelProvider } from "../model-providers/registry.ts";
@@ -77,17 +76,23 @@ function platformTimeoutBootGraceMs(): number {
 
 /**
  * Thrown before provisioning when the model's base URL targets a network range
- * the sidecar's egress floor refuses (loopback, private, link-local, internal
- * names) and `EGRESS_ALLOW_INTERNAL_HOSTS` does not list its host.
+ * the platform's egress guard refuses (loopback, private, link-local, internal
+ * names) and `EGRESS_ALLOW_INTERNAL_HOSTS` does not list its host. The message
+ * lands in `runs.error`, readable by run readers: an aliased model's host is
+ * never named, since the alias exists to hide its backing.
  */
 class LlmBaseUrlBlockedError extends Error {
-  constructor(baseUrl: string) {
-    const host = URL.parse(baseUrl)?.hostname ?? "(unparseable URL)";
+  constructor(baseUrl: string, aliased: boolean) {
+    const host = aliased ? null : (URL.parse(baseUrl)?.hostname ?? "(unparseable URL)");
     super(
-      `The model's base URL targets a blocked network range (host "${host}"). Model ` +
-        `inference goes through the run's sidecar, which reaches a private or local ` +
-        `endpoint only when EGRESS_ALLOW_INTERNAL_HOSTS lists its host. Add "${host}" ` +
-        `to EGRESS_ALLOW_INTERNAL_HOSTS, or point the model at a public endpoint.`,
+      host
+        ? `The model's base URL targets a blocked network range (host "${host}"). The ` +
+            `platform reaches a private or local model endpoint only when ` +
+            `EGRESS_ALLOW_INTERNAL_HOSTS lists its host. Add "${host}" to ` +
+            `EGRESS_ALLOW_INTERNAL_HOSTS, or point the model at a public endpoint.`
+        : `The model's base URL targets a blocked network range. The platform ` +
+            `reaches a private or local model endpoint only when ` +
+            `EGRESS_ALLOW_INTERNAL_HOSTS lists its host.`,
     );
     this.name = "LlmBaseUrlBlockedError";
   }
@@ -166,17 +171,8 @@ async function runPlatformContainerImpl(
 
   const { llmConfig } = plan;
 
-  // Single source of truth for "what kind of credential is this and how is it
-  // delivered". Classified by the provider's declared authMode: an oauth-class
-  // credential is delivered via the sidecar `/llm` bearer-swap; everything
-  // else is a static API-key placeholder substitution. Fail-closed: an OAuth
-  // provider that resolved WITHOUT a stored credential id throws here (invalid
-  // configuration — it must never downgrade to API-key handling, which would
-  // hand the sidecar a token it cannot refresh).
-  const delivery = resolveCredentialDelivery({
-    providerId: llmConfig.providerId,
-    credentialId: llmConfig.credentialId,
-  });
+  // The same route the pipeline stamped on `runs.inference_route`.
+  const delivery = resolveCredentialDelivery(llmConfig);
 
   const prompt = await buildPlatformSystemPrompt(context, plan);
   // The container's MODEL_ID is the PUBLIC id: the alias for a model alias, the
@@ -205,7 +201,7 @@ async function runPlatformContainerImpl(
     // orchestrator (docker, firecracker) keeps apart from the agent. API-key
     // providers are unaffected.
     assertOauthRunIsolation({
-      isOauthCredential: delivery.kind === "oauth",
+      isOauthCredential: delivery.route === "sidecar",
       providerId: llmConfig.providerId,
       orchestratorMode: getExecutionMode(),
     });
@@ -214,22 +210,17 @@ async function runPlatformContainerImpl(
     // Alias creation already rejects oauth credentials; fail-closed here for
     // any row predating that rule.
     assertOauthRunNotAliased({
-      isOauthCredential: delivery.kind === "oauth",
+      isOauthCredential: delivery.route === "sidecar",
       aliased: !!llmConfig.aliased,
       providerId: llmConfig.providerId,
     });
 
-    const llmApiKey = llmConfig.apiKey;
-    const servedByPlatformProxy = isMeteredByPlatformProxy({
-      modelSource: modelSourceOf(llmConfig),
-      modelId: llmConfig.aliasId,
-    });
-
-    // When the sidecar dials the base URL, its egress floor refuses a blocked
-    // range. Same guard, same allowlist, checked here so the run fails with the
-    // remedy instead of a 403 inside the container.
-    if (!servedByPlatformProxy && isBlockedEgressUrl(llmConfig.baseUrl)) {
-      throw new LlmBaseUrlBlockedError(llmConfig.baseUrl);
+    // Whoever dials the base URL refuses a blocked range, re-checked with DNS on
+    // every call. The literal check here (same allowlist, no DNS lookup) fails
+    // an obviously blocked endpoint at launch, with the remedy, instead of on
+    // its first inference call.
+    if (isBlockedEgressUrl(llmConfig.baseUrl)) {
+      throw new LlmBaseUrlBlockedError(llmConfig.baseUrl, !!llmConfig.aliased);
     }
 
     // Boot-phase liveness (see services/run-boot-heartbeat.ts). From here to
@@ -248,15 +239,6 @@ async function runPlatformContainerImpl(
     });
 
     boundary = await orch.createIsolationBoundary(runId);
-
-    // The placeholder is what actually lands in MODEL_API_KEY inside the
-    // agent container. Provider-specific shape (e.g. a structured JWT) is
-    // built by the module's `buildApiKeyPlaceholder` hook — see
-    // `deriveOauthPlaceholder` below.
-    const llmPlaceholder =
-      delivery.kind === "oauth"
-        ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
-        : deriveKeyPlaceholder(llmApiKey);
 
     // Model-alias swap descriptor (LLM-gateway alias pattern). The container is
     // handed the public alias as MODEL_ID (below); the sidecar swaps it for the
@@ -281,45 +263,27 @@ async function runPlatformContainerImpl(
         }
       : undefined;
 
-    // OAuth credentials must take the sidecar's OAuth branch — the API-key
-    // path can't refresh tokens or inject the provider's identity routing
-    // headers at request time. Narrowing `delivery` (rather than carrying a
-    // boolean) is what supplies `credentialId` here: `resolveCredentialDelivery`
-    // refused to build an `oauth` delivery without one, so there is nothing
-    // left to re-assert at this point.
-    //
     // OAuth subscription: the Pi SDK signs the subscription request shape
     // itself, so the sidecar just swaps the placeholder bearer for the real
     // token — no forging, no modelSwap (aliases rejected above).
     //
-    // Platform-provided credential: spent only by the platform's metered LLM
-    // proxy — the sidecar gets the route and authenticates with the run token,
-    // and the key never leaves the API process.
-    //
-    // Org API key: the sidecar forwards directly to the upstream provider.
-    // Transient 429/5xx are absorbed by two budgets, neither of them this
-    // file's and neither restated here (one number, one place): the
-    // container's turn-level retry policy in `packages/runner-pi/src/pi-runner.ts`,
-    // and — for an ALIASED run, whose container never sees a `retry-after`
-    // header — the sidecar's own provider-level budget in
-    // `runtime-pi/sidecar/pi-messages-backend.ts`.
+    // API key, platform-provided or the org's own: spent only by the platform's
+    // metered LLM proxy — the sidecar gets the route and authenticates with the
+    // run token, and the key never leaves the API process. Transient 429/5xx
+    // are absorbed by two budgets, neither of them this file's and neither
+    // restated here (one number, one place): the container's turn-level retry
+    // policy in `packages/runner-pi/src/pi-runner.ts`, and — for an ALIASED
+    // run, whose container never sees a `retry-after` header — the sidecar's
+    // own provider-level budget in `runtime-pi/sidecar/pi-messages-backend.ts`.
     const sidecarLlm: LlmProxyConfig =
-      delivery.kind === "oauth"
+      delivery.route === "sidecar"
         ? buildOauthSidecarLlm({ baseUrl: llmConfig.baseUrl, credentialId: delivery.credentialId })
-        : servedByPlatformProxy
-          ? {
-              authMode: "platform",
-              apiShape: llmConfig.apiShape,
-              baseUrl: llmConfig.baseUrl,
-              ...(modelSwap ? { modelSwap } : {}),
-            }
-          : {
-              authMode: "api_key",
-              baseUrl: llmConfig.baseUrl,
-              apiKey: llmApiKey,
-              placeholder: llmPlaceholder,
-              ...(modelSwap ? { modelSwap } : {}),
-            };
+        : {
+            authMode: "platform",
+            apiShape: llmConfig.apiShape,
+            baseUrl: llmConfig.baseUrl,
+            ...(modelSwap ? { modelSwap } : {}),
+          };
 
     // Agent↔sidecar bearer for THIS run. Minted here, in the one frame that
     // feeds both halves of the pair (`sidecarSpec` → the sidecar's env,
@@ -367,10 +331,8 @@ async function runPlatformContainerImpl(
     if (hasOutputSchema && plan.outputSchema) {
       sidecarSpec.outputSchema = plan.outputSchema as unknown as Record<string, unknown>;
     }
-    // The agent container only ever receives the placeholder
-    // (apiKeyPlaceholder); the real access token never leaves the
-    // platform/sidecar boundary. The sidecar overwrites Authorization with
-    // a fresh upstream token at request time — see `runtime-pi/sidecar/`.
+    // The agent container never receives a credential: its sidecar
+    // authenticates upstream — see `runtime-pi/sidecar/`.
     const containerEnv = buildRuntimePiEnv({
       model: {
         api: llmConfig.apiShape,
@@ -380,8 +342,16 @@ async function runPlatformContainerImpl(
         // get plain-OpenAI bytes. An aliased
         // run needs no vendor key at all.
         piProvider: llmConfig.piProvider,
-        apiKey: llmApiKey,
-        apiKeyPlaceholder: llmPlaceholder,
+        // pi-ai reads a subscription's identity from the key's shape; every
+        // other run gets a constant.
+        ...(delivery.route === "sidecar"
+          ? {
+              oauthApiKeyPlaceholder: deriveOauthPlaceholder(
+                llmConfig.apiKey,
+                llmConfig.providerId,
+              ),
+            }
+          : {}),
         input: llmConfig.input,
         contextWindow: llmConfig.contextWindow,
         maxTokens: llmConfig.maxTokens,
@@ -404,8 +374,7 @@ async function runPlatformContainerImpl(
       sidecarUrl: boundary.sidecarEndpoints.sidecarUrl,
       // Other half of the pair minted above.
       sidecarAuthToken,
-      // Inference rides the sidecar's `/llm` proxy, which swaps the
-      // placeholder for the real credential upstream.
+      // Inference rides the sidecar's `/llm` proxy, which authenticates upstream.
       sidecarProxyLlmUrl: boundary.sidecarEndpoints.llmProxyUrl,
       // Forward the effective per-file cap so the runtime's outputs
       // sweep agrees with the server-authoritative gate (avoids silently
@@ -797,22 +766,19 @@ async function readLogTail(
 const PLACEHOLDER_PREFIX_SEGMENTS = 2;
 
 /**
- * Derive a placeholder that preserves the key's dash-separated prefix, so the
+ * Derive a placeholder that preserves the token's dash-separated prefix, so the
  * SDK's prefix-based behavior (OAuth detection, auth header format, beta
  * headers) works identically with the placeholder.
  *
- * Bounded on both axes, because the original rule — drop the LAST segment,
- * keep everything before it — did not bound what it keeps. A key body is
- * base64url, whose alphabet contains `-`, so `sk-ant-api03-AbC-dEf-XyZ` kept
- * `sk-ant-api03-AbC-dEf`: real secret material placed inside the agent
- * container. Two segments is what prefix sniffing actually reads (`sk-ant-`,
- * `sk-proj-`, `sk-or-`), and the half-length ceiling keeps a short key from
- * handing over most of itself.
+ * Bounded on both axes: a token body is base64url, whose alphabet contains `-`,
+ * so keeping every segment but the last would place real secret material
+ * inside the agent container. Two segments is what prefix sniffing actually
+ * reads (`sk-ant-`, `sk-proj-`, `sk-or-`), and the half-length ceiling keeps a
+ * short key from handing over most of itself.
  *
- * This still names the VENDOR, which is correct here and only here: on a
- * non-aliased run the container is told the provider outright via
- * `MODEL_PROVIDER`. An aliased run never reaches this value — see
- * `ALIAS_API_KEY_PLACEHOLDER` in `@appstrate/runner-pi`.
+ * This still names the VENDOR, which discloses nothing: only an OAuth run
+ * reaches it, and an OAuth run is never aliased, so its container is told the
+ * provider outright via `MODEL_PROVIDER`.
  */
 function deriveKeyPlaceholder(key: string): string {
   const parts = key.split("-");
@@ -825,8 +791,8 @@ function deriveKeyPlaceholder(key: string): string {
 }
 
 /**
- * Build the `MODEL_API_KEY` placeholder the agent container sees, without
- * leaking the real upstream credential.
+ * Build the `MODEL_API_KEY` placeholder an OAuth run's agent container sees,
+ * without leaking the real upstream credential.
  *
  * Provider-specific: the module owns the placeholder shape via its
  * `buildApiKeyPlaceholder` hook (e.g. a synthetic JWT carrying only the
@@ -836,8 +802,14 @@ function deriveKeyPlaceholder(key: string): string {
  */
 function deriveOauthPlaceholder(key: string, providerId: string): string {
   const config = getModelProvider(providerId);
-  const fromHook = config?.hooks?.buildApiKeyPlaceholder?.(key);
-  return fromHook ?? deriveKeyPlaceholder(key);
+  const placeholder = config?.hooks?.buildApiKeyPlaceholder?.(key) ?? deriveKeyPlaceholder(key);
+  // Fail closed: a hook echoing the token would hand it to the container.
+  if (placeholder === key) {
+    throw new Error(
+      `Provider "${providerId}" built an API-key placeholder equal to the credential`,
+    );
+  }
+  return placeholder;
 }
 
 /** @internal Exported for testing */

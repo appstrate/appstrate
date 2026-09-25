@@ -10,7 +10,6 @@ import type { ModelMetadata } from "@appstrate/shared-types";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { lookupCatalogModel, restrictsToOffer } from "./model-catalog.ts";
-import { LLM_PROXY_ROUTES, isProxiedApiShape } from "@appstrate/runner-pi/llm-proxy-routes";
 
 // --- Types ---
 
@@ -205,17 +204,6 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
         );
       }
 
-      // A platform-provided model is served to runs only through the platform's
-      // metered LLM proxy, so its protocol must be one the proxy routes.
-      if (!isProxiedApiShape(provider.apiShape)) {
-        throw new Error(
-          `[model-registry] SYSTEM_PROVIDER_KEYS entry "${validCredential.id}" binds providerId ` +
-            `"${validCredential.providerId}", whose api shape "${provider.apiShape}" the platform ` +
-            `LLM proxy does not serve (served: ${Object.keys(LLM_PROXY_ROUTES).join(", ")}). ` +
-            `Remove this entry, or configure the model as an org model provider credential.`,
-        );
-      }
-
       if (validCredential.baseUrlOverride && !provider.baseUrlOverridable) {
         logger.error(
           "[model-registry] SYSTEM_PROVIDER_KEYS: skipping entry — baseUrlOverride supplied " +
@@ -259,24 +247,16 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
           // (loud) instead of registering a half-working alias.
           if (validM.aliased === true) {
             // SYSTEM_PROVIDER_KEYS entries are static API keys — ENFORCED by
-            // the authMode !== "oauth2" boot check above, so the
-            // oauth_provider violation is unreachable here.
+            // the authMode boot check above — so only `missing_label` is
+            // reachable here.
             const violation = checkAliasInvariants({
               label: validM.label,
-              apiShape,
               authMode: "api_key",
             });
             if (violation === "missing_label") {
               logger.error(
                 "[model-registry] SYSTEM_PROVIDER_KEYS: skipping aliased model without an explicit label (the derived label would name the backing)",
                 { modelProviderCredentialId: validCredential.id, model: m },
-              );
-              continue;
-            }
-            if (violation === "non_aliasable_shape") {
-              logger.error(
-                "[model-registry] SYSTEM_PROVIDER_KEYS: skipping aliased model — protocol carries the model id in the URL, not the body, so the swap can't hide it",
-                { modelProviderCredentialId: validCredential.id, apiShape, model: m },
               );
               continue;
             }

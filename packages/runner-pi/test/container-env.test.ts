@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  API_KEY_PLACEHOLDER,
   buildRuntimePiEnv,
   pickOperatorSidecarEnv,
   SIDECAR_OPERATOR_ENV_KEYS,
@@ -12,8 +13,6 @@ import {
 const model = {
   api: "anthropic-messages",
   modelId: "claude-sonnet-4-5",
-  apiKey: "sk-ant-secret",
-  apiKeyPlaceholder: "sk-ant-placeholder",
 };
 
 // Every call passes the topology explicitly — the orchestrator's
@@ -51,7 +50,7 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_ID).toBe(model.modelId);
     expect(env.SIDECAR_URL).toBe("http://sidecar:8080");
     expect(env.MODEL_BASE_URL).toBe("http://sidecar:8080/llm");
-    expect(env.MODEL_API_KEY).toBe("sk-ant-placeholder");
+    expect(env.MODEL_API_KEY).toBe(API_KEY_PLACEHOLDER);
     expect(env.HTTPS_PROXY).toBe("http://sidecar:8081");
   });
 
@@ -106,8 +105,6 @@ describe("buildRuntimePiEnv", () => {
         api: "openai-completions",
         modelId: "deepseek-chat",
         piProvider: "deepseek",
-        apiKey: "sk-secret",
-        apiKeyPlaceholder: "sk-placeholder",
       },
       agentPrompt: "p",
       ...sidecar,
@@ -115,7 +112,7 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_PROVIDER).toBe("deepseek");
     // The binding the sidecar exists to hide stays out of the container.
     expect(env.MODEL_BASE_URL).toBe("http://sidecar:8080/llm");
-    expect(env.MODEL_API_KEY).toBe("sk-placeholder");
+    expect(env.MODEL_API_KEY).toBe(API_KEY_PLACEHOLDER);
   });
 
   it("omits the provider key when the caller does not know the backing", () => {
@@ -123,33 +120,27 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_PROVIDER).toBeUndefined();
   });
 
-  describe("the vendor credential never enters the agent container", () => {
-    const REAL_KEY = "sk-ant-api03-real-secret-value";
-    const keyed = { ...model, apiKey: REAL_KEY };
+  describe("MODEL_API_KEY", () => {
+    const OAUTH_PLACEHOLDER = "sk-ant-oat01-placeholder";
 
-    it("MODEL_API_KEY is never the real key, and no env value carries it, for every option combination", () => {
-      for (const aliased of [false, true]) {
-        for (const piProvider of [undefined, "anthropic"]) {
-          const env = buildRuntimePiEnv({
-            model: { ...keyed, aliased, piProvider },
-            agentPrompt: "p",
-            ...sidecar,
-          });
-          expect(env.MODEL_API_KEY).not.toBe(REAL_KEY);
-          expect(Object.values(env).filter((v) => v.includes(REAL_KEY))).toEqual([]);
-          expect(env.MODEL_BASE_URL).toBe(sidecar.sidecarProxyLlmUrl);
-        }
+    it("is the constant placeholder unless the run is an OAuth subscription's", () => {
+      for (const piProvider of [undefined, "anthropic"]) {
+        const env = buildRuntimePiEnv({
+          model: { ...model, piProvider },
+          agentPrompt: "p",
+          ...sidecar,
+        });
+        expect(env.MODEL_API_KEY).toBe(API_KEY_PLACEHOLDER);
       }
     });
 
-    it("refuses a placeholder equal to the real key", () => {
-      expect(() =>
-        buildRuntimePiEnv({
-          model: { ...keyed, apiKeyPlaceholder: REAL_KEY },
-          agentPrompt: "p",
-          ...sidecar,
-        }),
-      ).toThrow(/apiKeyPlaceholder must differ from the real key/);
+    it("carries an OAuth run's token-shaped placeholder", () => {
+      const env = buildRuntimePiEnv({
+        model: { ...model, oauthApiKeyPlaceholder: OAUTH_PLACEHOLDER },
+        agentPrompt: "p",
+        ...sidecar,
+      });
+      expect(env.MODEL_API_KEY).toBe(OAUTH_PLACEHOLDER);
     });
   });
 
