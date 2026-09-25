@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`DEFAULT_MODEL_REASONING_LEVEL`** (`@appstrate/core/model-generation`, #1574) —
+  the reasoning level runs and chat apply when no layer sets one (`medium`). Pi has
+  no "provider default" reasoning state, so an unset level resolves to this one,
+  and the model settings UI names it instead of claiming the provider decides.
+
 - **`RunOrchestrator.sidecarExitsIndependently`** (`@appstrate/core/platform-types`,
   optional, #1561) — `true` when `waitForExit` on a sidecar handle resolves on the
   sidecar's own exit. The run launcher then fails a run the moment its sidecar dies
