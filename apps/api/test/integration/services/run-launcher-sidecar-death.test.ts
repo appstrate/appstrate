@@ -57,6 +57,8 @@ function createFake(opts: {
 }) {
   const agent = exit();
   const sidecar = exit();
+  // An exit the in-flight wait has not observed yet, as between Docker polls.
+  let unobservedSidecarExit: number | undefined;
   const stopped: string[] = [];
   const orchestrator: RunOrchestrator = {
     ...(opts.sidecarExitsIndependently !== undefined
@@ -99,7 +101,11 @@ function createFake(opts: {
       if (handle.role === "sidecar") sidecar.reject(new Error("container disappeared"));
     },
     waitForExit(handle: WorkloadHandle): Promise<number> {
-      return handle.role === "sidecar" ? sidecar.promise : agent.promise;
+      if (handle.role !== "sidecar") return agent.promise;
+      // A fresh wait inspects at once, like Docker's first poll.
+      return unobservedSidecarExit !== undefined
+        ? Promise.resolve(unobservedSidecarExit)
+        : sidecar.promise;
     },
     async *streamLogs(handle: WorkloadHandle): AsyncGenerator<string> {
       if (handle.role !== "sidecar") return;
@@ -113,7 +119,10 @@ function createFake(opts: {
       return "http://platform:3000";
     },
   };
-  return { orchestrator, agent, sidecar, stopped };
+  const exitSidecarUnobserved = (code: number) => {
+    unobservedSidecarExit = code;
+  };
+  return { orchestrator, agent, sidecar, stopped, exitSidecarUnobserved };
 }
 
 function buildRunPlan(timeout = 60): AppstrateRunPlan {
@@ -239,8 +248,8 @@ describe("run launcher — sidecar death", () => {
     try {
       const run = launch("run_both_exit", fake.orchestrator);
       await settle();
+      fake.exitSidecarUnobserved(1);
       fake.agent.resolve(1);
-      setTimeout(() => fake.sidecar.resolve(1), 10);
       expect(await run).toEqual({ exitCode: 1, timedOut: false, cancelled: false });
       const call = errorSpy.mock.calls.find(([msg]) => msg === SIDECAR_CRASH_LOG);
       expect(call?.[1]).toEqual({ runId: "run_both_exit", exitCode: 1, tail: "boom" });
@@ -255,15 +264,18 @@ describe("run launcher — sidecar death", () => {
     try {
       const run = launch("run_agent_fails_alone", fake.orchestrator);
       await settle();
+      const start = performance.now();
       fake.agent.resolve(1);
       expect(await run).toEqual({ exitCode: 1, timedOut: false, cancelled: false });
+      // A healthy sidecar must not hold up a failed run's teardown.
+      expect(performance.now() - start).toBeLessThan(1_000);
       const messages = errorSpy.mock.calls.map(([msg]) => msg);
       expect(messages).toContain("Agent container exited non-zero");
       expect(messages).not.toContain(SIDECAR_CRASH_LOG);
     } finally {
       errorSpy.mockRestore();
     }
-  }, 5_000);
+  });
 
   it("ignores the sidecar on an orchestrator that cannot observe it on its own", async () => {
     const fake = createFake({});

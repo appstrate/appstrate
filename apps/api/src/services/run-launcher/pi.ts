@@ -634,9 +634,8 @@ async function waitForWorkload(
 
   try {
     const agentExit = orch.waitForExit(agent);
-    const sidecarExit = observeSidecarExit(orch, sidecar);
     const sidecarDeath = await firstUnexpectedSidecarExit(
-      sidecarExit,
+      observeSidecarExit(orch, sidecar),
       agentExit,
       () => timedOut || (signal?.aborted ?? false),
     );
@@ -654,10 +653,8 @@ async function waitForWorkload(
     if (exitCode !== 0 && !timedOut && !signal?.aborted) {
       // A sidecar crash can take the agent down in the same poll round, and
       // the agent's exit may win the race: report the sidecar's too.
-      if (sidecarExit) {
-        const code = await withTimeout(sidecarExit, SIDECAR_EXIT_GRACE_MS);
-        if (code !== undefined && code !== 0) await logSidecarCrash(orch, sidecar, code);
-      }
+      const code = await exitedSidecarCode(orch, sidecar);
+      if (code !== undefined && code !== 0) await logSidecarCrash(orch, sidecar, code);
       logAbort.abort();
       await logStream;
       logger.error("Agent container exited non-zero", {
@@ -715,9 +712,23 @@ async function firstUnexpectedSidecarExit(
 
 const SIDECAR_TAIL_LINES = 30;
 const SIDECAR_TAIL_TIMEOUT_MS = 2_000;
-// Docker polls exits with a backoff capped at 2 s, so a sidecar that died
-// first can still be reported up to one poll after the agent.
-const SIDECAR_EXIT_GRACE_MS = 2_500;
+// Bounds one immediate exit check (a local Docker inspect); waiting longer
+// would delay every failed run and catch stops issued after the agent's exit.
+const SIDECAR_EXIT_PROBE_MS = 250;
+
+/**
+ * The sidecar's exit code if it has already exited, `undefined` otherwise. A
+ * fresh wait answers at once (Docker inspects before its first backoff, a
+ * process's `exited` is already settled), where the in-flight one can be a
+ * whole poll behind.
+ */
+async function exitedSidecarCode(
+  orch: RunOrchestrator,
+  sidecar: WorkloadHandle,
+): Promise<number | undefined> {
+  const exit = observeSidecarExit(orch, sidecar);
+  return exit ? withTimeout(exit, SIDECAR_EXIT_PROBE_MS) : undefined;
+}
 
 /** `promise`'s value, or `undefined` once `ms` elapse first. */
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
