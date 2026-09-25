@@ -62,12 +62,13 @@ session row needs none); a three-mode enum ("pins only" removed 3 index lines).
 `PUT /api/chat/sessions/{id}/skills` `{ skill_catalogue, pinned_skills }` → 204,
 one upsert (`ensureSession` with the selection): it creates the row for a
 client-minted id, as the first turn does — so a picker write on a fresh
-conversation makes it appear in the sidebar with no messages — and it never
-bumps `updatedAt`. Every session DTO carries both fields. There is no
+conversation makes it appear in the sidebar with no messages, and the URL
+adopts its id on that first write, as on a first send — and it never bumps
+`updatedAt`. Every session DTO carries both fields. There is no
 chat-specific skill listing: the picker reads `GET /api/packages/skills`.
 
 UI: a picker in the composer (catalogue switch + one pin checkbox per skill),
-mounted when the shell's `canPinSkills` holds (`chat:write` ∧ `readsSkills`) and
+mounted when `canPinSkills` holds (`chat:write` ∧ `readsSkills`) and
 the session read succeeded — a failed read would let the first click write the
 defaults over the stored pins. The selection lives in local state seeded from
 the session detail; one write at a time (the controls are disabled while it is
