@@ -777,6 +777,56 @@ answer.
 - `--primary-soft` / `--spark-soft` are the switcher's selection fills, so the
   two dimensions read apart at a glance.
 
+## Motion
+
+Decided 25 September 2026. Before it, every shadcn surface carried its own
+timing: dialogs 200ms, menus, popovers and selects tw-animate-css's default
+150ms on plain `ease`, sheets 500ms in and 300ms out on `ease-in-out`, the
+sidebar 200ms `ease-linear`. Nothing respected `prefers-reduced-motion`, and
+the popover, the dropdown and the select zoomed from their own centre while
+sliding from the trigger (the tooltip alone had its Radix transform origin).
+
+**The scale** lives in `apps/web/src/styles.css`, in a plain `@theme` block
+(not `inline`, so the utilities emit `var(--…)` and the numbers are tuned in
+one place). `@appstrate/ui` has no stylesheet of its own; this is the theme its
+components are compiled against.
+
+| token                        | utility         | value                            | used for                                           |
+| ---------------------------- | --------------- | -------------------------------- | -------------------------------------------------- |
+| `--transition-duration-fast` | `duration-fast` | 150ms                            | every exit, tooltips, hover and state feedback     |
+| `--transition-duration-base` | `duration-base` | 250ms                            | a menu, popover, select or dialog opening; sidebar |
+| `--transition-duration-slow` | `duration-slow` | 400ms                            | a sheet sliding in (it travels a whole viewport)   |
+| `--ease-surface`             | `ease-surface`  | `cubic-bezier(0.22, 1, 0.36, 1)` | anything that moves: surfaces, in and out, sidebar |
+
+The second easing is Tailwind's own default transition curve (ease-in-out,
+150ms), kept for colour and opacity feedback, which is why `transition-colors`
+needs no token. tw-animate-css reads the `--tw-duration` and `--tw-ease` that
+the utilities set, so `animate-in` / `animate-out` follow the scale with no
+extra class.
+
+**The rules**, taken from the principles of transitions.dev (read, not copied:
+it carries no licence):
+
+- **A surface opens on `base` and closes on `fast`.** Leaving is quicker than
+  arriving; the person has already decided.
+- **A surface anchored to a trigger grows from it**:
+  `origin-(--radix-…-content-transform-origin)` on popover, dropdown (and its
+  sub-menu), select and tooltip. A centred dialog stays centred.
+- **Overlay and content share the timing**, or the dimming outlives the dialog.
+- **Reduced motion removes movement, not feedback.** One rule in
+  `@layer base` pins tw-animate-css's translate, scale and rotate variables
+  neutral, so surfaces still fade but no longer slide or zoom, and makes
+  transitions instant. Spinners and pulses stay: a loop that says "still
+  working" is information. A looping MOVEMENT (the chat's bouncing thinking
+  dots) switches to a pulse with `motion-reduce:animate-pulse`.
+- **No animation library.** tw-animate-css plus these tokens is the whole
+  system; a new animation starts from the same four values.
+
+Left as they were, on purpose: the four `transition-opacity duration-200`
+cross-fades in app code (settings layout, panel dialog header, catalogue
+modal, connections chevron). 200 against 150 is not a defect worth a conflict
+with the dashboard branch; align them to `duration-fast` when next touched.
+
 ## Settings
 
 Two settings surfaces, one rendering. **Organisation and workspace share one
@@ -3546,7 +3596,8 @@ catches the regression in six months. What is measurable:
   a decision (a bigger hit area without a bigger glyph), not a shrug.
 - **Focus visible and tab order** on everything interactive, the stretched row
   link and the controls raised above it with `relative z-10` included.
-- **`prefers-reduced-motion`**, which nothing respects today.
+- **`prefers-reduced-motion`**: respected globally since 25 September (see
+  "Motion"); what is left is a guard that fails when it regresses.
 - **Labels and disabled state**: the share checkbox is `aria-label`ed, but a
   disabled checked box must still say WHY it cannot be changed, and today that
   reason is a sentence elsewhere in the row rather than anything tied to the
