@@ -165,11 +165,8 @@ describe("waitForHttp", () => {
 
 describe("isPortAvailable", () => {
   it("flips from false to true once the holder releases the port", async () => {
-    // A port cannot be both held (to keep it reserved) and free (for the
-    // probe), so the `true` case is asserted on the release transition.
-    // Another process can still take the port between the close and the
-    // second probe — the one place the ephemeral-pool race is accepted
-    // (#1563); the `false` probe first proves the port is the one we held.
+    // A port cannot be both reserved and free, so `true` is asserted on
+    // release; the close → probe window is the one accepted race (#1563).
     const { holder, port } = await holdEphemeralPort();
     expect(await isPortAvailable(port)).toBe(false);
     await closeServer(holder);

@@ -788,11 +788,7 @@ describe("resolveAppstratePort upgrade cross-check (findRunningComposeProject)",
   });
 });
 
-/**
- * Probe stub for the "port is free" cases. A real free port cannot be
- * held open for the test (holding it makes the probe report it busy),
- * and releasing one before the probe races the ephemeral pool (#1563).
- */
+/** A held port reads as busy and a released one races the ephemeral pool (#1563). */
 async function portIsFree(): Promise<boolean> {
   return true;
 }
