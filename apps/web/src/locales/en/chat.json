@@ -104,5 +104,6 @@
   "skills.loading": "Loading skills…",
   "skills.empty": "No skill is available in this space.",
   "skills.error": "Skills could not be loaded.",
+  "skills.saveError": "The choice could not be saved. Try again.",
   "skills.unavailable": "Unavailable in this space — uncheck to remove it."
 }

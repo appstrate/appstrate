@@ -63,3 +63,15 @@ test("switches to manual and chooses a skill before the first message", async ({
   await expect(popover.getByTestId("skills-mode-manual")).toHaveAttribute("data-state", "active");
   await expect(popover.getByTestId(`skill-pin-${packageId}`)).toBeChecked();
 });
+
+test("says a refused write, and shows the stored mode again", async ({ authedPage: page }) => {
+  await page.route("**/api/chat/sessions/*/skills", (route) =>
+    route.fulfill({ status: 500, body: "" }),
+  );
+  await page.goto("/chat");
+  await page.getByTestId("skills-picker-trigger").click();
+  const popover = page.getByTestId("skills-picker-popover");
+  await popover.getByTestId("skills-mode-manual").click();
+  await expect(popover.getByTestId("skills-save-error")).toBeVisible();
+  await expect(popover.getByTestId("skills-mode-auto")).toHaveAttribute("data-state", "active");
+});

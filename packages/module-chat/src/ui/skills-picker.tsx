@@ -58,6 +58,8 @@ export function SkillsPicker({
   const [selection, setSelection] = useState(initialSelection);
   // Controls are disabled while a PUT is in flight, so writes never race.
   const [saving, setSaving] = useState(false);
+  // A refused write is reverted, and said: a silent revert reads as a dead control.
+  const [saveFailed, setSaveFailed] = useState(false);
   // Space-scoped: the listing reads `X-Space-Id`, so the key carries the space.
   const spaceId = spaceIdFromHeaders(getHeaders);
   const readable = !!spaceId && can("skills:read");
@@ -83,12 +85,16 @@ export function SkillsPicker({
     const previous = selection;
     setSelection(next);
     setSaving(true);
+    setSaveFailed(false);
     if (!adopted.current) {
       adopted.current = true;
       selectConversation?.(sessionId);
     }
     putSessionSkills(getHeaders, sessionId, next)
-      .catch(() => setSelection(previous))
+      .catch(() => {
+        setSelection(previous);
+        setSaveFailed(true);
+      })
       .finally(() => setSaving(false));
   };
 
@@ -174,6 +180,15 @@ export function SkillsPicker({
         <p className="text-muted-foreground mt-1.5 shrink-0 px-1 text-[0.7rem] leading-snug">
           {t(MODE_COPY[selection.skillMode].hint)}
         </p>
+        {saveFailed && (
+          <p
+            role="alert"
+            data-testid="skills-save-error"
+            className="text-destructive mt-1 shrink-0 px-1 text-[0.7rem] leading-snug"
+          >
+            {t("skills.saveError")}
+          </p>
+        )}
 
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t pt-2">
           <div className="text-muted-foreground px-1 py-1 text-[0.65rem] font-semibold tracking-wider uppercase">

@@ -104,5 +104,6 @@
   "skills.loading": "Chargement des compétences…",
   "skills.empty": "Aucune compétence disponible dans cet espace.",
   "skills.error": "Les compétences n'ont pas pu être chargées.",
+  "skills.saveError": "Le choix n'a pas pu être enregistré. Réessayez.",
   "skills.unavailable": "Indisponible dans cet espace — décochez pour la retirer."
 }
