@@ -15,6 +15,8 @@ const VALID = {
   AGENT_PROMPT: "You are a helpful agent.",
   SIDECAR_URL: "http://sidecar:8080",
   SIDECAR_AUTH_TOKEN: "sidecar-auth-token",
+  MODEL_BASE_URL: "http://sidecar:8080/llm",
+  MODEL_API_KEY: "sk-placeholder",
 };
 
 describe("parseRuntimeEnv — happy path", () => {
@@ -45,7 +47,8 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.agentInput).toEqual({});
     expect(env.sidecarUrl).toBe("http://sidecar:8080");
     expect(env.sidecarAuthToken).toBe("sidecar-auth-token");
-    expect(env.modelApiKey).toBeUndefined();
+    expect(env.modelBaseUrl).toBe("http://sidecar:8080/llm");
+    expect(env.modelApiKey).toBe("sk-placeholder");
     expect(env.timeoutSeconds).toBeUndefined();
     expect(env.mcpToolTimeoutMs).toBeUndefined();
   });
@@ -316,19 +319,9 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
   });
 });
 
-describe("parseRuntimeEnv — backward-compat with empty strings", () => {
-  it("treats an empty SIDECAR_URL as missing", () => {
-    expect(() => parseRuntimeEnv({ ...VALID, SIDECAR_URL: "" })).toThrow(/SIDECAR_URL: required/);
-  });
-
-  it("treats empty MODEL_BASE_URL as unset", () => {
-    const env = parseRuntimeEnv({ ...VALID, MODEL_BASE_URL: "" });
-    expect(env.modelBaseUrl).toBeUndefined();
-  });
-
-  it("treats empty MODEL_API_KEY as unset", () => {
-    const env = parseRuntimeEnv({ ...VALID, MODEL_API_KEY: "" });
-    expect(env.modelApiKey).toBeUndefined();
+describe("parseRuntimeEnv — empty strings count as missing", () => {
+  it.each(["SIDECAR_URL", "MODEL_BASE_URL", "MODEL_API_KEY"])("refuses an empty %s", (key) => {
+    expect(() => parseRuntimeEnv({ ...VALID, [key]: "" })).toThrow(`${key}: required`);
   });
 });
 

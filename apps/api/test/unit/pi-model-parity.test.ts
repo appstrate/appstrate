@@ -80,6 +80,8 @@ function containerModel(def: ModelProviderDefinition, modelId: string): Model<Ap
     runId: "run_parity",
     sidecarUrl: "http://sidecar:8080",
     sidecarAuthToken: "sidecar-auth-token",
+    forwardProxyUrl: "http://sidecar:8081",
+    noProxy: "sidecar,localhost,127.0.0.1",
     sidecarProxyLlmUrl: "http://sidecar:8080/llm",
     sink: {
       url: `${ORIGIN}/api/runs/run_parity/events`,

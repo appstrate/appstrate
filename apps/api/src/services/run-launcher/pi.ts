@@ -220,7 +220,7 @@ async function runPlatformContainerImpl(
     // Inference rides the sidecar's `/llm`, whose egress floor refuses a base
     // URL on a blocked range. Same guard, same allowlist, checked here so the
     // run fails with the remedy instead of a 403 inside the container.
-    if ((delivery.kind === "oauth" || llmApiKey) && isBlockedEgressUrl(llmConfig.baseUrl)) {
+    if (isBlockedEgressUrl(llmConfig.baseUrl)) {
       throw new LlmBaseUrlBlockedError(llmConfig.baseUrl);
     }
 
@@ -273,37 +273,34 @@ async function runPlatformContainerImpl(
         }
       : undefined;
 
-    let sidecarLlm: LlmProxyConfig | undefined;
     // OAuth credentials must take the sidecar's OAuth branch — the API-key
     // path can't refresh tokens or inject the provider's identity routing
     // headers at request time. Narrowing `delivery` (rather than carrying a
     // boolean) is what supplies `credentialId` here: `resolveCredentialDelivery`
     // refused to build an `oauth` delivery without one, so there is nothing
     // left to re-assert at this point.
-    if (delivery.kind === "oauth") {
-      // OAuth subscription: the Pi SDK signs the subscription request shape
-      // itself, so the sidecar just swaps the placeholder bearer for the real
-      // token — no forging, no modelSwap (aliases rejected above).
-      sidecarLlm = buildOauthSidecarLlm({
-        baseUrl: llmConfig.baseUrl,
-        credentialId: delivery.credentialId,
-      });
-    } else if (llmApiKey) {
-      // API-key flow: the sidecar forwards directly to the upstream
-      // provider. Transient 429/5xx are absorbed by two budgets, neither of
-      // them this file's and neither restated here (one number, one place):
-      // the container's turn-level retry policy in
-      // `packages/runner-pi/src/pi-runner.ts`, and — for an ALIASED run, whose
-      // container never sees a `retry-after` header — the sidecar's own
-      // provider-level budget in `runtime-pi/sidecar/pi-messages-backend.ts`.
-      sidecarLlm = {
-        authMode: "api_key",
-        baseUrl: llmConfig.baseUrl,
-        apiKey: llmApiKey,
-        placeholder: llmPlaceholder,
-        ...(modelSwap ? { modelSwap } : {}),
-      };
-    }
+    //
+    // OAuth subscription: the Pi SDK signs the subscription request shape
+    // itself, so the sidecar just swaps the placeholder bearer for the real
+    // token — no forging, no modelSwap (aliases rejected above).
+    //
+    // API-key flow: the sidecar forwards directly to the upstream provider.
+    // Transient 429/5xx are absorbed by two budgets, neither of them this
+    // file's and neither restated here (one number, one place): the
+    // container's turn-level retry policy in `packages/runner-pi/src/pi-runner.ts`,
+    // and — for an ALIASED run, whose container never sees a `retry-after`
+    // header — the sidecar's own provider-level budget in
+    // `runtime-pi/sidecar/pi-messages-backend.ts`.
+    const sidecarLlm: LlmProxyConfig =
+      delivery.kind === "oauth"
+        ? buildOauthSidecarLlm({ baseUrl: llmConfig.baseUrl, credentialId: delivery.credentialId })
+        : {
+            authMode: "api_key",
+            baseUrl: llmConfig.baseUrl,
+            apiKey: llmApiKey,
+            placeholder: llmPlaceholder,
+            ...(modelSwap ? { modelSwap } : {}),
+          };
 
     // Agent↔sidecar bearer for THIS run. Minted here, in the one frame that
     // feeds both halves of the pair (`sidecarSpec` → the sidecar's env,
@@ -664,8 +661,7 @@ const PLACEHOLDER_PREFIX_SEGMENTS = 2;
  * `MODEL_PROVIDER`. An aliased run never reaches this value — see
  * `ALIAS_API_KEY_PLACEHOLDER` in `@appstrate/runner-pi`.
  */
-function deriveKeyPlaceholder(key: string | undefined): string {
-  if (!key) return "sk-placeholder";
+function deriveKeyPlaceholder(key: string): string {
   const parts = key.split("-");
   const kept = parts.slice(0, Math.min(PLACEHOLDER_PREFIX_SEGMENTS, parts.length - 1)).join("-");
   const ceiling = Math.floor(key.length / 2);
@@ -685,8 +681,7 @@ function deriveKeyPlaceholder(key: string | undefined): string {
  * is absent or returns null, the platform falls back to the generic
  * dash-stripping strategy — safe for opaque bearer tokens.
  */
-function deriveOauthPlaceholder(key: string | undefined, providerId: string): string {
-  if (!key) return deriveKeyPlaceholder(key);
+function deriveOauthPlaceholder(key: string, providerId: string): string {
   const config = getModelProvider(providerId);
   const fromHook = config?.hooks?.buildApiKeyPlaceholder?.(key);
   return fromHook ?? deriveKeyPlaceholder(key);

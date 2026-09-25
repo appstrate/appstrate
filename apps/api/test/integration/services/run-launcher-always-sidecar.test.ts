@@ -188,8 +188,6 @@ describe("run-launcher — sidecar wiring", () => {
       expect(counts.createSidecarCalls).toBe(1);
       expect(counts.createWorkloadCalls).toBe(1);
       expect(counts.capturedAgentSpec?.resources).toBe(resources.workload);
-      // The agent stays on the run's isolation boundary.
-      expect(counts.capturedAgentSpec).not.toHaveProperty("egress");
 
       // The real key goes to the sidecar, and nowhere in the agent env.
       const llm = counts.capturedSidecarSpec?.llm;

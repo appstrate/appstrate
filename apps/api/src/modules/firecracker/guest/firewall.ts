@@ -10,7 +10,7 @@
 import type { GuestNetworkConfig } from "./guest-config.ts";
 
 export const GUEST_SIDECAR_UID = "1000";
-export const GUEST_AGENT_UID = "1001";
+const GUEST_AGENT_UID = "1001";
 const GUEST_RUNNER_UID = "1002";
 
 /**
@@ -30,7 +30,7 @@ export const MMDS_IPV4_ADDRESS = "169.254.169.254";
  *   - root (supervisor): allowed — it is the trust anchor of the guest.
  *   - sidecar uid: full egress (it fronts the LLM proxy + forward proxy).
  *   - runner uid: full egress (integration MCP servers call external APIs).
- *   - agent uid: loopback + the platform sink only.
+ *   - agent uid: the platform sink only (its sidecar is on loopback, above).
  *   - everything else — any uid, any socketless packet — is dropped.
  *
  * DNS to the configured resolvers is allowed for whoever has egress
@@ -54,7 +54,6 @@ export function buildGuestFirewallScript(network: GuestNetworkConfig): string {
     `    meta skuid 0 accept`,
     `    meta skuid ${GUEST_SIDECAR_UID} accept`,
     `    meta skuid ${GUEST_RUNNER_UID} accept`,
-    `    meta skuid ${GUEST_AGENT_UID} ip daddr 127.0.0.1 accept`,
     `    meta skuid ${GUEST_AGENT_UID} ip daddr ${network.platform_ip} tcp dport ${network.platform_port} accept`,
     `  }`,
     `}`,

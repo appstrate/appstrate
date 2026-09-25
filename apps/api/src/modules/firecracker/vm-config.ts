@@ -17,6 +17,8 @@ import { SUBNET_NETMASK, type RunSubnet } from "./subnet.ts";
 // The config-drive wire contract is shared with its in-guest consumer —
 // single definition next to the supervisor, imported type-only.
 import type { GuestConfig } from "./guest/guest-config.ts";
+// Same address the guest firewall drops once the credentials are fetched.
+import { MMDS_IPV4_ADDRESS } from "./guest/firewall.ts";
 
 interface BuildGuestConfigInput {
   runId: string;
@@ -109,8 +111,6 @@ interface BuildVmConfigInput {
   mmds?: boolean;
 }
 
-/** MMDS default link-local service address (Firecracker default). */
-const MMDS_IPV4_ADDRESS = "169.254.169.254";
 /** The guest NIC MMDS is bound to — wired into the `network-interfaces` iface_id below. */
 const MMDS_NETWORK_INTERFACE = "eth0";
 

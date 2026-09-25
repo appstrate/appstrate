@@ -83,13 +83,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `SIDECAR_IMAGE` ship together as usual. The `appstrate.run.container_spawn`
   metric drops its `sidecar` attribute, which is now constant.
   **Firecracker operators**: every VM is sized with its sidecar — agent memory
-  - 512 MiB (256 MiB sidecar, 256 MiB kernel/init/overlay) and the agent's
-    vCPUs + 1, between 2 and 8. The runner protocol moves to `2` (the boundary
-    request takes `{ runId }` alone) and the guest protocol to `3` (the config
-    drive drops `agent.unrestricted_egress` and `sidecar.enabled`). Upgrade the
-    platform, the `appstrate-runner` daemon and the guest artifacts together; a
-    platform and a daemon on different runner protocols refuse each other at
-    `initialize`.
+  plus 512 MiB (256 MiB sidecar, 256 MiB kernel/init/overlay), agent vCPUs plus
+  1, between 2 and 8. The runner protocol moves to `2` (the boundary request
+  takes `{ runId }` alone) and the guest protocol to `3` (the config drive drops
+  `agent.unrestricted_egress` and `sidecar.enabled`). Upgrade the platform, the
+  `appstrate-runner` daemon and the guest artifacts together; a platform and a
+  daemon on different runner protocols refuse each other at `initialize`.
 
 - **BREAKING (operators): MinIO runs from `cgr.dev/chainguard/minio`, as uid
   65532 — an existing MinIO volume must be re-owned before the upgrade.**

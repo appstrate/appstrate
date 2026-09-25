@@ -800,7 +800,6 @@ describe("MMDS credential broker (FIRECRACKER_CREDENTIAL_BROKER)", () => {
     runId: string,
     mmdsPut: (socketPath: string, payload: unknown) => Promise<void>,
     withSidecar = true,
-    agentSpecExtra: Record<string, unknown> = {},
   ): Promise<{
     orch: FirecrackerOrchestrator;
     start: () => Promise<void>;
@@ -826,7 +825,6 @@ describe("MMDS credential broker (FIRECRACKER_CREDENTIAL_BROKER)", () => {
         image: "unused",
         env: withSidecar ? {} : { APPSTRATE_SINK_SECRET: "hmac" },
         resources: { memoryBytes: 256 * 1024 * 1024, nanoCpus: 1_000_000_000 },
-        ...agentSpecExtra,
       },
       boundary,
     );
@@ -893,24 +891,6 @@ describe("MMDS credential broker (FIRECRACKER_CREDENTIAL_BROKER)", () => {
     );
     await expect(start()).rejects.toThrow(/createSidecar/);
     expect(guestConfigs).toHaveLength(0);
-    await orch.shutdown();
-  });
-
-  // The agent is confined to loopback (its sidecar) + the platform sink on
-  // every run, whatever extra field an older client still sends on the loose
-  // workload-spec wire.
-  it("never hands the guest an agent egress override", async () => {
-    process.env.FIRECRACKER_CREDENTIAL_BROKER = "config-drive";
-    _resetCacheForTesting();
-    const { orch, start, guestConfigs } = await primeToStart(
-      "run_agent_egress",
-      async () => {},
-      true,
-      { egress: true },
-    );
-    await start();
-    expect(guestConfigs).toHaveLength(1);
-    expect(guestConfigs[0]?.agent).not.toHaveProperty("unrestricted_egress");
     await orch.shutdown();
   });
 });

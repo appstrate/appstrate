@@ -1499,7 +1499,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
 
     // Credential broker: push the run's secrets into the booted VMM's
     // in-memory MMDS store. The guest supervisor fetches them at boot;
-    // until they land, a sidecar-backed run would silently come up without
+    // until they land, a run would silently come up without
     // credentials — so this is FAIL-CLOSED. A short retry absorbs the
     // window where the just-spawned VMM has not yet bound its API socket;
     // on final failure the VM is destroyed and the run fails.

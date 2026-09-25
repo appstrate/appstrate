@@ -35,10 +35,10 @@ export interface RuntimePiModelConfig {
   modelId: string;
   /** Pi provider key of the real upstream → `MODEL_PROVIDER`. Pass it even for an {@link aliased} run. */
   piProvider?: string | null;
-  /** LLM API key. When unset, MODEL_API_KEY / MODEL_BASE_URL are not emitted. */
-  apiKey?: string;
-  /** Stands in for the real apiKey inside the container. Required with {@link apiKey}, and never equal to it. */
-  apiKeyPlaceholder?: string;
+  /** The real LLM credential — never emitted; only compared with {@link apiKeyPlaceholder}. */
+  apiKey: string;
+  /** Stands in for the real apiKey inside the container → `MODEL_API_KEY`. Never equal to it. */
+  apiKeyPlaceholder: string;
   input?: ReadonlyArray<ModelInputModality> | null;
   contextWindow?: number | null;
   maxTokens?: number | null;
@@ -74,12 +74,12 @@ export interface RuntimePiEnvOptions {
    * `SIDECAR_URL` — see `runtime-pi/entrypoint.ts` §2d.
    */
   sidecarAuthToken: string;
-  /** The sidecar's LLM proxy → `MODEL_BASE_URL`. Required with {@link RuntimePiModelConfig.apiKey}. */
-  sidecarProxyLlmUrl?: string;
-  /** Forward-proxy URL. When set, HTTP(S)_PROXY + NO_PROXY are emitted. */
-  forwardProxyUrl?: string;
-  /** Hosts excluded from the proxy. Required with {@link forwardProxyUrl}. */
-  noProxy?: string;
+  /** The sidecar's LLM proxy → `MODEL_BASE_URL`. */
+  sidecarProxyLlmUrl: string;
+  /** The sidecar's forward proxy → `HTTP(S)_PROXY`. */
+  forwardProxyUrl: string;
+  /** Hosts excluded from the forward proxy (names the sidecar's own host) → `NO_PROXY`. */
+  noProxy: string;
   sink?: {
     /** POST target for each {@link RunEvent} — typically `…/api/runs/{runId}/events`. */
     url: string;
@@ -156,36 +156,21 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.AGENT_TIMEOUT_SECONDS = String(opts.timeoutSeconds);
   }
 
-  // Fail closed: the sidecar injects the real credential upstream, so a keyed
-  // model reaches inference through the sidecar and the container holds only
-  // the placeholder.
-  if (model.apiKey) {
-    if (!opts.sidecarProxyLlmUrl) {
-      throw new Error(
-        "buildRuntimePiEnv: sidecarProxyLlmUrl is required with model.apiKey " +
-          "(pass the boundary's sidecarEndpoints.llmProxyUrl)",
-      );
-    }
-    if (!model.apiKeyPlaceholder) {
-      throw new Error(
-        "buildRuntimePiEnv: model.apiKeyPlaceholder is required with model.apiKey — " +
-          "the agent container only ever holds the placeholder",
-      );
-    }
-    if (model.apiKeyPlaceholder === model.apiKey) {
-      throw new Error("buildRuntimePiEnv: model.apiKeyPlaceholder must differ from the real key");
-    }
-    env.MODEL_BASE_URL = opts.sidecarProxyLlmUrl;
-    // An aliased run gets a vendor-neutral constant instead — see
-    // ALIAS_API_KEY_PLACEHOLDER for why the derived placeholder cannot be used.
-    // This is the same withholding the `MODEL_PROVIDER` line below performs,
-    // applied to the other env var that carries the vendor.
-    env.MODEL_API_KEY = model.aliased ? ALIAS_API_KEY_PLACEHOLDER : model.apiKeyPlaceholder;
+  // Fail closed: the sidecar injects the real credential upstream, so the
+  // container holds only the placeholder.
+  if (model.apiKeyPlaceholder === model.apiKey) {
+    throw new Error("buildRuntimePiEnv: model.apiKeyPlaceholder must differ from the real key");
   }
+  env.MODEL_BASE_URL = opts.sidecarProxyLlmUrl;
+  // An aliased run gets a vendor-neutral constant instead — see
+  // ALIAS_API_KEY_PLACEHOLDER for why the derived placeholder cannot be used.
+  // This is the same withholding the `MODEL_PROVIDER` line below performs,
+  // applied to the other env var that carries the vendor.
+  env.MODEL_API_KEY = model.aliased ? ALIAS_API_KEY_PLACEHOLDER : model.apiKeyPlaceholder;
 
   // Which provider Pi is really talking to: MODEL_BASE_URL is the sidecar's,
-  // erasing one of Pi's two detection inputs,
-  // and without this the container emits plain-OpenAI shape at every provider.
+  // erasing one of Pi's two detection inputs, and without this the container
+  // emits plain-OpenAI shape at every provider.
   // An ALIASED run never emits it — naming the vendor is the leak, and there is
   // nothing left to configure, `pi-messages` having one request shape.
   if (model.piProvider && !model.aliased) env.MODEL_PROVIDER = model.piProvider;
@@ -221,23 +206,12 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.FILE_MAX_BYTES = String(opts.maxFileBytes);
   }
 
-  if (opts.forwardProxyUrl) {
-    // Same invariant as sidecarUrl above: the exclusion list names the sidecar's
-    // own host, which only the orchestrator knows.
-    const { noProxy } = opts;
-    if (!noProxy) {
-      throw new Error(
-        "buildRuntimePiEnv: noProxy is required when forwardProxyUrl is set " +
-          "(pass the boundary's sidecarEndpoints.noProxy)",
-      );
-    }
-    env.HTTP_PROXY = opts.forwardProxyUrl;
-    env.HTTPS_PROXY = opts.forwardProxyUrl;
-    env.http_proxy = opts.forwardProxyUrl;
-    env.https_proxy = opts.forwardProxyUrl;
-    env.NO_PROXY = noProxy;
-    env.no_proxy = noProxy;
-  }
+  env.HTTP_PROXY = opts.forwardProxyUrl;
+  env.HTTPS_PROXY = opts.forwardProxyUrl;
+  env.http_proxy = opts.forwardProxyUrl;
+  env.https_proxy = opts.forwardProxyUrl;
+  env.NO_PROXY = opts.noProxy;
+  env.no_proxy = opts.noProxy;
 
   if (opts.modelRetry === false) env.MODEL_RETRY_ENABLED = "false";
   if (opts.modelCompaction === false) env.MODEL_COMPACTION_ENABLED = "false";

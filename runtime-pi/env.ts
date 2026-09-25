@@ -41,10 +41,10 @@ interface RuntimeEnv {
   modelApi: string;
   /** Model identifier passed to the SDK. */
   modelId: string;
-  /** The sidecar's LLM proxy; absent for a keyless model. */
-  modelBaseUrl?: string;
+  /** The sidecar's LLM proxy. */
+  modelBaseUrl: string;
   /** The placeholder the sidecar swaps for the real credential upstream. */
-  modelApiKey?: string;
+  modelApiKey: string;
   /** Whether the model emits reasoning tokens. */
   modelReasoning?: boolean;
   /** Explicit generation controls; absent preserves Pi's historical defaults. */
@@ -344,8 +344,12 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
   if (!sidecarAuthToken) issues.push("SIDECAR_AUTH_TOKEN: required");
 
   const modelBaseUrl = source.MODEL_BASE_URL;
-  if (modelBaseUrl && normalizeHttpUrl(modelBaseUrl) === null)
-    issues.push(`MODEL_BASE_URL: must be an http(s) URL when set (got "${modelBaseUrl}")`);
+  if (!modelBaseUrl) issues.push("MODEL_BASE_URL: required");
+  else if (normalizeHttpUrl(modelBaseUrl) === null)
+    issues.push(`MODEL_BASE_URL: must be an http(s) URL (got "${modelBaseUrl}")`);
+
+  const modelApiKey = source.MODEL_API_KEY;
+  if (!modelApiKey) issues.push("MODEL_API_KEY: required");
 
   const agentInput = source.AGENT_INPUT
     ? parseJsonRecord("AGENT_INPUT", source.AGENT_INPUT, issues)
@@ -413,8 +417,8 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     workspaceDir: source.WORKSPACE_DIR || "/workspace",
     modelApi: modelApi!,
     modelId: modelId!,
-    modelBaseUrl: modelBaseUrl || undefined,
-    modelApiKey: source.MODEL_API_KEY || undefined,
+    modelBaseUrl: modelBaseUrl!,
+    modelApiKey: modelApiKey!,
     ...(source.MODEL_REASONING ? { modelReasoning: source.MODEL_REASONING === "true" } : {}),
     ...(modelTemperature !== undefined ? { modelTemperature } : {}),
     ...(modelReasoningLevel?.success
@@ -450,7 +454,7 @@ export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
     // An aliased container is given no MODEL_PROVIDER and must derive none: the
     // api-shape fallback yields Appstrate's own key, naming no vendor.
     piProvider: env.modelProvider,
-    baseUrl: env.modelBaseUrl ?? "",
+    baseUrl: env.modelBaseUrl,
     reasoning: env.modelReasoning,
     input: env.modelInput,
     // Absent: the runner's `unpriced` flag keeps the record's card unreported.

@@ -86,10 +86,6 @@ describe("deriveOauthPlaceholder", () => {
       const placeholder = deriveOauthPlaceholder("opaque-token", SYNTH_PROVIDER_ID);
       expect(placeholder).toBe(deriveKeyPlaceholder("opaque-token"));
     });
-
-    it("returns sk-placeholder when input is undefined", () => {
-      expect(deriveOauthPlaceholder(undefined, SYNTH_PROVIDER_ID)).toBe("sk-placeholder");
-    });
   });
 
   describe("provider without hook / unknown provider", () => {

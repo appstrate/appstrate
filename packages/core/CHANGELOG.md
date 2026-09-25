@@ -269,6 +269,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and of `TelemetryProvider.recordContainerSpawn` — BREAKING for a provider
   implementation. Every run has a sidecar, so the attribute was constant.
 
+- **`undefined` as `DrainAndEmitOptions.drainer`** (`@appstrate/core/runtime-event-drain`)
+  — BREAKING. Every run has a sidecar journal to drain, so `drainAndEmitInto`
+  takes a `RuntimeEventDrainer` and no longer no-ops without one.
+
 - **`CatalogModelSelector`**, **`ModelIdSelection`**, **`isCatalogModelSelector`**
   and **`ModelProviderDefinition.modelDiscoveryCandidates`**
   (`@appstrate/core/module`) — BREAKING. A provider's discovery candidates, and

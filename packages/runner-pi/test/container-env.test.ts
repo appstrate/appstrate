@@ -12,11 +12,19 @@ import {
 const model = {
   api: "anthropic-messages",
   modelId: "claude-sonnet-4-5",
+  apiKey: "sk-ant-secret",
+  apiKeyPlaceholder: "sk-ant-placeholder",
 };
 
-// Every call passes the topology explicitly — buildRuntimePiEnv throws instead
-// of defaulting (the orchestrator's sidecarEndpoints is the single topology owner).
-const sidecar = { sidecarUrl: "http://sidecar:8080", sidecarAuthToken: "sidecar-auth-token" };
+// Every call passes the topology explicitly — the orchestrator's
+// sidecarEndpoints is the single topology owner.
+const sidecar = {
+  sidecarUrl: "http://sidecar:8080",
+  sidecarAuthToken: "sidecar-auth-token",
+  sidecarProxyLlmUrl: "http://sidecar:8080/llm",
+  forwardProxyUrl: "http://sidecar:8081",
+  noProxy: "sidecar,localhost,127.0.0.1",
+};
 
 describe("buildRuntimePiEnv", () => {
   it("forwards explicit generation controls, including temperature zero", () => {
@@ -42,6 +50,9 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_API).toBe(model.api);
     expect(env.MODEL_ID).toBe(model.modelId);
     expect(env.SIDECAR_URL).toBe("http://sidecar:8080");
+    expect(env.MODEL_BASE_URL).toBe("http://sidecar:8080/llm");
+    expect(env.MODEL_API_KEY).toBe("sk-ant-placeholder");
+    expect(env.HTTPS_PROXY).toBe("http://sidecar:8081");
   });
 
   it("throws when sidecarUrl or sidecarAuthToken is empty", () => {
@@ -51,12 +62,6 @@ describe("buildRuntimePiEnv", () => {
     expect(() =>
       buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar, sidecarAuthToken: "" }),
     ).toThrow(/sidecarAuthToken is required/);
-  });
-
-  it("skips MODEL_BASE_URL when no proxy is configured", () => {
-    const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
-    expect(env.MODEL_BASE_URL).toBeUndefined();
-    expect(env.MODEL_API_KEY).toBeUndefined();
   });
 
   it("emits AGENT_TIMEOUT_SECONDS only for a positive finite budget", () => {
@@ -90,17 +95,6 @@ describe("buildRuntimePiEnv", () => {
     expect(buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar }).RUN_ENGINE).toBeUndefined();
   });
 
-  it("routes LLM traffic through the sidecar when apiKey + proxy url are set", () => {
-    const env = buildRuntimePiEnv({
-      model: { ...model, apiKey: "sk-ant-secret", apiKeyPlaceholder: "sk-ant-placeholder" },
-      agentPrompt: "p",
-      ...sidecar,
-      sidecarProxyLlmUrl: "http://sidecar:8080/llm",
-    });
-    expect(env.MODEL_BASE_URL).toBe("http://sidecar:8080/llm");
-    expect(env.MODEL_API_KEY).toBe("sk-ant-placeholder");
-  });
-
   // Regression: a sidecar-proxied run replaces MODEL_BASE_URL with the
   // sidecar's URL, one of the two inputs Pi derives a provider's request shape
   // from. With only the api shape left, the container emitted plain-OpenAI
@@ -117,7 +111,6 @@ describe("buildRuntimePiEnv", () => {
       },
       agentPrompt: "p",
       ...sidecar,
-      sidecarProxyLlmUrl: "http://sidecar:8080/llm",
     });
     expect(env.MODEL_PROVIDER).toBe("deepseek");
     // The binding the sidecar exists to hide stays out of the container.
@@ -130,53 +123,23 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_PROVIDER).toBeUndefined();
   });
 
-  // P1-12: the real provider key must NEVER reach the agent container. A
-  // missing apiKeyPlaceholder used to silently fall back to the raw apiKey
-  // (`apiKeyPlaceholder ?? apiKey`) — now it fails closed.
-  it("throws when apiKey has no placeholder (P1-12)", () => {
-    expect(() =>
-      buildRuntimePiEnv({
-        model: { ...model, apiKey: "sk-test" }, // no apiKeyPlaceholder
-        agentPrompt: "p",
-        ...sidecar,
-        sidecarProxyLlmUrl: "http://sidecar:8080/llm",
-      }),
-    ).toThrow(/apiKeyPlaceholder is required/);
-  });
-
   describe("the vendor credential never enters the agent container", () => {
     const REAL_KEY = "sk-ant-api03-real-secret-value";
-    const keyed = { ...model, apiKey: REAL_KEY, apiKeyPlaceholder: "sk-ant-placeholder" };
-    const llm = { sidecarProxyLlmUrl: "http://sidecar:8080/llm" };
+    const keyed = { ...model, apiKey: REAL_KEY };
 
     it("MODEL_API_KEY is never the real key, and no env value carries it, for every option combination", () => {
-      const forwards = [{}, { forwardProxyUrl: "http://sidecar:8081", noProxy: "sidecar" }];
       for (const aliased of [false, true]) {
         for (const piProvider of [undefined, "anthropic"]) {
-          for (const forward of forwards) {
-            const env = buildRuntimePiEnv({
-              model: { ...keyed, aliased, piProvider },
-              agentPrompt: "p",
-              ...sidecar,
-              ...llm,
-              ...forward,
-            });
-            expect(env.MODEL_API_KEY).not.toBe(REAL_KEY);
-            expect(Object.values(env).filter((v) => v.includes(REAL_KEY))).toEqual([]);
-            expect(env.MODEL_BASE_URL).toBe(llm.sidecarProxyLlmUrl);
-          }
+          const env = buildRuntimePiEnv({
+            model: { ...keyed, aliased, piProvider },
+            agentPrompt: "p",
+            ...sidecar,
+          });
+          expect(env.MODEL_API_KEY).not.toBe(REAL_KEY);
+          expect(Object.values(env).filter((v) => v.includes(REAL_KEY))).toEqual([]);
+          expect(env.MODEL_BASE_URL).toBe(sidecar.sidecarProxyLlmUrl);
         }
       }
-    });
-
-    it("refuses a keyed model whose inference is not routed through the sidecar", () => {
-      expect(() =>
-        buildRuntimePiEnv({
-          model: { ...model, apiKey: REAL_KEY },
-          agentPrompt: "p",
-          ...sidecar,
-        }),
-      ).toThrow(/sidecarProxyLlmUrl is required/);
     });
 
     it("refuses a placeholder equal to the real key", () => {
@@ -185,7 +148,6 @@ describe("buildRuntimePiEnv", () => {
           model: { ...keyed, apiKeyPlaceholder: REAL_KEY },
           agentPrompt: "p",
           ...sidecar,
-          ...llm,
         }),
       ).toThrow(/apiKeyPlaceholder must differ from the real key/);
     });
@@ -281,7 +243,7 @@ describe("buildRuntimePiEnv", () => {
     expect(env2.MODEL_REASONING).toBe("false");
   });
 
-  it("emits HTTP/HTTPS/NO proxy env vars when forward proxy is set", () => {
+  it("emits HTTP/HTTPS/NO proxy env vars for the sidecar forward proxy", () => {
     const env = buildRuntimePiEnv({
       model,
       agentPrompt: "p",
@@ -297,17 +259,6 @@ describe("buildRuntimePiEnv", () => {
     expect(env.no_proxy).toBe("sidecar,localhost,127.0.0.1");
   });
 
-  it("throws when forwardProxyUrl is set without noProxy", () => {
-    expect(() =>
-      buildRuntimePiEnv({
-        model,
-        agentPrompt: "p",
-        ...sidecar,
-        forwardProxyUrl: "http://sidecar:8081",
-      }),
-    ).toThrow(/noProxy is required/);
-  });
-
   it("accepts a custom noProxy list", () => {
     const env = buildRuntimePiEnv({
       model,
@@ -317,13 +268,6 @@ describe("buildRuntimePiEnv", () => {
       noProxy: "internal.corp,10.0.0.0/8",
     });
     expect(env.NO_PROXY).toBe("internal.corp,10.0.0.0/8");
-  });
-
-  it("does not emit proxy env vars when forwardProxyUrl is unset", () => {
-    const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
-    expect(env.HTTP_PROXY).toBeUndefined();
-    expect(env.HTTPS_PROXY).toBeUndefined();
-    expect(env.NO_PROXY).toBeUndefined();
   });
 
   it("forwards a W3C traceparent into TRACEPARENT when supplied", () => {

@@ -515,87 +515,85 @@ const runtimeDrainer: RuntimeEventDrainer = createRuntimeEventDrainer({
   },
 });
 
-let mcpClient: AppstrateMcpClient | undefined;
-{
-  await progress("connecting to sidecar");
-  const mcpConnectStart = performance.now();
-  try {
-    // Retry the initial MCP handshake — the platform now starts the agent
-    // in parallel with sidecar boot (issue #406), so the sidecar's /mcp
-    // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
-    // still wiring its listener and the Docker DNS alias is propagating.
-    // AWS-style full jitter (50ms → 1s) absorbs the race without
-    // pessimising the warm-path; the fixed 60s deadline covers worst-case
-    // cold container pulls (#406 acceptance criteria: 20–45s boots are
-    // routine). It is not operator-tunable — see `MCP_CONNECT_DEADLINE_MS`.
-    // The sidecar's /mcp endpoint gates inbound requests on the run's
-    // `SIDECAR_AUTH_HEADER` token (denied by default) plus the Host-header
-    // DNS-rebinding check (`validateMcpHostHeader`). The token is NOT the run
-    // token — that one never enters this container.
-    mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
-      clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
-      extraHeaders: { [SIDECAR_AUTH_HEADER]: sidecarAuthToken },
-      // #779 annex — operator-tunable per-call tool timeout (absent →
-      // SDK default). The same `APPSTRATE_MCP_TOOL_TIMEOUT_MS` knob is
-      // honoured sidecar-side, so both legs of an integration tool call
-      // share one budget.
-      ...(env.mcpToolTimeoutMs !== undefined ? { defaultTimeoutMs: env.mcpToolTimeoutMs } : {}),
-      retry: {
-        deadlineMs: MCP_CONNECT_DEADLINE_MS,
-        baseMs: 50,
-        capMs: 1_000,
-        onRetry: ({ url, attempt, delayMs, errorCode, error }) => {
-          logLine("warn", "mcp_connect_retry", {
-            url,
-            attempt,
-            delayMs,
-            errorCode: errorCode ?? null,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        },
+let mcpClient: AppstrateMcpClient;
+await progress("connecting to sidecar");
+const mcpConnectStart = performance.now();
+try {
+  // Retry the initial MCP handshake — the platform now starts the agent
+  // in parallel with sidecar boot (issue #406), so the sidecar's /mcp
+  // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
+  // still wiring its listener and the Docker DNS alias is propagating.
+  // AWS-style full jitter (50ms → 1s) absorbs the race without
+  // pessimising the warm-path; the fixed 60s deadline covers worst-case
+  // cold container pulls (#406 acceptance criteria: 20–45s boots are
+  // routine). It is not operator-tunable — see `MCP_CONNECT_DEADLINE_MS`.
+  // The sidecar's /mcp endpoint gates inbound requests on the run's
+  // `SIDECAR_AUTH_HEADER` token (denied by default) plus the Host-header
+  // DNS-rebinding check (`validateMcpHostHeader`). The token is NOT the run
+  // token — that one never enters this container.
+  mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
+    clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
+    extraHeaders: { [SIDECAR_AUTH_HEADER]: sidecarAuthToken },
+    // #779 annex — operator-tunable per-call tool timeout (absent →
+    // SDK default). The same `APPSTRATE_MCP_TOOL_TIMEOUT_MS` knob is
+    // honoured sidecar-side, so both legs of an integration tool call
+    // share one budget.
+    ...(env.mcpToolTimeoutMs !== undefined ? { defaultTimeoutMs: env.mcpToolTimeoutMs } : {}),
+    retry: {
+      deadlineMs: MCP_CONNECT_DEADLINE_MS,
+      baseMs: 50,
+      capMs: 1_000,
+      onRetry: ({ url, attempt, delayMs, errorCode, error }) => {
+        logLine("warn", "mcp_connect_retry", {
+          url,
+          attempt,
+          delayMs,
+          errorCode: errorCode ?? null,
+          error: error instanceof Error ? error.message : String(error),
+        });
       },
-    });
-  } catch (err) {
-    await emitError(`Failed to connect MCP client to sidecar: ${getErrorMessage(err)}`);
-    process.exit(1);
-  }
+    },
+  });
+} catch (err) {
+  await emitError(`Failed to connect MCP client to sidecar: ${getErrorMessage(err)}`);
+  process.exit(1);
+}
 
-  phaseTimings.mcpConnectMs = Math.round(performance.now() - mcpConnectStart);
-  await progress("MCP connected", { mcpConnectMs: phaseTimings.mcpConnectMs });
+phaseTimings.mcpConnectMs = Math.round(performance.now() - mcpConnectStart);
+await progress("MCP connected", { mcpConnectMs: phaseTimings.mcpConnectMs });
 
-  try {
-    // `buildMcpDirectFactories` registers `run_history` and
-    // `recall_memory`, plus one forwarding factory per namespaced
-    // integration tool (including the generic `{ns}__api_call`). Runtime
-    // tools (log/note/pin/output) are executed once by the sidecar and
-    // journaled; the drainer pulls them on the run sink after each forwarded
-    // call — never trusted from `_meta`.
-    //
-    // Pi drains each tool call inline in `execute()` right after `callTool`
-    // resolves — the sidecar appends the events synchronously inside the
-    // wrapped handler BEFORE responding, so the per-call drain always captures
-    // them in time (no "events land after the stream ends" gap to
-    // backstop). What the per-call drain CANNOT cover is a
-    // transient localhost failure of the LAST call's single best-effort drain
-    // (no subsequent call retries it). The retrying final drain for that case
-    // is injected via `piEventSink` (below): PiRunner owns its finalize, so a
-    // drain placed after `runner.run()` would be too late — wrapping the sink
-    // runs it BEFORE the stdout-bridge merges its aggregate into the POST.
-    const factories = await buildMcpDirectFactories({
-      mcp: mcpClient,
-      runId: AGENT_RUN_ID,
-      workspace: WORKSPACE,
-      drainer: runtimeDrainer,
-      emit: (event) => {
-        void bridgedSink.handle(event as RunEvent);
-      },
-    });
-    extensionFactories.push(...factories);
-  } catch (err) {
-    await emitError(`Failed to wire MCP-backed tools: ${getErrorMessage(err)}`);
-    process.exit(1);
-  }
-} // end sidecar tool wiring
+try {
+  // `buildMcpDirectFactories` registers `run_history` and
+  // `recall_memory`, plus one forwarding factory per namespaced
+  // integration tool (including the generic `{ns}__api_call`). Runtime
+  // tools (log/note/pin/output) are executed once by the sidecar and
+  // journaled; the drainer pulls them on the run sink after each forwarded
+  // call — never trusted from `_meta`.
+  //
+  // Pi drains each tool call inline in `execute()` right after `callTool`
+  // resolves — the sidecar appends the events synchronously inside the
+  // wrapped handler BEFORE responding, so the per-call drain always captures
+  // them in time (no "events land after the stream ends" gap to
+  // backstop). What the per-call drain CANNOT cover is a
+  // transient localhost failure of the LAST call's single best-effort drain
+  // (no subsequent call retries it). The retrying final drain for that case
+  // is injected via `piEventSink` (below): PiRunner owns its finalize, so a
+  // drain placed after `runner.run()` would be too late — wrapping the sink
+  // runs it BEFORE the stdout-bridge merges its aggregate into the POST.
+  const factories = await buildMcpDirectFactories({
+    mcp: mcpClient,
+    runId: AGENT_RUN_ID,
+    workspace: WORKSPACE,
+    drainer: runtimeDrainer,
+    emit: (event) => {
+      void bridgedSink.handle(event as RunEvent);
+    },
+  });
+  extensionFactories.push(...factories);
+} catch (err) {
+  await emitError(`Failed to wire MCP-backed tools: ${getErrorMessage(err)}`);
+  process.exit(1);
+}
 
 // --- 2c-bis. Integration boot gate + per-phase observability ---
 // The sidecar booted each declared integration in parallel with this
@@ -883,11 +881,11 @@ try {
     signal: runAbort.signal,
   });
   heartbeat.stop();
-  await mcpClient?.close().catch(() => {});
+  await mcpClient.close().catch(() => {});
   process.exit(0);
 } catch (err) {
   heartbeat.stop();
-  await mcpClient?.close().catch(() => {});
+  await mcpClient.close().catch(() => {});
 
   // External abort (SIGTERM/SIGINT = platform timeout safety-net or a user
   // cancel). The runner already honours this by rethrowing WITHOUT finalizing
