@@ -21,7 +21,7 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 overflow-y-auto bg-black/80",
+      "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 ease-surface data-[state=open]:duration-base data-[state=closed]:duration-fast fixed inset-0 z-50 overflow-y-auto bg-black/80",
       className,
     )}
     {...props}
@@ -47,7 +47,7 @@ const DialogContent = React.forwardRef<
           data-slot="dialog-content"
           ref={ref}
           className={cn(
-            "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 relative z-50 grid w-full max-w-lg gap-4 rounded-lg border p-6 shadow-lg duration-200",
+            "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 ease-surface data-[state=open]:duration-base data-[state=closed]:duration-fast relative z-50 grid w-full max-w-lg gap-4 rounded-lg border p-6 shadow-lg",
             className,
           )}
           {...props}
