@@ -3,7 +3,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../../api/client.ts";
-import { RouteGate } from "../../components/require-permission.tsx";
+import { RouteGate } from "../../components/route-gate.tsx";
 import { OrgSettingsSpaceMembersPage } from "../org-settings/space/members.tsx";
 import { orgStore } from "../../stores/org-store.ts";
 import { spaceStore } from "../../stores/space-store.ts";

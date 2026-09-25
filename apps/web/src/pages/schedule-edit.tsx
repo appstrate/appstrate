@@ -11,7 +11,7 @@ import {
 import { ScheduleForm } from "../components/schedule-form";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
-import { NoAccessState } from "../components/require-permission";
+import { NoAccessState } from "../components/route-gate";
 import { usePermissions } from "../hooks/use-permissions";
 
 export function ScheduleEditPage() {

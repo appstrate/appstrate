@@ -67,16 +67,14 @@ function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
 /**
  * Parse the optional `?channels=` subscription filter.
  *
- * Contract (deliberately fail-open):
- *   • parameter absent            → `undefined` = subscribe to every channel
- *     the caller may receive (`subscribedChannels`).
- *     This is what every pre-existing client (CLI, SDKs, integrators) sends,
- *     so their stream is byte-identical to before.
+ * Contract (deliberately fail-open). `undefined` means "no filter": the
+ * stream carries every channel the caller may receive (`subscribedChannels`).
+ *   • parameter absent            → `undefined`.
  *   • parameter present           → the intersection with the known channel
  *     names. Unknown tokens are ignored rather than rejected so adding a
  *     channel later can't 400 an older client that hardcoded a list.
- *   • nothing recognised          → `undefined` (every channel) rather than an
- *     empty subscription. A typo must degrade to "too much data", never to a
+ *   • nothing recognised          → `undefined` rather than an empty
+ *     subscription. A typo must degrade to "too much data", never to a
  *     silently dead stream.
  */
 function parseChannels(raw: string | undefined): ReadonlySet<RealtimeChannel> | undefined {

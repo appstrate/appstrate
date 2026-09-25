@@ -11,6 +11,7 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ROUTE_ACCESS, routeVerdict, type RoutePath } from "../route-access.ts";
+import { routeOf } from "../route-match.ts";
 
 const source = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 
@@ -90,5 +91,34 @@ describe("routeVerdict", () => {
   it("opens an ungated route to a caller holding nothing", () => {
     const open: RoutePath[] = ["/", "/agents/:scope/:name/edit", "/preferences/general"];
     for (const path of open) expect(routeVerdict(path, none, {})).toBe("granted");
+  });
+});
+
+describe("routeOf", () => {
+  it("returns a declared pattern as is", () => {
+    expect(routeOf("/agents/:scope/:name/runs/:runId")).toBe("/agents/:scope/:name/runs/:runId");
+  });
+
+  it("ranks a concrete URL the way the router does: static segments first", () => {
+    expect(routeOf("/agents/new")).toBe("/agents/new");
+    expect(routeOf("/agents/@acme/triage")).toBe("/agents/:scope/:name");
+    expect(routeOf("/agents/@acme/triage/edit")).toBe("/agents/:scope/:name/edit");
+    expect(routeOf("/agents/@acme/triage/1.2.0")).toBe("/agents/:scope/:name/:version");
+    expect(routeOf("/agents/@acme/triage/runs/run_1?tab=logs#x")).toBe(
+      "/agents/:scope/:name/runs/:runId",
+    );
+    expect(routeOf("/integrations/@acme/gmail#configuration")).toBe("/integrations/:scope/:name");
+  });
+
+  it("covers no URL outside the declarations", () => {
+    expect(routeOf("/onboarding/create")).toBeUndefined();
+    expect(routeOf("/agents/@acme/triage/runs/run_1/logs")).toBeUndefined();
+  });
+
+  it("feeds routeVerdict, so a concrete link is judged by its route's gate", () => {
+    const runsOnly = (p: string) => p === "runs:read";
+    const verdict = (url: string) => routeVerdict(routeOf(url)!, runsOnly, {});
+    expect(verdict("/agents/@acme/triage/runs/run_1")).toBe("granted");
+    expect(verdict("/agents/@acme/triage")).toBe("denied");
   });
 });

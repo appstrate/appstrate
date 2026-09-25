@@ -124,8 +124,12 @@ describe("SpaceLibraryHint", () => {
   });
 
   it("points a reader of the type at the library", () => {
-    expect(libraryLink(hintFor(["agents:read"], "agent"))).not.toBeNull();
-    expect(libraryLink(hintFor(["skills:read"], "skill"))).not.toBeNull();
+    expect(libraryLink(hintFor(["spaces:read", "agents:read"], "agent"))).not.toBeNull();
+    expect(libraryLink(hintFor(["spaces:read", "skills:read"], "skill"))).not.toBeNull();
+  });
+
+  it("never links to the library a custom role cannot open (#1556)", () => {
+    expect(hintFor(["agents:read"], "agent")).toBe("");
   });
 
   it("does not answer the question the route was mounted behind", () => {
@@ -136,12 +140,14 @@ describe("SpaceLibraryHint", () => {
   });
 
   it("reads the type's OWN permission, not another type's", () => {
-    expect(hintFor(["agents:read"], "integration")).toBe("");
-    expect(hintFor(["integrations:read"], "agent")).toBe("");
+    expect(hintFor(["spaces:read", "agents:read"], "integration")).toBe("");
+    expect(hintFor(["spaces:read", "integrations:read"], "agent")).toBe("");
   });
 
   it("renders the bundle string rather than the key", () => {
-    expect(hintFor(["agents:read"], "agent")).not.toContain("library.indexEmptyHint");
+    const html = hintFor(["spaces:read", "agents:read"], "agent");
+    expect(html).not.toBe("");
+    expect(html).not.toContain("library.indexEmptyHint");
     expect(i18n.language).toBe("fr");
   });
 });

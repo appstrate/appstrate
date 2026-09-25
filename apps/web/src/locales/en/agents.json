@@ -256,6 +256,7 @@
   "editor.integrationInactive": "Not active in this space",
   "editor.activateIntegration": "Activate",
   "editor.dependencyMissing": "Not available in this space",
+  "editor.catalogUnreadable": "This catalog is not available to you in this space: only the dependencies already declared are listed.",
   "editor.tabGeneral": "General",
   "editor.tabSchema": "Schemas",
   "editor.tabSkills": "Skills",

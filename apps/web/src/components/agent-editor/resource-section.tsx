@@ -29,7 +29,9 @@ import { caretRange } from "./utils";
 import { IntegrationToolPicker } from "./integration-tool-picker";
 import { useSetPackageActive } from "../../hooks/use-library";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
+import { useCurrentSpaceGrant, usePermissions } from "../../hooks/use-permissions";
+import { useCanReach } from "../../hooks/use-can-reach";
+import { packagePermission } from "@appstrate/core/permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
 
 type ResourceEntriesUpdater = ResourceEntry[] | ((prev: ResourceEntry[]) => ResourceEntry[]);
@@ -115,6 +117,10 @@ export function ResourceSection({
   // §6.9, `services/package-catalog.ts`), so an agent can legally depend on a
   // package this space does not run, and the entry below stays visible for it.
   const { data: items, isLoading } = usePackageList(type);
+  // Without the type's read the catalog never loads (#1556): the declared
+  // entries are then all this section knows, listed by id.
+  const canReadCatalog = usePermissions().can(packagePermission(type, "read"));
+  const canReach = useCanReach();
   const upload = useUploadPackage(type);
   const setActive = useSetPackageActive();
   const currentSpaceId = useCurrentSpaceId();
@@ -142,15 +148,15 @@ export function ResourceSection({
   // place with its box unticked, which is what "I can undo this" looks like.
   const [declaredOnOpen] = useState(() => selectedEntries);
 
-  const inactiveDeclaredIds = useMemo(() => {
-    if (!items) return [];
-    const present = new Set(items.map((i) => i.id));
+  const unlistedDeclaredIds = useMemo(() => {
+    if (canReadCatalog && !items) return [];
+    const present = new Set((items ?? []).map((i) => i.id));
     const declared = new Set([
       ...declaredOnOpen.map((e) => e.id),
       ...selectedEntries.map((e) => e.id),
     ]);
     return [...declared].filter((id) => !present.has(id));
-  }, [items, selectedEntries, declaredOnOpen]);
+  }, [canReadCatalog, items, selectedEntries, declaredOnOpen]);
 
   const toggle = (id: string) => {
     onChange((prev) => {
@@ -217,15 +223,22 @@ export function ResourceSection({
         <div className="text-muted-foreground flex items-center justify-center py-6">
           <Spinner />
         </div>
-      ) : (!items || items.length === 0) && inactiveDeclaredIds.length === 0 && !leadingItems ? (
+      ) : (!items || items.length === 0) && unlistedDeclaredIds.length === 0 && !leadingItems ? (
         <>
-          <p className="text-muted-foreground text-xs">{emptyLabel}</p>
           <p className="text-muted-foreground text-xs">
-            <Link to={packageListPath(type)}>{t("editor.goToPackages")}</Link>
+            {canReadCatalog ? emptyLabel : t("editor.catalogUnreadable")}
           </p>
+          {canReach(packageListPath(type)) && (
+            <p className="text-muted-foreground text-xs">
+              <Link to={packageListPath(type)}>{t("editor.goToPackages")}</Link>
+            </p>
+          )}
         </>
       ) : (
         <div className="flex flex-col gap-1">
+          {!canReadCatalog && (
+            <p className="text-muted-foreground mb-1 text-xs">{t("editor.catalogUnreadable")}</p>
+          )}
           {leadingItems}
           {(items ?? []).map((item) => {
             const isSelected = selectedMap.has(item.id);
@@ -292,26 +305,31 @@ export function ResourceSection({
               "activate it to connect it", and until now nothing on this screen
               could: the checkbox only removes the dependency. So the one action
               the sentence asks for had no button anywhere. */}
-          {inactiveDeclaredIds.map((id) => (
+          {unlistedDeclaredIds.map((id) => (
             <div
               key={id}
-              className="border-destructive/40 bg-destructive/5 flex items-center gap-2 rounded-md border pr-2"
+              className={cn(
+                "flex items-center gap-2 rounded-md border pr-2",
+                canReadCatalog ? "border-destructive/40 bg-destructive/5" : "border-border",
+              )}
             >
               <label className="flex flex-1 cursor-pointer items-center gap-2.5 px-3 py-2">
                 <Checkbox checked={selectedMap.has(id)} onCheckedChange={() => toggle(id)} />
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="flex items-center gap-1.5 truncate text-sm font-medium">
                     {id}
-                    <span className="text-destructive inline-flex items-center gap-1 text-xs font-normal">
-                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                      {type === "integration"
-                        ? t("editor.integrationInactive")
-                        : t("editor.dependencyMissing")}
-                    </span>
+                    {canReadCatalog && (
+                      <span className="text-destructive inline-flex items-center gap-1 text-xs font-normal">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                        {type === "integration"
+                          ? t("editor.integrationInactive")
+                          : t("editor.dependencyMissing")}
+                      </span>
+                    )}
                   </span>
                 </div>
               </label>
-              {type === "integration" && (
+              {type === "integration" && canReadCatalog && (
                 <Button
                   size="sm"
                   variant="outline"

@@ -44,6 +44,7 @@ import { client } from "../../api/client";
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
 import { isVersioned } from "../../lib/version-selector";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useCanReach } from "../../hooks/use-can-reach";
 
 /**
  * How the picker persists the actor's pick:
@@ -126,6 +127,8 @@ export function IntegrationConnectionPicker({
   // Adding is the server's `can_add_connection`, which already includes it:
   // here the grant only tells a role refusal from the admin's block policy.
   const canConnect = usePermissions().can("integrations:connect");
+  const integrationPath = packageDetailPath("integration", integrationId);
+  const canOpenIntegration = useCanReach()(integrationPath);
 
   const overrideMode = persistence.mode === "override";
   const auths = manifest.auths ?? {};
@@ -340,15 +343,14 @@ export function IntegrationConnectionPicker({
           {t("settings:integration.auth.noClientHint")}{" "}
           {/* The sentence names a screen; without the link the reader has to go
               find it. Points at the integration's Configuration tab, where the
-              OAuth clients table lives. Shown to everyone, admin or not: a
-              non-admin lands on a page that tells them so, which beats a dead
-              sentence, and the tab itself is admin-gated anyway. */}
-          <Link
-            to={`${packageDetailPath("integration", integrationId)}#configuration`}
-            className="underline underline-offset-2"
-          >
-            {t("settings:integration.auth.noClientLink")}
-          </Link>
+              OAuth clients table lives. Shown to whoever may open that page, admin
+              or not: a non-admin lands on a page that tells them so, which beats
+              a dead sentence, and the tab itself is admin-gated anyway. */}
+          {canOpenIntegration && (
+            <Link to={`${integrationPath}#configuration`} className="underline underline-offset-2">
+              {t("settings:integration.auth.noClientLink")}
+            </Link>
+          )}
         </span>
       </div>
     );
@@ -482,16 +484,20 @@ export function IntegrationConnectionPicker({
                 </DropdownMenuItem>
               );
             })}
-          <DropdownMenuSeparator />
           {/* Escape hatch to the integration page for the full connection
               management surface (rename, share-with-org, delete, OAuth client). */}
-          <DropdownMenuItem
-            onSelect={() => navigate(`/integrations/${integrationId}`)}
-            data-testid={`member-pick-manage-${integrationId}`}
-          >
-            <Settings className="size-3.5" />
-            <span>{t("detail.integrationMemberPicker.manageConnections")}</span>
-          </DropdownMenuItem>
+          {canOpenIntegration && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => navigate(integrationPath)}
+                data-testid={`member-pick-manage-${integrationId}`}
+              >
+                <Settings className="size-3.5" />
+                <span>{t("detail.integrationMemberPicker.manageConnections")}</span>
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
       {/* Displayed connection is under-scoped → the run is blocked

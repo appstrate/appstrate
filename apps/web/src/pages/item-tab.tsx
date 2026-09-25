@@ -10,6 +10,7 @@ import { SpaceLibraryHint } from "../components/space-library-hint";
 import { usePackageList, type PackageType } from "../hooks/use-packages";
 import { type CardItem, PackageTab } from "./package-list";
 import { packageNewPath } from "../lib/package-paths";
+import { useCanReach } from "../hooks/use-can-reach";
 
 type BrowseType = Extract<PackageType, "skill" | "mcp-server">;
 
@@ -44,6 +45,7 @@ export function ItemTab({
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { data: rawItems, isLoading } = usePackageList(type);
   const [importOpen, setImportOpen] = useState(false);
+  const canReach = useCanReach();
 
   const presentation = TYPE_PRESENTATION[type];
   const typeLabel = t(presentation.typeKey);
@@ -72,7 +74,7 @@ export function ItemTab({
             <Button variant="outline" onClick={() => setImportOpen(true)}>
               {t("nav.import", { ns: "common" })}
             </Button>
-            {!readOnly && (
+            {!readOnly && canReach(packageNewPath(type)) && (
               <Link to={packageNewPath(type)}>
                 <Button>{t("list.createItem", { ns: "agents", type: typeLabel })}</Button>
               </Link>

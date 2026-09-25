@@ -7,7 +7,7 @@ import {
 } from "@appstrate/core/permissions";
 
 /** Which dashboard sections the caller can read — each one is its own read. */
-export interface DashboardSections {
+interface DashboardSections {
   schedules: boolean;
   recentAgents: boolean;
   recentRuns: boolean;

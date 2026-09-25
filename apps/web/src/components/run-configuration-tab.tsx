@@ -13,6 +13,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { useCanReach } from "../hooks/use-can-reach";
 import { FileCode2 } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { JsonView } from "./json-view";
@@ -36,15 +37,19 @@ export function RunConfigurationTab({ run, agentName }: RunConfigurationTabProps
   // Source agent deleted (FK SET NULL after migration 0017): the run row
   // survives but the agent page it would link to is gone.
   const isOrphaned = run.packageId == null && !isInline;
+  const agentPath = `/agents/${run.packageId}`;
+  const canReach = useCanReach();
 
   const agentValue = isInline ? (
     inlineRunDisplayName(run.agent_name, t("runs.inlineBadge"))
   ) : isOrphaned ? (
     <span className="text-muted-foreground italic">{t("runs.deletedAgent")}</span>
-  ) : (
-    <Link className="hover:underline" to={`/agents/${run.packageId}`}>
+  ) : canReach(agentPath) ? (
+    <Link className="hover:underline" to={agentPath}>
       {agentName || run.packageId}
     </Link>
+  ) : (
+    agentName || run.packageId
   );
 
   return (

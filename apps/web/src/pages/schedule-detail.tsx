@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePermissions } from "../hooks/use-permissions";
+import { useCanReach } from "../hooks/use-can-reach";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
@@ -159,6 +160,8 @@ function ScheduleParams({
 }) {
   const { t } = useTranslation(["agents"]);
   const { data: agents } = useAgents();
+  const canReach = useCanReach();
+  const agentPath = `/agents/${schedule.packageId}`;
   const agentDisplayName =
     agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
   const input = schedule.input;
@@ -184,12 +187,13 @@ function ScheduleParams({
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">
           <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramAgent")}</p>
-          <Link
-            to={`/agents/${schedule.packageId}`}
-            className="text-sm font-medium hover:underline"
-          >
-            {agentDisplayName}
-          </Link>
+          {canReach(agentPath) ? (
+            <Link to={agentPath} className="text-sm font-medium hover:underline">
+              {agentDisplayName}
+            </Link>
+          ) : (
+            <p className="text-sm font-medium">{agentDisplayName}</p>
+          )}
         </div>
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">

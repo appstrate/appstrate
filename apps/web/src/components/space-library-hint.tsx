@@ -4,6 +4,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import type { PackageType } from "@appstrate/core/validation";
 import { usePermissions } from "../hooks/use-permissions";
+import { useCanReach } from "../hooks/use-can-reach";
 import { packagePermission } from "@appstrate/core/permissions";
 
 /**
@@ -24,12 +25,14 @@ import { packagePermission } from "@appstrate/core/permissions";
  * `agents:read`, so the page answers 200 with an empty list rather than a 403.
  * Gating on reachability alone therefore sent the one preset that can act on
  * NOTHING in that library — no activation, no deactivation, no configuration —
- * to a page that is empty for it by design.
+ * to a page that is empty for it by design. Reachability is still required: a
+ * custom role may hold the type's read without `spaces:read`.
  */
 export function SpaceLibraryHint({ type }: { type: PackageType }) {
   const { t } = useTranslation("common");
   const { can } = usePermissions();
-  if (!can(packagePermission(type, "read"))) return null;
+  const canReach = useCanReach();
+  if (!can(packagePermission(type, "read")) || !canReach("/space/packages")) return null;
   return (
     <Trans
       t={t}

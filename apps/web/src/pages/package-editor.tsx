@@ -27,7 +27,7 @@ import { SourceSection } from "../components/integration-editor/source-section";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
 import { Spinner } from "../components/spinner";
-import { NoAccessState } from "../components/require-permission";
+import { NoAccessState } from "../components/route-gate";
 import { EditorShell } from "../components/editor-shell";
 
 import { newPackageContent } from "../lib/package-file-drafts";
