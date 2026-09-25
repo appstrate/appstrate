@@ -216,11 +216,14 @@ async function runPlatformContainerImpl(
     });
 
     const llmApiKey = llmConfig.apiKey;
+    // A platform-provided API key is spent only by the platform's LLM proxy;
+    // every other credential is dialed by the sidecar itself.
+    const servedByPlatformProxy = delivery.kind !== "oauth" && llmConfig.isSystemModel;
 
-    // Inference rides the sidecar's `/llm`, whose egress floor refuses a base
-    // URL on a blocked range. Same guard, same allowlist, checked here so the
-    // run fails with the remedy instead of a 403 inside the container.
-    if (isBlockedEgressUrl(llmConfig.baseUrl)) {
+    // When the sidecar dials the base URL, its egress floor refuses a blocked
+    // range. Same guard, same allowlist, checked here so the run fails with the
+    // remedy instead of a 403 inside the container.
+    if (!servedByPlatformProxy && isBlockedEgressUrl(llmConfig.baseUrl)) {
       throw new LlmBaseUrlBlockedError(llmConfig.baseUrl);
     }
 
@@ -284,7 +287,11 @@ async function runPlatformContainerImpl(
     // itself, so the sidecar just swaps the placeholder bearer for the real
     // token — no forging, no modelSwap (aliases rejected above).
     //
-    // API-key flow: the sidecar forwards directly to the upstream provider.
+    // Platform-provided credential: spent only by the platform's metered LLM
+    // proxy — the sidecar gets the route and authenticates with the run token,
+    // and the key never leaves the API process.
+    //
+    // Org API key: the sidecar forwards directly to the upstream provider.
     // Transient 429/5xx are absorbed by two budgets, neither of them this
     // file's and neither restated here (one number, one place): the
     // container's turn-level retry policy in `packages/runner-pi/src/pi-runner.ts`,
@@ -294,13 +301,20 @@ async function runPlatformContainerImpl(
     const sidecarLlm: LlmProxyConfig =
       delivery.kind === "oauth"
         ? buildOauthSidecarLlm({ baseUrl: llmConfig.baseUrl, credentialId: delivery.credentialId })
-        : {
-            authMode: "api_key",
-            baseUrl: llmConfig.baseUrl,
-            apiKey: llmApiKey,
-            placeholder: llmPlaceholder,
-            ...(modelSwap ? { modelSwap } : {}),
-          };
+        : servedByPlatformProxy
+          ? {
+              authMode: "platform",
+              apiShape: llmConfig.apiShape,
+              baseUrl: llmConfig.baseUrl,
+              ...(modelSwap ? { modelSwap } : {}),
+            }
+          : {
+              authMode: "api_key",
+              baseUrl: llmConfig.baseUrl,
+              apiKey: llmApiKey,
+              placeholder: llmPlaceholder,
+              ...(modelSwap ? { modelSwap } : {}),
+            };
 
     // Agent↔sidecar bearer for THIS run. Minted here, in the one frame that
     // feeds both halves of the pair (`sidecarSpec` → the sidecar's env,

@@ -24,6 +24,7 @@ import type {
 } from "@appstrate/core/platform-types";
 import { truncateAll } from "../../helpers/db.ts";
 import { runPlatformContainer } from "../../../src/services/run-launcher/pi.ts";
+import { applySpecToSidecarEnv } from "../../../src/services/orchestrator/sidecar-env.ts";
 import { mintSinkCredentials } from "../../../src/lib/mint-sink-credentials.ts";
 import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
@@ -156,55 +157,70 @@ describe("run-launcher — sidecar wiring", () => {
   });
 
   // One run topology, for every credential source.
-  for (const isSystemModel of [true, false]) {
-    it(`boots the sidecar and hands the agent only the placeholder (isSystemModel: ${isSystemModel})`, async () => {
-      const { orchestrator, counts } = createCountingFake();
-      const resources: AppstrateRunPlan["resources"] = {
-        requested: { memoryMb: 768, cpu: 1 },
-        effective: { memoryMb: 768, cpu: 1 },
-        memoryCapped: false,
-        cpuCapped: false,
-        workload: { memoryBytes: 805_306_368, nanoCpus: 1_000_000_000 },
-      };
-      const realKey = "sk-ant-api03-real-secret-1234";
-      const runId = `run_placeholder_${isSystemModel ? "system" : "org"}`;
-      const plan = buildRunPlan({
-        resources,
-        llmConfig: { ...buildRunPlan().llmConfig, apiKey: realKey, isSystemModel },
-      });
-
-      await runPlatformContainer({
-        runId,
-        context: buildContext(runId),
-        plan,
-        sinkCredentials: mintSinkCredentials({
-          runId,
-          appUrl: "http://platform:3000",
-          ttlSeconds: 60,
-        }),
-        orchestrator,
-      });
-
-      expect(counts.createSidecarCalls).toBe(1);
-      expect(counts.createWorkloadCalls).toBe(1);
-      expect(counts.capturedAgentSpec?.resources).toBe(resources.workload);
-
-      // The real key goes to the sidecar, and nowhere in the agent env.
-      const llm = counts.capturedSidecarSpec?.llm;
-      if (llm?.authMode !== "api_key")
-        throw new Error(`expected api_key llm, got ${llm?.authMode}`);
-      expect(llm.apiKey).toBe(realKey);
-      const env = counts.capturedAgentEnv ?? {};
-      expect(Object.entries(env).filter(([, v]) => v.includes(realKey))).toEqual([]);
-      expect(env.MODEL_API_KEY).toBe(llm.placeholder);
-
-      // Inference and egress both ride the sidecar.
-      expect(env.SIDECAR_URL).toBe("http://fake-sidecar.test:19080");
-      expect(env.MODEL_BASE_URL).toBe("http://fake-sidecar.test:19080/llm");
-      expect(env.HTTP_PROXY).toBe("http://fake-sidecar.test:19081");
-      expect(env.HTTPS_PROXY).toBe("http://fake-sidecar.test:19081");
+  async function launchWithKey(realKey: string, isSystemModel: boolean) {
+    const { orchestrator, counts } = createCountingFake();
+    const resources: AppstrateRunPlan["resources"] = {
+      requested: { memoryMb: 768, cpu: 1 },
+      effective: { memoryMb: 768, cpu: 1 },
+      memoryCapped: false,
+      cpuCapped: false,
+      workload: { memoryBytes: 805_306_368, nanoCpus: 1_000_000_000 },
+    };
+    const runId = `run_placeholder_${isSystemModel ? "system" : "org"}`;
+    const plan = buildRunPlan({
+      resources,
+      llmConfig: { ...buildRunPlan().llmConfig, apiKey: realKey, isSystemModel },
     });
+    await runPlatformContainer({
+      runId,
+      context: buildContext(runId),
+      plan,
+      sinkCredentials: mintSinkCredentials({
+        runId,
+        appUrl: "http://platform:3000",
+        ttlSeconds: 60,
+      }),
+      orchestrator,
+    });
+
+    expect(counts.createSidecarCalls).toBe(1);
+    expect(counts.createWorkloadCalls).toBe(1);
+    expect(counts.capturedAgentSpec?.resources).toBe(resources.workload);
+
+    const env = counts.capturedAgentEnv ?? {};
+    expect(Object.entries(env).filter(([, v]) => v.includes(realKey))).toEqual([]);
+    // Inference and egress both ride the sidecar.
+    expect(env.SIDECAR_URL).toBe("http://fake-sidecar.test:19080");
+    expect(env.MODEL_BASE_URL).toBe("http://fake-sidecar.test:19080/llm");
+    expect(env.HTTP_PROXY).toBe("http://fake-sidecar.test:19081");
+    expect(env.HTTPS_PROXY).toBe("http://fake-sidecar.test:19081");
+    return counts;
   }
+
+  it("hands a BYOK run's key to the sidecar and only the placeholder to the agent", async () => {
+    const realKey = "sk-ant-api03-real-secret-1234";
+    const counts = await launchWithKey(realKey, false);
+    const llm = counts.capturedSidecarSpec?.llm;
+    if (llm?.authMode !== "api_key") throw new Error(`expected api_key llm, got ${llm?.authMode}`);
+    expect(llm.apiKey).toBe(realKey);
+    expect(counts.capturedAgentEnv?.MODEL_API_KEY).toBe(llm.placeholder);
+  });
+
+  it("routes a platform-credential run through the platform LLM proxy — the key reaches neither workload", async () => {
+    const realKey = "sk-ant-api03-platform-secret-5678";
+    const counts = await launchWithKey(realKey, true);
+    const spec = counts.capturedSidecarSpec;
+    expect(spec?.llm).toEqual({
+      authMode: "platform",
+      apiShape: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com",
+    });
+    const sidecarEnv: Record<string, string> = {};
+    applySpecToSidecarEnv(spec!, sidecarEnv);
+    const serialized = JSON.stringify([spec, sidecarEnv, counts.capturedAgentEnv]);
+    expect(serialized).not.toContain(realKey);
+    expect(counts.capturedAgentEnv?.MODEL_API_KEY).toBeDefined();
+  });
 
   // The sidecar looks Pi's record up by the backing's Pi provider key — here
   // one that differs from the Appstrate id (`moonshot`).
@@ -235,7 +251,8 @@ describe("run-launcher — sidecar wiring", () => {
       orchestrator,
     });
     const llm = counts.capturedSidecarSpec?.llm;
-    if (llm?.authMode !== "api_key") throw new Error(`expected api_key llm, got ${llm?.authMode}`);
+    if (llm?.authMode !== "platform")
+      throw new Error(`expected platform llm, got ${llm?.authMode}`);
     expect(llm.modelSwap?.backing?.providerId).toBe("moonshotai");
   });
 
@@ -352,7 +369,8 @@ describe("run-launcher — sidecar wiring", () => {
       orchestrator,
     });
     const llm = counts.capturedSidecarSpec?.llm;
-    if (llm?.authMode !== "api_key") throw new Error(`expected api_key llm, got ${llm?.authMode}`);
+    if (llm?.authMode !== "platform")
+      throw new Error(`expected platform llm, got ${llm?.authMode}`);
     expect(llm.modelSwap?.backing).toEqual({
       providerId: "anthropic",
       reasoning: false,
@@ -390,8 +408,8 @@ describe("run-launcher — sidecar wiring", () => {
 
     // The sidecar receives the alias→real swap descriptor.
     const llm = counts.capturedSidecarSpec?.llm;
-    // Narrow the discriminated union (vend variant carries no modelSwap).
-    if (llm?.authMode !== "api_key") throw new Error(`expected api_key llm, got ${llm?.authMode}`);
+    if (llm?.authMode !== "platform")
+      throw new Error(`expected platform llm, got ${llm?.authMode}`);
     expect(llm.modelSwap).toEqual({
       alias: "appstrate-medium",
       real: "deepseek-chat",
@@ -541,7 +559,8 @@ describe("run-launcher — sidecar wiring", () => {
     });
 
     const llm = counts.capturedSidecarSpec?.llm;
-    if (llm?.authMode !== "api_key") throw new Error(`expected api_key llm, got ${llm?.authMode}`);
+    if (llm?.authMode !== "platform")
+      throw new Error(`expected platform llm, got ${llm?.authMode}`);
     expect(llm.modelSwap).toEqual({
       alias: "appstrate-adaptive",
       real: "claude-sonnet-4-6",
@@ -593,6 +612,29 @@ describe("run-launcher — sidecar wiring", () => {
       ).rejects.toThrow(/host\.docker\.internal.*EGRESS_ALLOW_INTERNAL_HOSTS/s);
       expect(counts.createBoundaryCalls).toBe(0);
       expect(counts.createSidecarCalls).toBe(0);
+    });
+
+    it("does not apply the sidecar's egress floor to a platform-provided model", async () => {
+      // The sidecar never dials it: the platform proxy does, behind its own guard.
+      const { orchestrator, counts } = createCountingFake();
+      await runPlatformContainer({
+        runId: "run_blocked_system_llm",
+        context: buildContext("run_blocked_system_llm"),
+        plan: buildRunPlan({
+          llmConfig: {
+            ...localModel("http://host.docker.internal:11434/v1"),
+            isSystemModel: true,
+          },
+        }),
+        sinkCredentials: mintSinkCredentials({
+          runId: "run_blocked_system_llm",
+          appUrl: "http://platform:3000",
+          ttlSeconds: 60,
+        }),
+        orchestrator,
+      });
+      expect(counts.createSidecarCalls).toBe(1);
+      expect(counts.capturedSidecarSpec?.llm?.authMode).toBe("platform");
     });
 
     it("launches when the operator allowlisted the host", async () => {

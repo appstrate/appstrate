@@ -41,6 +41,10 @@
  *   - Body size capped via `LLM_PROXY_LIMITS.max_request_bytes`
  *     (default 10 MiB).
  *
+ * A platform run whose model spends a platform-provided credential reaches the
+ * same pipeline at `/internal/llm-proxy/<api>/*` with its run token — see
+ * {@link createRunLlmProxyRouter}.
+ *
  * Observability:
  *   - `X-Run-Id` request header (optional; Phase 4 populates it) pins
  *     a call to a specific `runs` row so cost rolls up per-run. The id is
@@ -54,11 +58,12 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { bodyLimit } from "../middleware/body-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, forbidden, notFound } from "../lib/errors.ts";
 import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { LLM_PROXY_ROUTES, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
-import { getRunAttribution } from "../services/state/runs.ts";
+import { getRunAttribution, isMeteredByPlatformProxy } from "../services/state/runs.ts";
 import { enforceSystemProxyAdmission } from "../services/system-proxy-admission.ts";
 import { recordLlmLatency } from "@appstrate/core/telemetry";
 import {
@@ -76,28 +81,28 @@ import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
 import { ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
+import { verifyRunToken } from "./internal.ts";
+
+// Protocol family → adapter. The PATHS are not spelled out here any more:
+// `LLM_PROXY_ROUTES` (`@appstrate/runner-pi`) owns the convention, because
+// the chat engine and the CLI have to build a base URL that agrees with it
+// and used to do so by hand-copying these strings. Only the adapter — the
+// request/response translation, which is genuinely this package's business —
+// is bound here.
+const ADAPTERS: Record<ProxiedApiShape, LlmProxyAdapter> = {
+  "openai-completions": openaiCompletionsAdapter,
+  "openai-responses": openaiResponsesAdapter,
+  "anthropic-messages": anthropicMessagesAdapter,
+  "mistral-conversations": mistralConversationsAdapter,
+};
+
+const PROXIED_API_SHAPES = Object.keys(ADAPTERS) as ProxiedApiShape[];
 
 export function createLlmProxyRouter() {
   const router = new Hono<AppEnv>();
   const limits = getLlmProxyLimits();
 
-  // Protocol family → adapter. The PATHS are not spelled out here any more:
-  // `LLM_PROXY_ROUTES` (`@appstrate/runner-pi`) owns the convention, because
-  // the chat engine and the CLI have to build a base URL that agrees with it
-  // and used to do so by hand-copying these strings. Only the adapter — the
-  // request/response translation, which is genuinely this package's business —
-  // is bound here.
-  const adapters: Record<ProxiedApiShape, LlmProxyAdapter> = {
-    "openai-completions": openaiCompletionsAdapter,
-    "openai-responses": openaiResponsesAdapter,
-    "anthropic-messages": anthropicMessagesAdapter,
-    "mistral-conversations": mistralConversationsAdapter,
-  };
-
-  for (const apiShape of Object.keys(adapters) as ProxiedApiShape[]) {
-    const adapter = adapters[apiShape];
-    // `sdkPath` doubles as the upstream path — see the note on the table.
-    const upstreamPath = LLM_PROXY_ROUTES[apiShape].sdkPath;
+  for (const apiShape of PROXIED_API_SHAPES) {
     // Past `llm-proxy:call` the RUN named by `X-Run-Id`
     // decides — a jwt principal may only bill a run it launched
     // (`assertRunAttributable`).
@@ -105,7 +110,7 @@ export function createLlmProxyRouter() {
       llmProxyUrlPath(apiShape),
       rateLimit(limits.rate_per_min),
       requirePermission("llm-proxy", "call"),
-      async (c) => handleProxy(c, adapter, upstreamPath, limits),
+      async (c) => handleProxy(c, apiShape, limits),
     );
   }
 
@@ -113,6 +118,46 @@ export function createLlmProxyRouter() {
   // generic in-process Pi chat engine owned by `@appstrate/module-chat`, which
   // resolves the real token + baseUrl through `ctx.services` and drives Pi
   // inline — there is no per-provider credential-injection proxy to mount here.
+  return router;
+}
+
+/**
+ * The inference of a platform run whose model spends a platform-provided
+ * credential, mounted at `RUN_LLM_PROXY_MOUNT`. The run's sidecar calls it with
+ * the run token instead of holding the vendor key, so every call is metered
+ * here like any proxy call. The run's own model is served, whatever the body
+ * names, and the call is attributed to that run alone.
+ */
+export function createRunLlmProxyRouter() {
+  // Rate-limited per run token by `createInternalRouter`'s `/internal/*` limiter.
+  const router = new Hono<AppEnv>();
+  const limits = getLlmProxyLimits();
+  // The one body cap on this mount: `index.ts` exempts it from the global one.
+  router.use("/*", bodyLimit(limits.max_request_bytes));
+
+  for (const apiShape of PROXIED_API_SHAPES) {
+    router.post(llmProxyUrlPath(apiShape), async (c) => {
+      const { runId, run } = await verifyRunToken(c);
+      // The launcher routes exactly these runs here, and the ledger writes no
+      // runner row for them; any other run is metered elsewhere.
+      if (run.runOrigin !== "platform" || !isMeteredByPlatformProxy(run)) {
+        throw forbidden("This run's model is not served by the platform LLM proxy");
+      }
+      const orgId = run.orgId;
+      return proxyAndLog(c, apiShape, limits, {
+        principal: { kind: "run", runId, orgId },
+        runId,
+        chatSessionId: null,
+        presetId: run.modelId,
+        beforeUpstream: (resolved) =>
+          enforceSystemProxyAdmission({
+            orgId,
+            resolved,
+            usageContext: { context: "run_inference" },
+          }),
+      });
+    });
+  }
   return router;
 }
 
@@ -169,8 +214,7 @@ async function assertRunAttributable(
 
 async function handleProxy(
   c: Context<AppEnv>,
-  adapter: LlmProxyAdapter,
-  upstreamPath: string,
+  apiShape: ProxiedApiShape,
   limits: LlmProxyLimits,
 ): Promise<Response> {
   const authMethod = c.get("authMethod");
@@ -216,6 +260,32 @@ async function handleProxy(
       ? ({ context: "chat", sessionId: chatSessionId } as const)
       : null;
 
+  return proxyAndLog(c, apiShape, limits, {
+    principal,
+    runId,
+    chatSessionId,
+    beforeUpstream: (resolved) => enforceSystemProxyAdmission({ orgId, resolved, usageContext }),
+  });
+}
+
+/** The caller-specific half of a proxy call; the rest is shared by both entries. */
+type ProxyCaller = Pick<
+  Parameters<typeof proxyLlmCall>[0],
+  "principal" | "runId" | "chatSessionId" | "presetId" | "beforeUpstream"
+>;
+
+/**
+ * Read the body, run the shared pipeline, log and time the call, and map the
+ * proxy's client-validation refusals onto 400s.
+ */
+async function proxyAndLog(
+  c: Context<AppEnv>,
+  apiShape: ProxiedApiShape,
+  limits: LlmProxyLimits,
+  caller: ProxyCaller,
+): Promise<Response> {
+  const adapter = ADAPTERS[apiShape];
+  const orgId = caller.principal.orgId;
   const buf = await c.req.arrayBuffer();
   if (buf.byteLength === 0) {
     throw invalidRequest("Request body is empty");
@@ -225,27 +295,25 @@ async function handleProxy(
   const started = Date.now();
   try {
     const response = await proxyLlmCall({
+      ...caller,
       adapter,
-      principal,
-      runId,
-      chatSessionId,
       requestId: c.get("requestId"),
-      upstreamPath,
+      // `sdkPath` doubles as the upstream path — see the note on the table.
+      upstreamPath: LLM_PROXY_ROUTES[apiShape].sdkPath,
       incomingHeaders: c.req.raw.headers,
       rawBody,
       maxRequestBytes: limits.max_request_bytes,
-      beforeUpstream: (resolved) => enforceSystemProxyAdmission({ orgId, resolved, usageContext }),
     });
 
     const durationMs = Date.now() - started;
     logger.info("llm-proxy call", {
       requestId: c.get("requestId"),
-      authMethod,
-      apiKeyId,
-      userId,
+      authMethod: caller.principal.kind === "run" ? "run_token" : c.get("authMethod"),
+      apiKeyId: caller.principal.kind === "api_key" ? caller.principal.apiKeyId : undefined,
+      userId: caller.principal.kind === "run" ? undefined : caller.principal.userId,
       orgId,
       apiShape: adapter.apiShape,
-      runId,
+      runId: caller.runId,
       status: response.status,
       durationMs,
     });

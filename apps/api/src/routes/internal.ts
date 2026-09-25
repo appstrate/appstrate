@@ -70,7 +70,7 @@ import {
  * Verify the run token from the Authorization header.
  * Returns the run data or throws an ApiError.
  */
-async function verifyRunToken(c: Context): Promise<{
+export async function verifyRunToken(c: Context): Promise<{
   runId: string;
   run: {
     packageId: string;
@@ -80,6 +80,10 @@ async function verifyRunToken(c: Context): Promise<{
     spaceId: string;
     status: string;
     modelCredentialId: string | null;
+    /** `runs.model_source` — `"system"` when the run spends a platform-provided credential. */
+    modelSource: string | null;
+    /** The model the run launched with — see `runs.model_id`. */
+    modelId: string | null;
     runOrigin: "platform" | "remote";
     /**
      * The agent definition the run executes — `"draft"` or a concrete semver
@@ -133,6 +137,8 @@ async function verifyRunToken(c: Context): Promise<{
       spaceId: runs.spaceId,
       status: runs.status,
       modelCredentialId: runs.modelCredentialId,
+      modelSource: runs.modelSource,
+      modelId: runs.modelId,
       runOrigin: runs.runOrigin,
       versionRef: runs.versionRef,
       resolvedConnections: runs.resolvedConnections,
@@ -165,6 +171,8 @@ async function verifyRunToken(c: Context): Promise<{
       spaceId: run.spaceId,
       status: run.status,
       modelCredentialId: run.modelCredentialId ?? null,
+      modelSource: run.modelSource,
+      modelId: run.modelId,
       runOrigin: run.runOrigin,
       versionRef: run.versionRef ?? null,
       resolvedConnections: run.resolvedConnections ?? null,

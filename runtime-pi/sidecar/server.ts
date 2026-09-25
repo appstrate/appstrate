@@ -6,6 +6,7 @@ import { createApp, buildSidecarRuntimeDeps, SIDECAR_IDLE_TIMEOUT_SECONDS } from
 import { createForwardProxy } from "./forward-proxy.ts";
 import type { LlmProxyConfig } from "./helpers.ts";
 import { parseModelSwapEnv } from "./model-swap.ts";
+import { isProxiedApiShape } from "@appstrate/runner-pi/llm-proxy-routes";
 import { logger } from "./logger.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
 import {
@@ -87,19 +88,33 @@ function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
   // silently to the API-key path.
   const oauthJson = process.env.PI_LLM_OAUTH_CONFIG_JSON;
   if (oauthJson) return assertLlmProxyConfig(JSON.parse(oauthJson));
+  const modelSwapJson = process.env.PI_MODEL_SWAP_JSON;
+  const platformApiShape = process.env.PI_LLM_PLATFORM_API_SHAPE;
+  if (platformApiShape) {
+    if (!isProxiedApiShape(platformApiShape)) {
+      throw new Error(
+        `PI_LLM_PLATFORM_API_SHAPE: "${platformApiShape}" is not served by the platform LLM proxy`,
+      );
+    }
+    if (!process.env.PI_BASE_URL) throw new Error("PI_BASE_URL: required in platform mode");
+    return {
+      authMode: "platform",
+      apiShape: platformApiShape,
+      baseUrl: process.env.PI_BASE_URL,
+      ...(modelSwapJson ? { modelSwap: parseModelSwapEnv(modelSwapJson) } : {}),
+    };
+  }
   if (process.env.PI_BASE_URL && process.env.PI_API_KEY) {
     return {
       authMode: "api_key",
       baseUrl: process.env.PI_BASE_URL,
       apiKey: process.env.PI_API_KEY,
       placeholder: process.env.PI_PLACEHOLDER || "sk-placeholder",
-      // Model-alias swap (api-key path only — the oauth mode carries no
-      // modelSwap; aliases are rejected platform-side for oauth providers).
+      // Model-alias swap (the oauth mode carries no modelSwap; aliases are
+      // rejected platform-side for oauth providers).
       // A malformed or incomplete payload is a launcher bug: `parseModelSwapEnv`
       // throws at boot rather than silently disabling the swap and leaking the real id.
-      ...(process.env.PI_MODEL_SWAP_JSON
-        ? { modelSwap: parseModelSwapEnv(process.env.PI_MODEL_SWAP_JSON) }
-        : {}),
+      ...(modelSwapJson ? { modelSwap: parseModelSwapEnv(modelSwapJson) } : {}),
     };
   }
   return undefined;

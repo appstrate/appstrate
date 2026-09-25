@@ -4813,6 +4813,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/llm-proxy/anthropic-messages/v1/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run inference (anthropic-messages) — metered by the platform LLM proxy
+         * @description Container-to-host only. Auth via Bearer run token. Serves a running platform-origin run whose model is platform-provided: the run's own model is resolved and injected server-side whatever `body.model` names, and each call is metered from the provider's response and attributed to the run. Same request guards and response forwarding as the corresponding `/api/llm-proxy/…` endpoint.
+         */
+        post: operations["runLlmProxyAnthropicMessages"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/llm-proxy/mistral-conversations/v1/chat/completions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run inference (mistral-conversations) — metered by the platform LLM proxy
+         * @description Container-to-host only. Auth via Bearer run token. Serves a running platform-origin run whose model is platform-provided: the run's own model is resolved and injected server-side whatever `body.model` names, and each call is metered from the provider's response and attributed to the run. Same request guards and response forwarding as the corresponding `/api/llm-proxy/…` endpoint.
+         */
+        post: operations["runLlmProxyMistralChatCompletions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/llm-proxy/openai-completions/v1/chat/completions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run inference (openai-completions) — metered by the platform LLM proxy
+         * @description Container-to-host only. Auth via Bearer run token. Serves a running platform-origin run whose model is platform-provided: the run's own model is resolved and injected server-side whatever `body.model` names, and each call is metered from the provider's response and attributed to the run. Same request guards and response forwarding as the corresponding `/api/llm-proxy/…` endpoint.
+         */
+        post: operations["runLlmProxyOpenaiChatCompletions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/llm-proxy/openai-responses/v1/responses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run inference (openai-responses) — metered by the platform LLM proxy
+         * @description Container-to-host only. Auth via Bearer run token. Serves a running platform-origin run whose model is platform-provided: the run's own model is resolved and injected server-side whatever `body.model` names, and each call is metered from the provider's response and attributed to the run. Same request guards and response forwarding as the corresponding `/api/llm-proxy/…` endpoint.
+         */
+        post: operations["runLlmProxyOpenaiResponses"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/mcp-server-bundle/{scope}/{name}": {
         parameters: {
             query?: never;
@@ -23378,6 +23458,294 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
+            };
+        };
+    };
+    runLlmProxyAnthropicMessages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The provider payload for this protocol; `model` is ignored. */
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
+            200: {
+                headers: {
+                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
+                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    runLlmProxyMistralChatCompletions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The provider payload for this protocol; `model` is ignored. */
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
+            200: {
+                headers: {
+                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
+                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    runLlmProxyOpenaiChatCompletions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The provider payload for this protocol; `model` is ignored. */
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
+            200: {
+                headers: {
+                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
+                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    runLlmProxyOpenaiResponses: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The provider payload for this protocol; `model` is ignored. */
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
+            200: {
+                headers: {
+                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
+                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

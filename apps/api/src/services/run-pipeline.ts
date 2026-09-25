@@ -609,6 +609,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         proxyLabel: proxyLabel ?? undefined,
         modelLabel: modelLabel ?? undefined,
         modelSource: modelSource ?? undefined,
+        modelId: plan.llmConfig.aliasId,
         // Kickoff pricing snapshot — see `run-context-builder.ts`. Persisted on
         // the run row so the runner's ledger row (whose cost the container
         // computes) can be classified without trusting the container.

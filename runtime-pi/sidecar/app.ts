@@ -19,7 +19,10 @@ import {
   withIdleBound,
   STREAM_IDLE,
   type SidecarConfig,
+  type LlmProxyApiKeyConfig,
+  type LlmProxyConfig,
   type LlmProxyOauthConfig,
+  type LlmProxyPlatformConfig,
 } from "./helpers.ts";
 import { isBlockedEgressUrl } from "./ssrf.ts";
 import {
@@ -27,9 +30,15 @@ import {
   isAliasInferenceCall,
   LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "./model-swap.ts";
-import { handlePiMessagesRequest } from "./pi-messages-backend.ts";
+import { handlePiMessagesRequest, type PiMessagesBackendDeps } from "./pi-messages-backend.ts";
 import { applyOauthBearerSwap } from "@appstrate/core/oauth-bearer-swap";
 import { forwardedLlmRequestHeaders } from "@appstrate/connect/llm-request-headers";
+import {
+  LLM_PROXY_ROUTES,
+  RUN_LLM_PROXY_MOUNT,
+  isProxiedApiShape,
+  llmProxyBaseUrl,
+} from "@appstrate/runner-pi/llm-proxy-routes";
 import { llmProxyErrorBody } from "@appstrate/core/model-swap";
 import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
@@ -184,7 +193,7 @@ const HEADER_CANONICAL_CASE: Record<string, string> = {
 interface LlmStreamObservation {
   targetUrl?: string;
   credentialId?: string;
-  authMode?: "oauth" | "api_key";
+  authMode?: LlmProxyConfig["authMode"];
 }
 
 async function passUpstream(
@@ -501,6 +510,69 @@ function deriveLlmTarget(
 }
 
 /**
+ * The key pi-ai signs a re-originated call with when the upstream is the
+ * platform proxy. It authorizes nothing: the proxy drops inbound credentials
+ * and authenticates the run token bearer set beside it.
+ */
+const PLATFORM_PROXY_API_KEY = "appstrate-run";
+
+/**
+ * Where a keyed `/llm/*` call goes and how the sidecar authenticates there:
+ * the vendor, with the real key swapped in for the container's placeholder, or
+ * the platform's LLM proxy with the run token — narrowed to the one inference
+ * endpoint the proxy serves for the run's api shape.
+ */
+interface KeyedLlmUpstream {
+  baseUrl: string;
+  /** The only reachable path when narrowed; `null` is the vendor passthrough. */
+  inferencePath: string | null;
+  /** A vendor base URL is held to the egress floor; the platform's own is not. */
+  vendor: boolean;
+  /** Upstream headers for a forwarded request. */
+  headers(incoming: Record<string, string>): Headers;
+  /** Where and how pi-ai re-originates an aliased call. */
+  pi: PiMessagesBackendDeps["upstream"];
+}
+
+function keyedLlmUpstream(
+  config: SidecarConfig,
+  llm: LlmProxyApiKeyConfig | LlmProxyPlatformConfig,
+): KeyedLlmUpstream {
+  if (llm.authMode === "api_key") {
+    const credential = { placeholder: llm.placeholder, secret: llm.apiKey };
+    return {
+      baseUrl: llm.baseUrl,
+      inferencePath: null,
+      vendor: true,
+      headers: (incoming) => forwardedLlmRequestHeaders(incoming, credential),
+      pi: { baseUrl: llm.baseUrl, apiKey: llm.apiKey },
+    };
+  }
+  // `server.ts` refuses an unproxied shape at boot.
+  if (!isProxiedApiShape(llm.apiShape)) throw new Error(`unproxied api shape ${llm.apiShape}`);
+  const authorization = `Bearer ${config.runToken}`;
+  const baseUrl = llmProxyBaseUrl(config.platformApiUrl, llm.apiShape, RUN_LLM_PROXY_MOUNT)!;
+  return {
+    baseUrl,
+    inferencePath: LLM_PROXY_ROUTES[llm.apiShape].sdkPath,
+    vendor: false,
+    headers: (incoming) => {
+      const headers = forwardedLlmRequestHeaders(incoming);
+      headers.set("authorization", authorization);
+      return headers;
+    },
+    // The Model keeps the backing's endpoint (pi-ai reads its dialect off it);
+    // the transport sends the call to the proxy.
+    pi: {
+      baseUrl: llm.baseUrl,
+      apiKey: PLATFORM_PROXY_API_KEY,
+      headers: { authorization },
+      dialBaseUrl: baseUrl,
+    },
+  };
+}
+
+/**
  * Build the sidecar's HTTP surface.
  *
  *   - `GET  /health`     — readiness probe.
@@ -677,7 +749,7 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(deps.integrationBootReportProvider());
   });
 
-  // LLM reverse proxy. Two modes:
+  // LLM reverse proxy. Three modes:
   //
   //   - api_key: the Pi SDK formats every header (auth, beta, identity)
   //     using the platform-supplied placeholder; we swap the placeholder
@@ -690,21 +762,33 @@ export function createApp(deps: AppDeps): Hono {
   //     access token from the platform (`/internal/oauth-token/:id`) and swaps
   //     the placeholder request bearer for it — forging nothing. On 401 we
   //     refresh + retry once. There is no fingerprint-forging mode.
+  //   - platform: the api_key forward, but to the platform's metered LLM
+  //     proxy with the run token in place of the placeholder. The sidecar
+  //     holds no provider credential, and only the inference endpoint is reachable.
   app.all("/llm/*", async (c) => {
-    if (!config.llm) {
+    const llm = config.llm;
+    if (!llm) {
       return llmProxyError(503, "api_error", "LLM proxy not configured");
     }
 
-    if (isBlockedEgressUrl(config.llm.baseUrl)) {
+    if (llm.authMode === "oauth") {
+      if (isBlockedEgressUrl(llm.baseUrl)) {
+        return llmProxyError(
+          403,
+          "permission_error",
+          "LLM base URL targets a blocked network range",
+        );
+      }
+      return handleOauthLlmRequest(c, llm);
+    }
+
+    const upstreamLlm = keyedLlmUpstream(config, llm);
+    // The platform's own address is the sidecar's control plane, like
+    // `/internal/*`: the egress floor guards vendor endpoints only.
+    if (upstreamLlm.vendor && isBlockedEgressUrl(upstreamLlm.baseUrl)) {
       return llmProxyError(403, "permission_error", "LLM base URL targets a blocked network range");
     }
-
-    if (config.llm.authMode === "oauth") {
-      return handleOauthLlmRequest(c, config.llm);
-    }
-
-    const apiKeyConfig = config.llm; // discriminated narrowing
-    const { targetUrl, method, path } = deriveLlmTarget(c, apiKeyConfig.baseUrl);
+    const { targetUrl, method, path } = deriveLlmTarget(c, upstreamLlm.baseUrl);
 
     // ALIASED runs get a narrowed `/llm/*` surface, not a passthrough. The
     // agent needs the inference endpoint to do its job; everything else the
@@ -714,10 +798,10 @@ export function createApp(deps: AppDeps): Hono {
     // real key and before any upstream fetch: the credential must not be
     // spent on a request we are about to reject.
     //
-    // Non-aliased runs keep the verbatim passthrough — their contract is
-    // reaching the provider, not hiding it.
-    if (apiKeyConfig.modelSwap) {
-      const swap = apiKeyConfig.modelSwap;
+    // Non-aliased runs on a vendor upstream keep the verbatim passthrough —
+    // their contract is reaching the provider, not hiding it.
+    if (llm.modelSwap) {
+      const swap = llm.modelSwap;
       if (!isAliasInferenceCall(method, path)) {
         logger.warn("llm alias: non-inference request refused", {
           method,
@@ -746,7 +830,7 @@ export function createApp(deps: AppDeps): Hono {
       if (buffered instanceof Response) return buffered;
       return handlePiMessagesRequest(
         {
-          llm: apiKeyConfig,
+          upstream: upstreamLlm.pi,
           swap,
           // Token limits the backend needs to size the upstream call.
           limits: {
@@ -766,11 +850,14 @@ export function createApp(deps: AppDeps): Hono {
       );
     }
 
-    // Shared LLM header policy; the auth slot carrying the placeholder gets the real key.
-    const forwardedHeaders = forwardedLlmRequestHeaders(c.req.header(), {
-      placeholder: apiKeyConfig.placeholder,
-      secret: apiKeyConfig.apiKey,
-    });
+    const { inferencePath } = upstreamLlm;
+    if (inferencePath !== null && (method !== "POST" || path !== inferencePath)) {
+      logger.warn("llm: non-inference request refused", { method, path });
+      return llmProxyError(404, "not_found_error", "Not an inference endpoint");
+    }
+
+    // Shared LLM header policy, plus this upstream's auth.
+    const forwardedHeaders = upstreamLlm.headers(c.req.header());
 
     // Zero-copy body forward — nothing here rewrites the request.
     let body: ReadableStream<Uint8Array> | undefined;
@@ -817,7 +904,11 @@ export function createApp(deps: AppDeps): Hono {
       abort.firstResponse();
     }
 
-    return passUpstream(upstream, { targetUrl, authMode: "api_key" }, deps.llmStreamIdleTimeoutMs);
+    return passUpstream(
+      upstream,
+      { targetUrl, authMode: llm.authMode },
+      deps.llmStreamIdleTimeoutMs,
+    );
   });
 
   // OAuth: resolve the real subscription bearer and swap it onto the request,

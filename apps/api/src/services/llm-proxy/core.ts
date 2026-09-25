@@ -47,6 +47,11 @@ interface ProxyCallInputs {
    * null for headless/CLI proxy calls.
    */
   chatSessionId: string | null;
+  /**
+   * The preset this call is bound to, when the caller is: a run's own inference
+   * serves the run's model, so the body's `model` then selects nothing.
+   */
+  presetId?: string;
   /** Platform `Request-Id`, for the upstream-error log. */
   requestId: string;
   /** Request URL path *after* the route prefix, e.g. `/v1/chat/completions`. */
@@ -107,7 +112,7 @@ export class LlmProxyModelApiMismatchError extends Error {
       // for server-side logging; only non-aliased presets get the detail.
       aliased
         ? `Model "${presetId}" is not served by this endpoint.`
-        : `Model "${presetId}" uses "${actual}"; this endpoint serves "${expected}". Use the corresponding /api/llm-proxy/<api>/… route.`,
+        : `Model "${presetId}" uses "${actual}"; this endpoint serves "${expected}". Use the endpoint for "${actual}".`,
     );
     this.name = "LlmProxyModelApiMismatchError";
   }
@@ -142,7 +147,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   }
 
   const request = parseProxyRequest(inputs.rawBody);
-  const presetId = request.presetId;
+  const presetId = inputs.presetId ?? request.presetId;
   const resolved = await resolvePresetForOrg(
     presetId,
     inputs.principal.orgId,

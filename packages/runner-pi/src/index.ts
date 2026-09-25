@@ -30,12 +30,13 @@ export { deriveProviderFromApi, PROVIDER_BY_API } from "./provider-map.ts";
 // vendor client is pointed at — the three used to spell it out separately.
 export {
   LLM_PROXY_ROUTES,
+  RUN_LLM_PROXY_MOUNT,
   llmProxyBaseUrl,
   llmProxyUrlPath,
   type ProxiedApiShape,
 } from "./llm-proxy-routes.ts";
-// `isProxiedApiShape` is NOT here: grepped, and it is read only inside
-// `llm-proxy-routes.ts` (and its test, from the source path). It was added with
+// `isProxiedApiShape` is NOT here: its readers (the model registry, the sidecar)
+// import the `./llm-proxy-routes` subpath. It was added with
 // the four above, six lines under the rule that forbids it — which is the point
 // of the rule, since knip cannot see a barrel export with no reader.
 // `LlmProxyRoute` went further and is no longer exported at all.

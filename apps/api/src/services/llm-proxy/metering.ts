@@ -20,6 +20,7 @@
  * ERRORS (non-2xx) are the only un-metered branch: no tokens were produced.
  */
 
+import { createInFlightRegistry } from "../../lib/in-flight.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
@@ -656,6 +657,20 @@ export function guardSseTeardown(
   });
 }
 
+/** Streams still being metered — the tap settles once the stream ended and its row is written. */
+const inFlightMetering = createInFlightRegistry();
+
+/**
+ * Await in-flight streamed calls and their ledger writes, capped at
+ * `timeoutMs`. Graceful shutdown calls it so a recycle does not cut a stream
+ * the provider already billed before its usage is recorded.
+ */
+export function drainProxyMetering(
+  timeoutMs: number,
+): Promise<{ pending: number; drained: boolean }> {
+  return inFlightMetering.drain(timeoutMs);
+}
+
 /**
  * Forward an upstream LLM response to the caller and record usage — the single
  * forwarding terminus, reached through the protocol-adapter core
@@ -721,19 +736,21 @@ export async function forwardMeteredResponse(
   const isSse = (upstream.headers.get("content-type") ?? "").includes("text/event-stream");
   if (isSse && upstream.body) {
     const [clientStream, tapStream] = upstream.body.tee();
-    void tapSseUsage(tapStream, adapter, { maxFrameChars: options.maxFrameChars })
-      .then(meter)
-      .catch((err: unknown) => {
-        // The tap is out-of-band of the client stream. Direct DB failures are
-        // normally recovered by the durable retry queue; reaching this catch
-        // means parsing failed or both persistence channels failed, and must
-        // surface loudly rather than become an unhandled rejection.
-        logger.error("llm-proxy: SSE usage metering failed", {
-          runId: ctx.runId,
-          presetId: ctx.presetId,
-          error: getErrorMessage(err),
-        });
-      });
+    void inFlightMetering.track(
+      tapSseUsage(tapStream, adapter, { maxFrameChars: options.maxFrameChars })
+        .then(meter)
+        .catch((err: unknown) => {
+          // The tap is out-of-band of the client stream. Direct DB failures are
+          // normally recovered by the durable retry queue; reaching this catch
+          // means parsing failed or both persistence channels failed, and must
+          // surface loudly rather than become an unhandled rejection.
+          logger.error("llm-proxy: SSE usage metering failed", {
+            runId: ctx.runId,
+            presetId: ctx.presetId,
+            error: getErrorMessage(err),
+          });
+        }),
+    );
     const headers = buildClientHeaders(upstream.headers, swap);
     // Tell an intermediary not to buffer this stream. `/api/realtime/*` sets
     // this and the chat stream inherits it from the AI SDK's own

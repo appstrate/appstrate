@@ -15,6 +15,7 @@ import {
   computeCostUsd,
   tapSseUsage,
   guardSseTeardown,
+  drainProxyMetering,
   forwardMeteredResponse,
   recordProxyUsage,
   UNPARSED_USAGE_REQUEST_ID_PREFIX,
@@ -1012,5 +1013,42 @@ describe("forwardMeteredResponse — upstream error body is logged server-side",
     });
     await readAll(res.body!);
     expect(upstreamErrorLogs()).toEqual([]);
+  });
+});
+
+describe("drainProxyMetering", () => {
+  it("waits for an in-flight stream to end and its usage to be recorded", async () => {
+    const enc = new TextEncoder();
+    let finish!: () => void;
+    const upstreamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'));
+        finish = () => {
+          controller.enqueue(
+            enc.encode('data: {"usage":{"prompt_tokens":5,"completion_tokens":3}}\n\n'),
+          );
+          controller.close();
+        };
+      },
+    });
+    const recorded: RecordUsageInputs[] = [];
+    const res = await forwardMeteredResponse(
+      new Response(upstreamBody, { status: 200, headers: { "content-type": "text/event-stream" } }),
+      openaiCompletionsAdapter,
+      makeCtx(),
+      { recordUsage: async (inputs) => void recorded.push(inputs), maxFrameChars: 1 << 20 },
+    );
+    const client = readAll(res.body!);
+
+    let drained: boolean | undefined;
+    const drain = drainProxyMetering(1_000).then((result) => (drained = result.drained));
+    await Bun.sleep(20);
+    expect(drained).toBeUndefined();
+
+    finish();
+    await client;
+    await drain;
+    expect(drained).toBe(true);
+    expect(recorded.map((r) => r.usage)).toEqual([{ inputTokens: 5, outputTokens: 3 }]);
   });
 });

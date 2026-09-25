@@ -14,7 +14,12 @@
 
 import { z } from "zod";
 import type { OpenApiSchemaEntry } from "@appstrate/core/module";
-import { LLM_PROXY_ROUTES, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
+import {
+  LLM_PROXY_ROUTES,
+  RUN_LLM_PROXY_MOUNT,
+  llmProxyUrlPath,
+  type ProxiedApiShape,
+} from "@appstrate/runner-pi";
 
 // --- End-User schemas (routes/end-users.ts) ---
 import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts";
@@ -711,10 +716,12 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
   // both of which already read the table. A fourth shape gets its mount, its
   // path entry and this exemption in one edit.
   ...Object.fromEntries(
-    (Object.keys(LLM_PROXY_ROUTES) as ProxiedApiShape[]).map((shape) => [
-      `POST /api/llm-proxy${llmProxyUrlPath(shape)}`,
-      "verbatim provider passthrough; the body schema is the upstream provider's, not ours",
-    ]),
+    (Object.keys(LLM_PROXY_ROUTES) as ProxiedApiShape[]).flatMap((shape) =>
+      [`/api/llm-proxy`, RUN_LLM_PROXY_MOUNT].map((mount) => [
+        `POST ${mount}${llmProxyUrlPath(shape)}`,
+        "verbatim provider passthrough; the body schema is the upstream provider's, not ours",
+      ]),
+    ),
   ),
   // JSON-RPC 2.0 envelope dispatched by the MCP server; the method-level
   // params are validated per tool, not by one body schema.

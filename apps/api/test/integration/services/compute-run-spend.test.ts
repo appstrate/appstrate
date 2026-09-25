@@ -27,6 +27,10 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
 import { computeRunSpend } from "../../../src/services/state/runs.ts";
+import { writeRunnerLedgerRow } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
+import { db } from "@appstrate/db/client";
+import { llmUsage } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 
 describe("computeRunSpend — remote-run mirror exclusion", () => {
@@ -92,8 +96,8 @@ describe("computeRunSpend — remote-run mirror exclusion", () => {
   });
 
   it("keeps a platform runner row (non-NULL credential_source) even alongside proxy rows", async () => {
-    // A platform run's runner row is stamped from runs.model_source, so it is
-    // authoritative and never treated as a remote mirror.
+    // A BYOK platform run's runner row is stamped from runs.model_source, so it
+    // is authoritative and never treated as a remote mirror.
     const run = await seedTestRun();
     await recordLlmUsage({
       source: "proxy",
@@ -111,7 +115,7 @@ describe("computeRunSpend — remote-run mirror exclusion", () => {
         source: "runner",
         orgId: ctx.orgId,
         runId: run.id,
-        credentialSource: "system", // platform run
+        credentialSource: "org", // BYOK platform run
         inputTokens: 20,
         outputTokens: 20,
         costUsd: 0.03,
@@ -302,5 +306,93 @@ describe("computeRunSpend — worst-of provenance over the same rows as the cost
     const spend = await computeRunSpend(run.id, "00000000-0000-4000-a000-000000000009");
     expect(spend.costUsd).toBe(0);
     expect(spend.pricingStatus).toBeNull();
+  });
+});
+
+describe("runner ledger row — a platform-provided model is metered by the proxy alone", () => {
+  let ctx: TestContext;
+  const RATES = { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 };
+  const USAGE = { input_tokens: 1_000, output_tokens: 1_000 };
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "runcost-plane" });
+    await seedAgent({ id: "@runcost/plane", orgId: ctx.orgId, createdBy: ctx.user.id });
+  });
+
+  async function runnerRows(runId: string) {
+    return db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+  }
+
+  function seedPlatformRun(modelSource: "system" | "org") {
+    return seedRun({
+      packageId: "@runcost/plane",
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      status: "running",
+      modelSource,
+    });
+  }
+
+  it("writes no runner row for a system run, whose spend is the proxy rows", async () => {
+    const run = await seedPlatformRun("system");
+    await recordLlmUsage({
+      source: "proxy",
+      orgId: ctx.orgId,
+      runId: run.id,
+      credentialSource: "system",
+      inputTokens: 10,
+      outputTokens: 10,
+      costUsd: 0.01,
+      pricingStatus: "priced",
+      requestId: "req_plane_proxy",
+    });
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    const row = {
+      cost: 1,
+      usage: USAGE,
+      modelSource: "system",
+      modelId: "sys-preset",
+      modelCost: RATES,
+    };
+    await writeRunnerLedgerRow(scope, run.id, row);
+    await writeRunnerLedgerRow(scope, run.id, row, { required: true });
+
+    expect(await runnerRows(run.id)).toEqual([]);
+    const spend = await computeRunSpend(run.id, ctx.orgId);
+    expect(spend.costUsd).toBeCloseTo(0.01, 10);
+    expect(spend.pricingStatus).toBe("priced");
+  });
+
+  it("still writes the runner row of a system run the proxy does not serve (no model id)", async () => {
+    // A run launched before `runs.model_id` existed: its sidecar spends the key
+    // itself, so the runner row is the only record of its usage.
+    const run = await seedPlatformRun("system");
+    await writeRunnerLedgerRow({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, run.id, {
+      cost: null,
+      usage: USAGE,
+      modelSource: "system",
+      modelId: null,
+      modelCost: RATES,
+    });
+    const rows = await runnerRows(run.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.credentialSource).toBe("system");
+  });
+
+  it("still writes the runner row of a BYOK run", async () => {
+    const run = await seedPlatformRun("org");
+    await writeRunnerLedgerRow({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, run.id, {
+      cost: null,
+      usage: USAGE,
+      modelSource: "org",
+      modelCost: RATES,
+    });
+    const rows = await runnerRows(run.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.credentialSource).toBe("org");
   });
 });

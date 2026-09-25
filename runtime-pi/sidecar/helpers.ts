@@ -337,6 +337,7 @@ export type {
   LlmProxyConfig,
   LlmProxyApiKeyConfig,
   LlmProxyOauthConfig,
+  LlmProxyPlatformConfig,
   ModelSwap,
 } from "@appstrate/core/sidecar-types";
 

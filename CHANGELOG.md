@@ -66,6 +66,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (operators): runs on a platform-provided model are served through
+  the platform's metered LLM proxy, like chat.** A run whose model is a
+  `SYSTEM_PROVIDER_KEYS` preset now reaches its model through
+  `/internal/llm-proxy/<api>/…`, authenticated by the run token: the sidecar
+  receives the proxy route instead of the provider key, the proxy serves the
+  run's own model whatever the request names, and the same request guards apply
+  as on `/api/llm-proxy`. Usage is metered per request from the provider's
+  response, on `llm_usage` proxy rows attributed to the run
+  (`credential_source = 'system'`); such a run no longer writes a `runner` row.
+  Runs on an organization's own credential are unchanged. New nullable column
+  `runs.model_id` (migration `0072`) records the model a platform run launched
+  with; a run started before the upgrade keeps its previous path and ledger.
+  Operators:
+  - boot now fails when a `SYSTEM_PROVIDER_KEYS` entry binds a provider whose
+    API shape the proxy does not serve (served: `openai-completions`,
+    `openai-responses`, `anthropic-messages`, `mistral-conversations`) —
+    `google-ai` is refused;
+  - the inference of these runs now depends on the API being up: a restart
+    refuses new calls and graceful shutdown waits for open streams (and their
+    metering) within its existing drain window; the agent's retry policy covers
+    a short restart;
+  - the request body of these calls is capped by
+    `LLM_PROXY_LIMITS.max_request_bytes` (default 10 MiB) alone, not by
+    `API_BODY_LIMIT_BYTES`;
+  - the API, `PI_IMAGE`, `SIDECAR_IMAGE` and the Firecracker runner daemon must
+    be deployed together.
+
 - **BREAKING (operators): one run topology — every run boots its sidecar.**
   The agent container gets a placeholder credential and the restricted
   network, like every run: inference goes through the sidecar's `/llm` proxy

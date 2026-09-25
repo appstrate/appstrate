@@ -37,6 +37,7 @@
   ],
   "exports": {
     ".": "./src/index.ts",
+    "./llm-proxy-routes": "./src/llm-proxy-routes.ts",
     "./loop-env": "./src/loop-env.ts",
     "./model-compat": "./src/model-compat.ts",
     "./pi-model": "./src/pi-model.ts",

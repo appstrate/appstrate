@@ -67,6 +67,12 @@ export const LLM_PROXY_ROUTES = {
   "mistral-conversations": { baseSuffix: "", sdkPath: "/v1/chat/completions" },
 } as const satisfies Record<string, LlmProxyRoute>;
 
+/** Where the proxy is mounted for API callers (API key, OIDC, chat loopback). */
+const LLM_PROXY_MOUNT = "/api/llm-proxy";
+
+/** Where the proxy is mounted for a platform run's sidecar, authenticated by the run token. */
+export const RUN_LLM_PROXY_MOUNT = "/internal/llm-proxy";
+
 /** Api shapes the llm-proxy can route, derived from the table itself. */
 export type ProxiedApiShape = keyof typeof LLM_PROXY_ROUTES;
 
@@ -87,7 +93,11 @@ export function isProxiedApiShape(apiShape: string): apiShape is ProxiedApiShape
  * of a path convention into one function is the moment to enforce its
  * precondition once too, instead of restating it.
  */
-export function llmProxyBaseUrl(origin: string, apiShape: string): string | null {
+export function llmProxyBaseUrl(
+  origin: string,
+  apiShape: string,
+  mount: string = LLM_PROXY_MOUNT,
+): string | null {
   if (!isProxiedApiShape(apiShape)) return null;
   // Index scan, not `origin.replace(/\/+$/, "")`. That regex is the textbook
   // polynomial-ReDoS shape (`js/polynomial-redos`, and the same `\s+$` case
@@ -100,12 +110,12 @@ export function llmProxyBaseUrl(origin: string, apiShape: string): string | null
   let end = origin.length;
   while (end > 0 && origin.charCodeAt(end - 1) === 47 /* "/" */) end--;
   const base = origin.slice(0, end);
-  return `${base}/api/llm-proxy/${apiShape}${LLM_PROXY_ROUTES[apiShape].baseSuffix}`;
+  return `${base}${mount}/${apiShape}${LLM_PROXY_ROUTES[apiShape].baseSuffix}`;
 }
 
 /**
- * Path the proxy listens on for one shape, relative to the `/api/llm-proxy`
- * mount — i.e. the base suffix plus whatever the client appends to it.
+ * Path the proxy listens on for one shape, relative to its mount — i.e. the
+ * base suffix plus whatever the client appends to it.
  */
 export function llmProxyUrlPath(apiShape: ProxiedApiShape): string {
   const route = LLM_PROXY_ROUTES[apiShape];

@@ -489,6 +489,7 @@ column runs.last_heartbeat_at timestamp with time zone not null default now()
 column runs.metadata jsonb
 column runs.model_cost jsonb
 column runs.model_credential_id uuid
+column runs.model_id text
 column runs.model_label text
 column runs.model_source text
 column runs.org_id uuid not null

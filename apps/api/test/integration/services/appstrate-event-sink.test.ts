@@ -194,7 +194,7 @@ describe("persistRunEvent", () => {
   function persistPlatformMetric(usage: Record<string, number>, cost: number) {
     return persist(event("appstrate.metric", { usage, cost }), {
       writeLedger: true,
-      modelSource: "system",
+      modelSource: "org",
       modelCost: UPSERT_RATES,
     });
   }
@@ -338,7 +338,7 @@ describe("persistRunEvent", () => {
     it("platform run whose model resolved NO pricing → `unpriced`, not a silent $0", async () => {
       await persistLedger(
         event("appstrate.metric", { usage: { input_tokens: 900, output_tokens: 300 }, cost: 0 }),
-        { modelSource: "system", modelCost: null },
+        { modelSource: "org", modelCost: null },
       );
 
       const row = await runnerRow();
@@ -354,7 +354,7 @@ describe("persistRunEvent", () => {
       // snapshot nobody can read is treated as no snapshot at all.
       await persistLedger(
         event("appstrate.metric", { usage: { input_tokens: 900, output_tokens: 300 }, cost: 0 }),
-        { modelSource: "system", modelCost: {} as unknown as ModelCost },
+        { modelSource: "org", modelCost: {} as unknown as ModelCost },
       );
 
       const row = await runnerRow();
@@ -379,7 +379,7 @@ describe("persistRunEvent", () => {
           usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 4000 },
           cost: 0.001,
         }),
-        { modelSource: "system", modelCost: { input: 3, output: 15 } },
+        { modelSource: "org", modelCost: { input: 3, output: 15 } },
       );
 
       expect((await runnerRow())!.pricingStatus).toBe("partial");
@@ -406,7 +406,7 @@ describe("persistRunEvent", () => {
       // to qualify.
       await persistLedger(
         event("appstrate.metric", { usage: { input_tokens: 42, output_tokens: 7 } }),
-        { modelSource: "system", modelCost: null },
+        { modelSource: "org", modelCost: null },
       );
 
       const row = await runnerRow();
@@ -459,7 +459,7 @@ describe("persistRunEvent", () => {
           // server-computed it would have been billed verbatim.
           cost: 999,
         }),
-        { modelSource: "system", modelCost: rates },
+        { modelSource: "org", modelCost: rates },
       );
 
       // 1M×3 + 0.2M×15 + 0.5M×0.3 + 0.1M×3.75 = 3 + 3 + 0.15 + 0.375
@@ -509,7 +509,7 @@ describe("persistRunEvent", () => {
           {
             cost: 4,
             usage: { input_tokens: 1_000_000, output_tokens: 100_000 },
-            modelSource: "system",
+            modelSource: "org",
             modelCost: tiered,
           },
           { required: true },
@@ -535,7 +535,7 @@ describe("persistRunEvent", () => {
           usage: { input_tokens: 900, output_tokens: 300 },
           cost: 0.42,
         }),
-        { modelSource: "system", modelCost: null },
+        { modelSource: "org", modelCost: null },
       );
 
       const row = await runnerRow();
@@ -557,7 +557,7 @@ describe("persistRunEvent", () => {
           usage: { input_tokens: 1_000, output_tokens: 500 },
           cost: 0.01,
         }),
-        { modelSource: "system", modelCost: {} as unknown as ModelCost },
+        { modelSource: "org", modelCost: {} as unknown as ModelCost },
       );
 
       const row = await runnerRow();
@@ -590,7 +590,7 @@ describe("persistRunEvent", () => {
       // from. With no usage snapshot the recompute is exactly 0, so the row
       // would be all-zero and pin no accounting fact.
       await persistLedger(event("appstrate.metric", { cost: 0.5 }), {
-        modelSource: "system",
+        modelSource: "org",
         modelCost: rates,
       });
 
@@ -629,7 +629,7 @@ describe("persistRunEvent", () => {
                 usage: { input_tokens: inputTokens, output_tokens: 0 },
                 cost: claimed,
               }),
-              { modelSource: "system", modelCost: { input: 3, output: 15 } },
+              { modelSource: "org", modelCost: { input: 3, output: 15 } },
             );
           }
 
@@ -645,7 +645,7 @@ describe("persistRunEvent", () => {
             {
               cost: 3,
               usage: { input_tokens: 300_000, output_tokens: 0 },
-              modelSource: "system",
+              modelSource: "org",
               modelCost: { input: 3, output: 15 },
             },
             { required: true },
@@ -675,7 +675,7 @@ describe("persistRunEvent", () => {
             {
               cost: 0.3,
               usage: { input_tokens: 100_000, output_tokens: 0 },
-              modelSource: "system",
+              modelSource: "org",
               modelCost: { input: 3, output: 15 },
             },
             { required: true },

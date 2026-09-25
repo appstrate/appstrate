@@ -57,6 +57,7 @@ import {
 // needs the one path table.
 import {
   LLM_PROXY_ROUTES,
+  RUN_LLM_PROXY_MOUNT,
   llmProxyUrlPath,
   type ProxiedApiShape,
 } from "../packages/runner-pi/src/llm-proxy-routes.ts";
@@ -1992,9 +1993,11 @@ const SPEC_ONLY_ALLOWLIST = new Set<string>([
   // the mounted route, the document and this exemption in one step; the
   // symmetry between a client's base URL and the server's mount is asserted
   // directly in `packages/runner-pi/test/llm-proxy-routes.test.ts`.
-  ...(Object.keys(LLM_PROXY_ROUTES) as ProxiedApiShape[]).map(
-    (shape) => `POST /api/llm-proxy${llmProxyUrlPath(shape)}`,
-  ),
+  ...(Object.keys(LLM_PROXY_ROUTES) as ProxiedApiShape[]).flatMap((shape) => [
+    `POST /api/llm-proxy${llmProxyUrlPath(shape)}`,
+    // Same file, same table: a platform run's own inference entry.
+    `POST ${RUN_LLM_PROXY_MOUNT}${llmProxyUrlPath(shape)}`,
+  ]),
 ]);
 
 const undocumentedInCode = [...specEndpoints]

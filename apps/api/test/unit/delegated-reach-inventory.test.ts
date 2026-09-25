@@ -194,6 +194,10 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     reason: "signed connect-run grant or verifyRunToken",
   },
   refreshOAuthModelProviderToken: { category: "internal", reason: "verifyRunToken" },
+  runLlmProxyAnthropicMessages: { category: "internal", reason: "verifyRunToken" },
+  runLlmProxyMistralChatCompletions: { category: "internal", reason: "verifyRunToken" },
+  runLlmProxyOpenaiChatCompletions: { category: "internal", reason: "verifyRunToken" },
+  runLlmProxyOpenaiResponses: { category: "internal", reason: "verifyRunToken" },
 
   // handler-guarded — the permission is checked inside the handler (or by a
   // guard the route table cannot read) against the ceiling-applied permission set.

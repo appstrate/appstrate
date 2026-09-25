@@ -24,7 +24,7 @@
  * silently, and `partial` carries `api`, `provider` and the real model id.
  */
 
-import type { LlmProxyApiKeyConfig, ModelSwap, SidecarConfig } from "./helpers.ts";
+import type { ModelSwap, SidecarConfig } from "./helpers.ts";
 import {
   LLM_STREAM_IDLE_TIMEOUT_MS,
   llmUpstreamAbort,
@@ -127,9 +127,41 @@ export type BackingStreamFn = (
   options: SimpleStreamOptions,
 ) => AssistantMessageEventStream;
 
+/** Where the re-originated call goes, and what pi-ai authenticates it with. */
+interface PiMessagesUpstream {
+  /** The backing's own endpoint — pi-ai derives vendor dialect from it. */
+  baseUrl: string;
+  apiKey: string;
+  /** Merged over pi-ai's own headers, e.g. the platform proxy's bearer. */
+  headers?: Record<string, string>;
+  /** Set when the call is served elsewhere: this replaces the `baseUrl` prefix. */
+  dialBaseUrl?: string;
+}
+
+/**
+ * Send pi-ai's calls to `to` instead of the `from` prefix it built them on.
+ * Fails closed on any other URL: nothing else may leave through this transport.
+ */
+function redirectingFetch(base: typeof fetch, baseUrl: string, to: string): typeof fetch {
+  let end = baseUrl.length;
+  while (end > 0 && baseUrl.charCodeAt(end - 1) === 47 /* "/" */) end--;
+  const from = baseUrl.slice(0, end);
+  return Object.assign(
+    async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const next = url.charAt(from.length);
+      if (!url.startsWith(from) || (next !== "" && next !== "/" && next !== "?")) {
+        throw new Error("pi-messages backend: unexpected upstream URL");
+      }
+      const target = `${to}${url.slice(from.length)}`;
+      return input instanceof Request ? base(new Request(target, input), init) : base(target, init);
+    },
+    { preconnect: base.preconnect },
+  );
+}
+
 export interface PiMessagesBackendDeps {
-  /** The run's LLM config — supplies the real base URL, key and swap descriptor. */
-  llm: LlmProxyApiKeyConfig;
+  upstream: PiMessagesUpstream;
   /** The alias descriptor. Its `backing` is what this module rebuilds the Model from. */
   swap: ModelSwap;
   /**
@@ -284,7 +316,7 @@ function createUpstreamStatusProbe(base: typeof fetch): UpstreamStatusProbe {
  * zero is what it gets.
  */
 export function buildBackingModel(deps: PiMessagesBackendDeps): Model<Api> {
-  const { swap, llm, limits } = deps;
+  const { swap, upstream, limits } = deps;
   const backing = swap.backing;
   if (!backing) {
     // `parseModelSwapEnv` refuses this at boot; restated so the function
@@ -296,7 +328,7 @@ export function buildBackingModel(deps: PiMessagesBackendDeps): Model<Api> {
     registryModelId: swap.real,
     apiShape: swap.backingApiShape,
     piProvider: backing.providerId,
-    baseUrl: llm.baseUrl,
+    baseUrl: upstream.baseUrl,
     reasoning: backing.reasoning,
     input: narrowInputModalities(backing.input),
     // Explicit, so the record's card never applies: the disclosure control above.
@@ -374,13 +406,14 @@ function warnOnDiscardedRequestFields(body: PiMessagesRequestBody, requestUrl: s
 function projectRequestOptions(
   body: PiMessagesRequestBody,
   swap: ModelSwap,
-  apiKey: string,
+  upstream: PiMessagesUpstream,
   signal: AbortSignal,
   upstreamFetch: typeof fetch,
 ): SimpleStreamOptions {
   const incoming = body.options ?? {};
   return {
-    apiKey,
+    apiKey: upstream.apiKey,
+    ...(upstream.headers ? { headers: upstream.headers } : {}),
     signal,
     fetch: upstreamFetch,
     // NOT part of the client's payload and deliberately not derived from it:
@@ -593,11 +626,15 @@ export function handlePiMessagesRequest(
   const idleTimeoutMs = deps.llmStreamIdleTimeoutMs ?? LLM_STREAM_IDLE_TIMEOUT_MS;
   const abort = llmUpstreamAbort(AbortSignal.any([request.signal, unwind.signal]));
   // Per REQUEST, never per process: the recorded status belongs to this turn.
-  const statusProbe = createUpstreamStatusProbe(deps.fetchImpl ?? fetch);
+  const transport = deps.fetchImpl ?? fetch;
+  const { baseUrl, dialBaseUrl } = deps.upstream;
+  const statusProbe = createUpstreamStatusProbe(
+    dialBaseUrl ? redirectingFetch(transport, baseUrl, dialBaseUrl) : transport,
+  );
   const upstream = stream(
     model,
     body.context,
-    projectRequestOptions(body, swap, deps.llm.apiKey, abort.signal, statusProbe.fetch),
+    projectRequestOptions(body, swap, deps.upstream, abort.signal, statusProbe.fetch),
   );
 
   const encoder = new TextEncoder();

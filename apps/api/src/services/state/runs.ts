@@ -553,6 +553,8 @@ interface CreateRunParams {
   proxyLabel?: string;
   modelLabel?: string;
   modelSource?: string;
+  /** The model the run launched with — see `runs.model_id`. */
+  modelId?: string;
   /**
    * Per-1M-token rates the run is launched with (the `MODEL_COST` the container
    * receives). Persisted so the runner's ledger row — whose `cost` the container
@@ -698,6 +700,7 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
       proxyLabel: params.proxyLabel,
       modelLabel: params.modelLabel,
       modelSource: params.modelSource,
+      modelId: params.modelId,
       modelCost: params.modelCost ?? null,
       generationConfig:
         params.generationConfig == null
@@ -899,7 +902,9 @@ export async function recordRunDegradedIntegration(
  * has proxy rows, its NULL-credential runner mirror is not a spend fact.
  *
  * A platform run's runner row carries a non-NULL `credential_source` (from
- * `runs.model_source`) and stays authoritative; a remote run with ONLY a runner
+ * `runs.model_source`) and stays authoritative — a platform run on a
+ * platform-provided model writes none, its proxy rows being its whole ledger; a
+ * remote run with ONLY a runner
  * row (no proxy) keeps it; a detached row (`run_id IS NULL`) is never a mirror.
  *
  * Applying it in the SERVICE — rather than documenting it for consumers — is
@@ -919,6 +924,19 @@ const notRunnerMirrorSql = sql<boolean>`NOT (
       AND mirrored_proxy.source = 'proxy'
   )
 )`;
+
+/**
+ * Whether a run's inference is served — and metered per call — by the platform
+ * LLM proxy: a platform-provided model, pinned at launch in `runs.model_id`. The
+ * proxy's run entry serves exactly these runs, and the runner ledger row is not
+ * written for them. A system run without a pinned model (launched before the
+ * column existed) holds its own credential, so its runner row stays its ledger.
+ */
+export function isMeteredByPlatformProxy<
+  T extends { modelSource?: string | null; modelId?: string | null },
+>(run: T): run is T & { modelId: string } {
+  return run.modelSource === "system" && run.modelId != null;
+}
 
 /** A run's attributable spend and how much of it is backed by real rates. */
 interface RunSpend {
