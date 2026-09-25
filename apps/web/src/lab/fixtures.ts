@@ -1115,6 +1115,11 @@ export const chatHistory = {
         role: "assistant",
         parts: [
           {
+            type: "reasoning",
+            text: "**Trouver le bon run.** L’utilisateur veut le dernier échec, pas le dernier run : il faut filtrer sur le statut `failed` et trier par date.\n\nLe plus récent est le #199 de Compta trimestrielle. Son journal s’arrête sur une erreur de fichier manquant, c’est ce qu’il faut dire, avec l’heure et la durée.",
+            state: "done",
+          },
+          {
             type: "text",
             text: "Le run #199 (Compta trimestrielle) a échoué hier à 21:43 après 124 s : le relevé de mars manquait dans le dossier Drive du trimestre.",
           },

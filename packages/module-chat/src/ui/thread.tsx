@@ -34,7 +34,8 @@ import {
 import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
 import { formatBytes } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
-import { MarkdownText } from "./markdown-text.tsx";
+import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
+import { ReasoningGroup } from "./reasoning.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
   InvokeOperationToolUI,
@@ -479,6 +480,8 @@ function AssistantMessage() {
         <MessagePrimitive.Parts
           components={{
             Text: MarkdownText,
+            Reasoning: ReasoningText,
+            ReasoningGroup,
             tools: { Fallback: ToolFallback },
             Empty: ThinkingIndicator,
           }}
