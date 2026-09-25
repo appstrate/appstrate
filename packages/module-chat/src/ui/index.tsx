@@ -41,6 +41,7 @@ import {
   SelectConversationProvider,
 } from "./runtime-context.ts";
 import type {
+  ChatCan,
   ChatHost,
   ChatTranslate,
   DownloadFile,
@@ -59,12 +60,14 @@ import {
   loadHistory,
   markSessionRead,
   mintSessionId,
+  patchSessionsCache,
   sessionQueryKey,
   sessionsQueryKey,
   skillWriteSettled,
   spaceIdFromHeaders,
   SESSIONS_QUERY_KEY,
   stopSession,
+  type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
@@ -83,6 +86,7 @@ import { latestTurnModelId } from "./turn-model.ts";
 import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
 import { DEFAULT_SKILL_SELECTION } from "../skills.ts";
+import { canAuthorAgents, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -150,10 +154,8 @@ export interface ChatPageProps {
   useFileImageSrc: UseFileImageSrc;
   uploadFile: UploadFile;
   t: ChatTranslate;
-  /** Whether the caller may create agents, resolved by the shell: the module resolves no RBAC. */
-  canAuthorAgents: boolean;
-  /** Whether the caller may pin skills to a conversation (write it, read skills), same resolution. */
-  canPinSkills: boolean;
+  /** The caller's grants (see `ChatCan`). Pass a stable function. */
+  can: ChatCan;
 }
 
 export function ChatPage({
@@ -168,8 +170,7 @@ export function ChatPage({
   useFileImageSrc,
   uploadFile,
   t,
-  canAuthorAgents,
-  canPinSkills,
+  can,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -240,15 +241,19 @@ export function ChatPage({
   // failed PUT self-heals on the next signal/refetch; a duplicate PUT from a
   // refetch landing mid-flight is idempotent (monotonic marker) server-side.
   // External-system sync in an effect (no setState) — React Compiler-safe.
+  const canWrite = can("chat:write");
   useEffect(() => {
-    if (!visible) return;
+    // Marking read is a write (`chat:write`); a read-only caller keeps the dot.
+    if (!visible || !canWrite) return;
     const active = sessions.data?.find((s) => s.id === activeId);
     if (!active?.unread) return;
-    queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(pageSpaceId), (prev) =>
-      prev?.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
+    queryClient.setQueryData<SessionsCache>(sessionsQueryKey(pageSpaceId), (prev) =>
+      patchSessionsCache(prev, (rows) =>
+        rows.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
+      ),
     );
     void markSessionRead(getHeaders, activeId).catch(() => {});
-  }, [sessions.data, activeId, getHeaders, pageSpaceId, queryClient, visible]);
+  }, [sessions.data, activeId, getHeaders, pageSpaceId, queryClient, visible, canWrite]);
 
   const unreadIds = useMemo(() => {
     const list = sessions.data ?? [];
@@ -264,8 +269,9 @@ export function ChatPage({
       downloadFile,
       useFileImageSrc,
       t,
+      can,
     }),
-    [onOpenFile, downloadFile, useFileImageSrc, t],
+    [onOpenFile, downloadFile, useFileImageSrc, t, can],
   );
 
   // File attachments: the composer stages picked files through the HOST uploader
@@ -284,10 +290,11 @@ export function ChatPage({
   // `Conversation` a new prop each time and defeat its `memo` below. The
   // setters are stable module functions, so the deps are exactly the values
   // the picker displays.
+  const authorsAgents = canAuthorAgents(can);
   const composerSlot = useMemo(
     () => (
       <div className="flex items-center gap-2">
-        {canAuthorAgents ? <AgentAuthoringToggle /> : null}
+        {authorsAgents ? <AgentAuthoringToggle /> : null}
         <ModelSelect
           models={models}
           selectedId={selectedModel}
@@ -298,7 +305,7 @@ export function ChatPage({
         {composerActions}
       </div>
     ),
-    [canAuthorAgents, models, selectedModel, generation, composerActions],
+    [authorsAgents, models, selectedModel, generation, composerActions],
   );
 
   // The server's view of the ACTIVE conversation, reduced to two primitives so
@@ -367,7 +374,7 @@ export function ChatPage({
                   onConversationChange={onConversationChange}
                   attachments={attachments}
                   composerSlot={composerSlot}
-                  canPinSkills={canPinSkills}
+                  canPinSkills={canPinSkills(can)}
                   serverGenerating={serverGenerating}
                   serverUpdatedAt={serverUpdatedAt}
                 />
@@ -644,19 +651,24 @@ function ConversationInner({
   const wasGenerating = useRef(false);
   useEffect(() => {
     if (generating) {
-      queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(spaceId), (prev) => {
-        const list = prev ?? [];
-        const existing = list.find((s) => s.id === id);
+      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(spaceId), (prev) => {
+        const existing = prev?.pages.flatMap((p) => p.data).find((s) => s.id === id);
         const row: SessionSummary = {
           ...(existing ?? { id, title: null, unread: false }),
           generating: true,
           updatedAt: new Date().toISOString(),
         };
-        return [row, ...list.filter((s) => s.id !== id)];
+        return patchSessionsCache(
+          prev,
+          (rows, first) => [...(first ? [row] : []), ...rows.filter((s) => s.id !== id)],
+          row,
+        );
       });
     } else if (wasGenerating.current) {
-      queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(spaceId), (prev) =>
-        prev?.map((s) => (s.id === id ? { ...s, generating: false } : s)),
+      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(spaceId), (prev) =>
+        patchSessionsCache(prev, (rows) =>
+          rows.map((s) => (s.id === id ? { ...s, generating: false } : s)),
+        ),
       );
       void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
     }

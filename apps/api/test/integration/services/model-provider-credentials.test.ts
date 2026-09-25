@@ -620,7 +620,7 @@ describe("listOrgModelProviderCredentials — built-in alias-only binding mask",
     expect(entry).toBeDefined();
     expect(entry!.source).toBe("built-in");
     expect(entry!.apiShape).toBeNull();
-    expect(entry!.baseUrl).toBeNull();
+    expect(entry!.base_url).toBeNull();
     // The label is masked too, and asserting it POSITIVELY is what makes this
     // case discriminate: dropping the mask yields the provider display name
     // ("Anthropic"), which contains none of the lowercase substrings below.
@@ -654,6 +654,6 @@ describe("listOrgModelProviderCredentials — built-in alias-only binding mask",
     const entry = list.find((c) => c.id === "sys-mixed");
     expect(entry).toBeDefined();
     expect(entry!.apiShape).toBe("anthropic-messages");
-    expect(entry!.baseUrl).toBe("https://api.anthropic.com");
+    expect(entry!.base_url).toBe("https://api.anthropic.com");
   });
 });

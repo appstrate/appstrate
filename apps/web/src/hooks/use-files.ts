@@ -8,6 +8,7 @@ import { $api, client, type paths } from "../api/client";
 import { triggerBlobDownload } from "../lib/blob-download";
 import { invalidateRunDetails } from "../lib/query-keys";
 import { useOrgScope } from "./use-org-scope";
+import { usePermissions } from "./use-permissions";
 
 /** Wire shape of a single file (OpenAPI list-item schema). */
 export type FileDto =
@@ -29,6 +30,8 @@ interface FileListFilters {
  */
 export function useFiles(filters: FileListFilters = {}) {
   const scope = useOrgScope();
+  // A run or a conversation shows its files incidentally; neither implies `files:read`.
+  const { can } = usePermissions();
   return $api.useQuery(
     "get",
     "/api/files",
@@ -36,7 +39,7 @@ export function useFiles(filters: FileListFilters = {}) {
       params: {
         query: {
           purpose: filters.purpose,
-          run_id: filters.runId,
+          runId: filters.runId,
           context_chat_session_id: filters.contextChatSessionId,
           startingAfter: filters.startingAfter,
           limit: filters.limit,
@@ -44,7 +47,7 @@ export function useFiles(filters: FileListFilters = {}) {
         header: scope.header,
       },
     },
-    { enabled: scope.enabled && filters.enabled !== false },
+    { enabled: can("files:read") && scope.enabled && filters.enabled !== false },
   );
 }
 
@@ -56,11 +59,12 @@ export function useFiles(filters: FileListFilters = {}) {
  */
 export function useFile(id: string) {
   const scope = useOrgScope();
+  const { can } = usePermissions();
   return $api.useQuery(
     "get",
     "/api/files/{id}",
     { params: { path: { id }, header: scope.header } },
-    { enabled: scope.enabled && !!id, staleTime: 0, gcTime: 0 },
+    { enabled: can("files:read") && scope.enabled && !!id, staleTime: 0, gcTime: 0 },
   );
 }
 
@@ -151,7 +155,9 @@ export function useFileDownload() {
  */
 export function useFileImageSrc(id: string): string | null {
   const [src, setSrc] = useState<string | null>(null);
+  const readsFiles = usePermissions().can("files:read");
   useEffect(() => {
+    if (!readsFiles) return;
     let cancelled = false;
     let objectUrl: string | null = null;
     void (async () => {
@@ -174,6 +180,6 @@ export function useFileImageSrc(id: string): string | null {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [id]);
+  }, [id, readsFiles]);
   return src;
 }

@@ -24,7 +24,7 @@ import {
 } from "@appstrate/afps-runtime/bundle";
 import { DbPackageCatalog } from "./run-launcher/db-package-catalog.ts";
 import { downloadVersionZip } from "./package-storage.ts";
-import { resolveVersion } from "./package-versions.ts";
+import { resolveVersion, versionArtifactUnavailable } from "./package-versions.ts";
 import { db } from "@appstrate/db/client";
 import { packageVersions } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -135,9 +135,7 @@ export async function buildBundleForAgentExport(
 ): Promise<Bundle> {
   const version = await resolveExportVersion(packageId, opts.versionSpec);
   const zip = await downloadVersionZip(packageId, version);
-  if (!zip) {
-    throw notFound(`Artifact missing for '${packageId}@${version}'`);
-  }
+  if (!zip) throw versionArtifactUnavailable(packageId, version);
   const root = extractRootFromAfps(new Uint8Array(zip));
   return buildBundleFromDb(root, scope, opts.metadata);
 }

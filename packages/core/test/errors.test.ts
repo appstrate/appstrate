@@ -53,6 +53,45 @@ describe("formatErrorChain", () => {
     );
   });
 
+  it("starts a cause as a new sentence after a message that ends one", () => {
+    // Delete-to-fail (#1517): `": "` after a full stop printed
+    // "…replace it.: Skill was modified concurrently."
+    for (const end of [".", "!", "?"]) {
+      expect(formatErrorChain(new Error(`Refused${end}`, { cause: new Error("Conflict") }))).toBe(
+        `Refused${end} Conflict`,
+      );
+    }
+    expect(formatErrorChain(new Error("Refused.  ", { cause: new Error("Conflict") }))).toBe(
+      "Refused. Conflict",
+    );
+    const solo = new Error("Refused.");
+    (solo as { cause?: unknown }).cause = solo;
+    expect(formatErrorChain(solo)).toBe("Refused. [circular cause]");
+  });
+
+  it("does not repeat a cause the text already quotes, and keeps walking past it", () => {
+    // Delete-to-fail (#1517): a wrapper that inlines its cause's message
+    // ("Upgrade failed (disk full).") printed it a second time.
+    const quoted = new Error("Upgrade failed (disk full). Files restored.", {
+      cause: new Error("disk full", { cause: new Error("ENOSPC") }),
+    });
+    expect(formatErrorChain(quoted)).toBe("Upgrade failed (disk full). Files restored. ENOSPC");
+
+    const sameMessage = new Error("gone", { cause: new Error("gone") });
+    expect(formatErrorChain(sameMessage)).toBe("gone");
+  });
+
+  it("only drops a cause the text quotes as a whole", () => {
+    // A short cause inside a longer word is not a quote of it.
+    expect(formatErrorChain(new Error("2 timeouts", { cause: new Error("timeout") }))).toBe(
+      "2 timeouts: timeout",
+    );
+    expect(formatErrorChain(new Error("upstream said 500", { cause: new Error("500") }))).toBe(
+      "upstream said 500",
+    );
+    expect(formatErrorChain(new Error("failed", { cause: new Error("") }))).toBe("failed");
+  });
+
   it("renders a non-Error cause", () => {
     // A `cause` is typed `unknown` — a string or a rejected non-Error value
     // reaches here, and the walk must stop there rather than read `.cause`
@@ -184,12 +223,30 @@ describe("ApiError extension members (RFC 9457 §3.2)", () => {
     // `errors` is OPTIONAL and absent on this problem, so a `key in body` guard
     // would have let it through — and a client branching on `errors` cannot
     // tell a validation list from an extension that took the name.
-    const body = build({ errors: ["nope"], status: 200, param: "x" }) as unknown as Record<
-      string,
-      unknown
-    >;
+    const body = build({
+      errors: ["nope"],
+      status: 200,
+      param: "x",
+      request_id: "req_spoofed",
+      retry_after: 9,
+    }) as unknown as Record<string, unknown>;
     expect(body.errors).toBeUndefined();
     expect(body.param).toBeUndefined();
     expect(body.status).toBe(409);
+    expect(body.request_id).toBe("req_test");
+    expect(body.retry_after).toBeUndefined();
+  });
+
+  it("names the request id and retry delay in snake_case", () => {
+    const body = new ApiError({
+      status: 429,
+      code: "rate_limited",
+      title: "Rate Limited",
+      detail: "Slow down",
+      retryAfter: 7,
+    }).toProblemDetail("req_test") as unknown as Record<string, unknown>;
+    expect(body).toMatchObject({ request_id: "req_test", retry_after: 7 });
+    expect(body).not.toHaveProperty("requestId");
+    expect(body).not.toHaveProperty("retryAfter");
   });
 });

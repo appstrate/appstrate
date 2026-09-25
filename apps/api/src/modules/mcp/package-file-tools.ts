@@ -8,6 +8,7 @@ import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { MCP_SERVER_RUNTIME_CAPABILITIES, MCP_SERVER_RUNTIMES } from "@appstrate/core/mcp-server";
+import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
 import type { Actor } from "@appstrate/connect";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -232,7 +233,7 @@ function runtimeManifestTemplate(runtime: (typeof MCP_SERVER_RUNTIMES)[number]) 
     : [];
   return {
     manifest_version: capability.manifestVersion,
-    schema_version: "0.1",
+    schema_version: AFPS_SCHEMA_VERSION,
     type: "mcp-server",
     name: "@<organization-scope>/<package-name>",
     version: "1.0.0",
@@ -272,7 +273,7 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
     textResult({
       archive_required: true,
       package_archive_max_bytes: PACKAGE_ZIP_MAX_COMPRESSED_BYTES,
-      schema_version: "0.1",
+      schema_version: AFPS_SCHEMA_VERSION,
       entry_point_must_exist: true,
       required_archive_files: ["manifest.json", "<server.entry_point>"],
       runtimes: MCP_SERVER_RUNTIMES.map((runtime) => ({

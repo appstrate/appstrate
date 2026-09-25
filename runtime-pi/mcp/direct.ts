@@ -62,9 +62,9 @@ interface BuildMcpDirectFactoriesOptions {
    * its canonical events; after every forwarded tool call this drains the
    * journal and re-emits on the run's sink. Pi's MCP transport preserves the
    * result `_meta`, but the runner drains the journal anyway — single source
-   * of truth, no `_meta` trust. Absent → no runtime tools (nothing to drain).
+   * of truth, no `_meta` trust.
    */
-  drainer?: RuntimeEventDrainer;
+  drainer: RuntimeEventDrainer;
 }
 
 /**

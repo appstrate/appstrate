@@ -20,7 +20,7 @@ function credential(overrides: Partial<ModelProviderCredentialInfo>): ModelProvi
     id: "cred_1",
     label: "localhost:11434 · OpenAI-compatible",
     apiShape: "openai-completions",
-    baseUrl: "http://localhost:11434/v1",
+    base_url: "http://localhost:11434/v1",
     source: "custom",
     authMode: "api_key",
     providerId: "openai-compatible",
@@ -51,13 +51,13 @@ const OLLAMA = credential({});
 const VLLM = credential({
   id: "cred_2",
   label: "vllm.internal · OpenAI-compatible",
-  baseUrl: "https://vllm.internal/v1",
+  base_url: "https://vllm.internal/v1",
 });
 const GROQ_KEY = credential({
   id: "cred_groq",
   label: "Groq",
   providerId: "groq",
-  baseUrl: "https://api.groq.com/openai/v1",
+  base_url: "https://api.groq.com/openai/v1",
 });
 
 function ids(
@@ -123,7 +123,7 @@ describe("selectableCredentials — connections and system keys", () => {
       authMode: "oauth2",
       providerId: "claude-code",
       apiShape: "anthropic-messages",
-      baseUrl: "https://api.anthropic.com",
+      base_url: "https://api.anthropic.com",
     });
     expect(
       ids({

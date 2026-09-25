@@ -23,10 +23,10 @@ export function skillPickerRows(
   catalogue: readonly SkillHint[],
   pinned: readonly string[],
 ): SkillPickerRow[] {
-  const listed = new Set(catalogue.map((skill) => skill.package_id));
+  const listed = new Set(catalogue.map((skill) => skill.packageId));
   const dead = pinned.filter((id) => !listed.has(id));
   return [
     ...catalogue.map((skill) => ({ skill, available: true })),
-    ...dead.map((id) => ({ skill: { package_id: id }, available: false })),
+    ...dead.map((id) => ({ skill: { packageId: id }, available: false })),
   ];
 }

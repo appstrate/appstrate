@@ -22,8 +22,7 @@
 // pair carries no runtime cycle. Both symbols are the canonical, already
 // published ones — re-declaring them here is what let the chat surface drift
 // from the model-provider surface it mirrors.
-import type { ModelCost } from "./module.ts";
-import type { ModelNativeReasoningLevel, ModelReasoningLevel } from "./model-generation.ts";
+import type { ModelCost, ModelInputModality } from "./module.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
 
 /**
@@ -44,10 +43,8 @@ export interface SubscriptionChatModel {
   contextWindow: number | null;
   maxTokens: number | null;
   reasoning: boolean;
-  /** Provider-native values for portable reasoning levels, when catalogued. */
-  reasoningLevelMap?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
   /** Modality flags (`["text","image"]`), or `null` (defaults to text-only). */
-  input: string[] | null;
+  input: ModelInputModality[] | null;
   /**
    * Fresh subscription access token — pi-ai emits the OAuth request shape
    * from it natively, including any account routing header (codex decodes

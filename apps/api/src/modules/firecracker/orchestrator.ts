@@ -17,8 +17,8 @@
  *                                    └─ agent    (uid 1001, lo + sink only)
  *
  * The agent reaches the sidecar over the guest loopback
- * (`http://127.0.0.1:8080`), so the sidecar's placeholder-substituting
- * LLM proxy, forward proxy and MCP surface work unchanged. The sidecar
+ * (`http://127.0.0.1:8080`), so the sidecar's LLM proxy, forward proxy
+ * and MCP surface work unchanged. The sidecar
  * spawns integrations with `INTEGRATION_RUNTIME_ADAPTER=process` — from
  * its in-guest perspective the world looks exactly like process mode,
  * while the HOST keeps a hardware virtualization boundary around the
@@ -1340,6 +1340,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       spec,
       baseEnv: pickOperatorSidecarEnv(),
       port: "8080",
+      forwardProxyPort: "8081",
       runId,
       platformApiUrl: await this.resolvePlatformApiUrl(),
       workspace: boundary.workspace,
@@ -1386,10 +1387,11 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     const fcEnv = getFirecrackerEnv();
     const vm = this.vms.get(handle.runId);
     const agentSpec = this.pendingAgentSpecs.get(handle.runId);
-    if (!vm || !agentSpec) {
+    const sidecarEnv = this.pendingSidecarEnv.get(handle.runId);
+    if (!vm || !agentSpec || !sidecarEnv) {
       throw new Error(
-        `Firecracker orchestrator: no boundary/agent spec for run ${handle.runId} — ` +
-          `createIsolationBoundary + createWorkload must run before startWorkload`,
+        `Firecracker orchestrator: no boundary/sidecar/agent spec for run ${handle.runId} — ` +
+          `createIsolationBoundary + createSidecar + createWorkload must run before startWorkload`,
       );
     }
 
@@ -1400,9 +1402,6 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // supervisor's platform endpoint must target the override, not the
     // host lo alias (which nothing listens on in that topology).
     const aliasIp = platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR);
-    // skipSidecar runs never called createSidecar — no pending env entry.
-    const sidecarEnv = this.pendingSidecarEnv.get(handle.runId);
-
     // Credential broker: with FIRECRACKER_CREDENTIAL_BROKER=mmds (default)
     // the secret keys are stripped off the config drive and served in-memory
     // via MMDS after boot; config-drive mode keeps today's inline delivery.
@@ -1436,7 +1435,6 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       platformPort: this.platformForward?.port ?? loAliasPlatformPort(),
       sidecarEnv: split.driveSidecarEnv,
       agentEnv: split.driveAgentEnv,
-      agentUnrestrictedEgress: agentSpec.egress === true,
       credentialSource: mmdsMode ? "mmds" : "inline",
       ...(this.agentArgvOverride ? { agentArgv: this.agentArgvOverride } : {}),
     });
@@ -1448,7 +1446,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     const configDrivePath = join(vm.runDir, "config.img");
     await this.buildConfigDrive(vm.runDir, configDrivePath, guestConfig);
 
-    const sizing = vmSizing(agentSpec.resources, sidecarEnv !== undefined);
+    const sizing = vmSizing(agentSpec.resources);
     const proc = await this.spawnVmm(
       vm,
       configDrivePath,
@@ -1501,7 +1499,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
 
     // Credential broker: push the run's secrets into the booted VMM's
     // in-memory MMDS store. The guest supervisor fetches them at boot;
-    // until they land, a sidecar-backed run would silently come up without
+    // until they land, a run would silently come up without
     // credentials — so this is FAIL-CLOSED. A short retry absorbs the
     // window where the just-spawned VMM has not yet bound its API socket;
     // on final failure the VM is destroyed and the run fails.

@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { orgRoleEnum } from "@appstrate/db/schema";
+import {
+  orgRoleEnum,
+  packageSourceValues,
+  packageTypeValues,
+  runOriginValues,
+} from "@appstrate/db/schema";
+import { runStatusValues } from "@appstrate/core/run-status";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
+import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 
@@ -24,7 +31,7 @@ const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
 
 /**
  * The org-settings members, shared by the READ component (`OrgSettings`, below)
- * and the CLOSED write body of `PUT /api/orgs/{orgId}/settings`
+ * and the CLOSED write body of `PATCH /api/orgs/{orgId}/settings`
  * (`openapi/paths/organizations.ts`).
  *
  * The two cannot be one schema: `orgSettingsPatchSchema`
@@ -70,7 +77,7 @@ export const ORG_SETTINGS_PROPERTIES = {
   restrict_package_copy: {
     type: "boolean",
     description:
-      "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space: `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's `packages sync` downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about.",
+      "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space: `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's `code sync` downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about.",
   },
   api_version: {
     type: "string",
@@ -205,13 +212,14 @@ export const schemas = {
         type: "string",
         format: "uri",
         description:
-          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 412 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
+          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
       },
-      expires_at: {
-        type: "integer",
-        description: "Absolute expiry of `connect_url`, epoch ms.",
+      expiresAt: {
+        type: "string",
+        format: "date-time",
+        description: "Absolute expiry of `connect_url` (RFC 3339).",
       },
-      package_id: {
+      packageId: {
         type: "string",
         description: "Integration package id `connect_url` connects (`@scope/name`).",
       },
@@ -220,7 +228,7 @@ export const schemas = {
   ProblemDetail: {
     type: "object",
     description: "RFC 9457 Problem Details for HTTP APIs",
-    required: ["type", "title", "status", "detail", "code", "requestId"],
+    required: ["type", "title", "status", "detail", "code", "request_id"],
     properties: {
       type: { type: "string", format: "uri", description: "URI reference to error documentation" },
       title: { type: "string", description: "Short summary of the error type" },
@@ -231,9 +239,12 @@ export const schemas = {
         description: "URI reference identifying this specific occurrence",
       },
       code: { type: "string", description: "Machine-readable error code (snake_case)" },
-      requestId: { type: "string", description: "Unique request identifier (req_ prefix)" },
+      request_id: { type: "string", description: "Unique request identifier (req_ prefix)" },
       param: { type: "string", description: "Parameter that caused the error" },
-      retryAfter: { type: "integer", description: "Seconds before retry (on 429)" },
+      retry_after: {
+        type: "integer",
+        description: "Seconds before retry; mirrored in the `Retry-After` header",
+      },
       errors: {
         type: "array",
         description: "Field-level validation errors",
@@ -254,11 +265,25 @@ export const schemas = {
         description:
           "Provider sampling temperature; null or omission inherits the runtime default.",
       },
-      reasoningLevel: {
+      reasoning_level: {
         type: ["string", "null"],
         enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max", null],
-        description: "Portable reasoning effort normalized across providers.",
+        description:
+          "Portable reasoning effort normalized across providers; null or omission inherits the next lower-precedence layer, and `medium` applies when no layer sets one. `off` sends the provider an explicit disable.",
       },
+    },
+  },
+  ModelCostTier: {
+    type: "object",
+    required: ["inputTokensAbove", "input", "output", "cacheRead", "cacheWrite"],
+    description:
+      "A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request.",
+    properties: {
+      inputTokensAbove: { type: "number" },
+      input: { type: "number" },
+      output: { type: "number" },
+      cacheRead: { type: "number" },
+      cacheWrite: { type: "number" },
     },
   },
   ModelGenerationCapabilities: {
@@ -266,7 +291,7 @@ export const schemas = {
     additionalProperties: false,
     required: ["temperature", "reasoning"],
     description:
-      "Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal.",
+      "Normalized support facts derived from the model's record in Appstrate's pinned model registry, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal.",
     properties: {
       temperature: { type: "string", enum: ["supported", "unsupported", "unknown"] },
       reasoning: {
@@ -275,7 +300,7 @@ export const schemas = {
         required: ["supported", "adaptive", "levels"],
         properties: {
           supported: { type: "string", enum: ["supported", "unsupported", "unknown"] },
-          temperatureCompatible: {
+          temperature_compatible: {
             type: "string",
             enum: ["supported", "unsupported", "unknown"],
             description:
@@ -287,18 +312,6 @@ export const schemas = {
             additionalProperties: {
               type: "string",
               enum: ["supported", "unsupported", "unknown"],
-            },
-            propertyNames: {
-              enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-            },
-          },
-          nativeLevels: {
-            type: "object",
-            description:
-              "Optional provider-native values for portable levels (for example off to none).",
-            additionalProperties: {
-              type: "string",
-              enum: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
             },
             propertyNames: {
               enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
@@ -345,7 +358,7 @@ export const schemas = {
     //     not reach — the column is data, renamed by a migration or not at all.
     required: [
       "packageId",
-      "generationConfig",
+      "generation_config",
       "modelId",
       "proxyId",
       "enabled",
@@ -358,7 +371,7 @@ export const schemas = {
     properties: {
       object: { type: "string", enum: ["space_package"] },
       packageId: { type: "string", description: "Package ID from org catalog" },
-      generationConfig: {
+      generation_config: {
         oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
       },
       modelId: { type: ["string", "null"], description: "Model override for this space" },
@@ -366,8 +379,8 @@ export const schemas = {
       enabled: { type: "boolean" },
       installed_at: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
-      package_type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
-      package_source: { type: "string", enum: ["system", "local"] },
+      package_type: { type: "string", enum: [...packageTypeValues] },
+      package_source: { type: "string", enum: [...packageSourceValues] },
       draft_manifest: {
         type: ["object", "null"],
         description: "Raw draft manifest JSONB for the placed package.",
@@ -375,7 +388,7 @@ export const schemas = {
     },
   },
   // READ shape — deliberately open, see ORG_SETTINGS_PROPERTIES above. The
-  // write body of PUT /api/orgs/{orgId}/settings is the closed twin.
+  // write body of PATCH /api/orgs/{orgId}/settings is the closed twin.
   OrgSettings: {
     type: "object",
     description: "Organization settings (extensible)",
@@ -445,10 +458,10 @@ export const schemas = {
     type: "object",
     description:
       "A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set.",
-    required: ["space_id"],
+    required: ["spaceId"],
     oneOf: [{ required: ["preset_role"] }, { required: ["custom_role_id"] }],
     properties: {
-      space_id: { type: "string" },
+      spaceId: { type: "string" },
       preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
       custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
     },
@@ -556,7 +569,7 @@ export const schemas = {
       schema_version: { type: "string" },
       author: { type: "string" },
       keywords: { type: "array", items: { type: "string" } },
-      source: { type: "string", enum: ["system", "local"] },
+      source: { type: "string", enum: [...packageSourceValues] },
       scope: {
         type: ["string", "null"],
         description:
@@ -566,7 +579,7 @@ export const schemas = {
       type: {
         type: "string",
         description: "Package type from manifest",
-        enum: ["agent", "skill", "mcp-server", "integration"],
+        enum: [...packageTypeValues],
       },
       running_runs: { type: "integer" },
       dependencies: {
@@ -606,7 +619,7 @@ export const schemas = {
   AgentDetail: {
     type: "object",
     // Always emitted by buildAgentDetailDto. `display_name`/`description`/
-    // `updatedAt`/`lock_version` stay optional: system agents omit the last two,
+    // `updatedAt` stay optional: system agents omit `updatedAt`,
     // and the manifest-derived display_name/description may be absent (the
     // shared-type marks them optional to match). `forked_from` is optional for
     // a second reason: a summary read (`agents:run` without `agents:read`)
@@ -636,7 +649,7 @@ export const schemas = {
       id: { type: "string" },
       display_name: { type: "string" },
       description: { type: "string" },
-      source: { type: "string", enum: ["system", "local"] },
+      source: { type: "string", enum: [...packageSourceValues] },
       scope: {
         type: ["string", "null"],
         description:
@@ -658,10 +671,6 @@ export const schemas = {
         type: "string",
         format: "date-time",
         description: "Last updated timestamp (user agents only)",
-      },
-      lock_version: {
-        type: "integer",
-        description: "Optimistic lock version (user agents only)",
       },
       input: {
         // Stated explicitly alongside `allOf`: the branches below are a
@@ -873,12 +882,17 @@ export const schemas = {
   },
   PackageFileIndex: {
     type: "object",
-    required: ["entries"],
+    required: ["object", "data", "hasMore"],
     properties: {
-      entries: {
+      object: { type: "string", enum: ["list"] },
+      data: {
         type: "array",
         items: { $ref: "#/components/schemas/PackageFileEntry" },
         description: "Files in the artifact, sorted by `path`.",
+      },
+      hasMore: {
+        type: "boolean",
+        description: "Always `false`: the index is never paginated.",
       },
     },
   },
@@ -1033,7 +1047,7 @@ export const schemas = {
       orgId: { type: "string" },
       status: {
         type: "string",
-        enum: ["pending", "running", "success", "failed", "timeout", "cancelled"],
+        enum: [...runStatusValues],
       },
       input: {
         type: ["object", "null"],
@@ -1247,7 +1261,7 @@ export const schemas = {
       // (spec==runtime invariant). Do not rename without changing the serializer.
       runOrigin: {
         type: ["string", "null"],
-        enum: ["platform", "remote", null],
+        enum: [...runOriginValues, null],
         description:
           "Which runner drives this run: 'platform' (server-managed Docker container) or 'remote' (caller's host via signed events).",
       },
@@ -1295,7 +1309,7 @@ export const schemas = {
     type: "object",
     required: ["id", "runId", "type", "level", "createdAt"],
     properties: {
-      id: { type: "integer" },
+      id: { type: "integer", format: "int64" },
       runId: { type: "string" },
       orgId: { type: "string" },
       type: { type: "string" },
@@ -1425,7 +1439,10 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       name: { type: "string" },
-      keyPrefix: { type: "string", description: "First 8 chars of the key for identification" },
+      keyPrefix: {
+        type: "string",
+        description: "The first characters of the key, for identification: `apst_` + 8.",
+      },
       scopes: {
         type: "array",
         items: { type: "string" },
@@ -1482,7 +1499,7 @@ export const schemas = {
         description:
           "The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description.",
       },
-      source: { type: "string", enum: ["system", "local"] },
+      source: { type: "string", enum: [...packageSourceValues] },
       created_by: { type: ["string", "null"] },
       created_by_name: { type: "string" },
       used_by_agents: { type: "integer" },
@@ -1538,10 +1555,9 @@ export const schemas = {
         description:
           "The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an mcp-server (which has no companion file of its own) and for an integration published without one. Read from the draft or from the published archive according to `definition`.",
       },
-      source: { type: "string", enum: ["system", "local"] },
+      source: { type: "string", enum: [...packageSourceValues] },
       created_by: { type: ["string", "null"] },
       auto_installed: { type: "boolean" },
-      lock_version: { type: "integer", description: "Optimistic lock version" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
       manifest: { type: "object", description: "Full manifest object" },
       manifest_name: {
@@ -1579,7 +1595,7 @@ export const schemas = {
       "id",
       "label",
       "apiShape",
-      "baseUrl",
+      "base_url",
       "source",
       "authMode",
       "created_by",
@@ -1594,7 +1610,7 @@ export const schemas = {
         description:
           "Protocol family. `null` for a built-in credential whose every model is managed (#727) — the binding is not exposed, so the endpoint doesn't reveal the provider.",
       },
-      baseUrl: {
+      base_url: {
         type: ["string", "null"],
         description:
           "Endpoint base URL. `null` for a managed-only built-in credential (see apiShape).",
@@ -1608,12 +1624,6 @@ export const schemas = {
       },
       oauth_email: { type: ["string", "null"] },
       needs_reconnection: { type: "boolean" },
-      available_model_ids: {
-        type: ["array", "null"],
-        items: { type: "string" },
-        description:
-          "Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For API-key providers these are the discovery candidates present in the provider's `GET <base_url>/models` listing, persisted by model discovery (POST /:id/refresh-models); nothing is inference-probed. Empty when discovery never ran, and per-credential because the listing depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write.",
-      },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -1626,8 +1636,9 @@ export const schemas = {
       "label",
       "apiShape",
       "providerId",
-      "providerName",
-      "baseUrl",
+      "provider_name",
+      "pi_provider",
+      "base_url",
       "modelId",
       "generation",
       "enabled",
@@ -1654,12 +1665,17 @@ export const schemas = {
         description:
           "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for managed models — binding not exposed.",
       },
-      providerName: {
+      provider_name: {
         type: ["string", "null"],
         description:
           "The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for managed models (binding not exposed) and for rows whose `providerId` has no registry entry.",
       },
-      baseUrl: {
+      pi_provider: {
+        type: ["string", "null"],
+        description:
+          "Key of the Pi model-registry provider that describes this model (e.g. `moonshotai` for `moonshot`): a client builds its model record (limits, request dialect) from `pi_provider` + `modelId`. `null` for a gateway (`openai-compatible`, `anthropic-compatible`), which has no registry record, and for managed models — binding not exposed.",
+      },
+      base_url: {
         type: ["string", "null"],
         description: "Provider endpoint. `null` for managed models — binding not exposed.",
       },
@@ -1672,7 +1688,10 @@ export const schemas = {
         description:
           "Generation controls supported by the backing model. Null for managed aliases whose binding is hidden.",
       },
-      input: { type: ["array", "null"], items: { type: "string" } },
+      input: {
+        type: ["array", "null"],
+        items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
+      },
       contextWindow: { type: ["integer", "null"] },
       maxTokens: { type: ["integer", "null"] },
       reasoning: { type: ["boolean", "null"] },
@@ -1686,12 +1705,12 @@ export const schemas = {
       aliased: {
         type: "boolean",
         description:
-          "Managed-model flag. When true, the binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge.",
+          "Managed-model flag. When true, the binding (`modelId`, `apiShape`, `base_url`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge.",
       },
       iconUrl: {
         type: ["string", "null"],
         description:
-          "Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`baseUrl`, or fall back to a generic icon.",
+          "Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`base_url`, or fall back to a generic icon.",
       },
       source: { type: "string", enum: ["built-in", "custom"] },
       credentialId: {
@@ -1707,6 +1726,7 @@ export const schemas = {
           output: { type: "number" },
           cacheRead: { type: "number" },
           cacheWrite: { type: "number" },
+          tiers: { type: "array", items: { $ref: "#/components/schemas/ModelCostTier" } },
         },
       },
       created_by: { type: ["string", "null"] },
@@ -1733,17 +1753,17 @@ export const schemas = {
     type: "object",
     description:
       "Resolved access token returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Carries only the fields that change per refresh — provider invariants (baseUrl, …) live in the sidecar's boot-time `LlmProxyOauthConfig`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`.",
-    required: ["accessToken", "expiresAt"],
+    required: ["access_token", "expiresAt"],
     properties: {
-      accessToken: { type: "string" },
+      access_token: { type: "string" },
       expiresAt: {
         type: ["integer", "null"],
         description: "Epoch milliseconds. null when expiry is unknown.",
       },
-      accountId: {
+      account_id: {
         type: "string",
         description:
-          "Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as.",
+          "Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. Omitted when the provider surfaced none. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as.",
       },
     },
   },
@@ -1828,7 +1848,11 @@ export const schemas = {
       member_pinned_connection_id: { type: ["string", "null"] },
       org_default_connection_id: { type: ["string", "null"] },
       org_default_enforced: { type: "boolean" },
-      can_add_connection: { type: "boolean" },
+      can_add_connection: {
+        type: "boolean",
+        description:
+          "Whether the caller may create a connection for this integration: holds `integrations:connect`, and either holds `integrations:configure` or the space does not block member connections.",
+      },
       candidates: {
         type: "array",
         items: {
@@ -1868,18 +1892,18 @@ export const schemas = {
   AgentConnectionReadiness: {
     type: "object",
     description:
-      "What stands between this agent and a run, in one call: the connection verdict (mirroring the run-kickoff 412, run semantics) plus the space's own activation switch. `integrations[]` carries every declared integration's management verdict for the Connexions tab.",
+      "What stands between this agent and a run, in one call: the connection verdict (mirroring the run-kickoff 409, run semantics) plus the space's own activation switch. `integrations[]` carries every declared integration's management verdict for the Connexions tab.",
     required: ["blocks_run", "errors", "integrations"],
     properties: {
       blocks_run: {
         type: "boolean",
         description:
-          "True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (412), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty.",
+          "True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (409), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty.",
       },
       errors: {
         type: "array",
         description:
-          'What blocks the run. The integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can\'t drift from the 412 error items.',
+          'What blocks the run. The integration portion of the 409 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can\'t drift from the 409 error items.',
         items: { $ref: "#/components/schemas/ResolutionFieldError" },
       },
       integrations: {
@@ -2000,10 +2024,10 @@ export const schemas = {
   },
   SpaceSweepResult: {
     type: "object",
-    required: ["object", "space_id", "rehomed_packages", "deleted_packages"],
+    required: ["object", "spaceId", "rehomed_packages", "deleted_packages"],
     properties: {
       object: { type: "string", enum: ["space_sweep"] },
-      space_id: { type: "string", description: "The personal space that was swept and deleted" },
+      spaceId: { type: "string", description: "The personal space that was swept and deleted" },
       rehomed_packages: {
         type: "integer",
         description:
@@ -2202,13 +2226,22 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["permission", "action", "api_key_grantable"],
+          required: ["permission", "action", "api_key_grantable", "requires_one_of"],
           properties: {
             permission: { type: "string" },
             action: { type: "string" },
             api_key_grantable: {
               type: "boolean",
               description: "Can also be carried by an API key.",
+            },
+            requires_one_of: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "The reads a role holding this permission must also hold, any one of them sufficing; " +
+                "the first is the canonical one to add. Usually the resource's own `read`, not always " +
+                "(`agents:run` needs a runs read). Empty when the permission needs none. " +
+                "The authority on the rule: a create or update breaking it is a 400.",
             },
           },
         },
@@ -2340,7 +2373,7 @@ export const schemas = {
       ],
       properties: {
         id: { type: "string", description: "Package id (`@scope/name`)." },
-        type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
+        type: { type: "string", enum: [...packageTypeValues] },
         source: {
           type: "string",
           description:
@@ -2410,19 +2443,19 @@ export const schemas = {
     oneOf: [
       {
         type: "object",
-        required: ["kind", "user_id"],
+        required: ["kind", "userId"],
         properties: {
           kind: { type: "string", enum: ["user"] },
-          user_id: { type: "string", description: "Organization member's user id." },
+          userId: { type: "string", description: "Organization member's user id." },
         },
         additionalProperties: false,
       },
       {
         type: "object",
-        required: ["kind", "space_id"],
+        required: ["kind", "spaceId"],
         properties: {
           kind: { type: "string", enum: ["space"] },
-          space_id: { type: "string", description: "Space id (`spc_…`) the caller can reach." },
+          spaceId: { type: "string", description: "Space id (`spc_…`) the caller can reach." },
         },
         additionalProperties: false,
       },
@@ -2435,8 +2468,8 @@ export const schemas = {
     required: ["kind", "name"],
     properties: {
       kind: { type: "string", enum: ["user", "space"] },
-      user_id: { type: "string", description: "Present when `kind` is `user`." },
-      space_id: { type: "string", description: "Present when `kind` is `space`." },
+      userId: { type: "string", description: "Present when `kind` is `user`." },
+      spaceId: { type: "string", description: "Present when `kind` is `space`." },
       name: {
         type: "string",
         description: "The member's display name, or the space's name.",
@@ -2447,7 +2480,7 @@ export const schemas = {
     type: "object",
     description:
       "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to activate; it is never an activation, and no execution path consults it.",
-    required: ["object", "target", "shared_by", "created_at"],
+    required: ["object", "target", "shared_by", "createdAt"],
     properties: {
       object: { type: "string", enum: ["package_share"] },
       target: { $ref: "#/components/schemas/ShareTargetView" },
@@ -2461,7 +2494,7 @@ export const schemas = {
           name: { type: "string" },
         },
       },
-      created_at: { type: "string", format: "date-time" },
+      createdAt: { type: "string", format: "date-time" },
     },
   },
   PackageHome: {
@@ -2479,7 +2512,7 @@ export const schemas = {
     ],
     properties: {
       id: { type: "string", description: "Package id (`@scope/name`)." },
-      type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
+      type: { type: "string", enum: [...packageTypeValues] },
       ...PACKAGE_HOME_PROPERTIES,
       read_space_ids: {
         type: "array",

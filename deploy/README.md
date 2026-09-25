@@ -25,7 +25,7 @@ Coolify's `docker_compose_domains` maps **these** service names to `app.appstrat
 
 ## Upgrading
 
-1. Set `APPSTRATE_VERSION` to the release tag **without the `v`** (`1.0.0-beta.60`, not `v1.0.0-beta.60`).
+1. Set `APPSTRATE_VERSION` to the release tag **without the `v`** (`1.0.0-beta.62`, not `v1.0.0-beta.62`).
 2. Redeploy.
 
 `appstrate-migrate` runs the platform's schema migrations before the application starts (`depends_on: service_completed_successfully`), and `@appstrate/module-ee` migrates its own `ee_*` tables at `init()`. A release that needs more than that says so in `CHANGELOG.md`, and the procedure lives in **`scripts/migration/README.md`** — read it before changing the version, not after.
@@ -44,9 +44,23 @@ Facts worth writing down, because each one is easy to break:
 
 - **Coolify injects every variable configured on the resource into every service**, whatever the `environment:` blocks in `docker-compose.yml` list. So those blocks are not production's contract — `.env.example` is, and the blocks are the contract for a **raw** `docker compose` run. That is who they are maintained for, and it is why a variable missing from them can go unnoticed here for months.
 
-- **A bare name in an `environment:` block is materialised as the empty string.** Coolify rewrites `- FOO` into `FOO: ''` in the compose it generates, so "unset, let the schema default apply" is a state that file cannot express. `verify:compose-defaults` (class 6) refuses one, and `env_file` is what delivers the operator's variables instead.
+- **A bare name in an `environment:` block is materialised as the empty string.** Coolify rewrites `- FOO` into `FOO: ''` in the compose it generates, so "unset, let the schema default apply" is a state that file cannot express. `verify:compose-defaults` (class 5) refuses one, and `env_file` is what delivers the operator's variables instead.
+
+- **`MODULES` is required, not defaulted.** `docker-compose.yml` reads it as `${MODULES:?}`: a raw `docker compose` refuses to start without it, and Coolify documents that form as flagging the variable and blocking the deploy until a value is entered. There is no fallback list, and the code default names no billing module. Set it on the resource with `@appstrate/module-ee` included; its Stripe keys are then required (`.env.example` lists them).
+
+- **Check what Coolify actually ran, not this file.** Coolify rewrites the compose before running it, so after a deploy read `/data/coolify/applications/<uuid>/docker-compose.yaml` on the server: `MODULES` must appear there with the resource's value, `@appstrate/module-ee` included.
 
 - **Coolify regenerates `.env` from the resource's own environment configuration on every deploy.** A value written into the file on the server is gone at the next one. Edit the variables in Coolify, never the file.
+
+- **`<uuid>_miniodata` must be owned by `65532:65532`.** `appstrate-minio` runs as that uid, and on root-owned files — a volume written by an image that ran as root, or restored as root — it crash-loops with `FATAL Unable to initialize backend: Unable to write to the backend` and the deploy never turns healthy. The compose has no override for it; re-own the volume. On the server: stop the application in Coolify, snapshot the volume, re-own it, deploy.
+
+  ```sh
+  docker volume create <uuid>_miniodata_backup
+  docker run --rm -v <uuid>_miniodata:/from:ro -v <uuid>_miniodata_backup:/to \
+    --user 0 --entrypoint cp cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 -a /from/. /to/
+  docker run --rm -v <uuid>_miniodata:/data --user 0 --entrypoint chown \
+    cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 -R 65532:65532 /data
+  ```
 
 - **`watch_paths` is set to this directory.** Without it, a push anywhere in the monorepo would redeploy production — and a deploy is not free: it re-pulls every image and restarts the whole stack. If you change `docker_compose_location`, change `watch_paths` in the same edit.
 

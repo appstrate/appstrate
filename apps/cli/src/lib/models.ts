@@ -11,56 +11,35 @@
  */
 
 import { LLM_PROXY_ROUTES } from "@appstrate/runner-pi";
-import type { ModelCost } from "@appstrate/core/module";
+import type { OrgModelInfo } from "@appstrate/shared-types";
 import { apiList } from "./api.ts";
 
-export interface ModelPreset {
-  id: string;
-  label: string;
-  /**
-   * Wire format / API shape the CLI must route through (selects the
-   * `/api/llm-proxy/<apiShape>/…` sub-route). Known values today:
-   * `openai-completions`, `anthropic-messages`, `openai-responses`,
-   * `google-generative-ai`, `google-vertex`, `azure-openai-responses`,
-   * `bedrock-converse-stream`.
-   */
-  apiShape: string;
-  enabled: boolean;
-  isDefault: boolean;
-  /**
-   * The preset's stored credential can no longer serve inference. Such a
-   * preset is LISTED by `GET /api/models` (so it can be reconnected or
-   * deleted) but resolving one would only fail later at the llm-proxy.
-   * Optional + `!== true` semantics: an instance older than this CLI does
-   * not send the field, and absent means live.
-   */
-  needs_reconnection?: boolean;
-  source: "built-in" | "custom";
-  /**
-   * Backing provider id. Absent for an ALIASED preset — the platform strips a
-   * model alias's binding before it reaches a non-loopback caller. When
-   * present it keeps Pi's provider detection working through the llm-proxy
-   * base URL (`derivePiProvider`).
-   */
-  providerId?: string | null;
-  contextWindow: number | null;
-  maxTokens: number | null;
-  reasoning: boolean | null;
-  input: string[] | null;
-  cost: ModelCost | null;
-  /**
-   * Anthropic-only: shape of the upstream credential. When `oauth`, the
-   * CLI hands pi-ai an `sk-ant-oat-…`-shaped placeholder so pi-ai's
-   * prefix-based OAuth detection fires locally and the body is reshaped
-   * BEFORE it reaches the proxy. Anthropic gates OAuth tokens to that
-   * body shape upstream, so the reshape has to happen client-side; the
-   * proxy only swaps the placeholder secret for the real OAuth bearer.
-   * null for non-Anthropic protocols and for Anthropic models whose
-   * creds aren't loadable (treat as api-key). OSS ships no Anthropic
-   * OAuth provider — this field stays as a contribution point for
-   * external operator-installed modules.
-   */
-  keyKind?: "oauth" | "api-key" | null;
+/**
+ * One row of `GET /api/models`, derived from the server's wire type so a renamed
+ * field fails to compile. An aliased preset arrives with its backing nulled.
+ */
+export type ModelPreset = Pick<
+  OrgModelInfo,
+  | "id"
+  | "label"
+  | "apiShape"
+  | "enabled"
+  | "is_default"
+  | "needs_reconnection"
+  | "source"
+  | "providerId"
+  | "pi_provider"
+  | "modelId"
+  | "contextWindow"
+  | "maxTokens"
+  | "reasoning"
+  | "input"
+  | "cost"
+>;
+
+/** Whether `/api/llm-proxy/*` routes this preset's protocol (never an alias's nulled one). */
+export function isProxySupported(apiShape: string | null): apiShape is string {
+  return apiShape !== null && PROXY_SUPPORTED_APIS.has(apiShape);
 }
 
 export async function listModelPresets(profileName: string): Promise<ModelPreset[]> {
@@ -70,11 +49,11 @@ export async function listModelPresets(profileName: string): Promise<ModelPreset
 /**
  * Protocol families the **CLI** can route through `/api/llm-proxy/*`.
  *
- * Three families wired today: `openai-completions`, `anthropic-messages`,
- * and `mistral-conversations`. Despite its name, `mistral-conversations`
+ * Families wired today: `openai-completions`, `openai-responses`,
+ * `anthropic-messages` and `mistral-conversations`. Despite its name, `mistral-conversations`
  * (from pi-ai's registry) targets Mistral's OpenAI-compatible
  * `/v1/chat/completions` endpoint — NOT the Beta `/v1/conversations`
- * agentic API. Auth is `Authorization: Bearer` for OpenAI and Mistral.
+ * agentic API. Auth is `Authorization: Bearer` for both OpenAI shapes and Mistral.
  *
  * Derived from `LLM_PROXY_ROUTES` rather than restated. This paragraph used to
  * argue the opposite — "NOT a shared constant, and deliberately so", the set

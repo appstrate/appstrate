@@ -19,17 +19,18 @@ import type { Finding } from "./types.ts";
 import { AUTH_PROBES } from "./probes.ts";
 import { resolveAccessToken } from "./creds.ts";
 import { ssrfGuardedFetch } from "./ssrf-fetch.ts";
+import { resolveAfpsHttpDelivery, type AfpsHttpDelivery } from "@appstrate/connect/afps-delivery";
 
 const CHECK = "auth-live";
 
-interface DeliveryHttp {
-  in?: string;
-  name?: string;
-  prefix?: string;
+interface ManifestAuth {
+  type?: string;
+  credentials?: { schema?: { properties?: Record<string, unknown>; required?: unknown } };
+  delivery?: { http?: AfpsHttpDelivery };
 }
 
 /** First auth key declared by the manifest (probe default). */
-function firstAuthKey(manifest: Record<string, unknown>): string | undefined {
+export function firstAuthKey(manifest: Record<string, unknown>): string | undefined {
   const auths = manifest.auths;
   if (auths && typeof auths === "object") {
     const keys = Object.keys(auths);
@@ -38,63 +39,67 @@ function firstAuthKey(manifest: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-function deliveryHttp(
+function manifestAuth(
   manifest: Record<string, unknown>,
   authKey: string,
-): DeliveryHttp | undefined {
-  const auths = manifest.auths as Record<string, unknown> | undefined;
-  const auth = auths?.[authKey];
-  if (auth && typeof auth === "object") {
-    const delivery = (auth as { delivery?: unknown }).delivery;
-    if (delivery && typeof delivery === "object") {
-      const http = (delivery as { http?: unknown }).http;
-      if (http && typeof http === "object") return http as DeliveryHttp;
-    }
-  }
-  return undefined;
+): ManifestAuth | undefined {
+  const auth = (manifest.auths as Record<string, unknown> | undefined)?.[authKey];
+  return auth && typeof auth === "object" ? (auth as ManifestAuth) : undefined;
 }
 
 /**
- * Apply the manifest's auth delivery to a probe request. Header delivery sets
- * `<name>: <prefix><token>`; query delivery appends `<name>=<token>`. Falls
- * back to a Bearer Authorization header when no delivery is declared.
+ * Fields a credential for this auth carries: the ones its `credentials.schema`
+ * declares, plus the implicit field of its type (`access_token` for oauth2,
+ * `api_key` for api_key — AFPS §4.1.3).
+ */
+function credentialFieldNames(auth: ManifestAuth): string[] {
+  const declared = Object.keys(auth.credentials?.schema?.properties ?? {});
+  const implicit =
+    auth.type === "oauth2" ? ["access_token"] : auth.type === "api_key" ? ["api_key"] : [];
+  return [...new Set([...declared, ...implicit])];
+}
+
+/** Credential fields the auth REQUIRES — more than one cannot come from a single secret. */
+export function requiredCredentialFields(
+  manifest: Record<string, unknown>,
+  authKey: string,
+): string[] {
+  const required = manifestAuth(manifest, authKey)?.credentials?.schema?.required;
+  return Array.isArray(required) ? required.filter((f): f is string => typeof f === "string") : [];
+}
+
+/**
+ * Apply the manifest's auth delivery to a probe request, with every credential
+ * field set to `secret`. Rendered by the runtime's own resolver
+ * (`resolveAfpsHttpDelivery`), so the probe sends the byte-for-byte header a
+ * real run sends: the declared prefix concatenated verbatim (AFPS §7.6), the
+ * per-auth-type default when none is declared (`""` for api_key, never a
+ * "Bearer " no run sends), and templated values such as Basic
+ * `{$credential.account_sid}:{$credential.auth_token}` base64-encoded.
+ *
+ * Returns `null` when the auth delivers no HTTP header (a `custom` auth, an
+ * env-only delivery) — there is nothing a probe could send.
  */
 export function applyAuth(
   url: string,
   manifest: Record<string, unknown>,
-  token: string,
+  secret: string,
   authKey: string,
-): { url: string; headers: Record<string, string> } {
-  const http = deliveryHttp(manifest, authKey);
-  const headers: Record<string, string> = { Accept: "application/json", "User-Agent": "Appstrate" };
-
-  if (http?.in === "query" && http.name) {
-    const u = new URL(url);
-    u.searchParams.set(http.name, token);
-    return { url: u.toString(), headers };
-  }
-
-  const name = http?.name ?? "Authorization";
-  // AFPS §7.6: `prefix` is a LITERAL, concatenated verbatim — an auth scheme
-  // carries its own separator ("Bearer "), a vendor composite carries none
-  // ("Token token="). Same concatenation as the runtime injector
-  // (`planHttpDeliveryInjection`), so for a manifest that declares a prefix the
-  // probe sends the byte-for-byte header a real run would; a bare scheme is
-  // refused at install time by `integrationManifestSchema`. Normalising here
-  // instead would re-diverge the probe from the runtime, and did: it inserted
-  // a space into "Token token=" that no run ever sends.
-  //
-  // The `?? "Bearer "` fallback is the PROBE's own and is NOT the runtime's
-  // per-auth-type default table (which yields "" for api_key). No probe reaches
-  // it today — all four manifests in `AUTH_PROBES` declare their prefix — so
-  // that divergence is unreachable, not resolved. Route this through
-  // `resolveHttpDelivery` before probing an integration whose `delivery.http`
-  // declares no prefix: five shipped api_key ones (activecampaign, brevo,
-  // fathom, shopify, shortcut) are that shape, and this line would send them a
-  // "Bearer " no run sends.
-  const prefix = http?.prefix ?? "Bearer ";
-  headers[name] = `${prefix}${token}`;
-  return { url, headers };
+): { url: string; headers: Record<string, string>; credentialHeader: string } | null {
+  const auth = manifestAuth(manifest, authKey);
+  if (!auth?.type) return null;
+  const fields = Object.fromEntries(credentialFieldNames(auth).map((f) => [f, secret]));
+  const plan = resolveAfpsHttpDelivery(auth.type, fields, auth.delivery?.http);
+  if (!plan || plan.value.length === 0) return null;
+  return {
+    url,
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "Appstrate",
+      [plan.headerName]: `${plan.headerPrefix}${plan.value}`,
+    },
+    credentialHeader: plan.headerName,
+  };
 }
 
 export async function checkAuthLiveness(
@@ -151,7 +156,29 @@ export async function checkAuthLiveness(
     ];
   }
 
-  const { url, headers } = applyAuth(probe.url, entry.manifest, token, authKey);
+  const required = requiredCredentialFields(entry.manifest, authKey);
+  if (required.length > 1) {
+    return [
+      {
+        packageId: entry.packageId,
+        check: CHECK,
+        severity: "warn",
+        message: `auth '${authKey}' needs several credential fields (${required.join(", ")}); a CONFORMANCE_TOKENS entry carries one secret — skipped`,
+      },
+    ];
+  }
+  const request = applyAuth(probe.url, entry.manifest, token, authKey);
+  if (!request) {
+    return [
+      {
+        packageId: entry.packageId,
+        check: CHECK,
+        severity: "fail",
+        message: `auth '${authKey}' declares no HTTP credential delivery — a probe cannot deliver the credential`,
+      },
+    ];
+  }
+  const { url, headers } = request;
   const fetchImpl = opts.fetchImpl ?? ssrfGuardedFetch;
 
   try {

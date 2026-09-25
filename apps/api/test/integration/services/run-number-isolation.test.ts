@@ -54,6 +54,8 @@ describe("nextRunNumber isolation per space", () => {
         packageId: agentId,
         actor,
         input: null,
+        modelId: null,
+        inferenceRoute: null,
       },
     );
     await createRun(
@@ -63,6 +65,8 @@ describe("nextRunNumber isolation per space", () => {
         packageId: agentId,
         actor,
         input: null,
+        modelId: null,
+        inferenceRoute: null,
       },
     );
 
@@ -91,30 +95,40 @@ describe("nextRunNumber isolation per space", () => {
       packageId: agentId,
       actor,
       input: null,
+      modelId: null,
+      inferenceRoute: null,
     });
     await createRun(spaceAScope, {
       id: "run_aaaa000000000002",
       packageId: agentId,
       actor,
       input: null,
+      modelId: null,
+      inferenceRoute: null,
     });
     await createRun(spaceBScope, {
       id: "run_bbbb000000000001",
       packageId: agentId,
       actor,
       input: null,
+      modelId: null,
+      inferenceRoute: null,
     });
     await createRun(spaceAScope, {
       id: "run_aaaa000000000003",
       packageId: agentId,
       actor,
       input: null,
+      modelId: null,
+      inferenceRoute: null,
     });
     await createRun(spaceBScope, {
       id: "run_bbbb000000000002",
       packageId: agentId,
       actor,
       input: null,
+      modelId: null,
+      inferenceRoute: null,
     });
 
     const spaceARuns = await db

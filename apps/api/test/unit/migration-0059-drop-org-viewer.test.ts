@@ -39,6 +39,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { replayJournal } from "../helpers/journal.ts";
 import { ORG_ROLES } from "@appstrate/core/permissions";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
@@ -59,27 +60,6 @@ const VIEWER = "usr_0059_viewer";
 const MEMBER = "usr_0059_member";
 
 const pg = new PGlite();
-
-/**
- * Replay the journal up to and including `lastTag`, the way the Tier 0 runner
- * does (`apps/api/src/lib/pglite-migrate.ts`): whole file, breakpoints
- * stripped, one transaction each. Throws rather than stopping silently if the
- * tag is absent, so a renamed migration fails this file instead of quietly
- * shortening the replay.
- */
-async function replayThrough(pg: PGlite, lastTag: string): Promise<void> {
-  const journal = (await Bun.file(`${MIGRATIONS_DIR}/meta/_journal.json`).json()) as {
-    entries: { idx: number; tag: string }[];
-  };
-  for (const entry of journal.entries) {
-    const source = await Bun.file(`${MIGRATIONS_DIR}/${entry.tag}.sql`).text();
-    await pg.transaction(async (tx) => {
-      await tx.exec(source.replaceAll("--> statement-breakpoint", ""));
-    });
-    if (entry.tag === lastTag) return;
-  }
-  throw new Error(`journal has no entry tagged ${lastTag}`);
-}
 
 /**
  * Apply `0059` the way the runner does. The transaction is not decoration: the
@@ -198,7 +178,7 @@ async function seedRollout(pg: PGlite): Promise<void> {
 }
 
 beforeAll(async () => {
-  await replayThrough(pg, REPLAY_THROUGH);
+  await replayJournal(pg, REPLAY_THROUGH);
   await seedRollout(pg);
   // A journal replay is the expensive part of every test in this directory, and
   // it runs past the 15s default in `bunfig.toml`. An abandoned `beforeAll`

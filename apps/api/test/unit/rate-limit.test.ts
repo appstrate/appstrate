@@ -16,6 +16,7 @@ import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import { resetClientIpCache } from "../../src/lib/client-ip.ts";
 import { flushRedis } from "../helpers/redis.ts";
+import { signRunToken } from "../../src/lib/run-token.ts";
 
 // `rateLimitByIp` derives the key from `getClientIp(c)` which honors
 // `X-Forwarded-For` / `X-Real-IP` only when `TRUST_PROXY > 0`. Hono's
@@ -102,6 +103,8 @@ describe("rateLimit (authenticated)", () => {
     const body = (await res.json()) as any;
     expect(body.code).toBe("rate_limited");
     expect(body.detail).toContain("Too many requests");
+    expect(body.retry_after).toBe(Number(res.headers.get("Retry-After")));
+    expect(body).not.toHaveProperty("retryAfter");
   });
 
   it("returns IETF headers and Retry-After on 429", async () => {
@@ -300,14 +303,28 @@ describe("rateLimitByBearer", () => {
     app.get("/internal", (c) => c.json({ ok: true }));
 
     const res1 = await app.request("/internal", {
-      headers: { Authorization: "Bearer run_111.hmac1" },
+      headers: { Authorization: `Bearer ${signRunToken("run_111")}` },
     });
     expect(res1.status).toBe(200);
 
     const res2 = await app.request("/internal", {
-      headers: { Authorization: "Bearer run_222.hmac2" },
+      headers: { Authorization: `Bearer ${signRunToken("run_222")}` },
     });
     expect(res2.status).toBe(200);
+  });
+
+  it("keys on the VERIFIED run id — forged tokens cannot spend a real run's budget", async () => {
+    const app = createApp();
+    app.use("/internal", rateLimitByBearer(2));
+    app.get("/internal", (c) => c.json({ ok: true }));
+
+    for (let i = 0; i < 3; i++) {
+      await app.request("/internal", { headers: { Authorization: "Bearer run_victim.forged" } });
+    }
+    const real = await app.request("/internal", {
+      headers: { Authorization: `Bearer ${signRunToken("run_victim")}` },
+    });
+    expect(real.status).toBe(200);
   });
 
   it("keys a lowercase `bearer` scheme the same as `Bearer` (RFC 9110 §11.4)", async () => {
@@ -316,14 +333,14 @@ describe("rateLimitByBearer", () => {
     app.get("/internal", (c) => c.json({ ok: true }));
 
     const first = await app.request("/internal", {
-      headers: { Authorization: "Bearer run_333.hmac" },
+      headers: { Authorization: `Bearer ${signRunToken("run_333")}` },
     });
     expect(first.status).toBe(200);
 
     // Same token, non-canonical scheme — must land in the SAME bucket,
     // not a fresh `unknown` one that would hand out extra budget.
     const second = await app.request("/internal", {
-      headers: { Authorization: "bearer run_333.hmac" },
+      headers: { Authorization: `bearer ${signRunToken("run_333")}` },
     });
     expect(second.status).toBe(429);
   });

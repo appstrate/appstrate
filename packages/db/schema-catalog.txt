@@ -40,13 +40,13 @@ column audit_events.user_agent text
 column chat_messages.content jsonb not null
 column chat_messages.created_at timestamp with time zone not null default now()
 column chat_messages.message_id text not null
-column chat_messages.seq integer not null default nextval('chat_messages_seq_seq'::regclass)
+column chat_messages.seq bigint not null default nextval('chat_messages_seq_seq'::regclass)
 column chat_messages.session_id text not null
 column chat_sessions.active_stream_id text
 column chat_sessions.created_at timestamp with time zone not null default now()
 column chat_sessions.id text not null
-column chat_sessions.last_assistant_seq integer
-column chat_sessions.last_read_seq integer
+column chat_sessions.last_assistant_seq bigint
+column chat_sessions.last_read_seq bigint
 column chat_sessions.org_id uuid not null
 column chat_sessions.pinned_skills text[] not null default '{}'::text[]
 column chat_sessions.skill_catalogue boolean not null default true
@@ -174,7 +174,7 @@ column llm_usage.cost_usd double precision not null default 0
 column llm_usage.created_at timestamp with time zone not null default now()
 column llm_usage.credential_source credential_source
 column llm_usage.duration_ms integer
-column llm_usage.id integer not null default nextval('llm_usage_id_seq'::regclass)
+column llm_usage.id bigint not null default nextval('llm_usage_id_seq'::regclass)
 column llm_usage.input_tokens integer not null default 0
 column llm_usage.model text
 column llm_usage.org_id uuid not null
@@ -185,7 +185,6 @@ column llm_usage.request_id text
 column llm_usage.run_id text
 column llm_usage.source llm_usage_source not null
 column llm_usage.user_id text
-column model_provider_credentials.available_model_ids jsonb
 column model_provider_credentials.base_url_override text
 column model_provider_credentials.created_at timestamp with time zone not null default now()
 column model_provider_credentials.created_by text
@@ -461,7 +460,7 @@ column profiles.updated_at timestamp with time zone not null default now()
 column run_logs.created_at timestamp with time zone not null default now()
 column run_logs.data jsonb
 column run_logs.event text
-column run_logs.id integer not null default nextval('run_logs_id_seq'::regclass)
+column run_logs.id bigint not null default nextval('run_logs_id_seq'::regclass)
 column run_logs.level text not null default 'debug'::text
 column run_logs.message text
 column run_logs.org_id uuid not null
@@ -486,12 +485,14 @@ column runs.error text
 column runs.generation_config jsonb
 column runs.generation_config_override jsonb
 column runs.id text not null
+column runs.inference_route inference_route
 column runs.input jsonb
 column runs.last_event_sequence integer not null default 0
 column runs.last_heartbeat_at timestamp with time zone not null default now()
 column runs.metadata jsonb
 column runs.model_cost jsonb
 column runs.model_credential_id uuid
+column runs.model_id text
 column runs.model_label text
 column runs.model_source text
 column runs.org_id uuid not null
@@ -833,6 +834,7 @@ constraint runs runs_open_sink_has_secret CHECK (((sink_expires_at IS NULL) OR (
 constraint runs runs_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint runs runs_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE SET NULL
 constraint runs runs_pkey PRIMARY KEY (id)
+constraint runs runs_proxy_route_has_model CHECK (((inference_route <> 'proxy'::inference_route) OR (model_id IS NOT NULL)))
 constraint runs runs_schedule_id_package_schedules_id_fk FOREIGN KEY (schedule_id) REFERENCES package_schedules(id) ON DELETE SET NULL
 constraint runs runs_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint runs runs_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE SET NULL
@@ -890,6 +892,7 @@ constraint webhooks webhooks_pkey PRIMARY KEY (id)
 constraint webhooks webhooks_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 enum credential_source system,org
 enum file_purpose user_upload,agent_output
+enum inference_route proxy,sidecar
 enum invitation_status pending,accepted,expired,cancelled
 enum llm_usage_source proxy,runner
 enum org_role owner,admin,member,guest
@@ -1009,7 +1012,7 @@ index CREATE INDEX idx_uploads_end_user ON public.uploads USING btree (end_user_
 index CREATE INDEX idx_uploads_expires_unconsumed ON public.uploads USING btree (expires_at) WHERE (consumed_at IS NULL)
 index CREATE INDEX idx_uploads_org ON public.uploads USING btree (org_id)
 index CREATE INDEX idx_uploads_space ON public.uploads USING btree (space_id)
-index CREATE INDEX idx_webhook_deliveries_webhook_id ON public.webhook_deliveries USING btree (webhook_id)
+index CREATE INDEX idx_webhook_deliveries_webhook_created ON public.webhook_deliveries USING btree (webhook_id, created_at, id)
 index CREATE INDEX idx_webhooks_org_id ON public.webhooks USING btree (org_id)
 index CREATE INDEX idx_webhooks_space_enabled ON public.webhooks USING btree (space_id, enabled)
 index CREATE INDEX pkp_lookup ON public.package_persistence USING btree (package_id, space_id, actor_type, actor_id, key, pinned)

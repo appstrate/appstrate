@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { packageTypeValues } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { SPACE_ROLE_ID_PATTERN } from "../schemas.ts";
@@ -385,7 +386,7 @@ export const spacesPaths = {
           name: "type",
           in: "query",
           required: false,
-          schema: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
+          schema: { type: "string", enum: [...packageTypeValues] },
           description: "Filter by package type",
         },
       ],
@@ -495,7 +496,7 @@ export const spacesPaths = {
                 status: 422,
                 detail: "MCP-server package '@myorg/tools' has no activatable published version.",
                 code: "bundle_invalid",
-                requestId: "req_abc123",
+                request_id: "req_abc123",
               },
             },
           },
@@ -531,12 +532,12 @@ export const spacesPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
-    put: {
+    patch: {
       operationId: "updateSpacePackage",
       tags: ["Space Packages"],
       summary: "Configure how this space runs a placed package",
       description:
-        "Update the model/proxy overrides and generation settings of a package PLACED in this space. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. " +
+        "Update the model/proxy overrides and generation settings of a package PLACED in this space. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. " +
         "There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{spaceId}/packages` and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`, where the placement rule and the offer that may have to be created with it are stated once. Sending it is a `400`. " +
         "There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
       parameters: [
@@ -551,7 +552,7 @@ export const spacesPaths = {
             schema: {
               type: "object",
               properties: {
-                generationConfig: {
+                generation_config: {
                   oneOf: [
                     { $ref: "#/components/schemas/ModelGenerationSettings" },
                     { type: "null" },
@@ -646,7 +647,7 @@ export const spacesPaths = {
                 },
               },
               example: {
-                generation: { temperature: 0.2, reasoningLevel: "high" },
+                generation: { temperature: 0.2, reasoning_level: "high" },
                 modelId: "claude-sonnet-4-6",
                 proxyId: null,
                 input: { values: { dry_run: true }, locked_fields: ["dry_run"] },

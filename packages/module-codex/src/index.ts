@@ -22,9 +22,8 @@
  * discover models: validation is the local JWT decode below (inferred from the
  * presence of the `validateCredential` hook), and model discovery neither
  * probes nor persists — `modelDiscovery: { mode: "static" }` makes the served
- * set a pure function of (definition, vendored catalog), so the platform
- * resolves `modelDiscoveryCandidates` (∩ catalog) on every read rather than
- * copying it onto the credential row. The user's subscription token is only ever spent via the
+ * set the provider's offer (Pi's `openai-codex` records), resolved on every
+ * read. The user's subscription token is only ever spent via the
  * sidecar's verbatim bearer swap at run time — agent runs execute on the
  * single Pi engine, whose pi-ai SDK emits the codex-responses request
  * shape natively. See
@@ -171,10 +170,10 @@ const codexHooks: ModelProviderHooks = {
  * https://learn.chatgpt.com/docs/models (Codex with ChatGPT sign-in).
  *
  * Hand-written because no feed carries plan tiers: `docs/architecture/
- * SUBSCRIPTION_COMPLIANCE.md` forbids enumerating a subscription, and neither
- * the OpenAI pricing catalog nor the `chatgpt` snapshot has the field.
+ * SUBSCRIPTION_COMPLIANCE.md` forbids enumerating a subscription, and Pi's
+ * registry has no such field.
  *
- * They stay in `modelDiscoveryCandidates` (a deliberate pick by someone who
+ * They stay offered (a deliberate pick by someone who
  * knows their plan) and out of `featuredModels`, which the platform auto-seeds
  * into `org_models` on first connection and defaults the org to.
  */
@@ -206,63 +205,14 @@ const codexProvider: ModelProviderDefinition = {
     authorizationUrl: "https://auth.openai.com/oauth/authorize",
     tokenUrl: "https://auth.openai.com/oauth/token",
     refreshUrl: "https://auth.openai.com/oauth/token",
-    scopes: ["openid", "profile", "email"],
+    // Must match pi-ai's /authorize scopes (pinned by the pi-ai-oauth-parity test).
+    scopes: ["openid", "profile", "email", "offline_access"],
     pkce: "S256",
   },
-  // ChatGPT Codex tokens authenticate against the OpenAI catalog —
-  // metadata (cost, context, capabilities) flows through openai.json.
-  // The subscription backend serves a restricted, moving set of models
-  // (no `/models` endpoint to discover it), so this curated list stays
-  // the source of truth. The weekly pricing-refresh CI diffs LiteLLM's
-  // `chatgpt` provider snapshot
-  // (`apps/api/src/data/subscription-watch/chatgpt.json`) — review this
-  // list when that snapshot drifts.
-  catalogProviderId: "openai",
-  // The ChatGPT Codex responses backend rejects `temperature` even though the
-  // underlying OpenAI API catalog advertises it for the same model ids.
-  generationOverride: { temperature: "unsupported" },
-  // Explicit arrays, NOT a catalog selector (unlike `claude-code`, which
-  // derives from the vendored anthropic catalog). The ChatGPT sign-in set is
-  // defined by OpenAI's documentation and does not track the OpenAI API
-  // catalog: openai.json carries API-only models (`gpt-5.4-nano`,
-  // `gpt-5-search-api`, the `-chat-latest` aliases…) that a Codex
-  // subscription never serves, so deriving from it would over-list by a wide
-  // margin. Reviewed against
-  // https://learn.chatgpt.com/docs/models (Codex with ChatGPT sign-in).
-  //
-  // That review is not trust-based: `apps/api/test/unit/services/
-  // curated-model-drift.test.ts` fails CI when the vendored openai catalog
-  // gains an id newer than this list. A catalog id the subscription does NOT
-  // serve is recorded — after checking the doc above — in
-  // `apps/api/src/data/subscription-watch/reviewed.json`, never just dropped.
-  //
-  // Recommended set, newest first; excludes PRO_PLAN_MODEL_IDS (see above),
-  // enforced by test/unit/discovery-candidates.test.ts.
+  // The ChatGPT Codex backend's models, narrower than the OpenAI API's.
+  catalogProviderId: "openai-codex",
+  // Recommended set, newest first (https://learn.chatgpt.com/docs/models).
   featuredModels: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
-  // OFFLINE validation: the platform issues ZERO Codex API calls to test
-  // a credential or discover models. The connection test runs the
-  // `validateCredential` hook below (local JWT decode) — its mere presence is
-  // what tells the platform to validate offline. Static discovery resolves the
-  // candidates below (∩ catalog) at read time and probes nothing. Real
-  // availability is checked at the first agent run (on the Pi engine).
-  // Served as-is (∩ catalog) — what THIS account's plan actually serves is
-  // discovered by the user at first run, not by the platform. Superset of
-  // `featuredModels`: the documented "recommended" set in doc order
-  // (PRO_PLAN_MODEL_IDS included — see above), then the "other available"
-  // models — which is why the tail is not strictly newest-first. `gpt-5.2` and
-  // `gpt-5.3-codex` are deprecated for ChatGPT sign-in and dropped from both.
-  modelDiscoveryCandidates: [
-    "gpt-6-astra",
-    "gpt-5.6-sol",
-    "gpt-5.6-terra",
-    "gpt-5.6-luna",
-    "gpt-5.5",
-    "gpt-5.3-codex-spark",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-  ],
-  // Static discovery: resolve the candidates above (∩ catalog) on read, never
-  // probe and never persist.
   modelDiscovery: { mode: "static" },
   hooks: codexHooks,
   // The chatgpt.com Codex backend rejects requests without a

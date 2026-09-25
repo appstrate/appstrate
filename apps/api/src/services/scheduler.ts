@@ -7,7 +7,7 @@ import { and, eq, asc, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { schedules, endUsers, runs, notifications } from "@appstrate/db/schema";
-import { activeRunStatusValues } from "@appstrate/db/run-status";
+import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { loadSpaceAccess } from "../lib/space-lookup.ts";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
@@ -558,8 +558,9 @@ export async function triggerScheduledRun(
     // Same resolver as a manual run: the schedule's own `version_override`, or
     // the latest published version when it has none. No authority check — the
     // principal who created the schedule proved it then (`routes/schedules.ts`),
-    // and this path has no Hono context to re-ask with. A missing version
-    // produces a visible failed run.
+    // and this path has no Hono context to re-ask with. Every resolution failure
+    // (missing version, unreadable archive, storage outage) produces a visible
+    // failed run.
     let agent: LoadedPackage;
     let overrideVersionLabel: string | undefined;
     try {
@@ -577,7 +578,14 @@ export async function triggerScheduledRun(
         await failSchedule(err.message);
         return;
       }
-      throw err;
+      // Storage/SDK/programming error text stays in the log: the run row is user-visible.
+      logger.error("Schedule version resolution threw, recording a failed run", {
+        scheduleId,
+        packageId,
+        error: getErrorMessage(err),
+      });
+      await failSchedule("The scheduled version could not be loaded (internal error)");
+      return;
     }
 
     // Per-space settings: editor defaults + locked fields for the input
@@ -1124,7 +1132,7 @@ export async function updateSchedule(
  * Refusing the lock write instead would block a legitimate admin action.
  *
  * The whole lock set is applied, not just the keys added by this write: it is
- * idempotent on a consistent row (`PUT /api/schedules/:id` already refuses a
+ * idempotent on a consistent row (`PATCH /api/schedules/:id` already refuses a
  * locked field, so a compliant schedule names none) and it repairs any drift.
  *
  * Rewrites go through {@link updateSchedule} rather than a raw UPDATE so the

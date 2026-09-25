@@ -2,18 +2,21 @@
 
 /**
  * What a credential's provider serves: guarded `GET <baseUrl>/models` requests
- * (`fetchModelListing`, the credential test's transport), parsed per
- * `apiShape`. Per-entry capability fields some servers publish (vLLM
- * `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` /
- * `architecture` / `supported_parameters`, LM Studio `max_context_length`)
- * are read from the entry in hand as hints.
+ * (`fetchModelListing`, the credential test's transport), parsed from the
+ * `{ data: [{ id }] }` body every supported shape answers. Per-entry capability
+ * fields some servers publish (vLLM `max_model_len`, Mistral `capabilities`,
+ * OpenRouter `context_length` / `architecture` / `supported_parameters`, LM
+ * Studio `max_context_length`) are read from the entry in hand as hints.
  *
  * A listing that declares a next page is followed to its end, under a page cap,
  * a model cap and a per-page byte budget; a result cut by any of them is
  * returned `truncated` rather than as a complete listing.
  */
 
-import { fetchModelListing } from "../org-models.ts";
+import { MODEL_INPUT_MODALITIES, type ModelInputModality } from "@appstrate/core/module";
+import type { TestResult } from "@appstrate/shared-types";
+import { fetchModelListing, statusFailure, validateKeyByInference } from "../org-models.ts";
+import { getModelProvider } from "./registry.ts";
 import { logger } from "../../lib/logger.ts";
 
 /** Upper bound on models taken from a listing, across all of its pages. */
@@ -29,9 +32,6 @@ const MAX_LISTING_PAGES = 10;
  */
 const MAX_LISTING_BODY_BYTES = 4 * 1024 * 1024;
 
-/** Input modalities a listing entry or a catalog entry can advertise, in canonical order. */
-export const INPUT_MODALITIES = ["text", "image"] as const;
-
 /** Context-window fields, in the order the first positive integer wins. */
 const CONTEXT_WINDOW_FIELDS = ["max_model_len", "context_length", "max_context_length"] as const;
 
@@ -39,7 +39,7 @@ const CONTEXT_WINDOW_FIELDS = ["max_model_len", "context_length", "max_context_l
 export interface ServedModelHints {
   contextWindow?: number;
   maxTokens?: number;
-  input?: ("text" | "image")[];
+  input?: ModelInputModality[];
   reasoning?: boolean;
 }
 
@@ -68,60 +68,17 @@ interface PageQuery {
 }
 
 /**
- * How a `/models` response body is laid out, per `apiShape`: where the ids sit,
- * and how it points at its next page.
+ * What a listing body says about a next page, on the OpenAI/Anthropic cursor
+ * (`has_more` + `last_id`, spent as `?after_id=`). `more` without a `query` is
+ * an endpoint that declares more and gives nothing to ask with: unfollowable,
+ * and therefore truncated rather than complete.
  */
-function listingShape(apiShape: string): {
-  key: "data" | "models";
-  field: "id" | "name";
-  prefix: string;
-  /** Field whose `true` declares a next page; `null` when the cursor's presence is the signal. */
-  moreFlag: string | null;
-  /** Field carrying the cursor, and the query parameter that spends it. */
-  cursorField: string;
-  cursorParam: string;
-} {
-  // Google enumerates `{ models: [{ name: "models/<id>" }] }` and pages with
-  // `nextPageToken` / `?pageToken=`; every other shape answers
-  // `{ data: [{ id: "<id>" }] }` and pages on the OpenAI/Anthropic cursor
-  // (`has_more` + `last_id`, spent as `?after_id=`).
-  return apiShape === "google-generative-ai" || apiShape === "google-vertex"
-    ? {
-        key: "models",
-        field: "name",
-        prefix: "models/",
-        moreFlag: null,
-        cursorField: "nextPageToken",
-        cursorParam: "pageToken",
-      }
-    : {
-        key: "data",
-        field: "id",
-        prefix: "",
-        moreFlag: "has_more",
-        cursorField: "last_id",
-        cursorParam: "after_id",
-      };
-}
-
-/**
- * What a listing body says about a next page. `more` without a `query` is an
- * endpoint that declares more and gives nothing to ask with: unfollowable, and
- * therefore truncated rather than complete.
- */
-function nextPage(apiShape: string, body: unknown): { more: boolean; query: PageQuery | null } {
-  const { moreFlag, cursorField, cursorParam } = listingShape(apiShape);
+function nextPage(body: unknown): { more: boolean; query: PageQuery | null } {
   const container = readRecord(body);
-  if (container === null) return { more: false, query: null };
-  const cursor = container[cursorField];
+  if (container?.has_more !== true) return { more: false, query: null };
+  const cursor = container.last_id;
   const usable = typeof cursor === "string" && cursor.length > 0;
-  if (moreFlag === null) {
-    return usable
-      ? { more: true, query: { name: cursorParam, value: cursor } }
-      : { more: false, query: null };
-  }
-  if (container[moreFlag] !== true) return { more: false, query: null };
-  return { more: true, query: usable ? { name: cursorParam, value: cursor } : null };
+  return { more: true, query: usable ? { name: "after_id", value: cursor } : null };
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
@@ -162,7 +119,7 @@ function sniffHints(entry: Record<string, unknown>): ServedModelHints {
   const capabilities = readRecord(entry.capabilities);
   const modalities = readStringArray(readRecord(entry.architecture)?.input_modalities);
   if (modalities !== null) {
-    const input = INPUT_MODALITIES.filter((m) => modalities.includes(m));
+    const input = MODEL_INPUT_MODALITIES.filter((m) => modalities.includes(m));
     if (input.length > 0) hints.input = input;
   } else {
     const vision = readBoolean(capabilities?.vision);
@@ -192,11 +149,10 @@ export interface ParsedServedModels {
  * worth; `listServedModels` holds the same cap across a paginated listing and
  * carries `capped` into its own `truncated` verdict.
  */
-export function parseServedModels(apiShape: string, body: unknown): ParsedServedModels | null {
-  const { key, field, prefix } = listingShape(apiShape);
+export function parseServedModels(body: unknown): ParsedServedModels | null {
   const container = readRecord(body);
   if (container === null) return null;
-  const entries = container[key];
+  const entries = container.data;
   if (!Array.isArray(entries)) return null;
 
   const models: ServedModel[] = [];
@@ -205,10 +161,8 @@ export function parseServedModels(apiShape: string, body: unknown): ParsedServed
   for (const entry of entries) {
     const record = readRecord(entry);
     if (record === null) continue;
-    const raw = record[field];
-    if (typeof raw !== "string") continue;
-    const id = prefix && raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
-    if (id.length === 0 || seen.has(id)) continue;
+    const id = record.id;
+    if (typeof id !== "string" || id.length === 0 || seen.has(id)) continue;
     if (models.length === MAX_SERVED_MODELS) {
       capped = true;
       break;
@@ -223,13 +177,29 @@ interface ListingConfig {
   apiShape: string;
   baseUrl: string;
   apiKey: string;
-  providerId?: string;
+  providerId: string;
 }
 
+type ListingFailure = Extract<ListServedModelsResult, { ok: false }>;
+
 /** One page of a listing: its parsed body, or the verdict that stopped it. */
-type ListingPageResult =
-  | { ok: true; body: unknown; status: number }
-  | { ok: false; error: ListServedModelsError; status?: number; message: string };
+type ListingPageResult = { ok: true; body: unknown; status: number } | ListingFailure;
+
+/**
+ * A failed provider request as a listing verdict. Before any response, a
+ * refused URL keeps its verdict (fixed by `EGRESS_ALLOW_INTERNAL_HOSTS`, not by
+ * retrying) and anything else is "the provider did not answer".
+ */
+function toListingFailure(reply: TestResult): ListingFailure {
+  const message = reply.message ?? "Provider request failed";
+  if (reply.status === undefined) {
+    const error = reply.error === "BLOCKED_URL" ? "BLOCKED_URL" : "UNREACHABLE";
+    return { ok: false, error, message };
+  }
+  const error =
+    reply.error === "AUTH_FAILED" || reply.error === "RATE_LIMITED" ? reply.error : "HTTP_ERROR";
+  return { ok: false, error, status: reply.status, message };
+}
 
 /** One guarded `GET <baseUrl>/models`, mapped from transport/HTTP failure to verdict. */
 async function fetchListingPage(
@@ -237,36 +207,10 @@ async function fetchListingPage(
   pageQuery?: PageQuery,
 ): Promise<ListingPageResult> {
   const listing = await fetchModelListing(config, pageQuery);
-  if (!listing.ok) {
-    // A refused URL keeps its verdict (fixed by `EGRESS_ALLOW_INTERNAL_HOSTS`,
-    // not by retrying); anything else is "the provider did not answer".
-    return {
-      ok: false,
-      error: listing.error === "BLOCKED_URL" ? "BLOCKED_URL" : "UNREACHABLE",
-      message: listing.message ?? "Model listing request failed",
-    };
-  }
+  if (!listing.ok) return toListingFailure(listing);
 
   const { res } = listing;
-  if (!res.ok) {
-    if (res.status === 401 || res.status === 403) {
-      return {
-        ok: false,
-        error: "AUTH_FAILED",
-        status: res.status,
-        message: "Authentication failed",
-      };
-    }
-    if (res.status === 429) {
-      return { ok: false, error: "RATE_LIMITED", status: res.status, message: "Rate limited" };
-    }
-    return {
-      ok: false,
-      error: "HTTP_ERROR",
-      status: res.status,
-      message: `Provider returned ${res.status}`,
-    };
-  }
+  if (!res.ok) return toListingFailure(statusFailure(res.status, listing.latency));
 
   const parsed = await readBoundedJson(res);
   if (!parsed.ok) {
@@ -315,8 +259,27 @@ async function readBoundedJson(
 /**
  * List the models a credential's provider serves, following the listing's own
  * cursor across pages. Response order, deduped on id across pages (first wins).
+ * A `publicModelListing` provider's key is then checked by inference.
  */
 export async function listServedModels(config: ListingConfig): Promise<ListServedModelsResult> {
+  const listing = await readServedModels(config);
+  const def = getModelProvider(config.providerId);
+  if (!listing.ok || !def?.publicModelListing) return listing;
+  const verdict = await validateKeyByInference(
+    def,
+    config,
+    listing.models.map((m) => m.id),
+  );
+  return verdict.ok ? listing : toListingFailure(verdict);
+}
+
+/** The ids a provider's listing serves, or `null` when it could not be read. */
+export async function listedModelIds(config: ListingConfig): Promise<string[] | null> {
+  const listing = await readServedModels(config);
+  return listing.ok ? listing.models.map((m) => m.id) : null;
+}
+
+async function readServedModels(config: ListingConfig): Promise<ListServedModelsResult> {
   const models: ServedModel[] = [];
   const seen = new Set<string>();
   let pageQuery: PageQuery | undefined;
@@ -325,7 +288,7 @@ export async function listServedModels(config: ListingConfig): Promise<ListServe
     const fetched = await fetchListingPage(config, pageQuery);
     if (!fetched.ok) return fetched;
 
-    const parsed = parseServedModels(config.apiShape, fetched.body);
+    const parsed = parseServedModels(fetched.body);
     if (!parsed) {
       return {
         ok: false,
@@ -345,7 +308,7 @@ export async function listServedModels(config: ListingConfig): Promise<ListServe
     }
     if (parsed.capped) return truncatedListing(config, models, "model cap reached");
 
-    const next = nextPage(config.apiShape, fetched.body);
+    const next = nextPage(fetched.body);
     if (!next.more) return { ok: true, models, truncated: false };
     if (next.query === null) {
       return truncatedListing(

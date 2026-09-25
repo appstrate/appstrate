@@ -4,11 +4,11 @@
  * Single import surface ("barrel") for the Pi Coding Agent SDK
  * (`@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`).
  *
- * This is the ONLY file in `@appstrate/runner-pi` allowed to import from
+ * With `pi-model.ts`, the ONLY files in `@appstrate/runner-pi` allowed to import
  * the Pi SDK directly — enforced by the `no-restricted-imports` ESLint
  * guard (see `eslint.config.mjs`). Every other module imports the symbols
  * it needs from here, so swapping or forking the single-vendor SDK is a
- * one-file change.
+ * two-file change.
  *
  * Re-exports preserve type identity (`export type { ... }`), so consumers
  * see the exact same nominal types as a direct SDK import would yield.
@@ -20,23 +20,10 @@
 // Used synchronously at tool-registration time to build parameter schemas,
 // so it stays a static export.
 export { Type } from "@earendil-works/pi-ai";
-// NOTHING TEST-ONLY BELONGS IN THIS FILE.
-//
-// Two re-exports lived here — `streamSimple` (from `pi-ai/compat`) and
-// `getBuiltinProviders` (from `pi-ai/providers/all`) — on the stated grounds
-// that the `no-restricted-imports` guard forbade a test from reaching the
-// vendor directly. It did not: that guard's `files` list is
-// `packages/runner-pi/src/**`, and has never covered `test/**`.
-//
-// The cost was real. `pi-ai/dist/providers` is 2.1 MB across ~45 statically
-// imported provider modules, and `compat.js` pulls it too. The package ROOT
-// does not — so before those two lines this graph was never evaluated. They are
-// static exports, so every consumer of this barrel paid for them at import
-// time: `runtime-pi/entrypoint.ts` at container boot, and `apps/api` through
-// `module-chat`. That is the exact cost this file's header exists to avoid and
-// `runtime-pi/Dockerfile` spends a bundling stage shaving.
-//
-// The tests import the vendor entrypoints directly.
+// NOTHING TEST-ONLY BELONGS IN THIS FILE: the `no-restricted-imports` guard
+// covers `src/**` only, so tests import the vendor entrypoints directly. Pi's
+// registry (`pi-ai/providers/all`) stays in `pi-model.ts`: ~14 ms to import,
+// sidecar bundle 1.55 → 2.15 MB.
 
 // --- types (erased at runtime) ---
 export type { ModelRuntime, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";

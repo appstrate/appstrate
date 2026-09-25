@@ -45,6 +45,7 @@ import {
 import { reconcileChatRun } from "./run-reconcile.ts";
 import { logger } from "./logger.ts";
 import { warnIfDefaultChatConcurrency } from "./pi-chat/concurrency.ts";
+import { getChatEnv } from "./env.ts";
 import { loadPiCodingAgentSdk } from "@appstrate/runner-pi";
 import { z } from "zod";
 
@@ -68,6 +69,8 @@ const chatModule: AppstrateModule = {
   manifest: { id: "chat", name: "Chat", version: "0.1.0", dependencies: ["mcp"] },
 
   async init(ctx: ModuleInitContext) {
+    // Fail boot on a bad CHAT_* value rather than on the first chat turn.
+    getChatEnv();
     // Tables are centralized in the core schema — nothing to migrate. No
     // workers: chat is request-driven. Capture the platform deps once: the
     // rate limiter, the in-process dispatcher (re-enters the platform app for

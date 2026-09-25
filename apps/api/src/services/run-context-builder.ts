@@ -15,10 +15,10 @@ import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
-import { resolveModel } from "./org-models.ts";
+import { clampToBackingLevel, resolveModel } from "./org-models.ts";
 import { extractManifestOutputSchema } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns, type DroppedIntegration } from "./integration-spawn-resolver.ts";
-import { appendRunLog } from "./state/runs.ts";
+import { appendRunLog, modelSourceOf } from "./state/runs.ts";
 import type { OrgScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import {
@@ -95,6 +95,8 @@ export async function buildRunContext(params: {
   generationConfig?: ModelGenerationSettings | null;
   /** Invocation layer; null/omitted fields inherit the agent defaults. */
   generationConfigOverride?: ModelGenerationSettings | null;
+  /** Set for a scheduled fire: its stored override is reconciled, not refused. */
+  scheduleId?: string;
   proxyId?: string | null;
   overrideVersionLabel?: string;
   /**
@@ -131,7 +133,7 @@ export async function buildRunContext(params: {
   versionLabel: string | null;
   versionRef: string;
   proxyLabel: string | null;
-  modelLabel: string | null;
+  modelLabel: string;
   modelSource: string | null;
   modelCost: ModelCost | null;
   generationConfig: ModelGenerationSettings;
@@ -141,6 +143,12 @@ export async function buildRunContext(params: {
    * caller MUST surface these — see {@link recordDroppedIntegrations}.
    */
   droppedIntegrations: DroppedIntegration[];
+  /**
+   * Stored generation settings (space defaults, a schedule's override) that
+   * `modelLabel`'s model refuses, dropped for this run. The caller MUST surface
+   * these — see {@link recordDroppedGenerationSettings}.
+   */
+  droppedGenerationSettings: DroppedGenerationSetting[];
 }> {
   const { runId, agent, orgId, spaceId, actor, input, files } = params;
 
@@ -225,7 +233,7 @@ export async function buildRunContext(params: {
   const proxyUrl = proxyResult?.url ?? null;
   const proxyLabel = proxyResult?.label ?? null;
   const modelLabel = modelResult.label;
-  const modelSource = modelResult.isSystemModel ? "system" : "org";
+  const modelSource = modelSourceOf(modelResult);
   // The rates the run LAUNCHES with — the same object `buildRuntimePiEnv`
   // serialises into `MODEL_COST`. Persisted on `runs.model_cost` so the runner's
   // ledger row can be classified server-side: the container reports the cost, so
@@ -234,14 +242,34 @@ export async function buildRunContext(params: {
   // `org_models.cost` override) — which is exactly the run whose `$0.00` would
   // otherwise read as "free".
   const modelCost = modelResult.cost ?? null;
-  const generationDefaults = reconcileModelGenerationSettings(
-    params.generationConfig ?? spaceSettings?.generationConfig ?? {},
-    modelResult.generation,
+  // Stored layers (space defaults, a schedule's override) drop what the model
+  // refuses — a Pi bump must not break them; only a request's override is refused.
+  const storedDefaults = params.generationConfig ?? spaceSettings?.generationConfig ?? {};
+  const storedLayers = params.scheduleId
+    ? { ...storedDefaults, ...withoutInherited(params.generationConfigOverride) }
+    : storedDefaults;
+  const generationDefaults = reconcileModelGenerationSettings(storedLayers, modelResult.generation);
+  const requestOverride = params.scheduleId ? null : params.generationConfigOverride;
+  // A key the request sets supersedes its stored value, so that drop is moot.
+  const overridden = withoutInherited(requestOverride);
+  // Null means "inherit": reconcile keeps it, so only set values can drop.
+  const droppedGenerationSettings: DroppedGenerationSetting[] = Object.entries(
+    storedLayers,
+  ).flatMap(([setting, value]) =>
+    value != null && !(setting in generationDefaults) && !(setting in overridden)
+      ? [{ setting, value }]
+      : [],
   );
+  if (droppedGenerationSettings.length > 0) {
+    logger.warn("Stored generation settings refused by the model, dropped for this run", {
+      ...(params.scheduleId ? { scheduleId: params.scheduleId } : {}),
+      dropped: droppedGenerationSettings.map((entry) => entry.setting),
+    });
+  }
   const generationConfig = resolveModelGenerationSettings({
     capabilities: modelResult.generation,
     defaults: generationDefaults,
-    override: params.generationConfigOverride,
+    override: requestOverride,
   });
 
   // Step 3: resolve the persisted version display fields.
@@ -310,7 +338,7 @@ export async function buildRunContext(params: {
     outputSchema: extractManifestOutputSchema(agent.manifest),
     ...(runtimeTools && runtimeTools.length > 0 ? { runtimeTools } : {}),
     llmConfig: modelResult,
-    generationConfig,
+    generationConfig: clampToBackingLevel(modelResult, generationConfig),
     runToken: signRunToken(runId),
     proxyUrl,
     // The manifest reaching here is already ceiling-clamped by
@@ -333,7 +361,15 @@ export async function buildRunContext(params: {
     modelCost,
     generationConfig,
     droppedIntegrations,
+    droppedGenerationSettings,
   };
+}
+
+/** A settings layer without its inheriting (null) fields. */
+function withoutInherited(settings: ModelGenerationSettings | null | undefined) {
+  return Object.fromEntries(
+    Object.entries(settings ?? {}).filter(([, value]) => value != null),
+  ) as ModelGenerationSettings;
 }
 
 /**
@@ -365,29 +401,75 @@ export async function recordDroppedIntegrations(
   dropped: readonly DroppedIntegration[],
 ): Promise<void> {
   for (const entry of dropped) {
-    try {
-      await appendRunLog(
-        scope,
-        runId,
-        "system",
-        INTEGRATION_DROPPED_EVENT,
-        `integration '${entry.integrationId}' is declared by this agent but was not started (${entry.reason})` +
-          (entry.detail ? `: ${entry.detail}` : "") +
-          " — its tools are unavailable to this run",
-        {
-          platform: true,
-          integrationId: entry.integrationId,
-          reason: entry.reason,
-          ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
-        },
-        "warn",
-      );
-    } catch (err) {
-      logger.warn("failed to append dropped-integration run log", {
-        runId,
+    await appendDropMarker(
+      scope,
+      runId,
+      INTEGRATION_DROPPED_EVENT,
+      `integration '${entry.integrationId}' is declared by this agent but was not started (${entry.reason})` +
+        (entry.detail ? `: ${entry.detail}` : "") +
+        " — its tools are unavailable to this run",
+      {
         integrationId: entry.integrationId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+        reason: entry.reason,
+        ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
+      },
+    );
+  }
+}
+
+/**
+ * Run-log `event` name for a stored generation setting the run's model
+ * refuses. One row per setting, so `data.setting` is never a list.
+ */
+export const GENERATION_SETTING_DROPPED_EVENT = "generation_setting_dropped";
+
+/** A stored setting the model refused, with the value it would have sent. */
+export interface DroppedGenerationSetting {
+  setting: string;
+  value: NonNullable<ModelGenerationSettings[keyof ModelGenerationSettings]>;
+}
+
+/**
+ * Same marker as {@link recordDroppedIntegrations}, for the stored generation
+ * settings {@link buildRunContext} dropped: a scheduled fire has no user to
+ * refuse, so the run proceeds and the owner learns why from its log.
+ */
+export async function recordDroppedGenerationSettings(
+  scope: OrgScope,
+  runId: string,
+  model: string,
+  dropped: readonly DroppedGenerationSetting[],
+): Promise<void> {
+  // One reason: the reconcile step does not say which rule refused the value
+  // (unsupported setting, unsupported level, temperature vs reasoning).
+  for (const { setting, value } of dropped) {
+    const shown = typeof value === "string" ? `'${value}'` : String(value);
+    await appendDropMarker(
+      scope,
+      runId,
+      GENERATION_SETTING_DROPPED_EVENT,
+      `generation setting '${setting}' = ${shown} is not accepted by model '${model}' — ignored for this run`,
+      { setting, value, model, reason: "refused_by_model" },
+    );
+  }
+}
+
+/** Best-effort `warn` system row: a failed write is logged, never thrown. */
+async function appendDropMarker(
+  scope: OrgScope,
+  runId: string,
+  event: string,
+  message: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await appendRunLog(scope, runId, "system", event, message, { platform: true, ...data }, "warn");
+  } catch (err) {
+    logger.warn("failed to append drop marker run log", {
+      runId,
+      event,
+      ...data,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }

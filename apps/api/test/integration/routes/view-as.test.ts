@@ -19,7 +19,7 @@ import {
 import type { AppstrateModule } from "@appstrate/core/module";
 import { getTestApp } from "../../helpers/app.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
-import { viewAsWire, type ViewAsPersona as ViewAsSnapshot } from "../../../src/lib/view-as.ts";
+import { viewAsAudit, type ViewAsPersona as ViewAsSnapshot } from "../../../src/lib/view-as.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
@@ -240,7 +240,7 @@ describe("view as role", () => {
       request("/api/packages/@view-as/shared/shares", {
         view,
         space: owner.defaultSpaceId,
-        body: { target: { kind: "space", space_id: target.id } },
+        body: { target: { kind: "space", spaceId: target.id } },
       });
 
     await expectProblem(await share(persona("member", "preset:viewer")), 403);
@@ -330,7 +330,7 @@ describe("view as role", () => {
         return {
           required: ctx.required,
           role: fromContext(ctx, "orgRole"),
-          viewAs: p ? viewAsWire(p) : undefined,
+          viewAs: p ? viewAsAudit(p) : undefined,
         };
       });
       // A disjunction refusal, which is the shape that reaches the hook
@@ -345,9 +345,9 @@ describe("view as role", () => {
       expect(records[0]).toMatchObject({
         role: "owner",
         viewAs: {
-          org_role: "member",
+          orgRole: "member",
           space: {
-            space_id: owner.defaultSpaceId,
+            spaceId: owner.defaultSpaceId,
             role: { kind: "preset", key: "builder", name: "builder" },
           },
         },
@@ -511,15 +511,15 @@ describe("view as role", () => {
 
     expect(previewed?.actorId).toBe(owner.user.id);
     expect(previewed?.actorType).toBe("user");
-    expect((previewed?.after as { view_as?: unknown }).view_as).toEqual({
-      org_role: "member",
+    expect((previewed?.after as { viewAs?: unknown }).viewAs).toEqual({
+      orgRole: "member",
       space: {
-        space_id: owner.defaultSpaceId,
+        spaceId: owner.defaultSpaceId,
         role: { kind: "preset", key: "admin", name: "admin" },
       },
     });
     // The control: the same write with no header carries no persona at all.
-    expect(real?.after).not.toHaveProperty("view_as");
+    expect(real?.after).not.toHaveProperty("viewAs");
   });
 
   // ─── 6. Nothing acts on the REAL org role behind the persona ──────

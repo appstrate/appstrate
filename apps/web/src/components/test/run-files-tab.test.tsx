@@ -28,7 +28,7 @@ await i18n.changeLanguage("fr");
 const RUN_ID = "run_1";
 
 function file(name: string): FileDto {
-  return fileFixture({ name, run_id: RUN_ID });
+  return fileFixture({ name, runId: RUN_ID });
 }
 
 function filesTab(files: FileDto[], extra: { hasMore?: boolean } = {}): string {
@@ -57,5 +57,15 @@ describe("the complete file view says when it is not complete", () => {
     // the rows that fell off could be inputs, outputs, or both, so the notice
     // never depends on which files came back.
     expect(filesTab([], { hasMore: true })).toContain(filesFr["run.truncated"]);
+  });
+});
+
+describe("the file view without `files:read`", () => {
+  it("says the role cannot list files rather than that the run has none", () => {
+    const html = render(
+      <RunFilesView runId={RUN_ID} files={[]} isLoading={false} error={null} filesDenied />,
+    );
+    expect(html).toContain(filesFr["run.noAccess"]);
+    expect(html).not.toContain(filesFr["run.emptyHint"]);
   });
 });

@@ -102,9 +102,10 @@ describe("POST /api/auth/bootstrap/redeem", () => {
       password: "TestPassword123!",
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { bootstrap?: { orgId: string; orgSlug: string } };
+    const body = (await res.json()) as { bootstrap?: { orgId: string; org_slug: string } };
     expect(body.bootstrap).toBeDefined();
-    expect(body.bootstrap!.orgSlug).toBe("acme-hq");
+    expect(body.bootstrap!.org_slug).toBe("acme-hq");
+    expect(body.bootstrap).not.toHaveProperty("orgSlug");
 
     // BA session cookie must be set so the SPA's hard-reload to / lands
     // authenticated. BA names it `better-auth.session_token` by default.

@@ -28,6 +28,8 @@ import { FilePreview } from "../../components/file-preview";
 import { FileViewer } from "../../components/file-viewer";
 import { useFile, useFileDownload, useFiles } from "../../hooks/use-files";
 import { useOrgOnlyScope, useOrgScope } from "../../hooks/use-org-scope";
+import { usePermissions } from "../../hooks/use-permissions";
+import { canReadRuns } from "@appstrate/core/permissions";
 import { formatDateField } from "../../lib/format-date";
 import type {
   ConversationSidebarAction,
@@ -38,9 +40,20 @@ import type {
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
 
-function useConversationTabs() {
+/**
+ * `chat:read` opens the page, not the runs and files two tabs list. A stored
+ * tab the caller can no longer see resolves to the preview, which always stays.
+ */
+function useConversationTabs(selected: ConversationSidebarTab) {
   const { t } = useTranslation("chat");
-  return [
+  const { can } = usePermissions();
+  const readable: Record<ConversationSidebarTab, boolean> = {
+    preview: true,
+    runs: canReadRuns(can),
+    files: can("files:read"),
+    info: true,
+  };
+  const [preview, ...rest] = [
     { id: "preview", Icon: EyeIcon, label: t("context.tabs.preview") },
     { id: "runs", Icon: ActivityIcon, label: t("context.tabs.runs") },
     { id: "files", Icon: FilesIcon, label: t("context.tabs.files") },
@@ -50,6 +63,8 @@ function useConversationTabs() {
     Icon: typeof EyeIcon;
     label: string;
   }[];
+  const tabs = [preview, ...rest.filter(({ id }) => readable[id])];
+  return { tabs, activeTab: tabs.find(({ id }) => id === selected) ?? preview };
 }
 
 export function ConversationContextActions({
@@ -60,12 +75,12 @@ export function ConversationContextActions({
   dispatch: Dispatch<ConversationSidebarAction>;
 }) {
   const { t } = useTranslation("chat");
-  const tabs = useConversationTabs();
+  const { tabs, activeTab } = useConversationTabs(state.activeTab);
 
   return (
     <TooltipProvider delayDuration={300}>
       <Tabs
-        value={state.expanded ? state.activeTab : ""}
+        value={state.expanded ? activeTab.id : ""}
         onValueChange={(tab) =>
           dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })
         }
@@ -152,6 +167,7 @@ function ConversationRuns({
 }) {
   const { t } = useTranslation("chat");
   const scope = useOrgScope();
+  const { can } = usePermissions();
   const query = $api.useQuery(
     "get",
     "/api/runs",
@@ -161,7 +177,7 @@ function ConversationRuns({
         header: scope.header,
       },
     },
-    { enabled: scope.enabled && active && !!conversationId },
+    { enabled: canReadRuns(can) && scope.enabled && active && !!conversationId },
   );
 
   if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
@@ -315,8 +331,7 @@ export function ConversationSidebar({
   dispatch: Dispatch<ConversationSidebarAction>;
 }) {
   const { t } = useTranslation("chat");
-  const tabs = useConversationTabs();
-  const activeTab = tabs.find(({ id }) => id === state.activeTab) ?? tabs[0];
+  const { activeTab } = useConversationTabs(state.activeTab);
   const ActiveTabIcon = activeTab.Icon;
   const showFile = (file: SidebarFile) => dispatch({ type: "show-file", file });
 
@@ -334,7 +349,7 @@ export function ConversationSidebar({
         <aside
           id={CONVERSATION_CONTEXT_PANEL_ID}
           role="tabpanel"
-          aria-labelledby={`conversation-context-${state.activeTab}-tab`}
+          aria-labelledby={`conversation-context-${activeTab.id}-tab`}
           aria-label={t("context.label")}
           className="bg-background absolute inset-y-0 right-0 z-30 flex h-full w-[min(92vw,36rem)] shrink-0 flex-col border-l shadow-xl lg:static lg:w-[42vw] lg:max-w-[42rem] lg:min-w-[28rem] lg:shadow-none"
         >
@@ -354,19 +369,19 @@ export function ConversationSidebar({
             </Button>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
-            {state.activeTab === "preview" ? (
+            {activeTab.id === "preview" ? (
               <PreviewTab
                 file={state.selectedFile}
                 onOpenModal={() => dispatch({ type: "open-modal" })}
               />
             ) : null}
-            {state.activeTab === "runs" ? (
+            {activeTab.id === "runs" ? (
               <ConversationRuns conversationId={conversationId} active />
             ) : null}
-            {state.activeTab === "files" ? (
+            {activeTab.id === "files" ? (
               <ConversationFiles conversationId={conversationId} active onSelect={showFile} />
             ) : null}
-            {state.activeTab === "info" ? (
+            {activeTab.id === "info" ? (
               <ConversationInfo conversationId={conversationId} active />
             ) : null}
           </div>

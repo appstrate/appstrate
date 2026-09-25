@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -117,7 +117,7 @@ describe("ProcessOrchestrator", () => {
     });
 
     it("advertises coherent loopback sidecar endpoints at boundary creation", async () => {
-      // The sidecar port pair is allocated when the BOUNDARY is created (not
+      // The sidecar's two ports are allocated when the BOUNDARY is created (not
       // lazily in createSidecar) so pi.ts can bake the URLs into the agent
       // env before the sidecar exists — the parallel-boot ordering fix.
       orchestrator = new ProcessOrchestrator();
@@ -128,7 +128,9 @@ describe("ProcessOrchestrator", () => {
       const port = Number(new URL(sidecarUrl).port);
       expect(port).toBeGreaterThan(0);
       expect(llmProxyUrl).toBe(`${sidecarUrl}/llm`);
-      expect(new URL(forwardProxyUrl).port).toBe(String(port + 1));
+      const forwardProxyPort = Number(new URL(forwardProxyUrl).port);
+      expect(forwardProxyPort).toBeGreaterThan(0);
+      expect(forwardProxyPort).not.toBe(port);
       expect(noProxy).toContain("localhost");
 
       await orchestrator.removeIsolationBoundary(boundary);
@@ -415,19 +417,72 @@ describe("ProcessOrchestrator", () => {
     });
   });
 
-  describe("findAvailablePort (via createSidecar)", () => {
-    it("allocates a port", async () => {
-      orchestrator = new ProcessOrchestrator();
+  describe("findAvailablePorts", () => {
+    type PortFinder = {
+      findAvailablePorts: () => Promise<{ sidecar: number; forwardProxy: number }>;
+    };
 
-      // We test the port allocation indirectly — findAvailablePort is private,
-      // but we can verify it works by checking the sidecar doesn't throw on port binding.
-      // Since we can't easily test createSidecar without the sidecar binary,
-      // we verify the port finder works standalone via reflection.
-      const port = await (
-        orchestrator as unknown as { findAvailablePort: () => Promise<number> }
-      ).findAvailablePort();
-      expect(port).toBeGreaterThan(0);
-      expect(port).toBeLessThan(65536);
+    it("allocates two distinct ports", async () => {
+      orchestrator = new ProcessOrchestrator();
+      const ports = await (orchestrator as unknown as PortFinder).findAvailablePorts();
+      for (const port of [ports.sidecar, ports.forwardProxy]) {
+        expect(port).toBeGreaterThan(0);
+        expect(port).toBeLessThan(65536);
+      }
+      expect(ports.forwardProxy).not.toBe(ports.sidecar);
+    });
+
+    it("succeeds on a host where no explicitly requested port is ever free", async () => {
+      // The old finder probed port 0, then bound `port + 1` explicitly, and
+      // threw after 5 draws whenever that neighbour was taken — CI's
+      // `Failed to find available port after retries`. Refusing every
+      // explicit port makes that host deterministic.
+      const realListen = Bun.listen.bind(Bun);
+      const listen = spyOn(Bun, "listen").mockImplementation(((
+        options: Parameters<typeof Bun.listen>[0],
+      ) => {
+        if ((options as { port?: number }).port !== 0) throw new Error("EADDRINUSE");
+        return realListen(options);
+      }) as typeof Bun.listen);
+      try {
+        orchestrator = new ProcessOrchestrator();
+        const ports = await (orchestrator as unknown as PortFinder).findAvailablePorts();
+        expect(listen).toHaveBeenCalled();
+        expect(ports.forwardProxy).not.toBe(ports.sidecar);
+      } finally {
+        listen.mockRestore();
+      }
+    });
+
+    it("redraws when both probes report the same port", async () => {
+      // `bun --hot` (the dev server) hot-reloads a second `Bun.serve()` into
+      // the first, so a Bun.serve-based finder handed out one port twice and
+      // the sidecar refused to boot. A draw that yields two equal ports must
+      // be rejected, never returned.
+      const realListen: (
+        options: Bun.TCPSocketListenOptions<undefined>,
+      ) => Bun.TCPSocketListener<undefined> = Bun.listen.bind(Bun);
+      let calls = 0;
+      let firstPort = 0;
+      const listen = spyOn(Bun, "listen").mockImplementation(((
+        options: Bun.TCPSocketListenOptions<undefined>,
+      ) => {
+        const listener = realListen(options);
+        calls++;
+        if (calls === 1) firstPort = listener.port;
+        if (calls === 2) {
+          return { port: firstPort, stop: (force?: boolean) => listener.stop(force) };
+        }
+        return listener;
+      }) as typeof Bun.listen);
+      try {
+        orchestrator = new ProcessOrchestrator();
+        const ports = await (orchestrator as unknown as PortFinder).findAvailablePorts();
+        expect(calls).toBeGreaterThan(2);
+        expect(ports.forwardProxy).not.toBe(ports.sidecar);
+      } finally {
+        listen.mockRestore();
+      }
     });
   });
 
@@ -456,14 +511,14 @@ describe("ProcessOrchestrator", () => {
       return (orchestrator as unknown as { pendingSpecs: Map<string, unknown> }).pendingSpecs.size;
     }
 
-    async function stageAgent(runId: string) {
+    async function stageAgent(runId: string, env: Record<string, string> = {}) {
       const boundary = await orchestrator.createIsolationBoundary(runId);
       const handle = await orchestrator.createWorkload(
         {
           runId,
           role: "agent",
           image: "unused-in-process-mode",
-          env: { RUN_TOKEN: "run-token-that-must-not-be-retained" },
+          env: { RUN_TOKEN: "run-token-that-must-not-be-retained", ...env },
           resources: { memoryBytes: 512 * 1024 * 1024, nanoCpus: 1_000_000_000 },
         },
         boundary,
@@ -471,10 +526,14 @@ describe("ProcessOrchestrator", () => {
       return { boundary, handle };
     }
 
-    /** Swap the agent entrypoint for an idle script so no real run boots. */
-    async function withFakeEntrypoint<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+    /** Swap the agent entrypoint for a fake script (idle by default) so no real run boots. */
+    async function withFakeEntrypoint<T>(
+      dir: string,
+      fn: () => Promise<T>,
+      source = "setInterval(()=>{},60000);",
+    ): Promise<T> {
       const fake = join(dir, "fake-agent.ts");
-      await writeFile(fake, "setInterval(()=>{},60000);");
+      await writeFile(fake, source);
       const originalSpawn = Bun.spawn;
       const patched = ((cmd: string[], opts: Parameters<typeof Bun.spawn>[1]) =>
         originalSpawn(
@@ -500,6 +559,25 @@ describe("ProcessOrchestrator", () => {
 
       expect(await readdir(boundary.id)).toContain("agent.pid");
       expect(pendingSpecCount()).toBe(0);
+    }, 10_000);
+
+    it("startWorkload hands the run-scoped secrets over on stdin, not in the environment", async () => {
+      const { boundary, handle } = await stageAgent("test-run-secret-handover", {
+        APPSTRATE_SINK_SECRET: "dummy-sink-secret",
+        AGENT_RUN_ID: "test-run-secret-handover",
+      });
+      const report = join(boundary.id, "report.json");
+      await withFakeEntrypoint(
+        boundary.id,
+        () => orchestrator.startWorkload(handle),
+        `await Bun.write(${JSON.stringify(report)}, JSON.stringify({ env: process.env, stdin: await Bun.stdin.text() }));`,
+      );
+
+      for (let i = 0; i < 100 && !(await Bun.file(report).exists()); i++) await Bun.sleep(50);
+      const { env, stdin } = await Bun.file(report).json();
+      expect(env.AGENT_RUN_ID).toBe("test-run-secret-handover");
+      expect(env.APPSTRATE_SINK_SECRET).toBeUndefined();
+      expect(JSON.parse(stdin)).toEqual({ APPSTRATE_SINK_SECRET: "dummy-sink-secret" });
     }, 10_000);
 
     it("removeWorkload drops the pending spec, not just the process entry", async () => {

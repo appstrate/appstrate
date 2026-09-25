@@ -6,7 +6,7 @@ import type { OrgModelInfo } from "../hooks/use-models";
  * Can this model be picked for a run or a chat?
  *
  * Two independent ways a LISTED model is unusable, and every selection surface
- * must honour both — they are exactly the two `loadModel()` returns null for:
+ * must honour both — the two states in which `loadModel()` refuses a listed row:
  *
  *  - `enabled: false` — the row is switched off.
  *  - `needs_reconnection` — its stored credential can no longer serve

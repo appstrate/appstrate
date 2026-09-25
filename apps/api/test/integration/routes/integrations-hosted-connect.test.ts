@@ -25,13 +25,19 @@ import { seedApiKey, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
-import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  integrationConnections,
+  integrationOauthClients,
+  packages,
+} from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { AppstrateModule, AuthResolution } from "@appstrate/core/module";
 import {
   buildConnectUrl,
   connectClaimsFor,
 } from "../../../src/services/connect/connect-session.ts";
+import { generateOpenSshEd25519PrivateKey } from "../../../src/lib/openssh-key.ts";
 import {
   _setSystemPackagesForTesting,
   type SystemPackageEntry,
@@ -97,8 +103,9 @@ async function mintSession(
     body: JSON.stringify(body),
   });
   expect(res.status).toBe(200);
-  const json = (await res.json()) as { connect_url: string; expires_at: number };
-  expect(typeof json.expires_at).toBe("number");
+  const json = (await res.json()) as { connect_url: string; expiresAt: string };
+  // RFC 3339, not epoch ms: the canonical `expiresAt` spelling carries a string.
+  expect(new Date(json.expiresAt).toISOString()).toBe(json.expiresAt);
   const url = new URL(json.connect_url);
   const token = url.searchParams.get("token");
   expect(token).toBeTruthy();
@@ -120,7 +127,7 @@ describe("hosted connect portal — mint", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(200);
-    const json = (await res.json()) as { connect_url: string; expires_at: number };
+    const json = (await res.json()) as { connect_url: string; expiresAt: string };
     expect(json.connect_url).toContain("/api/integrations/connect/start?token=");
   });
 
@@ -192,13 +199,13 @@ describe("hosted connect portal — dispatch + submit", () => {
     });
     expect(ctxRes.status).toBe(200);
     const context = (await ctxRes.json()) as {
-      package_id: string;
+      packageId: string;
       auth_key: string;
       display_name: string;
       auth: { type: string };
       csrf: string;
     };
-    expect(context.package_id).toBe("@myorg/gmail");
+    expect(context.packageId).toBe("@myorg/gmail");
     expect(context.auth_key).toBe("api");
     expect(context.display_name).toBe("Gmail");
     expect(context.auth.type).toBe("api_key");
@@ -290,6 +297,20 @@ describe("hosted connect portal — dispatch + submit", () => {
       .from(integrationConnections)
       .where(eq(integrationConnections.integrationId, "@myorg/gmail"));
     expect(all).toHaveLength(1);
+
+    // The page cookie carries the principal, not a session: the trail must
+    // still name the user, and tell the renewal apart from the creation.
+    const trail = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceId, created.connection.id))
+      .orderBy(auditEvents.id);
+    expect(trail.map((r) => [r.action, r.actorType, r.actorId, r.spaceId])).toEqual([
+      ["integration.connection.created", "user", ctx.user.id, ctx.defaultSpaceId],
+      ["integration.connection.reconnected", "user", ctx.user.id, ctx.defaultSpaceId],
+    ]);
+    expect(trail[0]!.after).toMatchObject({ packageId: "@myorg/gmail", authKey: "api" });
+    expect(JSON.stringify(trail)).not.toContain("AKIA");
   });
 });
 
@@ -615,21 +636,26 @@ describe("hosted connect portal — a fault while resolving scopes (issue #1352)
   });
 });
 
+/** The package id the provisioning table names — the only one it provisions. */
+const SSH_ID = "@appstrate/ssh";
+
 /**
  * Credential PROVISIONING at the ROUTE level.
  *
  * The provisioner's own guards are unit-tested; what only this level can show
  * is WHICH routes run it. There are two doors onto `FieldsStrategy`: the
  * hosted form, which provisions, and the programmatic import, which does not
- * — and therefore refuses any name the auth declares as platform-minted.
+ * — and therefore refuses any name the platform mints for that auth.
  * The invariants the SSH integration relies on cannot live in the provisioner
  * alone: they live in `credentials.schema`, which both doors validate.
  */
-async function provisionedManifest(name = "@myorg/ssh"): Promise<IntegrationManifest> {
+async function sshManifest(name = SSH_ID): Promise<IntegrationManifest> {
   // Read the SHIPPED manifest rather than restating its schema here: the
   // constraints under test are the ones `@appstrate/ssh` actually carries, and
   // a local copy of them would stay green after someone deleted the originals.
-  // Only the identifiers are rewritten, so the package can be seeded per-org.
+  // Seeded as a row (`getTestApp()` skips the boot sync, see
+  // `registerSshAsSystemPackage`); `name` rewrites the identifiers for a copy
+  // under another id.
   const sources = join(import.meta.dir, "../../../../../scripts/system-packages");
   const dir = (await readdir(sources))
     .filter((d) => d.startsWith("integration-ssh-"))
@@ -645,16 +671,16 @@ async function provisionedManifest(name = "@myorg/ssh"): Promise<IntegrationMani
 }
 
 /**
- * Provisioning is honoured for system packages only, and `getTestApp()` skips
- * the boot that fills the system registry — so a describe seeding the SSH
- * package under `@myorg/ssh` registers that id for its own duration. Handed
- * back afterwards: the whole suite shares one process and one registry.
+ * Provisioning answers only for a loaded system package, and `getTestApp()`
+ * skips the boot that fills the system registry — so a describe connecting the
+ * SSH package registers its id for its own duration. Handed back afterwards:
+ * the whole suite shares one process and one registry.
  */
-function registerAsSystemPackage(packageId: string) {
+function registerSshAsSystemPackage() {
   let restore: () => void;
   beforeAll(() => {
     restore = _setSystemPackagesForTesting(
-      new Map([[packageId, { packageId } as SystemPackageEntry]]),
+      new Map([[SSH_ID, { packageId: SSH_ID } as SystemPackageEntry]]),
     );
   });
   afterAll(() => restore());
@@ -670,6 +696,15 @@ const SSH_FORM_FIELDS = {
   user: "agent",
   host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
 } as const;
+
+/**
+ * The same fields plus a well-formed key the CALLER holds: what the fields
+ * route refuses for `@appstrate/ssh` and accepts for a copy under another id.
+ */
+const CALLER_KEYED_FIELDS = {
+  ...SSH_FORM_FIELDS,
+  private_key: generateOpenSshEd25519PrivateKey(),
+};
 
 /**
  * Mint a session, follow the dispatch, and come back with the page cookie +
@@ -711,19 +746,19 @@ async function submitConnectForm(
 }
 
 describe("hosted connect portal — credential provisioning", () => {
-  registerAsSystemPackage("@myorg/ssh");
+  registerSshAsSystemPackage();
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
-    await seedIntegration(ctx.orgId, await provisionedManifest("@myorg/ssh"));
+    await seedIntegration(ctx.orgId, await sshManifest());
   });
 
   const submit = async (credentials: Record<string, unknown>) =>
-    submitConnectForm(ctx, "@myorg/ssh", "primary", credentials);
+    submitConnectForm(ctx, SSH_ID, "primary", credentials);
 
   const importFields = async (credentials: Record<string, unknown>) =>
-    app.request("/api/integrations/@myorg/ssh/auths/primary/connect/fields", {
+    app.request(`/api/integrations/${SSH_ID}/auths/primary/connect/fields`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ credentials }),
@@ -736,7 +771,7 @@ describe("hosted connect portal — credential provisioning", () => {
    * the one place that answer reaches the browser.
    */
   it("serves a schema the form can render verbatim, minus what it mints", async () => {
-    const { cookie } = await openConnectForm(ctx, "@myorg/ssh", "primary");
+    const { cookie } = await openConnectForm(ctx, SSH_ID, "primary");
     const res = await app.request("/api/integrations/connect/context", {
       headers: { Cookie: cookie },
     });
@@ -778,12 +813,7 @@ describe("hosted connect portal — credential provisioning", () => {
    * the pair. Any credential named in `provides` is refused at the door.
    */
   it("refuses a caller-supplied private_key on the programmatic import", async () => {
-    const res = await importFields({
-      private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----\n",
-      host: "ssh.example.test",
-      user: "agent",
-      host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
-    });
+    const res = await importFields(CALLER_KEYED_FIELDS);
     expect(res.status).toBe(400);
     expect(JSON.stringify(await res.json())).toMatch(/private_key.*minted by the platform/);
 
@@ -836,7 +866,7 @@ describe("hosted connect portal — credential provisioning", () => {
       handoff_steps: Array<{ shell?: string }>;
     };
 
-    const reconnected = await submitConnectForm(ctx, "@myorg/ssh", "primary", SSH_FORM_FIELDS, {
+    const reconnected = await submitConnectForm(ctx, SSH_ID, "primary", SSH_FORM_FIELDS, {
       connection_id: created.connection.id,
     });
     expect(reconnected.status).toBe(200);
@@ -855,47 +885,57 @@ describe("hosted connect portal — credential provisioning", () => {
 });
 
 /**
- * The same manifest seeded as an ordinary org package. Declaring provisioning
- * has the platform mint a key and author a block pasted as root, so only a
- * package the platform ships may do it: anywhere else the declaration is
- * refused on every door, never read as "provisions nothing" — that would ask
- * the user to type a key the manifest expects to be minted.
+ * The same manifest seeded under another package id. Provisioning is keyed by
+ * package id and auth key in code, never read off the manifest, so a copy of
+ * `@appstrate/ssh` gets no minted key and no root install block: its
+ * `private_key` is an ordinary field the user must supply.
  */
-describe("hosted connect portal — provisioning outside a system package", () => {
+describe("hosted connect portal — the same manifest under another package id", () => {
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
-    await seedIntegration(ctx.orgId, await provisionedManifest("@myorg/ssh-fork"));
+    await seedIntegration(ctx.orgId, await sshManifest("@myorg/ssh-fork"));
   });
 
-  it("refuses the hosted form's render context", async () => {
-    const token = await mintSession(ctx, "@myorg/ssh-fork", "primary");
-    const start = await app.request(
-      `/api/integrations/connect/start?token=${encodeURIComponent(token)}`,
-      { redirect: "manual" },
-    );
+  it("serves the schema with private_key still asked for", async () => {
+    const { cookie } = await openConnectForm(ctx, "@myorg/ssh-fork", "primary");
     const res = await app.request("/api/integrations/connect/context", {
-      headers: { Cookie: `appstrate_connect=${readSetCookie(start)}` },
+      headers: { Cookie: cookie },
     });
-    expect(res.status).toBe(400);
-    expect(JSON.stringify(await res.json())).toMatch(/only system packages may/);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      auth: { credentials: { schema: { properties: Record<string, unknown> } } };
+    };
+    expect(Object.keys(body.auth.credentials.schema.properties)).toContain("private_key");
   });
 
-  it("refuses the programmatic import, even without a minted name in the body", async () => {
+  it("mints nothing on the hosted form: the missing private_key is refused", async () => {
+    // The bag the SSH package's form accepts (see the positive control above):
+    // here nothing fills `private_key`, so `required` refuses it.
+    const res = await submitConnectForm(ctx, "@myorg/ssh-fork", "primary", SSH_FORM_FIELDS);
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toMatch(/declared schema:.*private_key/);
+
+    const rows = await db.select().from(integrationConnections);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("accepts a caller-held private_key on the programmatic import", async () => {
+    // The body `@appstrate/ssh` refuses as platform-minted: on a copy it is
+    // an ordinary custom-auth bag.
     const res = await app.request(
       "/api/integrations/@myorg/ssh-fork/auths/primary/connect/fields",
       {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ credentials: SSH_FORM_FIELDS }),
+        body: JSON.stringify({ credentials: CALLER_KEYED_FIELDS }),
       },
     );
-    expect(res.status).toBe(400);
-    expect(JSON.stringify(await res.json())).toMatch(/only system packages may/);
+    expect(res.status).toBe(200);
 
     const rows = await db.select().from(integrationConnections);
-    expect(rows).toHaveLength(0);
+    expect(rows).toHaveLength(1);
   });
 });
 
@@ -924,7 +964,8 @@ const orgBoundDelegate: AppstrateModule = {
             orgRole: "admin",
             authMethod: "test-org-bound-delegate",
             principalKind: "delegate",
-            permissions: [],
+            // The handoff's ceiling, so only the binding can refuse.
+            permissions: ["integrations:disconnect"],
           } satisfies AuthResolution;
         },
       },
@@ -947,18 +988,18 @@ const boundApp = getTestApp({ modules: [orgBoundDelegate] });
  * the clear and a stored copy could drift from the key it claims to remove.
  */
 describe("me/connections/:id/handoff — the teardown half, derived", () => {
-  registerAsSystemPackage("@myorg/ssh");
+  registerSshAsSystemPackage();
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
-    await seedIntegration(ctx.orgId, await provisionedManifest("@myorg/ssh"));
+    await seedIntegration(ctx.orgId, await sshManifest());
     await seedIntegration(ctx.orgId, apiKeyManifest("@myorg/gmail"));
   });
 
   /** The only door onto a provisioning auth: the hosted form, which mints the key. */
   const connectSsh = async () => {
-    const res = await submitConnectForm(ctx, "@myorg/ssh", "primary", SSH_FORM_FIELDS);
+    const res = await submitConnectForm(ctx, SSH_ID, "primary", SSH_FORM_FIELDS);
     expect(res.status).toBe(200);
     return (await res.json()) as {
       connection: { id: string };
@@ -1061,15 +1102,19 @@ describe("me/connections/:id/handoff — the teardown half, derived", () => {
       const { connection } = await connectSsh();
       const foreignOrgId = await secondOrgFor(ctx.user.id);
       const foreignSpace = await seedSpace({ orgId: foreignOrgId, name: "Foreign" });
+      // Both hold the handoff's ceiling, so only the binding can refuse.
+      const scopes = ["integrations:disconnect"];
       const foreign = await seedApiKey({
         orgId: foreignOrgId,
         spaceId: foreignSpace.id,
         createdBy: ctx.user.id,
+        scopes,
       });
       const here = await seedApiKey({
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
+        scopes,
       });
 
       expect(await handoffAs(connection.id, { Authorization: `Bearer ${foreign.rawKey}` })).toEqual(

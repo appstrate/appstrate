@@ -91,7 +91,7 @@ describe("refusalCode", () => {
   });
 
   it("reads the same file off a bare string error", () => {
-    expect(refusalCode(problem({ status: 401, code: "needs_reconnection" }))).toBe(
+    expect(refusalCode(problem({ status: 409, code: "needs_reconnection" }))).toBe(
       "needs_reconnection",
     );
   });

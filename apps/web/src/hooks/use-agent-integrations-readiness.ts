@@ -5,7 +5,7 @@ import { useAgentConnectionReadiness } from "./use-integrations";
 interface AgentIntegrationsReadiness {
   /** True while the readiness verdict is still loading. */
   loading: boolean;
-  /** Declared integrations whose connection would 412 at run kickoff. */
+  /** Declared integrations whose connection would 409 at run kickoff. */
   blockingCount: number;
   /** No integration blocks the run. */
   ready: boolean;
@@ -16,7 +16,7 @@ interface AgentIntegrationsReadiness {
  * run button's orange "connections needed" badge.
  *
  * Reads the single bulk `connection-readiness` query (server-authoritative —
- * the same resolver the run-kickoff 412 runs, including the required-auth
+ * the same resolver the run-kickoff 409 runs, including the required-auth
  * carve-out for declared-but-inert integrations). One call drives this badge,
  * the Connexions tab, and the pre-run check, so they can never disagree.
  *

@@ -47,7 +47,8 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 | `appstrate token`     | Print metadata about the stored access + refresh tokens (debug).                                            |
 | `appstrate org`       | List, switch, or create organizations pinned on the active profile.                                         |
 | `appstrate space`     | List, switch, or create spaces pinned on the active profile.                                                |
-| `appstrate packages`  | Sync your spaces' skills to Claude Code and Codex; edit a package in a folder, push it, publish it.         |
+| `appstrate code`      | Sync your spaces' skills, and the pinned space's agents as commands, into Claude Code and Codex.            |
+| `appstrate packages`  | Edit a package in a local folder, push it to its draft, publish it.                                         |
 | `appstrate api`       | Authenticated HTTP passthrough to the Appstrate API.                                                        |
 | `appstrate openapi`   | Explore the active profile's OpenAPI schema without flooding stdout.                                        |
 | `appstrate run`       | Execute an agent — a package id runs on the pinned instance, a `.afps`/`.afps-bundle` path runs in-process. |
@@ -376,29 +377,29 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 
 ---
 
-### `appstrate packages sync`
+### `appstrate code sync`
 
-Materialize the union of skills placed in the spaces you reach in the pinned organization as [Agent Skills](https://agentskills.io/specification) directories on this machine — one Claude Code plugin, and/or the shared skill directories Claude Code and Codex scan directly. The connected Claude Code plugin also configures the organization's Appstrate MCP server.
+Materialize the union of skills placed in the spaces you reach in the pinned organization as [Agent Skills](https://agentskills.io/specification) directories on this machine — one Claude Code plugin, and/or the shared skill directories Claude Code and Codex scan directly. The connected Claude Code plugin also configures the organization's Appstrate MCP server, and installs every agent active in the pinned space as a command, `/appstrate:run-<agent>`, that launches it through that server (see [Agent commands](#agent-commands)).
 
 The command is designed to run **unattended**. Claude Code plugin marketplaces accept a `command` source: a locally installed tool prints the path of a directory holding a complete plugin, and Claude Code re-runs that command at install, then once per session in the background, reinstalling and reloading the plugin when the directory's content hash changes. That is the whole auto-sync mechanism — no hook, no daemon, no server-side change.
 
 ```sh
-appstrate packages sync                                  # → the Claude Code plugin directory
-appstrate packages sync --target codex                   # → ~/.agents/skills/
-appstrate packages sync --target claude-user             # → ~/.claude/skills/
-appstrate packages sync --target claude-plugin --target codex
-appstrate packages sync --source draft                   # sync working copies instead of published versions
-appstrate packages sync --space spc_prod --space spc_team # narrow this run; MCP stays on the pinned space
-appstrate packages sync --dry-run                        # report what would change, write nothing
-appstrate packages sync --print-path                     # the plugin path as the ONLY stdout line
+appstrate code sync --target claude-plugin                                   # → the Claude Code plugin directory
+appstrate code sync --target codex                                           # → ~/.agents/skills/
+appstrate code sync --target claude-user                                     # → ~/.claude/skills/
+appstrate code sync --target claude-plugin --target codex                    # both, as the marketplace command does
+appstrate code sync --target claude-user --source draft                      # sync working copies instead of published versions
+appstrate code sync --target claude-plugin --space spc_prod --space spc_team # narrow this run; MCP stays on the pinned space
+appstrate code sync --target codex --dry-run                                 # report what would change, write nothing
+appstrate code sync --target claude-plugin --print-path                      # the plugin path as the ONLY stdout line
 ```
 
 **Command and flags**
 
 | Flag / command    | Purpose                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages sync`   | Reads the skills ACTIVE in every space this profile is a member of — a skill switched off in a space is not synced from it — and writes one directory per skill into each requested target.                                                                                                                                                                                                              |
-| `--target <name>` | Repeatable. `claude-plugin` (default) → `$XDG_DATA_HOME/appstrate/claude-plugin/`; `codex` → `~/.agents/skills/`; `claude-user` → `~/.claude/skills/`.                                                                                                                                                                                                                                                   |
+| `code sync`       | Reads the skills ACTIVE in every space this profile is a member of — a skill switched off in a space is not synced from it — and writes one directory per skill into each requested target. With `claude-plugin`, it also writes one command per agent ACTIVE in the pinned space.                                                                                                                       |
+| `--target <name>` | **Required**, repeatable — there is no default target, and a bare `appstrate code sync` exits 1 with a usage line naming the three: `claude-plugin` → `$XDG_DATA_HOME/appstrate/claude-plugin/`; `codex` → `~/.agents/skills/`; `claude-user` → `~/.claude/skills/`.                                                                                                                                     |
 | `--space <id>`    | Repeatable. Narrows this sync to the named spaces — IDs or unambiguous exact names from `appstrate space list`. Does not change the pinned MCP space and does not persist.                                                                                                                                                                                                                               |
 | `--source <name>` | `published` (default) syncs each skill's `latest` published version, integrity-verified. `draft` syncs the working copy instead — for authors iterating on their own machine: the sync NAMES the draft, and naming it needs `skills:write` on the skill in its home space, so the instance refuses it (`403 draft_not_writable`) to everybody else rather than quietly handing back the published bytes. |
 | `--print-path`    | Print the plugin directory as the **only** stdout line; every message goes to stderr. This is what a marketplace `command` source consumes. Requires `--target claude-plugin`, and refuses `--dry-run`.                                                                                                                                                                                                  |
@@ -411,7 +412,7 @@ appstrate packages sync --print-path                     # the plugin path as th
 `--space` and `syncSpaces` **narrow** that set. They never widen it: a space you have not joined cannot be synced.
 
 ```sh
-appstrate packages sync --space spc_prod --space spc_team   # this invocation only
+appstrate code sync --target claude-plugin --space spc_prod --space spc_team   # this invocation only
 ```
 
 For a persistent restriction, add IDs to the existing profile in `config.toml` (see the complete example below):
@@ -424,7 +425,7 @@ Changing organization clears this list because space IDs belong to one organizat
 
 **One copy per package, at the organization's `latest`.** A package is an organization-level row that `space_packages` attributes to any number of spaces, so the same skill is normally listed by several of the spaces you reach. It is downloaded once, from the first that listed it. That choice never decides _which_ version: `versions/latest` resolves per organization, so what lands on your machine is the organization's latest published version, whichever space listed it first. It can still be newer than what an agent in that space executes — an agent resolves its skills against the semver ranges in its own manifest, and each run freezes what it resolved.
 
-**One active context per destination.** Profiles do not accumulate installations. A successful sync for another profile or organization replaces the previous context in the requested targets. The pinned space is not part of that identity: `appstrate space switch` installs the same skills and only rewrites the plugin's `.mcp.json`, so it never triggers the replacement rules below. The plugin switches its skills and MCP configuration together after the replacement has been prepared. Network, authentication or preparation failures during a context switch retain the previous plugin. Installed skill folders are generated copies: local edits are not sent back to Appstrate. Package authoring and bidirectional folder sync are outside this command.
+**One active context per destination.** Profiles do not accumulate installations. A successful sync for another profile or organization replaces the previous context in the requested targets. The pinned space is not part of that identity: `appstrate space switch` installs the same skills and only rewrites the plugin's `.mcp.json` and agent commands, so it never triggers the replacement rules below. The plugin switches its skills, agent commands and MCP configuration together after the replacement has been prepared. Network, authentication or preparation failures during a context switch retain the previous plugin. Installed skill folders are generated copies: local edits are not sent back to Appstrate. Package authoring and bidirectional folder sync are outside this command.
 
 **Registering it with Claude Code.** Add the marketplace, then install the plugin — the consent screen shows the exact command string Claude Code will re-run each session:
 
@@ -437,10 +438,10 @@ claude plugin install appstrate@appstrate
 The recorded command string is:
 
 ```
-if command -v appstrate >/dev/null 2>&1; then exec appstrate packages sync --target claude-plugin --target codex --print-path; else exec npx -y appstrate@latest packages sync --target claude-plugin --target codex --print-path; fi
+if command -v appstrate >/dev/null 2>&1; then exec appstrate code sync --target claude-plugin --target codex --print-path; else exec npx -y appstrate@latest code sync --target claude-plugin --target codex --print-path; fi
 ```
 
-It must stay byte-stable: changing it stops the background re-runs until the user re-accepts via `claude plugin update appstrate@appstrate` — so a change ships with the CLI release that introduces it, and is announced in the CHANGELOG. Skills then appear as `/appstrate:<skill>`.
+It must stay byte-stable: changing it stops the background re-runs until the user re-accepts via `claude plugin update appstrate@appstrate` — so a change ships with the CLI release that introduces it, and is announced in the CHANGELOG. Skills then appear as `/appstrate:<skill>`, agents as `/appstrate:run-<agent>`.
 
 **Fresh machine.** Installing the plugin is the only step that has to come first. The command uses the installed CLI when there is one and `npx` otherwise, and `--print-path` on a machine whose profile is not configured (or has no org / space pinned) still succeeds: it installs a plugin whose only skill, `/appstrate:setup`, states what is missing and the exact command to run, plus a `SessionStart` hook that says so at every session start — to the user, and to Claude so it can offer to run `appstrate login` itself (the CLI opens the browser; the user only approves there; `login` pins the single organization and its default space by itself). The first connected sync replaces that skill with the organization's. Outside explicit logout, this only happens on a fresh plugin: once skills have been synced, a lapsed login fails the run and leaves the installed plugin untouched. Explicit logout performs the cleanup described above.
 
@@ -480,7 +481,7 @@ Then exit the active Claude Code session and start a new one, check the endpoint
 
 Appstrate refuses to publish a skill whose frontmatter is not valid Agent Skills YAML, but artifacts published before that rule existed are still synced exactly as authored. Each one is named once on stderr (`… does not pass the skill frontmatter rule …`): Claude Code and Codex may skip it, and the fix is to republish it from Appstrate.
 
-**Directory names.** The Agent Skills spec requires the frontmatter `name` to equal the parent directory name, and Appstrate ids are `@scope/name`, which is not a legal skill name. The directory is therefore the frontmatter `name` when it is already legal, falling back to the slugified package `name` segment. If two skills across the spaces you reach claim the same slug, the second one — ordered by package id, so the choice is reproducible — becomes `<scope>-<name>`, then `<scope>-<name>-2`, `-3`, … until the name is free. Every rename is reported on stderr.
+**Directory names.** The Agent Skills spec requires the frontmatter `name` to equal the parent directory name, and `@scope/name` is not a legal skill name, so the directory is the frontmatter `name` when it is legal, else the slugified package `name` segment. An installed name stays with its package while the catalogue still lists it, even when this run could not read it; it changes owner only when its holder leaves or renames itself. A newcomer claiming a held name becomes `<scope>-<name>`, then `-2`, `-3`, … Every rename is reported on stderr.
 
 **Failure modes.** The command never prompts and never assumes a TTY. Each of these is a _whole-run_ failure: it exits 1 with a one-line remedy on stderr, which Claude Code surfaces under `/plugin` → Errors. The first, third and fourth rows become the `/appstrate:setup` plugin instead under `--print-path` on a fresh plugin (see above).
 
@@ -499,7 +500,7 @@ Appstrate refuses to publish a skill whose frontmatter is not valid Agent Skills
 - Without `--print-path`, the command then exits 1 so a wrapper notices.
 - With `--print-path`, it exits **0** as long as the plugin tree itself was written (or was already up to date), and prints the path. A non-zero exit makes Claude Code discard the run, so failing the process over one unpublished skill would throw away a correct plugin. When the plugin tree could _not_ be produced, nothing is printed on stdout and the command exits 1.
 
-A skill whose refresh fails keeps the version already on disk and its state entry is preserved — a failed download never deletes a working skill. The same holds one step earlier: **deletion is decided against the catalogue, not against what resolved.** A skill the server still lists but whose version could not be read (a 500, a 429, an expired token mid-run) is kept exactly as it is, counted among the unchanged; only a skill that has genuinely left the catalogue is removed. Its directory name stays reserved for it too, so a transient error cannot hand `/appstrate:<slug>` to a different skill.
+A skill whose refresh fails keeps the version already on disk and its state entry is preserved — a failed download never deletes a working skill. The same holds one step earlier: **deletion is decided against the catalogue, not against what resolved.** A skill the server still lists but whose version could not be read (a 500, a 429, an expired token mid-run) is kept exactly as it is, counted among the unchanged; only a skill that has genuinely left the catalogue is removed. A draft you cannot write (`--source draft`, `403 draft_not_writable`) is the exception: it is refused the same way on every run, so it is reported and removed rather than kept, and it does not block a context switch.
 
 **Deleting, and not overwriting.** `codex` and `claude-user` write into directories you also fill by hand. The sync only ever removes — or replaces — a directory its own state file records as managed for that target. A destination it does not own is left completely alone and reported:
 
@@ -511,9 +512,29 @@ There is no automatic rename: remove or rename the directory yourself and re-run
 
 Ownership is recorded per target **together with its profile context — profile name, instance, user and organization, and not the pinned space, which is only `.mcp.json` content — and the root it was written under**. `HOME` is not a constant — the same profile run from cron, `launchd`, `sudo -E` or a devcontainer can resolve a different `~/.agents/skills` — so a state file whose recorded root does not match the current one is read as claiming nothing. Every directory it finds is then treated as unmanaged: refused, never overwritten. A state file that does not name its context is refused the same way, for the same reason: nothing can say whose those directories are. That is what a ledger written by `v1.0.0-beta.56` or `.57` looks like — `claude-plugin` is regenerated whole and costs you nothing, while skills already synced into `codex` or `claude-user` are reported unmanaged once and have to be removed by hand before sync will own them again.
 
+#### Agent commands
+
+With the `claude-plugin` target, sync also installs one command per agent ACTIVE in the **pinned** space, system agents included. Type it with your request, or just ask in plain words and let Claude pick the command; Claude builds the input, launches the agent through the plugin's MCP server with `run_and_wait`, and reports the result and every file it produced:
+
+```text
+/appstrate:run-invoice-extractor extract the totals from ~/Downloads/march-invoice.pdf
+```
+
+**Who gets them.** Agents come from the pinned space alone — `--space` and `syncSpaces` never change it — because an MCP session, its uploads and its runs belong to one space. You need `agents:run`, `runs:read` (or `runs:read-all`) and `mcp:invoke` there (the `runner` role has them); otherwise sync installs none and says so on stderr. `codex` and `claude-user` never get agent commands: nothing configures the MCP server there.
+
+**What a command contains.** `skills/run-<agent>/SKILL.md` and `input.json`, the space's launch contract — the dashboard launch form's split into `prompted` fields (taken from your request; Claude asks only for a missing required one), `prefilled` (sent only when you override them) and `locked` (never sent). Stored values are never written to disk. Its description ("Launches a metered run of the Appstrate agent …") sits in each session's context, so Claude can choose it on its own.
+
+**The run asks for permission.** Whoever picks the command, nothing is pre-approved: Claude Code's prompt for `run_and_wait` shows the exact `input` before the metered run, unless you allowed the tool permanently or run in an auto-accept mode. A command never launches twice once a run exists.
+
+**File inputs.** Claude uploads a local file with `curl` and passes its `upload://` URI. Keep the file in the session's working directory, or start Claude Code with `--add-dir <dir>`: elsewhere, shell access prompts, or the file is copied through the model's context.
+
+**Keeping commands current.** A command pins the version it launches (`--source published`: the latest published; `--source draft`: `draft`, removed if you cannot write the agent; a system agent always uses its published version). A republish, a schema, lock or default change, or another pinned space rewrites it at the next sync. A command that fell behind says so at launch and tells you to run `claude plugin update appstrate@appstrate`, which re-runs the sync and reinstalls the plugin.
+
+**Names.** `run-<name>`, under the skill directory rule above: an installed command keeps its name while its agent is still active, a newcomer falls back to `run-<scope>-<name>`, `-2`, …, and skills are named before agents.
+
 #### Codex, and running without a Claude Code plugin
 
-The recorded marketplace command syncs both targets (`--target claude-plugin --target codex`), so if you use Claude Code, every session already refreshes `~/.agents/skills/` and Codex picks the skills up on its next start. This target supplies skills only; it does not configure Codex MCP.
+The recorded marketplace command syncs both targets (`--target claude-plugin --target codex`), so if you use Claude Code, every session already refreshes `~/.agents/skills/` and Codex picks the skills up on its next start. This target supplies skills only — no agent commands, which need the plugin's MCP server — and it does not configure Codex MCP.
 
 **Connect Codex manually.** Run `appstrate whoami` to read the instance URL, `appstrate org list` to choose an organization, and `appstrate org current` to print its pinned ID. Substitute those values below, removing any trailing slash from the instance URL:
 
@@ -535,12 +556,12 @@ claude mcp add --transport http --scope user appstrate https://app.example.com/a
 
 Inspect an existing entry with `claude mcp get appstrate` before adding; keep it or choose another name rather than replacing it blindly. [Claude Code installation scopes](https://code.claude.com/docs/en/mcp#user-scope).
 
-Two cases need you to run the sync yourself: you do not use Claude Code at all, or your organization blocks command-sourced plugins (`disableCommandPluginSources`). Then schedule `appstrate packages sync --target codex` (add or swap in `--target claude-user` to feed `~/.claude/skills/`, which Claude Code picks up live).
+Two cases need you to run the sync yourself: you do not use Claude Code at all, or your organization blocks command-sourced plugins (`disableCommandPluginSources`). Then schedule `appstrate code sync --target codex` (add or swap in `--target claude-user` to feed `~/.claude/skills/`, which Claude Code picks up live).
 
 A cron entry every 15 minutes — cron's `PATH` is minimal, so give the absolute path:
 
 ```cron
-*/15 * * * * /usr/local/bin/appstrate packages sync --target codex >/dev/null 2>&1
+*/15 * * * * /usr/local/bin/appstrate code sync --target codex >/dev/null 2>&1
 ```
 
 On macOS, prefer a `launchd` user agent running the same command every 900 seconds (`command -v appstrate` gives the absolute path).
@@ -553,30 +574,29 @@ Per-skill toggles survive all of this. We never write `~/.codex/config.toml`, an
 
 ### `appstrate packages` — pull, status, push, publish
 
-Edit a package (skill, agent, integration, MCP server) in a local folder with any tool, then write it back to its **draft** and publish it as a separate, deliberate step. `packages sync` is the other direction: it copies what is published (or, with `--source draft`, your draft) onto your machine and never sends anything back.
+Edit a package (skill, agent, integration, MCP server) in a local folder with any tool, then write it back to its **draft** and publish it as a separate, deliberate step. [`appstrate code sync`](#appstrate-code-sync) is the other direction: it copies what is published (or, with `--source draft`, your draft) into your coding tools and never sends anything back — `appstrate code sync --target claude-user --source draft` is how you test a pushed draft on this machine before publishing it: Claude Code reads `~/.claude/skills/` live, while the plugin's copy is rewritten from published versions at every marketplace refresh.
 
 ```sh
 appstrate packages pull my-skill                 # the draft → <workDir>/<org>/packages/skills/@<org>/my-skill
 appstrate packages status my-skill --diff        # what the folder would change in the draft
 appstrate packages push my-skill                 # the folder → the draft; nobody else sees it yet
-appstrate packages sync --source draft           # test the draft on this machine
 appstrate packages publish my-skill              # the draft → a version every space resolves
 ```
 
 **Authority is the package's home space.** A package lives in one space, its home, and only a caller who may write there can read its draft, push or publish. Anyone else who can read the package pulls its latest published version, read-only, and `push` refuses with a pointer to co-editing. The CLI asks the platform where the package lives (`GET /api/packages/{scope}/{name}/home`, across every space you reach), so a package homed in your personal space is found even while a team space is pinned. Sharing and activation are not part of this loop.
 
-**The lock belongs to the folder.** `pull` of a draft records the draft's `lock_version` for that folder (by its real path), and `push` sends it back: a draft edited anywhere else in between (the dashboard, the chat, the API, another folder or machine) is refused with `409` and nothing is written. After a push the folder records the lock its own write produced (one step up), never a later one it did not see, and warns when someone wrote right after it. `status` warns about it before you push. A folder that never read the draft, or that pulled a published version, can only push with `--force`, which replaces the draft with the folder. Lock records are per profile and updated under an `flock(2)`, so two commands never lose each other's entries.
+**The draft version belongs to the folder.** `pull` of a draft records the draft's `ETag` for that folder (by its real path), and `push` sends it back as `If-Match`: a draft edited anywhere else in between (the dashboard, the chat, the API, another folder or machine) is refused with `412` and nothing is written. After a push the folder records the `ETag` its own write produced, never a later one it did not see. A lock table written by an older CLI (numeric locks) is refused with the steps to rebuild it. `status` warns about it before you push. A folder that never read the draft, or that pulled a published version, can only push with `--force`, which replaces the draft with the folder. Lock records are per profile and updated under an `flock(2)`, so two commands never lose each other's entries.
 
-| Subcommand                 | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pull <package> [dir]`     | `@scope/name` or a bare name under the org's slug. `--version <spec>` pulls a published version instead of the draft. Refuses a non-empty folder unless `--force`, which makes the folder mirror the package: files it does not have are deleted, and listed.                                                                                                                                                                                                                                                                                                                |
-| `status <dir>`             | A folder path, or a bare name resolved in the work dir. `manifest.json` counts: a configuration-only edit is a change. `--diff` prints a line diff for each modified text file.                                                                                                                                                                                                                                                                                                                                                                                              |
-| `push <dir>`               | Writes every change in ONE atomic `PUT /api/packages/{type segment}/{scope}/{name}`: all of it lands, or none. Bytes that are not UTF-8 text travel as base64, so binary annexes survive.                                                                                                                                                                                                                                                                                                                                                                                    |
-| `publish <package-or-dir>` | Creates a version from the draft, by the dashboard's rule. Given a folder, refuses when the folder holds anything the draft does not (unpushed edits, or a draft moved since the folder read it); given an id, publishes the draft as it is. The rule: a draft still at the latest version is bumped (`--bump patch\|minor\|major`, default `patch`), a draft ahead of it is cut as is, one behind it is refused. A specific number goes in `manifest.json`, pushed, as in the dashboard. The publish carries the lock it read, so a draft that moved in between is refused. |
+| Subcommand                 | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pull <package> [dir]`     | `@scope/name` or a bare name under the org's slug, optionally `@<spec>`: `<package>@1.2.0`, `@latest`, a range or a tag pulls that published version instead of the draft; `@draft` pulls the draft, and is refused to someone who cannot write it. Refuses a non-empty folder unless `--force`, which makes the folder mirror the package: files it does not have are deleted, and listed.                                                                                                                                                                                                  |
+| `status <dir>`             | A folder path, or a bare name resolved in the work dir. `manifest.json` counts: a configuration-only edit is a change. `--diff` prints a line diff for each modified text file.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `push <dir>`               | Writes every change in ONE atomic `PATCH /api/packages/{type segment}/{scope}/{name}`: all of it lands, or none. Bytes that are not UTF-8 text travel as base64, so binary annexes survive.                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `publish <package-or-dir>` | Creates a version from the draft, by the dashboard's rule. Given a folder, refuses when the folder holds anything the draft does not (unpushed edits, or a draft moved since the folder read it); given an id, publishes the draft as it is. The rule: a draft still at the latest version is bumped (`--bump patch\|minor\|major`, default `patch`), a draft ahead of it is cut as is, one behind it is refused. A specific number goes in `manifest.json`, pushed, as in the dashboard. The publish carries the `ETag` it read as `If-Match`, so a draft that moved in between is refused. |
 
 **What the folder is.** Dot-named entries (`.git`, `.env`, `.DS_Store`, editor state) and `__pycache__` are tooling state and secrets, not package content: never read, pushed, deleted from the draft or reported — on both sides, so a dotfile the draft holds is left alone — and `pull` never writes them either, so a package cannot plant a `.git/config` or an editor task in your folder (it lists what it skipped). `node_modules` is NOT ignored: an MCP server bundle ships `server/node_modules` as part of the package. A file the folder writes (added or modified) is at most 1 MiB, the platform's per-file write limit, checked before the write is sent; an unchanged larger file the draft already holds (an import is bounded only by the archive) is fine. `pull` refuses a package holding two paths that are one file on a case- or normalization-insensitive disk (`A.md` and `a.md`). a symbolic link is refused rather than followed. A folder without `manifest.json` is a skill (`SKILL.md` alone): its manifest is not compared or sent, and stays the draft's. `push` never changes the version — that is decided when you publish, as in the dashboard; a publish that bumps it carries the new version into the `manifest.json` of every folder current with the draft, leaving the rest of that file alone.
 
-**Creating a package publishes it.** `push` on an id that does not exist yet refuses unless you pass `--create`. It then zips the folder — listing on stderr the ignored entries it leaves out — into `POST /api/packages/import`, the one creation path every type has, which homes the package in `--space <id>` (default: the pinned space) and publishes its first version. The folder records the new draft's lock and gets the manifest the platform stored — a `SKILL.md`-only folder gains the one it derived.
+**Creating a package publishes it.** `push` on an id that does not exist yet refuses unless you pass `--create`. It then zips the folder — listing on stderr the ignored entries it leaves out — into `POST /api/packages/import`, the one creation path every type has, which homes the package in `--space <id>` (default: the pinned space) and publishes its first version. The folder records the new draft's `ETag` and gets the manifest the platform stored — a `SKILL.md`-only folder gains the one it derived.
 
 **Work dir.** Default `~/Appstrate Packages`, overridable with a top-level `workDir` in `config.toml`. A package's working copy is `<workDir>/<org slug>/packages/<type segment>/@<scope>/<name>`: a bare name means `@<org slug>/<name>`, a scoped id keeps its scope, and a folder found there that holds another package is refused. An Appstrate instance directory (one holding `.appstrate/project.json`) is refused: `appstrate uninstall --purge` removes it wholesale.
 
@@ -818,7 +838,7 @@ The full flag set is documented under `appstrate run --help`.
 
 **Connection readiness**
 
-Connection readiness is enforced server-side at run-trigger time: a run that targets an integration without a healthy connection is rejected with HTTP 412 (`missing_integration_connection`) before the container launches. Connect or repair the connection from the dashboard's connectors panel (`${instance}/preferences/connectors`).
+Connection readiness is enforced server-side at run-trigger time: a run that targets an integration without a healthy connection is rejected with HTTP 409 (`missing_integration_connection`) before the container launches. Connect or repair the connection from the dashboard's connectors panel (`${instance}/preferences/connectors`).
 
 ---
 
@@ -890,9 +910,9 @@ $XDG_CONFIG_HOME/appstrate/              (or ~/.config/appstrate/)
 └── credentials.json                     # keyring fallback (only if keyring unavailable)
 
 $XDG_DATA_HOME/appstrate/                (or ~/.local/share/appstrate/)
-├── claude-plugin/                       # generated Claude Code plugin (`appstrate packages sync`)
+├── claude-plugin/                       # generated Claude Code plugin (`appstrate code sync`)
 ├── skills-sync/state.json               # which skill directory each target owns, and from which artifact
-├── packages/<profile>-locks.json       # working folder → package and the draft lock it last saw (`appstrate packages`)
+├── packages/<profile>-locks.json       # working folder → package and the draft `ETag` it last saw (`appstrate packages`)
 ├── packages/<profile>-locks.lock       # flock(2) target serializing updates of that file (never removed)
 └── skills-sync/sync.lock                # flock(2) target serializing concurrent syncs (never removed; unlocked where flock(2) is absent)
 ```

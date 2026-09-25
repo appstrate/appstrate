@@ -24,7 +24,8 @@
  *     header (the only place it exists — the wire target IP is ours);
  *   - apply the exact same SSRF floor as the CONNECT listener (literal
  *     layer + resolve-and-pin DNS-rebind layer, fail closed) and the same
- *     optional authorized-host matcher;
+ *     egress allowlist, that of the runner at the peer IP (`policyForPeer`,
+ *     an unknown peer is refused — #1458);
  *   - dial the upstream at the PINNED resolved address — never at the
  *     kernel-level original destination, which is always our own IP and,
  *     more importantly, is attacker-controlled ordering: the hostname the
@@ -47,7 +48,14 @@
 import { createServer as netCreateServer } from "node:net";
 import type { Socket } from "node:net";
 
-import { isBlockedHost, resolveAndCheckHost, type HostResolver } from "./helpers.ts";
+import {
+  isBlockedHost,
+  peerAddress,
+  resolveAndCheckHost,
+  PREAMBLE_TIMEOUT_MS,
+  type AuthorityPolicy,
+  type HostResolver,
+} from "./helpers.ts";
 import { netConnectWithTimeout, relaySockets } from "./connect-tunnel.ts";
 import { extractSni, collectUntilSniParses } from "./integration-mitm-listener.ts";
 import type { EgressListenerEvent } from "./integration-egress-listener.ts";
@@ -69,12 +77,8 @@ interface CreateTransparentListenerOptions {
   isBlockedHostFn?: typeof isBlockedHost;
   /** Injectable DNS resolver for the rebind guard (tests stub it). */
   resolveHostFn?: HostResolver;
-  /**
-   * Optional hard egress allowlist — same contract as the CONNECT
-   * listener's `authorizedHostMatcher` (#543): `undefined` leaves egress
-   * SSRF-floored-open, matching today's behaviour.
-   */
-  authorizedHostMatcher?: (host: string) => boolean;
+  /** Egress policy of the runner at `remoteAddress`; `null` = refused. */
+  policyForPeer: (remoteAddress: string) => Promise<AuthorityPolicy | null>;
 }
 
 export interface TransparentListenerHandle {
@@ -85,15 +89,6 @@ export interface TransparentListenerHandle {
 
 /** Cap on plain-HTTP head accumulation while hunting for the Host header. */
 const MAX_HTTP_HEAD_BYTES = 16 * 1024;
-
-/**
- * Read timeout for the preamble phase (ClientHello / HTTP head). A client
- * that connects and stalls — or sends a complete SNI-less ClientHello we
- * can never route — is torn down instead of holding the socket open.
- * Once the splice starts, {@link relaySockets} replaces this with its own
- * idle timeout.
- */
-const PREAMBLE_TIMEOUT_MS = 10_000;
 
 /**
  * Pull the hostname out of a plain-HTTP request head. Accepts both the
@@ -158,11 +153,13 @@ export function createTransparentEgressListener(
   const isBlockedHostFn = options.isBlockedHostFn ?? isBlockedHost;
   const resolveHostFn = options.resolveHostFn;
   const emit = options.onEvent ?? (() => {});
-  const matcher = options.authorizedHostMatcher;
 
   const server = netCreateServer();
 
   server.on("connection", (clientSocket: Socket) => {
+    // Peer gate, started at accept.
+    const peer = peerAddress(clientSocket);
+    const peerPolicy = peer ? options.policyForPeer(peer).catch(() => null) : Promise.resolve(null);
     // Upstream is dialed later, after the async SSRF/resolve phase. Track
     // it in the connection scope so ANY client teardown — including the
     // preamble idle-timeout firing mid-dial, before relaySockets wires its
@@ -205,6 +202,13 @@ export function createTransparentEgressListener(
         // void. relaySockets' pipe() resumes the stream.
         clientSocket.pause();
 
+        const policy = await peerPolicy;
+        if (!policy) {
+          const target = `<unknown>:${upstreamPort}`;
+          emit({ kind: "tunnel-refused", target, reason: "peer-not-allowed", peer });
+          clientSocket.destroy();
+          return;
+        }
         if (!targetHost) {
           emit({
             kind: "tunnel-refused",
@@ -223,8 +227,8 @@ export function createTransparentEgressListener(
           return;
         }
 
-        // Optional hard egress allowlist (#543 contract; no-op by default).
-        if (matcher && !matcher(targetHost)) {
+        // Hard egress allowlist — before any DNS lookup of the client-supplied name.
+        if (!policy.allowsAuthority(targetHost, upstreamPort)) {
           emit({ kind: "tunnel-refused", target, reason: "not-authorized" });
           clientSocket.destroy();
           return;

@@ -41,7 +41,7 @@ describe("Invitations API", () => {
       email: member.email,
       invitedBy: ctx.user.id,
       role: "guest",
-      spaceAssignments: [{ space_id: privateSpace.id, preset_role: "admin" }],
+      spaceAssignments: [{ spaceId: privateSpace.id, preset_role: "admin" }],
     });
     const api: { getSession: (context: { headers: Headers }) => Promise<unknown> } = getAuth().api;
     const getSession = api.getSession;
@@ -72,7 +72,7 @@ describe("Invitations API", () => {
         auditEvents,
         and(eq(auditEvents.action, "org.invitation_accepted"), eq(auditEvents.resourceId, inv.id))!,
       );
-      expect(audit.after).toMatchObject({ role: "member", space_assignments: [] });
+      expect(audit.after).toMatchObject({ role: "member", spaceAssignments: [] });
     } finally {
       sessionRead.mockRestore();
     }

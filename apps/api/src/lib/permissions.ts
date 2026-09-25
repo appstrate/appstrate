@@ -54,6 +54,7 @@ import {
   type SpaceLevelPermission,
   type SpaceRolePreset,
   ORG_LEVEL_PERMISSIONS,
+  RUNS_READ_PERMISSIONS,
   SPACE_LEVEL_PERMISSIONS,
   SPACE_ROLE_PRESETS,
   getModuleRoleScopes,
@@ -214,6 +215,29 @@ const SPACE_PRESET_PERMISSIONS: Record<SpaceRolePreset, ReadonlySet<SpaceLevelPe
 };
 
 /**
+ * Core exceptions to "`R:a` needs `R:read`" ({@link readGrantsFor}); the first
+ * read is the canonical one (the editor ticks it, `0020` adds it).
+ */
+const READ_REQUIREMENT_OVERRIDES: Partial<
+  Record<SpaceLevelPermission, readonly SpaceLevelPermission[]>
+> = {
+  "runs:read-all": [],
+  // Per-row visibility, or the route enforces the read it needs (bulk delete: `runs:read-all`).
+  "runs:cancel": RUNS_READ_PERMISSIONS,
+  "runs:delete": RUNS_READ_PERMISSIONS,
+  // A launch is read back as a run (`canRunAgents`), not as the agent: `runner`
+  // launches agents it cannot read (RBAC spec §3.4).
+  "agents:run": RUNS_READ_PERMISSIONS,
+  // An invite-only role adds by exact email (RBAC spec §8).
+  "space-members:invite": [],
+  // A launcher connects accounts from the missing-connection flow (RBAC spec §3.4).
+  "integrations:connect": [],
+  // No role grant gates it: a connection is removed by its owner
+  // (`DELETE /api/me/connections/:id`); it caps a delegated credential there.
+  "integrations:disconnect": [],
+};
+
+/**
  * Presets whose static grants are a STRICT superset of `preset`'s: the ones a
  * module contribution naming `preset` must also name, or the stronger role
  * would hold less than the weaker one for that single resource
@@ -356,6 +380,53 @@ export function knownSpaceLevelPermissions(): ReadonlySet<string> {
 }
 
 /**
+ * The reads any one of which `permission` requires, canonical first; empty when none.
+ * The module loader passes its own `known`: it runs before the module snapshot is registered.
+ */
+export function readGrantsFor(
+  permission: string,
+  known: ReadonlySet<string> = knownSpaceLevelPermissions(),
+): string[] {
+  if (!known.has(permission)) return [];
+  const read = `${permission.slice(0, permission.indexOf(":"))}:read`;
+  // Every known permission holds a `:`, so it never names an `Object.prototype` key.
+  const override = READ_REQUIREMENT_OVERRIDES[permission as SpaceLevelPermission];
+  const reads: readonly string[] = override ?? (permission === read ? [] : [read]);
+  return reads.filter((candidate) => known.has(candidate));
+}
+
+/**
+ * Held permissions that require a read ({@link readGrantsFor}) and hold none of
+ * them, sorted; unknown strings ignored.
+ */
+export function missingReadGrants(
+  permissions: Iterable<string>,
+  known: ReadonlySet<string> = knownSpaceLevelPermissions(),
+): { permission: string; reads: string[] }[] {
+  const held = new Set(permissions);
+  const missing: { permission: string; reads: string[] }[] = [];
+  for (const permission of held) {
+    const reads = readGrantsFor(permission, known);
+    if (reads.length > 0 && !reads.some((read) => held.has(read))) {
+      missing.push({ permission, reads });
+    }
+  }
+  return missing.sort((a, b) => a.permission.localeCompare(b.permission));
+}
+
+/** A {@link missingReadGrants} entry as prose: `'agents:delete' requires 'agents:read'`. */
+export function describeMissingRead({
+  permission,
+  reads,
+}: {
+  permission: string;
+  reads: readonly string[];
+}): string {
+  const quoted = reads.map((read) => `'${read}'`).join(", ");
+  return `'${permission}' requires ${reads.length === 1 ? quoted : `one of ${quoted}`}`;
+}
+
+/**
  * A stored custom bundle read against the CURRENT vocabulary: what it grants
  * here, and the entries this deployment cannot name.
  *
@@ -391,6 +462,8 @@ export interface SpacePermissionEntry {
   action: string;
   /** Can be carried by an API key (`getApiKeyAllowedScopes`). */
   api_key_grantable: boolean;
+  /** Reads the role must hold one of (`readGrantsFor`), the one to add first; empty when none. */
+  requires_one_of: string[];
 }
 
 /** Space-level permissions grouped under their resource, both sorted. */
@@ -406,8 +479,9 @@ export interface SpaceVocabularyGroup {
  */
 export function spaceLevelVocabulary(): SpaceVocabularyGroup[] {
   const apiKeyAllowed = getApiKeyAllowedScopes();
+  const known = knownSpaceLevelPermissions();
   const byResource = new Map<string, SpacePermissionEntry[]>();
-  for (const permission of [...knownSpaceLevelPermissions()].sort()) {
+  for (const permission of [...known].sort()) {
     const colon = permission.indexOf(":");
     const resource = permission.slice(0, colon);
     const entries = byResource.get(resource) ?? [];
@@ -415,6 +489,7 @@ export function spaceLevelVocabulary(): SpaceVocabularyGroup[] {
       permission,
       action: permission.slice(colon + 1),
       api_key_grantable: apiKeyAllowed.has(permission),
+      requires_one_of: readGrantsFor(permission, known),
     });
     byResource.set(resource, entries);
   }
@@ -461,6 +536,16 @@ export function effectivePermissions(input: {
  */
 export function callerPermissions(c: Context<AppEnv>): ReadonlySet<string> {
   return c.get("permissions") ?? new Set<string>();
+}
+
+/**
+ * Whether the credential's scope ceiling leaves `permission` in reach. For an
+ * act authorized by ownership rather than a role grant, which `permissions`
+ * therefore cannot cap (RBAC spec §7.1). A cookie session carries no ceiling.
+ */
+export function ceilingAllows(c: Context<AppEnv>, permission: Permission): boolean {
+  const ceiling = c.get("scopeCeiling");
+  return ceiling === undefined || ceiling.has(permission);
 }
 
 /**

@@ -36,29 +36,39 @@ describe("/api/spaces/:id/social-providers/:provider", () => {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({
-        clientId: "tenant.apps.googleusercontent.com",
-        clientSecret: "super-secret",
+        client_id: "tenant.apps.googleusercontent.com",
+        client_secret: "super-secret",
         scopes: ["openid", "email", "profile"],
       }),
     });
     expect(putRes.status).toBe(200);
     const created = (await putRes.json()) as Record<string, unknown>;
     expect(created.provider).toBe("google");
-    expect(created.clientId).toBe("tenant.apps.googleusercontent.com");
-    expect(created).not.toHaveProperty("clientSecret");
+    expect(created.client_id).toBe("tenant.apps.googleusercontent.com");
+    expect(created).not.toHaveProperty("clientId");
+    expect(created).not.toHaveProperty("client_secret");
     expect(created).not.toHaveProperty("clientSecretEncrypted");
 
     const getRes = await app.request(url, { headers: authHeaders(ctx) });
     expect(getRes.status).toBe(200);
     const got = (await getRes.json()) as Record<string, unknown>;
-    expect(got.clientId).toBe("tenant.apps.googleusercontent.com");
-    expect(got).not.toHaveProperty("clientSecret");
+    expect(got.client_id).toBe("tenant.apps.googleusercontent.com");
+    expect(got).not.toHaveProperty("client_secret");
 
     const delRes = await app.request(url, { method: "DELETE", headers: authHeaders(ctx) });
     expect(delRes.status).toBe(204);
 
     const notFoundRes = await app.request(url, { headers: authHeaders(ctx) });
     expect(notFoundRes.status).toBe(404);
+  });
+
+  it("rejects camelCase body keys", async () => {
+    const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/social-providers/google`, {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId: "g", clientSecret: "gs" }),
+    });
+    expect(res.status).toBe(400);
   });
 
   it("rejects unknown provider with 404", async () => {
@@ -74,7 +84,7 @@ describe("/api/spaces/:id/social-providers/:provider", () => {
       {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId: "x", clientSecret: "y" }),
+        body: JSON.stringify({ client_id: "x", client_secret: "y" }),
       },
     );
     expect(res.status).toBe(404);
@@ -95,7 +105,7 @@ describe("/api/spaces/:id/social-providers/:provider", () => {
     await app.request(`/api/spaces/${ctx.defaultSpaceId}/social-providers/google`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: "g", clientSecret: "gs" }),
+      body: JSON.stringify({ client_id: "g", client_secret: "gs" }),
     });
     const ghRes = await app.request(`/api/spaces/${ctx.defaultSpaceId}/social-providers/github`, {
       headers: authHeaders(ctx),
@@ -105,7 +115,7 @@ describe("/api/spaces/:id/social-providers/:provider", () => {
     await app.request(`/api/spaces/${ctx.defaultSpaceId}/social-providers/github`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: "gh", clientSecret: "ghs" }),
+      body: JSON.stringify({ client_id: "gh", client_secret: "ghs" }),
     });
     const ghGetRes = await app.request(
       `/api/spaces/${ctx.defaultSpaceId}/social-providers/github`,
@@ -113,7 +123,7 @@ describe("/api/spaces/:id/social-providers/:provider", () => {
     );
     expect(ghGetRes.status).toBe(200);
     const gh = (await ghGetRes.json()) as Record<string, unknown>;
-    expect(gh.clientId).toBe("gh");
+    expect(gh.client_id).toBe("gh");
   });
 });
 
@@ -142,8 +152,8 @@ describe("/api/spaces/:id/social-providers/:provider — space membership gate",
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({
-        clientId: "tenant.apps.googleusercontent.com",
-        clientSecret: "super-secret",
+        client_id: "tenant.apps.googleusercontent.com",
+        client_secret: "super-secret",
       }),
     });
     expect(seeded.status).toBe(200);

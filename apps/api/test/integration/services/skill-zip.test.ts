@@ -22,6 +22,7 @@ import { zipSync } from "fflate";
 import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
@@ -110,6 +111,8 @@ describe("tryParseSkillOnlyZip", () => {
       expect(result.parsed.type).toBe("skill");
       expect(result.parsed.manifest.name).toBe(`@${ctx.org.slug}/my-skill`);
       expect(result.parsed.manifest.version).toBe("1.0.0");
+      // Same version the dashboard editor writes for a new skill (#1520).
+      expect(result.parsed.manifest.schema_version).toBe(AFPS_SCHEMA_VERSION);
       expect(result.parsed.content).toBe(VALID_SKILL_MD);
       // The reconstructed manifest.json is injected into the files map.
       expect(result.parsed.files["manifest.json"]).toBeDefined();

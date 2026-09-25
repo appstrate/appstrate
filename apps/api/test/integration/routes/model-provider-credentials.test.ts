@@ -1,61 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
+import { describe, it, expect, beforeEach } from "bun:test";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials } from "@appstrate/db/schema";
+import { auditEvents } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
-import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { registerModelProvider } from "../../../src/services/model-providers/registry.ts";
-import { registerCatalog, lookupCatalogModel } from "../../../src/services/pricing-catalog.ts";
-import xaiFeatured from "../../../src/data/featured-models.json" with { type: "json" };
-import type { CatalogModelEntry } from "@appstrate/shared-types";
+import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
+import { getModelProvider } from "../../../src/services/model-providers/registry.ts";
+import { listCatalogModels, lookupCatalogModel } from "../../../src/services/model-catalog.ts";
 
 const app = getTestApp();
 
-/**
- * Synthetic `modelDiscovery: { mode: "static" }` provider — a stand-in for the
- * subscription sign-ins (codex, claude-code), which the core suite must not
- * depend on (zero-footprint invariant). `s-absent` is deliberately outside the
- * catalog so the ∩-catalog filter stays pinned.
- */
-const STATIC_PROVIDER_ID = "test-refresh-static";
-const STATIC_CATALOG_ID = "test-refresh-static-catalog";
+/** Synthetic api-key provider whose listing is unauthenticated (`publicModelListing`). */
+const PUBLIC_LISTING_PROVIDER_ID = "test-public-listing-route";
+/** An id Pi's OpenCode Go records serve. */
+const P_ONE = "kimi-k2.6";
 
-function registerStaticRefreshProvider(): void {
-  const entry: CatalogModelEntry = {
-    label: "Synthetic",
-    contextWindow: 8192,
-    maxTokens: 1024,
-    capabilities: ["text"],
-    cost: { input: 0, output: 0 },
-  };
+function registerPublicListingProvider(): void {
   try {
-    registerCatalog(STATIC_CATALOG_ID, { "s-one": entry, "s-two": entry });
     registerModelProvider({
-      providerId: STATIC_PROVIDER_ID,
-      displayName: "Test Static Refresh",
-      iconUrl: "anthropic",
-      description: "Synthetic offline-validation provider.",
-      apiShape: "anthropic-messages",
-      defaultBaseUrl: "https://static.example.test",
+      providerId: PUBLIC_LISTING_PROVIDER_ID,
+      displayName: "Test Public Listing",
+      iconUrl: "openai",
+      apiShape: "openai-completions",
+      defaultBaseUrl: "https://public-listing.example.test/v1",
       baseUrlOverridable: false,
-      authMode: "oauth2",
-      oauth: {
-        clientId: "test-static-client",
-        authorizationUrl: "https://auth.example.test/authorize",
-        tokenUrl: "https://auth.example.test/token",
-        refreshUrl: "https://auth.example.test/token",
-        scopes: ["openid"],
-        pkce: "S256",
-      },
-      catalogProviderId: STATIC_CATALOG_ID,
-      featuredModels: ["s-one"],
-      modelDiscoveryCandidates: ["s-one", "s-two", "s-absent"],
-      modelDiscovery: { mode: "static" },
+      authMode: "api_key",
+      catalogProviderId: "opencode-go",
+      featuredModels: [P_ONE],
+      publicModelListing: true,
     });
   } catch {
     // Already registered in this process — the registry rejects duplicates.
@@ -71,12 +47,7 @@ describe("Model Provider Keys API", () => {
   });
 
   describe("GET /api/model-provider-credentials/registry", () => {
-    it("fills cost from the pricing catalog when the inline definition omits it", async () => {
-      // Catalog invariant: openai/anthropic/mistral are covered by the
-      // vendored LiteLLM catalog, so `core-providers/index.ts` no longer
-      // duplicates `cost` inline — the registry serializer must derive
-      // it via `lookupCatalogModel(providerId, modelId)?.cost`. If this regresses,
-      // the form UI and the run cost would diverge again.
+    it("serves each model's catalog cost, tiers included", async () => {
       const res = await app.request("/api/model-provider-credentials/registry", {
         headers: authHeaders(ctx),
       });
@@ -84,71 +55,53 @@ describe("Model Provider Keys API", () => {
       const body = (await res.json()) as {
         data: { providerId: string; models: { id: string; cost: unknown }[] }[];
       };
-      const anthropic = body.data.find((p) => p.providerId === "anthropic");
-      expect(anthropic).toBeDefined();
-      const haiku = anthropic!.models.find((m) => m.id === "claude-haiku-4-5-20251001");
-      expect(haiku).toBeDefined();
-      // Assert the route SERVES WHAT THE CATALOG HOLDS, not a transcription of
-      // what it held the day this was written. `apps/api/src/data/pricing/*` is
-      // refreshed weekly by a bot (`chore(pricing): refresh LiteLLM pricing
-      // catalog`), so a literal price turns every vendor repricing into a red
-      // `main` — which is exactly what the xai assertion below did on
-      // 2026-09-02 when xAI moved grok from $3/$15 to $1.25/$2.50.
-      //
-      // Not vacuous: the serializer can still drop the field, read the wrong
-      // provider or model, or reshape the object, and each of those fails here.
-      // What it can no longer do is fail because a vendor changed a price. The
-      // `toBeDefined` guard is the other half — without it a catalog that
-      // stopped pricing this model would compare undefined to undefined and go
-      // green while the route served nothing.
-      const haikuCatalogCost = lookupCatalogModel("anthropic", "claude-haiku-4-5-20251001")?.cost;
-      expect(haikuCatalogCost).toBeDefined();
-      expect(haiku!.cost).toEqual(haikuCatalogCost);
+      const openai = body.data.find((p) => p.providerId === "openai");
+      const gpt = openai!.models.find((m) => m.id === "gpt-5.5");
+      // Compared against the catalog, and not vacuous: gpt-5.5 carries tiers.
+      const catalogCost = lookupCatalogModel(getModelProvider("openai")!, "gpt-5.5")?.cost;
+      expect(catalogCost?.tiers?.length).toBeGreaterThan(0);
+      expect(gpt!.cost).toEqual(catalogCost!);
     });
 
-    it("marks featured catalog models with featured: true (xai)", async () => {
-      // xAI is in the LiteLLM catalog and its featured list is
-      // auto-generated (data/featured-models.json). The picker must flag
-      // exactly the generated ids `featured: true` and every other
-      // catalog model `featured: false`.
+    it("lists the provider's whole offer, flagging exactly its featured ids (xai)", async () => {
       const res = await app.request("/api/model-provider-credentials/registry", {
         headers: authHeaders(ctx),
       });
       const body = (await res.json()) as {
-        data: {
-          providerId: string;
-          models: { id: string; cost: unknown; featured: boolean }[];
-        }[];
+        data: { providerId: string; models: { id: string; featured: boolean }[] }[];
       };
-      const xai = body.data.find((p) => p.providerId === "xai");
-      expect(xai).toBeDefined();
-      // The catalog ships 30+ xai models — the picker now exposes them all.
-      expect(xai!.models.length).toBeGreaterThan(5);
-      const generated = (xaiFeatured as Record<string, string[]>)["xai"] ?? [];
-      expect(generated.length).toBeGreaterThan(0);
-      for (const id of generated) {
-        expect(xai!.models.find((m) => m.id === id)?.featured).toBe(true);
-      }
-      // Catalog-derived cost still flows for non-featured models. Compared
-      // against the catalog rather than a literal, for the reason spelled out
-      // on the anthropic test above.
-      const grok4 = xai!.models.find((m) => m.id === "grok-4");
-      const grok4CatalogCost = lookupCatalogModel("xai", "grok-4")?.cost;
-      expect(grok4CatalogCost).toBeDefined();
-      expect(grok4?.cost).toEqual(grok4CatalogCost);
-      // A non-featured xai model surfaces too, flagged `featured: false`.
-      //
-      // Picked from the response rather than named: `grok-2` used to be the
-      // literal here and the 2026-09-02 catalog refresh DELETED it upstream, so
-      // the assertion started reading `undefined?.featured` and failed on a
-      // model that no longer exists. The property is "everything outside the
-      // generated list is flagged false", which needs no particular model to
-      // survive a vendor's catalog.
-      const nonFeatured = xai!.models.filter((m) => !generated.includes(m.id));
-      expect(nonFeatured.length).toBeGreaterThan(0);
-      for (const m of nonFeatured) {
-        expect(m.featured).toBe(false);
-      }
+      const xai = body.data.find((p) => p.providerId === "xai")!;
+      const def = getModelProvider("xai")!;
+      expect(xai.models.map((m) => m.id)).toEqual(listCatalogModels(def).map((m) => m.id));
+      const featured = def.featuredModels;
+      expect(featured.length).toBeGreaterThan(0);
+      for (const m of xai.models) expect(m.featured).toBe(featured.includes(m.id));
+    });
+
+    it("declares live model search on the providers that serve it, false elsewhere", async () => {
+      const res = await app.request("/api/model-provider-credentials/registry", {
+        headers: authHeaders(ctx),
+      });
+      const body = (await res.json()) as {
+        data: { providerId: string; live_model_search: boolean }[];
+      };
+      const searched = body.data.filter((p) => p.live_model_search).map((p) => p.providerId);
+      expect(searched).toEqual(["openrouter"]);
+    });
+
+    it("serves null for a model the catalog leaves unpriced", async () => {
+      const res = await app.request("/api/model-provider-credentials/registry", {
+        headers: authHeaders(ctx),
+      });
+      const body = (await res.json()) as {
+        data: { providerId: string; models: { id: string; cost: unknown }[] }[];
+      };
+      // Pi prices OpenRouter's variable router with negative rates.
+      const router = body.data
+        .find((p) => p.providerId === "openrouter")!
+        .models.find((m) => m.id === "openrouter/auto");
+      expect(router).toBeDefined();
+      expect(router!.cost).toBeNull();
     });
 
     it("lists the anthropic-messages custom endpoint with no featured models", async () => {
@@ -252,7 +205,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Test Key",
           providerId: "openai",
-          apiKey: "sk-test-key-123",
+          api_key: "sk-test-key-123",
         }),
       });
 
@@ -282,8 +235,8 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           providerId: "openai-compatible",
-          apiKey: "sk-local",
-          baseUrlOverride: "http://10.255.255.9:9/v1",
+          api_key: "sk-local",
+          base_url_override: "http://10.255.255.9:9/v1",
         }),
       });
 
@@ -293,7 +246,89 @@ describe("Model Provider Keys API", () => {
     });
   });
 
-  describe("PUT /api/model-provider-credentials/:id", () => {
+  describe("wire casing (snake_case family)", () => {
+    const post = (path: string, body: unknown) =>
+      app.request(path, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+      });
+
+    it("rejects snake_case spellings of the carve-out name `providerId`", async () => {
+      const create = await post("/api/model-provider-credentials", {
+        provider_id: "openai",
+        api_key: "sk-snake",
+      });
+      expect(create.status).toBe(400);
+      const inlineTest = await post("/api/model-provider-credentials/test", {
+        provider_id: "openai-compatible",
+        base_url: "http://10.255.255.9:9",
+        api_key: "sk-x",
+      });
+      expect(inlineTest.status).toBe(400);
+      const discover = await post("/api/model-provider-credentials/discover", {
+        provider_id: "openai-compatible",
+        api_key: "sk-x",
+      });
+      expect(discover.status).toBe(400);
+    });
+
+    it("rejects camelCase `apiKey` / `baseUrlOverride` beside `providerId` on create", async () => {
+      const res = await post("/api/model-provider-credentials", {
+        providerId: "openai-compatible",
+        apiKey: "sk-camel",
+        baseUrlOverride: "http://10.255.255.9:9/v1",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects camelCase `baseUrl` / `apiKey` beside `providerId` on inline test", async () => {
+      const res = await post("/api/model-provider-credentials/test", {
+        providerId: "openai-compatible",
+        baseUrl: "http://10.255.255.9:9",
+        apiKey: "sk-x",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("refuses an `apiShape` on inline test: the provider decides the shape", async () => {
+      const res = await post("/api/model-provider-credentials/test", {
+        providerId: "openai-compatible",
+        apiShape: "openai-responses",
+        base_url: "http://10.255.255.9:9",
+        api_key: "sk-x",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects a camelCase `apiKey` on update", async () => {
+      const created = await post("/api/model-provider-credentials", {
+        providerId: "openai",
+        api_key: "sk-original",
+      });
+      const { id } = (await created.json()) as { id: string };
+      const res = await app.request(`/api/model-provider-credentials/${id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ apiKey: "sk-rotated" }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("emits `base_url`, never `baseUrl`, with the honoured override", async () => {
+      const res = await post("/api/model-provider-credentials", {
+        providerId: "openai-compatible",
+        api_key: "sk-local",
+        base_url_override: "http://10.255.255.9:9/v1",
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.base_url).toBe("http://10.255.255.9:9/v1");
+      expect(body).not.toHaveProperty("baseUrl");
+    });
+  });
+
+  describe("PATCH /api/model-provider-credentials/:id", () => {
     it("updates the label and returns the full non-secret resource", async () => {
       // Create a model provider key first
       const createRes = await app.request("/api/model-provider-credentials", {
@@ -302,7 +337,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Original Label",
           providerId: "openai",
-          apiKey: "sk-test-key-123",
+          api_key: "sk-test-key-123",
         }),
       });
       expect(createRes.status).toBe(201);
@@ -310,9 +345,9 @@ describe("Model Provider Keys API", () => {
 
       // Update the label (and rotate the key — must not leak in the response).
       const res = await app.request(`/api/model-provider-credentials/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ label: "Updated Label", apiKey: "sk-rotated-secret-456" }),
+        body: JSON.stringify({ label: "Updated Label", api_key: "sk-rotated-secret-456" }),
       });
 
       expect(res.status).toBe(200);
@@ -327,6 +362,18 @@ describe("Model Provider Keys API", () => {
       expect(serialized).not.toContain("sk-rotated-secret-456");
       expect(body).not.toHaveProperty("apiKey");
       expect(body).not.toHaveProperty("credentialsEncrypted");
+
+      // The audit trail keeps camelCase keys and never the rotated secret.
+      const [audit] = await db
+        .select({ after: auditEvents.after })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.action, "model_provider_credential.updated"),
+            eq(auditEvents.resourceId, id),
+          ),
+        );
+      expect(audit?.after).toEqual({ label: "Updated Label" });
     });
   });
 
@@ -339,7 +386,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "To Delete",
           providerId: "openai",
-          apiKey: "sk-test-key-123",
+          api_key: "sk-test-key-123",
         }),
       });
       expect(createRes.status).toBe(201);
@@ -370,7 +417,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Pinned",
           providerId: "anthropic",
-          apiKey: "sk-anth-test",
+          api_key: "sk-anth-test",
         }),
       });
       const { id: credId } = (await createRes.json()) as { id: string };
@@ -415,7 +462,7 @@ describe("Model Provider Keys API", () => {
    * the SSRF short-circuit (`isBlockedUrl` returns BLOCKED_URL before any
    * fetch fires) — using `http://10.255.255.9:9` keeps the tests offline and
    * deterministic. Real upstream coverage lives at the unit level
-   * (`build-inference-probe-request.test.ts` + `build-model-test-request.test.ts`).
+   * (`build-model-test-request.test.ts`, `public-model-listing.test.ts`).
    */
   describe("POST /api/model-provider-credentials/:id/test", () => {
     it("returns 401 without authentication", async () => {
@@ -448,8 +495,8 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Org A key",
           providerId: "openai-compatible",
-          baseUrlOverride: "https://api.openai.com/v1",
-          apiKey: "sk-org-a",
+          base_url_override: "https://api.openai.com/v1",
+          api_key: "sk-org-a",
         }),
       });
       const { id } = (await createRes.json()) as { id: string };
@@ -476,8 +523,8 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Local",
           providerId: "openai-compatible",
-          baseUrlOverride: "http://10.255.255.9:9",
-          apiKey: "sk-local",
+          base_url_override: "http://10.255.255.9:9",
+          api_key: "sk-local",
         }),
       });
       const { id } = (await createRes.json()) as { id: string };
@@ -499,46 +546,46 @@ describe("Model Provider Keys API", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          apiShape: "openai-responses",
-          baseUrl: "http://10.255.255.9:9",
-          apiKey: "sk-x",
+          providerId: "openai-compatible",
+          base_url: "http://10.255.255.9:9",
+          api_key: "sk-x",
         }),
       });
       expect(res.status).toBe(401);
     });
 
-    it("returns 400 when neither apiKey nor existingKeyId is provided", async () => {
+    it("returns 400 when neither api_key nor credentialId is provided", async () => {
       const res = await app.request("/api/model-provider-credentials/test", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          apiShape: "openai-responses",
-          baseUrl: "http://10.255.255.9:9",
+          providerId: "openai-compatible",
+          base_url: "http://10.255.255.9:9",
         }),
       });
       expect(res.status).toBe(400);
     });
 
-    it("returns 400 on missing baseUrl (Zod rejects)", async () => {
+    it("returns 400 on missing base_url (Zod rejects)", async () => {
       const res = await app.request("/api/model-provider-credentials/test", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          apiShape: "openai-responses",
-          apiKey: "sk-x",
+          providerId: "openai-compatible",
+          api_key: "sk-x",
         }),
       });
       expect(res.status).toBe(400);
     });
 
-    it("returns 200 + BLOCKED_URL when apiKey is supplied inline with a private baseUrl", async () => {
+    it("returns 200 + BLOCKED_URL when api_key is supplied inline with a private base_url", async () => {
       const res = await app.request("/api/model-provider-credentials/test", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          apiShape: "openai-responses",
-          baseUrl: "http://10.255.255.9:9",
-          apiKey: "sk-inline",
+          providerId: "openai-compatible",
+          base_url: "http://10.255.255.9:9",
+          api_key: "sk-inline",
         }),
       });
       expect(res.status).toBe(200);
@@ -546,7 +593,7 @@ describe("Model Provider Keys API", () => {
       expect(body.error).toBe("BLOCKED_URL");
     });
 
-    it("resolves the saved key's plaintext when only existingKeyId is provided", async () => {
+    it("resolves the saved key's plaintext when only credentialId is provided", async () => {
       // Regression for the same wiring that broke as bug 2: the inline
       // /test route also goes through `loadInferenceCredentials`.
       // The test verifies the resolution succeeds end-to-end (we hit
@@ -558,8 +605,8 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Inline-existing",
           providerId: "openai-compatible",
-          baseUrlOverride: "http://10.255.255.9:9",
-          apiKey: "sk-stored",
+          base_url_override: "http://10.255.255.9:9",
+          api_key: "sk-stored",
         }),
       });
       const { id } = (await createRes.json()) as { id: string };
@@ -568,17 +615,97 @@ describe("Model Provider Keys API", () => {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          apiShape: "openai-responses",
-          baseUrl: "http://10.255.255.9:9",
-          existingKeyId: id,
+          providerId: "openai-compatible",
+          base_url: "http://10.255.255.9:9",
+          credentialId: id,
         }),
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { ok: boolean; error?: string };
       expect(body.error).toBe("BLOCKED_URL");
+
+      const snakeFallback = await app.request("/api/model-provider-credentials/test", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          providerId: "openai-compatible",
+          base_url: "http://10.255.255.9:9",
+          existing_key_id: id,
+        }),
+      });
+      expect(snakeFallback.status).toBe(400);
     });
 
-    it("falls through to 'API key is required' (400) when existingKeyId points to a non-existent key", async () => {
+    it("validates through the provider's inference probe when providerId declares publicModelListing", async () => {
+      // Loopback is on the test preload's egress allowlist. The listing answers
+      // 200 to any key; only the chat endpoint authenticates — so AUTH_FAILED
+      // proves the route handed providerId to testModelConfig.
+      const server = Bun.serve({
+        port: 0,
+        fetch: (req) =>
+          new URL(req.url).pathname.endsWith("/models")
+            ? Response.json({ data: [{ id: P_ONE }] })
+            : Response.json({ error: { type: "AuthError" } }, { status: 401 }),
+      });
+      const providerId = `test-public-listing-loopback-${server.port}`;
+      const baseUrl = `http://127.0.0.1:${server.port}/v1`;
+      registerModelProvider({
+        providerId,
+        displayName: "Test Public Listing (loopback)",
+        iconUrl: "openai",
+        apiShape: "openai-completions",
+        defaultBaseUrl: baseUrl,
+        baseUrlOverridable: false,
+        authMode: "api_key",
+        catalogProviderId: "opencode-go",
+        featuredModels: [P_ONE],
+        publicModelListing: true,
+      });
+      try {
+        const res = await app.request("/api/model-provider-credentials/test", {
+          method: "POST",
+          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            providerId,
+            base_url: baseUrl,
+            api_key: "sk-bogus",
+          }),
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { ok: boolean; error?: string };
+        expect(body.ok).toBe(false);
+        expect(body.error).toBe("AUTH_FAILED");
+      } finally {
+        await server.stop(true);
+      }
+    });
+
+    it("returns 400 when providerId is omitted", async () => {
+      const res = await app.request("/api/model-provider-credentials/test", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          base_url: "http://10.255.255.9:9",
+          api_key: "sk-x",
+        }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 on an unknown providerId", async () => {
+      const res = await app.request("/api/model-provider-credentials/test", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          providerId: "no-such-provider",
+          base_url: "http://10.255.255.9:9",
+          api_key: "sk-x",
+        }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("falls through to 'API key is required' (400) when credentialId points to a non-existent key", async () => {
       // loadInferenceCredentials returns null → apiKey stays
       // undefined → route throws invalidRequest. Guards against a future
       // refactor that would silently treat an unresolved key as ok.
@@ -586,109 +713,163 @@ describe("Model Provider Keys API", () => {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          apiShape: "openai-responses",
-          baseUrl: "http://10.255.255.9:9",
-          existingKeyId: "00000000-0000-0000-0000-000000000000",
+          providerId: "openai-compatible",
+          base_url: "http://10.255.255.9:9",
+          credentialId: "00000000-0000-0000-0000-000000000000",
         }),
       });
       expect(res.status).toBe(400);
     });
   });
 
-  /**
-   * `POST /:id/refresh-models` for a `mode: "static"` provider. The endpoint
-   * is deliberately kept as a truthful no-op rather than 404-ing: the model
-   * form drives both provider kinds through the same call, and the response
-   * still has to be the credential's current list. The harness validates
-   * every JSON body against the OpenAPI response schema, so these tests also
-   * gate the documented shape (`outcome`, `candidate_count`,
-   * `available_model_ids`).
-   */
-  describe("POST /api/model-provider-credentials/:id/refresh-models (static provider)", () => {
-    beforeAll(registerStaticRefreshProvider);
-    afterAll(() => {
-      // Restore the canonical baseline — `bun test` shares one process and the
-      // registry rejects duplicate ids.
-      seedTestModelProviders();
-    });
-    beforeEach(registerStaticRefreshProvider);
-
-    it("returns the derived list and writes nothing", async () => {
-      const cred = await seedOrgModelProviderOAuth({
-        orgId: ctx.org.id,
-        providerId: STATIC_PROVIDER_ID,
+  describe("POST /api/model-provider-credentials/test — endpoint of a stored credential", () => {
+    /** A loopback endpoint recording every request it receives. */
+    function recordingServer() {
+      const hits: { path: string; authorization: string | null }[] = [];
+      const server = Bun.serve({
+        port: 0,
+        fetch: (req) => {
+          hits.push({
+            path: new URL(req.url).pathname,
+            authorization: req.headers.get("authorization"),
+          });
+          return Response.json({ data: [] });
+        },
       });
+      return { server, hits, baseUrl: `http://127.0.0.1:${server.port}/v1` };
+    }
 
-      const res = await app.request(`/api/model-provider-credentials/${cred.id}/refresh-models`, {
+    const testRoute = (body: Record<string, unknown>) =>
+      app.request("/api/model-provider-credentials/test", {
         method: "POST",
-        headers: authHeaders(ctx),
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        outcome: string;
-        candidate_count: number;
-        available_model_ids: string[] | null;
-      };
-      expect(body.outcome).toBe("ok");
-      // Every declared candidate is counted, none requested — the platform
-      // never spends a subscription quota to enumerate models.
-      expect(body.candidate_count).toBe(3);
-      // "s-absent" is filtered out: seeding would reject an uncatalogued id.
-      expect(body.available_model_ids).toEqual(["s-one", "s-two"]);
-
-      const [row] = await db
-        .select({ ids: modelProviderCredentials.availableModelIds })
-        .from(modelProviderCredentials)
-        .where(eq(modelProviderCredentials.id, cred.id));
-      expect(row?.ids ?? null).toBeNull();
-    });
-
-    it("ignores a stale persisted array instead of returning or refreshing it", async () => {
-      // The production shape this whole change exists for: a row written once
-      // at discovery time, never refreshed, still being served to the picker
-      // long after the provider definition moved on.
-      const cred = await seedOrgModelProviderOAuth({
-        orgId: ctx.org.id,
-        providerId: STATIC_PROVIDER_ID,
-      });
-      await db
-        .update(modelProviderCredentials)
-        .set({ availableModelIds: ["s-ancient"] })
-        .where(eq(modelProviderCredentials.id, cred.id));
-
-      const res = await app.request(`/api/model-provider-credentials/${cred.id}/refresh-models`, {
-        method: "POST",
-        headers: authHeaders(ctx),
-      });
-
-      const body = (await res.json()) as { available_model_ids: string[] | null };
-      expect(body.available_model_ids).toEqual(["s-one", "s-two"]);
-
-      // Still not written — the column is inert for this provider kind, which
-      // is exactly why migration 0030 clears the historical rows.
-      const [row] = await db
-        .select({ ids: modelProviderCredentials.availableModelIds })
-        .from(modelProviderCredentials)
-        .where(eq(modelProviderCredentials.id, cred.id));
-      expect(row?.ids).toEqual(["s-ancient"]);
-    });
-
-    it("exposes the same derived list on GET (list and refresh cannot disagree)", async () => {
-      const cred = await seedOrgModelProviderOAuth({
-        orgId: ctx.org.id,
-        providerId: STATIC_PROVIDER_ID,
-      });
-
+    async function createCredential(body: Record<string, unknown>): Promise<string> {
       const res = await app.request("/api/model-provider-credentials", {
-        headers: authHeaders(ctx),
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
       });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: { id: string; available_model_ids?: string[] | null }[];
-      };
-      const found = body.data.find((k) => k.id === cred.id);
-      expect(found?.available_model_ids).toEqual(["s-one", "s-two"]);
+      expect(res.status).toBe(201);
+      return ((await res.json()) as { id: string }).id;
+    }
+
+    it("refuses a system credential", async () => {
+      initSystemModelProviderKeys([
+        { id: "system-test-route-key", providerId: "openai", apiKey: "sk-system", models: [] },
+      ]);
+      const foreign = recordingServer();
+      try {
+        const res = await testRoute({
+          providerId: "openai-compatible",
+          base_url: foreign.baseUrl,
+          credentialId: "system-test-route-key",
+        });
+        expect(res.status).toBe(403);
+        expect(foreign.hits).toEqual([]);
+      } finally {
+        await foreign.server.stop(true);
+        initSystemModelProviderKeys([]);
+      }
+    });
+
+    it("probes the stored endpoint with the stored key", async () => {
+      const stored = recordingServer();
+      try {
+        const id = await createCredential({
+          providerId: "openai-compatible",
+          base_url_override: stored.baseUrl,
+          api_key: "sk-stored",
+        });
+        const res = await testRoute({
+          providerId: "openai-compatible",
+          base_url: stored.baseUrl,
+          credentialId: id,
+        });
+        expect(res.status).toBe(200);
+        expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
+        expect(stored.hits).toEqual([{ path: "/v1/models", authorization: "Bearer sk-stored" }]);
+      } finally {
+        await stored.server.stop(true);
+      }
+    });
+
+    it("never sends a stored key to a base_url other than the credential's", async () => {
+      const stored = recordingServer();
+      const foreign = recordingServer();
+      try {
+        const custom = await createCredential({
+          providerId: "openai-compatible",
+          base_url_override: stored.baseUrl,
+          api_key: "sk-stored",
+        });
+        const named = await createCredential({ providerId: "openai", api_key: "sk-named" });
+        for (const body of [
+          { providerId: "openai-compatible", credentialId: custom },
+          { providerId: "openai-compatible", credentialId: named },
+          { providerId: "openai", credentialId: named },
+        ]) {
+          const res = await testRoute({
+            ...body,
+            base_url: foreign.baseUrl,
+          });
+          expect(res.status).toBe(400);
+          expect(((await res.json()) as { param?: string }).param).toBe("base_url");
+        }
+        expect(foreign.hits).toEqual([]);
+        expect(stored.hits).toEqual([]);
+      } finally {
+        await stored.server.stop(true);
+        await foreign.server.stop(true);
+      }
+    });
+
+    it("takes the provider from the credential, not the caller", async () => {
+      const stored = recordingServer();
+      try {
+        const id = await createCredential({
+          providerId: "openai-compatible",
+          base_url_override: stored.baseUrl,
+          api_key: "sk-stored",
+        });
+        const res = await testRoute({
+          providerId: "anthropic",
+          base_url: stored.baseUrl,
+          credentialId: id,
+        });
+        expect(res.status).toBe(200);
+        // openai-completions listing auth, not anthropic's `x-api-key`.
+        expect(stored.hits).toEqual([{ path: "/v1/models", authorization: "Bearer sk-stored" }]);
+      } finally {
+        await stored.server.stop(true);
+      }
+    });
+
+    it("sends a caller-supplied key to a caller-supplied base_url only on an overridable provider", async () => {
+      const foreign = recordingServer();
+      try {
+        const ok = await testRoute({
+          providerId: "openai-compatible",
+          base_url: foreign.baseUrl,
+          api_key: "sk-typed",
+        });
+        expect(ok.status).toBe(200);
+        expect(foreign.hits).toEqual([{ path: "/v1/models", authorization: "Bearer sk-typed" }]);
+
+        registerPublicListingProvider(); // baseUrlOverridable: false
+        const refused = await testRoute({
+          providerId: PUBLIC_LISTING_PROVIDER_ID,
+          base_url: foreign.baseUrl,
+          api_key: "sk-typed",
+        });
+        expect(refused.status).toBe(400);
+        expect(((await refused.json()) as { param?: string }).param).toBe("base_url");
+        expect(foreign.hits).toHaveLength(1);
+      } finally {
+        await foreign.server.stop(true);
+      }
     });
   });
 });

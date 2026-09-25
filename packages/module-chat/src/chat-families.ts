@@ -35,6 +35,7 @@
  */
 export const CHAT_USABLE_FAMILIES = new Set([
   "openai-completions",
+  "openai-responses",
   "anthropic-messages",
   "mistral-conversations",
   "openai-codex-responses",

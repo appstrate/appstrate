@@ -20,7 +20,7 @@
 import { z } from "zod";
 import { pgEnum } from "drizzle-orm/pg-core";
 import { ORG_ROLES } from "@appstrate/core/permissions";
-import { runStatusValues } from "../run-status.ts";
+import { runStatusValues } from "@appstrate/core/run-status";
 
 /**
  * The `org_role` pg enum IS `ORG_ROLES` from `@appstrate/core/permissions` —
@@ -34,21 +34,9 @@ export type OrgRole = (typeof orgRoleValues)[number];
 
 /**
  * Run statuses are the one enum whose literals live OUTSIDE this file, in the
- * import-free `../run-status.ts`: the SPA needs the values (not the Drizzle
- * object), and importing them from here would pull drizzle-orm + the whole
- * schema barrel into the browser bundle. The `pgEnum` below derives from that
- * tuple, so the DB enum can never drift from what the client ships.
+ * import-free `@appstrate/core/run-status`, so the DB enum cannot drift from
+ * what the client ships.
  */
-export {
-  runStatusValues,
-  terminalRunStatusValues,
-  TERMINAL_RUN_STATUSES,
-  activeRunStatusValues,
-  ACTIVE_RUN_STATUSES,
-  TERMINAL_RUN_EVENT_TYPES,
-} from "../run-status.ts";
-export type { RunStatus, TerminalRunStatus } from "../run-status.ts";
-
 export const runStatusEnum = pgEnum("run_status", runStatusValues);
 
 export const invitationStatusValues = ["pending", "accepted", "expired", "cancelled"] as const;
@@ -98,6 +86,15 @@ export type CredentialSource = (typeof credentialSourceValues)[number];
  */
 export const runOriginValues = ["platform", "remote"] as const;
 export const runOriginEnum = pgEnum("run_origin", runOriginValues);
+
+/**
+ * Which component reaches the model vendor for a platform run's inference —
+ * `proxy` for the platform LLM proxy (which then writes the run's ledger rows),
+ * `sidecar` for the run's own sidecar holding an OAuth subscription token.
+ */
+export const inferenceRouteValues = ["proxy", "sidecar"] as const;
+export const inferenceRouteEnum = pgEnum("inference_route", inferenceRouteValues);
+export type InferenceRoute = (typeof inferenceRouteValues)[number];
 
 /**
  * What a `files` row is: `user_upload` (a staged upload materialized into

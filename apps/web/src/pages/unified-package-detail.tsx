@@ -13,13 +13,16 @@ import {
   usePackageDownload,
   useDeletePackage,
   useAgents,
+  type Versioned,
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { SchemaWrapper } from "@appstrate/core/form";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
+import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
 import { usePackageActivationState, useSetPackageActive } from "../hooks/use-library";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { LoadingState } from "../components/page-states";
+import { LoadingState, ErrorState } from "../components/page-states";
+import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
 import { isModelSelectable } from "../lib/model-selectability";
@@ -88,7 +91,7 @@ function AgentRunButtonInline({
   const { data: agentModel } = useAgentModel(packageId);
   const readiness = useAgentReadiness(detail, agentModel?.modelId, models);
   // Launch-time integration readiness — drives the non-blocking orange badge.
-  // Same server resolver as the run-kickoff 412 (see useAgentIntegrationsReadiness).
+  // Same server resolver as the run-kickoff 409 (see useAgentIntegrationsReadiness).
   const integrationsReady = useAgentIntegrationsReadiness(packageId);
 
   if (!detail) return null;
@@ -102,7 +105,7 @@ function AgentRunButtonInline({
   // here, and the run gate refuses it like any other.
   const inactiveHere = !detail.active;
   // Integration connection gaps don't disable Run — they surface as a warning
-  // badge here and the recovery modal at run-kickoff (412 → MissingConnectionsModal).
+  // badge here and the recovery modal at run-kickoff (409 → MissingConnectionsModal).
   const runDisabled = inactiveHere || !hasPrompt || !hasRequiredSkills || !hasModel;
   const runDisabledTitle = inactiveHere
     ? t("detail.titleNotActive")
@@ -159,6 +162,13 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // Whether this page is looking at the whole resource. Only an agent has a
   // narrower read; every other type reaches this route on its own `<type>:read`.
   const fullRead = type !== "agent" || can("agents:read");
+  // Each tab below is fed by a read of its own, none implied by this route.
+  const tabReads = {
+    runs: canReadRuns(can),
+    connections: can("integrations:read"),
+    memory: can("persistence:read"),
+    usedBy: packageSightPermissions("agent").some(can),
+  };
   const isVersionView = !!versionParam;
 
   // ── Data loading (unified) ──
@@ -172,8 +182,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const { data: allAgents } = useAgents();
 
   // Type-narrowed aliases for type-specific branches
-  const agentDetail = type === "agent" ? (detail as AgentDetail | undefined) : undefined;
-  const pkgDetail = type !== "agent" ? (detail as OrgPackageItemDetail | undefined) : undefined;
+  const agentDetail = type === "agent" ? (detail as Versioned<AgentDetail> | undefined) : undefined;
+  const pkgDetail =
+    type !== "agent" ? (detail as Versioned<OrgPackageItemDetail> | undefined) : undefined;
 
   const displayName = agentDetail?.display_name ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
   const source = agentDetail?.source ?? pkgDetail?.source;
@@ -190,11 +201,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // read-only system package is freely editable/deletable (registry checks happen at publish).
   const isOwned = source !== "system";
 
-  const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
-    type,
-    packageId,
-    versionParam,
-  );
+  const {
+    data: versionDetail,
+    isLoading: versionLoading,
+    error: versionError,
+  } = useVersionDetail(type, packageId, versionParam);
 
   // The server's own flag gates publishing (the header badge and the publish
   // dialog), as it does for `appstrate packages publish`: the server judges the
@@ -252,12 +263,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // four is fed by a field the summary read omits (manifest, prompt, authoring
   // history) or by a route — versions, files — that answers them 403.
   const allValidTabs: DetailTab[] = [
-    "connections",
-    "runs",
-    "configuration",
-    "memory",
+    ...(tabReads.connections ? (["connections"] as const) : []),
+    ...(tabReads.runs ? (["runs"] as const) : []),
+    ...(can("agents:configure") ? (["configuration"] as const) : []),
+    ...(tabReads.memory ? (["memory"] as const) : []),
     "api",
-    "usedBy",
+    ...(tabReads.usedBy ? (["usedBy"] as const) : []),
     ...(can("schedules:read") ? (["schedules"] as const) : []),
     ...(fullRead ? (["overview", "content", "versions", "diff"] as const) : []),
   ];
@@ -273,7 +284,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // still wins in `useTabWithHash`.
   const defaultTab: DetailTab =
     type === "agent"
-      ? "runs"
+      ? tabReads.runs
+        ? "runs"
+        : fullRead
+          ? "overview"
+          : "api"
       : primaryDisplayFile(type).source === "content"
         ? "content"
         : "overview";
@@ -289,6 +304,27 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
   if (error || !detail) {
     return <Navigate to="/" replace />;
+  }
+
+  // A published version whose stored archive is unavailable EXISTS — redirecting
+  // to the live page (what any other version failure does) would hide that it
+  // is broken. Say so, and leave the way back to the live page one click away.
+  if (
+    isVersionView &&
+    versionError instanceof ApiError &&
+    versionError.code === "version_artifact_unavailable"
+  ) {
+    return (
+      <div className="flex flex-col items-center">
+        <ErrorState message={t("files.errorMissingArtifact")} />
+        <Link
+          to={packageDetailPath(type, packageId)}
+          className="text-sm text-blue-400 hover:underline"
+        >
+          {t("btn.back", { ns: "common" })}
+        </Link>
+      </div>
+    );
   }
 
   // ── Version redirect ──
@@ -354,15 +390,17 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   };
 
   const agentTabs: Array<{ id: DetailTab; label: string }> = [
-    { id: "runs", label: t("detail.tabRuns") },
-    { id: "connections", label: t("detail.tabConnections") },
+    ...(tabReads.runs ? [{ id: "runs" as DetailTab, label: t("detail.tabRuns") }] : []),
+    ...(tabReads.connections
+      ? [{ id: "connections" as DetailTab, label: t("detail.tabConnections") }]
+      : []),
     ...(effectiveShowConfigTab
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
       : []),
     ...(can("schedules:read")
       ? [{ id: "schedules" as DetailTab, label: t("detail.tabSchedules") }]
       : []),
-    { id: "memory", label: t("detail.tabMemory") },
+    ...(tabReads.memory ? [{ id: "memory" as DetailTab, label: t("detail.tabMemory") }] : []),
     { id: "api", label: t("detail.tabApi") },
     ...(fullRead ? [overviewTab, filesTab] : []),
   ];
@@ -370,7 +408,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
     overviewTab,
     filesTab,
-    { id: "usedBy", label: t("packages.usedBy") },
+    ...(tabReads.usedBy ? [{ id: "usedBy" as DetailTab, label: t("packages.usedBy") }] : []),
   ];
 
   // Shared tabs appended to all package types
@@ -597,7 +635,14 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           );
         })()}
 
-      {tab === "versions" && <VersionHistory packageId={packageId} type={type} isOwned={isOwned} />}
+      {tab === "versions" && (
+        <VersionHistory
+          packageId={packageId}
+          type={type}
+          canRestore={isOwned && !!homeWritable}
+          canDelete={isOwned && !!homeDeletable}
+        />
+      )}
 
       {tab === "diff" && latestVersionForDiff && (
         <DiffTab
@@ -614,7 +659,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         type={type}
         packageId={packageId}
         hasUnarchivedChanges={hasTimestampChanges}
-        lockVersion={(agentDetail ?? pkgDetail)?.lock_version}
+        etag={(agentDetail ?? pkgDetail)?.etag}
       />
 
       <ForkPackageModal

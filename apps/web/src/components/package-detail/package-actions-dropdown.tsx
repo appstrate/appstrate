@@ -28,7 +28,8 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import type { PackageType } from "@appstrate/core/validation";
 import { packageEditPath } from "../../lib/package-paths";
-import { maySetPackageActive, PACKAGE_PERMISSIONS } from "../../lib/package-permissions";
+import { packagePermission } from "@appstrate/core/permissions";
+import { maySetPackageActive } from "../../lib/package-permissions";
 import { usePermissions, useCurrentSpaceGrant } from "../../hooks/use-permissions";
 import { MoveHomeSpaceDialog } from "./move-home-space-dialog";
 import { SharePackageDialog } from "./share-package-dialog";
@@ -164,15 +165,12 @@ export function PackageActionsDropdown({
   const [shareOpen, setShareOpen] = useState(false);
 
   const isAgent = type === "agent";
-  // Each package family is its own permission resource, so every gate below
-  // asks for the string the matching route checks.
-  const resource = PACKAGE_PERMISSIONS[type].resource;
   // The server's own verdict, not a re-derivation of it.
   const canWrite = homeWritable === true;
   // The exports carry the manifest and every authored file, so the two download
   // routes ask for `<type>:read` — the permission a summary-only caller (an
   // `agents:run` runner) does not hold. Without this the items 403 on click.
-  const canRead = can(`${resource}:read`);
+  const canRead = can(packagePermission(type, "read"));
   const isMutable = canWrite && !isBuiltIn && !isHistoricalVersion && isOwned;
   // Its own verdict, not `canWrite`'s: `DELETE` enforces `<type>:delete`, an
   // INDEPENDENT permission string, and a custom space role is an arbitrary
@@ -315,7 +313,7 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Fork — only read-only system packages (org-owned ones are edited directly) ── */}
-          {can(`${resource}:write`) && !isOwned && onFork && (
+          {can(packagePermission(type, "write")) && !isOwned && onFork && (
             <DropdownMenuItem onSelect={onFork}>
               <GitFork size={14} />
               {t("fork.button")}
@@ -332,7 +330,7 @@ export function PackageActionsDropdown({
                   {t("schedule.titleNew")}
                 </DropdownMenuItem>
               )}
-              {can("runs:delete") && hasRuns && onDeleteRuns && (
+              {can("runs:delete") && can("runs:read-all") && hasRuns && onDeleteRuns && (
                 <DropdownMenuItem
                   onSelect={onDeleteRuns}
                   disabled={runningRuns > 0}

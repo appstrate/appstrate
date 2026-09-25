@@ -7,7 +7,7 @@
  *
  *   pull     the draft (or a published version) → a working folder
  *   status   what the folder would change in the draft, computed on demand
- *   push     the folder → the draft, in one atomic write, under the lock this
+ *   push     the folder → the draft, in one atomic write, under the ETag this
  *            folder last saw
  *   publish  the draft → a version, by the dashboard's version rule
  *
@@ -32,7 +32,7 @@ import {
 import { planPublishVersion, type VersionBump } from "@appstrate/core/semver";
 import { extractSkillMeta, packageTypeEnum, type PackageType } from "@appstrate/core/validation";
 import { isSafeArchivePath, zipArtifact } from "@appstrate/core/zip";
-import { apiFetch, ApiError, problemFields } from "../lib/api.ts";
+import { apiFetch, apiFetchWithHeaders, ApiError, problemFields } from "../lib/api.ts";
 import {
   expandHome,
   packageWorkDir,
@@ -44,8 +44,10 @@ import {
 import { PROJECT_FILE_RELPATH } from "../lib/install/project.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
-import { formatError } from "../lib/ui.ts";
+import { DRAFT_SELECTOR, splitPackageSpec } from "../lib/package-spec.ts";
+import { ExplainedError, formatError } from "../lib/ui.ts";
 import {
+  draftRefusal,
   fetchPackageDefinition,
   PackageDefinitionError,
   SIGNATURE_RECORD,
@@ -261,18 +263,23 @@ async function rewriteManifest(dir: string, manifest: Record<string, unknown>): 
   await writeFile(join(dir, PACKAGE_MANIFEST_FILE), manifestFileText(manifest));
 }
 
-const DRAFT_REMEDY_PULL = "Pull its published version instead: --version latest.";
+/** What to run instead when a draft is refused: its published version. */
+function draftRemedyPull(packageId: string): string {
+  return `Pull its published version instead: appstrate packages pull ${packageId}@latest.`;
+}
 
 // ─── pull ────────────────────────────────────────────────────────────────
 
 export interface PackagesPullOptions {
   profile?: string;
-  /** `@scope/name`, or a bare name under the organization's slug. */
+  /**
+   * `@scope/name`, or a bare name under the organization's slug, optionally
+   * followed by `@<spec>`: a published version (`latest`, exact, range, tag),
+   * or `draft`.
+   */
   package: string;
   /** Destination folder. Default: `<workDir>/<org slug>/packages/<type segment>/@<scope>/<name>`. */
   dir?: string;
-  /** A published version (`latest`, exact, range) instead of the draft. */
-  version?: string;
   /** Pull into a folder that already has files, making it mirror the definition. */
   force?: boolean;
 }
@@ -284,9 +291,13 @@ export async function packagesPullCommand(
   const session = await openSession(opts.profile, io);
   if (!session) return;
   try {
-    const packageId = await resolvePackageId(session, opts.package);
+    const { ref, spec } = splitPackageSpec(opts.package);
+    const packageId = await resolvePackageId(session, ref);
     const home = await resolvePackage(session.profileName, packageId);
     if (!home) throw new Error(`${packageId}: no package with this id that you can read.`);
+    if (spec === DRAFT_SELECTOR && !home.home_writable) {
+      throw draftRefusal(packageId, home.type, draftRemedyPull(packageId));
+    }
 
     let dir: string;
     if (opts.dir) dir = resolve(expandHome(opts.dir));
@@ -298,27 +309,28 @@ export async function packagesPullCommand(
     const existing = await prepareDestination(dir, opts.force === true);
 
     // The draft is the author's: read it when this caller may write the
-    // package and asked for no version. Everyone else reads what is published.
-    const readsDraft = home.home_writable && opts.version === undefined;
+    // package and named no version, or named the draft. Everyone else reads
+    // what is published.
+    const readsDraft = home.home_writable && (spec === undefined || spec === DRAFT_SELECTOR);
     let files: PackageFiles;
-    let lock: number | undefined;
+    let lock: string | undefined;
     if (readsDraft) {
-      // Read BEFORE the archive: a lock older than the bytes costs a spurious
-      // 409 on the next push, a newer one would hide an edit.
-      lock = (await readDraftState(session.profileName, home)).lockVersion;
+      // Read BEFORE the archive: a version older than the bytes costs a spurious
+      // 412 on the next push, a newer one would hide an edit.
+      lock = (await readDraftState(session.profileName, home)).etag;
       files = await fetchPackageDefinition(session.profileName, {
         packageId,
         type: home.type,
         spaceId: home.home_space_id ?? undefined,
         source: "draft",
-        refusalRemedy: DRAFT_REMEDY_PULL,
+        refusalRemedy: draftRemedyPull(packageId),
       });
     } else {
-      const published = await fetchPublished(session, home, opts.version ?? "latest");
+      const published = await fetchPublished(session, home, spec ?? "latest");
       if (!published) {
         throw new Error(
           home.home_writable
-            ? `${packageId} has no published version yet: pull its draft (no --version).`
+            ? `${packageId} has no published version yet: pull its draft (appstrate packages pull ${packageId}).`
             : `${packageId} has no published version yet, and only its authors read its draft.`,
         );
       }
@@ -330,7 +342,7 @@ export async function packagesPullCommand(
     else await forgetLock(session.profileName, dir);
 
     const version = definitionVersion(files);
-    const what = readsDraft ? "draft" : `published ${version ?? opts.version ?? "latest"}`;
+    const what = readsDraft ? "draft" : `published ${version ?? spec ?? "latest"}`;
     io.stdout.write(`Pulled ${packageId} (${home.type}, ${what}, ${written} files) into ${dir}\n`);
     if (removed.length > 0) {
       io.stderr.write(
@@ -513,13 +525,13 @@ export async function packagesStatusCommand(
 
     let remote: PackageFiles;
     if (home.home_writable) {
-      const now = (await readDraftState(session.profileName, home)).lockVersion;
+      const now = (await readDraftState(session.profileName, home)).etag;
       remote = await fetchPackageDefinition(session.profileName, {
         packageId: home.id,
         type: home.type,
         spaceId: home.home_space_id ?? undefined,
         source: "draft",
-        refusalRemedy: DRAFT_REMEDY_PULL,
+        refusalRemedy: draftRemedyPull(home.id),
       });
       const seen = await readLock(session.profileName, local.dir, home.id);
       if (seen === undefined) {
@@ -528,7 +540,7 @@ export async function packagesStatusCommand(
         );
       } else if (seen !== now) {
         lines.push(
-          `  ! the draft was edited elsewhere since this folder last saw it (lock ${seen} → ${now}): pull it into another folder to compare, or push --force to replace it`,
+          `  ! the draft was edited elsewhere since this folder last saw it (${seen} → ${now}): pull it into another folder to compare, or push --force to replace it`,
         );
       }
     } else {
@@ -673,13 +685,13 @@ export async function packagesPushCommand(
       );
     }
     const state = await readDraftState(session.profileName, home);
-    const lock = opts.force ? state.lockVersion : known!;
+    const lock = opts.force ? state.etag : known!;
     const draft = await fetchPackageDefinition(session.profileName, {
       packageId,
       type,
       spaceId: home.home_space_id ?? undefined,
       source: "draft",
-      refusalRemedy: DRAFT_REMEDY_PULL,
+      refusalRemedy: draftRemedyPull(packageId),
     });
 
     const changes = diffFiles(files, draft);
@@ -687,7 +699,7 @@ export async function packagesPushCommand(
     const manifestChanged = changes.some((change) => change.path === PACKAGE_MANIFEST_FILE);
     if (operations.length === 0 && !manifestChanged) {
       // The folder IS the current draft, so it has seen it.
-      if (!opts.dryRun) await recordLock(session.profileName, dir, packageId, state.lockVersion);
+      if (!opts.dryRun) await recordLock(session.profileName, dir, packageId, state.etag);
       io.stdout.write(`Nothing to push: ${packageId} matches its draft.\n`);
       return;
     }
@@ -697,54 +709,47 @@ export async function packagesPushCommand(
       return;
     }
 
-    const body: Record<string, unknown> = { lock_version: lock };
+    const body: Record<string, unknown> = {};
     if (manifestChanged) body.manifest = folderManifest(files);
     if (operations.length > 0) body.operations = operations;
-    let written: DraftDetail;
+    let written: { body: DraftDetail; headers: Headers };
     try {
-      written = await apiFetch<DraftDetail>(session.profileName, packageRoute(type, packageId), {
-        method: "PUT",
-        body: JSON.stringify(body),
-        ...(home.home_space_id ? { spaceId: home.home_space_id } : {}),
-      });
+      written = await apiFetchWithHeaders<DraftDetail>(
+        session.profileName,
+        packageRoute(type, packageId),
+        {
+          method: "PATCH",
+          headers: { "If-Match": lock },
+          body: JSON.stringify(body),
+          ...(home.home_space_id ? { spaceId: home.home_space_id } : {}),
+        },
+      );
     } catch (err) {
-      // 409 `conflict` is the stale lock; any other refusal is the problem it names.
-      if (err instanceof ApiError && problemFields(err.body).code === "conflict") {
-        const now = await readDraftState(session.profileName, home).then(
-          (s) => ` → ${s.lockVersion}`,
-          () => "",
-        );
-        throw new Error(
-          `The draft of ${packageId} was edited elsewhere since this folder last saw it (lock ${lock}${now}). Pull it into another folder to compare, or push --force to replace it.`,
+      // 412 is the stale version; any other refusal is the problem it names.
+      if (err instanceof ApiError && err.status === 412) {
+        throw new ExplainedError(
+          `The draft of ${packageId} was edited elsewhere since this folder last saw it. Pull it into another folder to compare, or push --force to replace it.`,
           { cause: err },
         );
       }
       if (err instanceof ApiError) {
-        throw new Error(`Push of ${packageId} refused: ${describeProblem(err)}`, { cause: err });
+        throw new Error(`Push of ${packageId} refused: ${describeProblem(err)}`, {
+          cause: err,
+        });
       }
       throw err;
     }
-    // The write moved the lock by exactly one: that is the draft this folder
-    // now holds. The response is read back AFTER the write, so a later write by
-    // someone else can already show in it — recording its lock would let this
-    // folder's next push overwrite an edit it never saw.
-    const ours = lock + 1;
-    const after = draftStateOf(packageId, written);
-    await recordLock(session.profileName, dir, packageId, ours);
-    if (after.lockVersion === ours) {
-      // The server stores the VALIDATED manifest, which may normalize what the
-      // author wrote: writing it back keeps the next status clean.
-      if (PACKAGE_MANIFEST_FILE in files) await rewriteManifest(dir, after.manifest);
-    } else {
-      io.stderr.write(
-        `warning: the draft of ${packageId} moved again right after this push (lock ${ours} → ${after.lockVersion}): someone else wrote it. Pull it into another folder to compare.\n`,
-      );
-    }
+    // This write's own ETag: a later foreign write still refuses the next push.
+    const after = draftStateOf(packageId, written.body, written.headers);
+    await recordLock(session.profileName, dir, packageId, after.etag);
+    // The server stores the VALIDATED manifest, which may normalize what the
+    // author wrote: writing it back keeps the next status clean.
+    if (PACKAGE_MANIFEST_FILE in files) await rewriteManifest(dir, after.manifest);
 
     io.stdout.write(`Pushed ${summary} to the draft of ${packageId}.\n`);
     io.stderr.write(
       type === "skill"
-        ? `Test it here: appstrate packages sync --source draft. Then: appstrate packages publish ${packageId}\n`
+        ? `Test it here: appstrate code sync --target claude-user --source draft. Then: appstrate packages publish ${packageId}\n`
         : `Test the draft on Appstrate, then: appstrate packages publish ${packageId}\n`,
     );
   } catch (err) {
@@ -812,7 +817,7 @@ async function createPackage(
   const home = await resolvePackage(session.profileName, createdId);
   if (!home) throw new Error(`${createdId} was created, but it cannot be read back.`);
   const state = await readDraftState(session.profileName, home);
-  await recordLock(session.profileName, dir, createdId, state.lockVersion);
+  await recordLock(session.profileName, dir, createdId, state.etag);
   await rewriteManifest(dir, state.manifest);
 
   const version = typeof created.version === "string" ? ` ${created.version}` : "";
@@ -894,9 +899,9 @@ export async function packagesPublishCommand(
         type: home.type,
         spaceId: home.home_space_id ?? undefined,
         source: "draft",
-        refusalRemedy: DRAFT_REMEDY_PULL,
+        refusalRemedy: draftRemedyPull(packageId),
       });
-      if (seen !== before.lockVersion || diffFiles(folder.files, draft).length > 0) {
+      if (seen !== before.etag || diffFiles(folder.files, draft).length > 0) {
         throw new Error(
           `${folder.dir} has changes the draft does not have: push them first, or publish by id (${packageId}) to publish the draft as it is.`,
         );
@@ -930,16 +935,13 @@ export async function packagesPublishCommand(
     }
     const { override, target } = plan;
 
-    // `lock_version`: the version cut is the draft read above — a draft moved
-    // since (a push landing in between) is refused, never published unseen.
+    // `If-Match`: a draft moved since the read above is refused (412), never published unseen.
     let created: { version?: unknown };
     try {
       created = await apiFetch<{ version?: unknown }>(session.profileName, `${route}/versions`, {
         method: "POST",
-        body: JSON.stringify({
-          ...(override !== undefined ? { version: override } : {}),
-          lock_version: before.lockVersion,
-        }),
+        headers: { "If-Match": before.etag },
+        body: JSON.stringify(override !== undefined ? { version: override } : {}),
         ...inHome,
       });
     } catch (err) {
@@ -951,17 +953,12 @@ export async function packagesPublishCommand(
     }
     const version = created.version;
 
-    // The server rewrote the draft's version only if the lock moved by exactly
-    // one AND the draft now carries it; anything else is an edit folders never saw.
+    // Only the publish's own rewrite advances folder locks, never a foreign edit.
     if (override !== undefined && before.manifest.version !== version) {
       const after = await readDraftState(session.profileName, home);
-      if (after.lockVersion === before.lockVersion + 1 && after.manifest.version === version) {
-        await advanceLocks(
-          session.profileName,
-          packageId,
-          before.lockVersion,
-          after.lockVersion,
-          (dir) => carryVersion(dir, before.manifest.version, version, io),
+      if (!after.hasUnpublishedChanges && after.manifest.version === version) {
+        await advanceLocks(session.profileName, packageId, before.etag, after.etag, (dir) =>
+          carryVersion(dir, before.manifest.version, version, io),
         );
       }
     }
@@ -1013,21 +1010,22 @@ function publishRefusal(err: ApiError, packageId: string, target: string | undef
   const cut = target ? ` ${target}` : "";
   switch (code) {
     case "version_exists":
-      return new Error(
+      return new ExplainedError(
         `Version${cut} of ${packageId} is already published. Set a higher \`version\` in manifest.json and push.`,
         { cause: err },
       );
     case "no_changes":
-      return new Error(
+      return new ExplainedError(
         `Nothing changed in the draft of ${packageId} since its latest version: there is nothing to publish.`,
         { cause: err },
       );
-    case "conflict":
-      return new Error(
+    case "precondition_failed":
+      return new ExplainedError(
         `The draft of ${packageId} changed while this command read it (a push or an edit landed in between): nothing was published. Check it and publish again.`,
         { cause: err },
       );
     case "agent_in_use":
+      // A plain Error on purpose: the server's detail carries the run count.
       return new Error(`${packageId} has runs in progress; retry when they finish.`, {
         cause: err,
       });

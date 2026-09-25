@@ -15,7 +15,7 @@ import { mcpResultToPi, toPiToolResult } from "../src/pi-chat/mcp-tools.ts";
 const OFFER = {
   status: "auth_required",
   connect_url: "https://app.example.com/connect/start?token=SECRET",
-  package_id: "@appstrate/gmail",
+  packageId: "@appstrate/gmail",
 };
 
 describe("toPiToolResult (run_and_wait payloads)", () => {
@@ -28,7 +28,7 @@ describe("toPiToolResult (run_and_wait payloads)", () => {
     expect(JSON.stringify(result.details)).not.toContain("token=SECRET");
     // The typed offers are the single place the live URL survives.
     expect(result.connectOffers).toEqual([
-      { connect_url: OFFER.connect_url, package_id: OFFER.package_id },
+      { connect_url: OFFER.connect_url, packageId: OFFER.packageId },
     ]);
   });
 
@@ -43,11 +43,11 @@ describe("toPiToolResult (run_and_wait payloads)", () => {
 
   // Issue #1207 phase 5: the readiness preflight mints the link itself, so the
   // chat's `run_and_wait` failure step IS the connect card's data source — one
-  // offer per actionable integration, `expires_at` and `package_id` included,
+  // offer per actionable integration, `expiresAt` and `packageId` included,
   // and not a byte of any link on the model channel.
-  it("splits a 412 launch failure into a fully redacted step and one offer per item", () => {
+  it("splits a 409 launch failure into a fully redacted step and one offer per item", () => {
     const result = toPiToolResult({
-      status: 412,
+      status: 409,
       body: {
         code: "missing_integration_connection",
         errors: [
@@ -58,8 +58,8 @@ describe("toPiToolResult (run_and_wait payloads)", () => {
             auth_key: "primary",
             required_scopes: ["mail.read"],
             connect_url: "https://app.example.com/api/integrations/connect/start?token=AAA",
-            expires_at: 1_900_000_000_000,
-            package_id: "@appstrate/gmail",
+            expiresAt: "2030-03-17T17:46:40.000Z",
+            packageId: "@appstrate/gmail",
           },
           {
             field: "integrations.@appstrate/clickup",
@@ -69,8 +69,8 @@ describe("toPiToolResult (run_and_wait payloads)", () => {
             connection_id: "conn-9",
             owned_by_actor: true,
             connect_url: "https://app.example.com/api/integrations/connect/start?token=BBB",
-            expires_at: 1_900_000_001_000,
-            package_id: "@appstrate/clickup",
+            expiresAt: "2030-03-17T17:46:41.000Z",
+            packageId: "@appstrate/clickup",
           },
         ],
       },
@@ -79,13 +79,13 @@ describe("toPiToolResult (run_and_wait payloads)", () => {
     expect(result.connectOffers).toEqual([
       {
         connect_url: "https://app.example.com/api/integrations/connect/start?token=AAA",
-        expires_at: 1_900_000_000_000,
-        package_id: "@appstrate/gmail",
+        expiresAt: "2030-03-17T17:46:40.000Z",
+        packageId: "@appstrate/gmail",
       },
       {
         connect_url: "https://app.example.com/api/integrations/connect/start?token=BBB",
-        expires_at: 1_900_000_001_000,
-        package_id: "@appstrate/clickup",
+        expiresAt: "2030-03-17T17:46:41.000Z",
+        packageId: "@appstrate/clickup",
       },
     ]);
     // Both tokens are gone from every model-visible channel — the whole point
@@ -95,7 +95,7 @@ describe("toPiToolResult (run_and_wait payloads)", () => {
       expect(modelText).not.toContain(token);
       expect(JSON.stringify(result.details)).not.toContain(token);
     }
-    // The rest of the 412 survives intact: the model still explains WHY.
+    // The rest of the 409 survives intact: the model still explains WHY.
     expect(modelText).toContain("missing_integration_connection");
     expect(modelText).toContain("integrations.@appstrate/gmail");
   });
@@ -112,7 +112,7 @@ describe("mcpResultToPi (forwarded MCP tool results)", () => {
     // Details are redacted too — the URL lives only in the typed offers.
     expect(JSON.stringify(result.details)).not.toContain("token=SECRET");
     expect(result.connectOffers).toEqual([
-      { connect_url: OFFER.connect_url, package_id: OFFER.package_id },
+      { connect_url: OFFER.connect_url, packageId: OFFER.packageId },
     ]);
   });
 
@@ -170,7 +170,7 @@ describe("mcpResultToPi (forwarded MCP tool results)", () => {
     expect(result.details).toEqual({ ...OFFER, connect_url: expect.stringContaining("hidden") });
     expect(JSON.stringify(result.details)).not.toContain("token=SECRET");
     expect(result.connectOffers).toEqual([
-      { connect_url: OFFER.connect_url, package_id: OFFER.package_id },
+      { connect_url: OFFER.connect_url, packageId: OFFER.packageId },
     ]);
   });
 

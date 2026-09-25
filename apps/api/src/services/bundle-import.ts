@@ -252,7 +252,7 @@ interface BundleImportAuditRecord {
     version: string | null;
     via: "import:bundle" | "import:file";
     root: boolean;
-    file_id?: string;
+    fileId?: string;
   };
 }
 
@@ -272,7 +272,7 @@ export function bundleImportAuditRecords(
           version: identity?.version ?? null,
           via: source.via,
           root: entry.identity === `${result.root_package_id}@${result.root_version}`,
-          ...(source.via === "import:file" ? { file_id: source.fileId } : {}),
+          ...(source.via === "import:file" ? { fileId: source.fileId } : {}),
         },
       },
     ];

@@ -93,6 +93,7 @@ describe("resolveProviderEntry", () => {
     baseUrlOverridable: providerId.endsWith("-compatible"),
     authMode: "api_key",
     featured: false,
+    live_model_search: false,
     models: [],
   });
   const registry = [
@@ -106,7 +107,7 @@ describe("resolveProviderEntry", () => {
     const row = {
       providerId: "openai-compatible",
       apiShape: "openai-completions",
-      baseUrl: "https://vllm.internal/v1",
+      base_url: "https://vllm.internal/v1",
     };
     expect(resolveProviderEntry(row, registry)?.iconUrl).toBe("openai");
   });
@@ -117,7 +118,7 @@ describe("resolveProviderEntry", () => {
     const row = {
       providerId: null,
       apiShape: "anthropic-messages",
-      baseUrl: "https://api.anthropic.com/",
+      base_url: "https://api.anthropic.com/",
     };
     expect(resolveProviderEntry(row, registry)?.providerId).toBe("anthropic");
   });
@@ -126,7 +127,7 @@ describe("resolveProviderEntry", () => {
     const row = {
       providerId: "gone",
       apiShape: "openai-completions",
-      baseUrl: "https://x.test/v1",
+      base_url: "https://x.test/v1",
     };
     expect(resolveProviderEntry(row, registry)).toBeUndefined();
   });

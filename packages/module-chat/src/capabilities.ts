@@ -23,3 +23,13 @@ export function turnCapabilities(has: (permission: string) => boolean): TurnCapa
     readsSkills: invokes && has("skills:read"),
   };
 }
+
+/** Creating agents from the chat: the composer's authoring switch and the shell's access row. */
+export function canAuthorAgents(has: (permission: string) => boolean): boolean {
+  return has("chat:write") && turnCapabilities(has).authors;
+}
+
+/** The skill picker: it writes the conversation and lists skills the turn can load. */
+export function canPinSkills(has: (permission: string) => boolean): boolean {
+  return has("chat:write") && turnCapabilities(has).readsSkills;
+}

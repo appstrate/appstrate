@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { z } from "zod";
-import type { ModelCost } from "@appstrate/core/module";
+import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
@@ -59,14 +59,15 @@ export interface ListEnvelope<T> {
   limit?: number;
 }
 
-import type { RunStatus as _RunStatus } from "@appstrate/db/run-status";
+import type { RunStatus as _RunStatus } from "@appstrate/core/run-status";
 import type { PricingStatus as _PricingStatus } from "@appstrate/db/pricing-status";
 
 /**
  * Wire-shape Run DTO returned to API consumers. The Drizzle `Run` row keeps
  * camelCase field names internally (Better Auth blocker); this is the single
- * snake_case wire surface every JSON response uses. Universal DB-convention
- * fields (`id`, `*Id`, `createdAt`, …) stay camelCase per Phase 3 scope.
+ * snake_case wire surface every JSON response uses. The universal
+ * DB-convention names (`id`, `packageId`, `createdAt`, `runOrigin`, …) stay
+ * camelCase — by their literal name, never by suffix.
  */
 export interface RunWireDto {
   id: string;
@@ -106,7 +107,7 @@ export interface RunWireDto {
    */
   cost_pricing_status: _PricingStatus | null;
   runNumber: number | null;
-  token_usage: unknown;
+  token_usage: TokenUsage | null;
   version_label: string | null;
   /**
    * Unambiguous reference to the agent definition the run executed (#636):
@@ -125,16 +126,6 @@ export interface RunWireDto {
   runner_kind: string | null;
   agent_scope: string | null;
   agent_name: string | null;
-  // CASING: `runOrigin`/`contextSnapshot` are NOT in the documented universal
-  // carve-out (id/*Id/createdAt/runNumber/…), so docs/CASING_CONVENTIONS.md
-  // would nominally call for snake_case (`run_origin`/`context_snapshot`).
-  // They are kept camelCase as a deliberate, known module carve-out: the wire
-  // contract already emits camelCase across all three surfaces in lockstep —
-  // the runtime mapper (services/state/runs.ts `toRunWireDto`), the OpenAPI
-  // spec (openapi/schemas.ts + baseline.json), and the SPA consumers
-  // (run-detail.tsx, run-row.tsx, api/schema.d.ts). Renaming here without
-  // re-cutting the spec + regenerating the client would break the contract, so
-  // this field name is intentionally left as-is.
   runOrigin: string | null;
   contextSnapshot: unknown;
   modelCredentialId: string | null;
@@ -300,10 +291,8 @@ export interface ResourceEntry {
 // barrel: this module is consumed by the SPA, and a value import from
 // `@appstrate/db/schema` cannot be elided by the bundler — it shipped
 // drizzle-orm plus all 18 schema files (table + column names included) to
-// the browser. `run-status.ts` is import-free and is what `runStatusEnum`
-// itself derives from, so there is still exactly one list of statuses.
+// the browser. `run-status.ts` is import-free, so there is one list of statuses.
 export { TERMINAL_RUN_STATUSES, ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
-export type { RunStatus, TerminalRunStatus } from "@appstrate/db/run-status";
 
 // --- Auth policy ---
 
@@ -461,7 +450,7 @@ export interface MeConnectionEntry {
   connected_at: string;
   needs_reconnection: boolean;
   expiresAt: string | null;
-  /** Human-friendly identity (accountEmail, sub claim). */
+  /** Human-friendly identity (`account_email`, sub claim). */
   identity: string;
   /** Which auth slot this connection satisfies. */
   auth_key: string;
@@ -590,8 +579,6 @@ export interface AgentDetail {
   } | null;
   /** Omitted for system agents (the SPA treats absence as "no timestamp"). */
   updatedAt?: string | null;
-  /** Omitted for system agents — absence means "no optimistic-lock token". */
-  lock_version?: number;
   prompt?: string;
   scope: string | null;
   version: string | null;
@@ -764,7 +751,6 @@ export interface OrgPackageItemDetail extends Omit<
   agents: { id: string; display_name: string }[];
   manifest?: Record<string, unknown>;
   manifest_name?: string | null;
-  lock_version?: number;
   version_count?: number;
   has_unarchived_changes?: boolean;
 }
@@ -891,17 +877,15 @@ export interface OrgProxyInfo {
  * (system-registry entry), and {@link OrgModelInfo} (wire shape).
  *
  * Capability surface uses the queryable split (`input` + `reasoning`) rather
- * than the flat `capabilities: string[]` array stored in the vendored JSON
- * files. The catalog loader projects from `capabilities` into these two fields
- * via `resolveCatalogDefaults()` in `org-models.ts` — the JSON files
- * themselves are not modified.
+ * than the catalog's flat `capabilities: string[]`, projected by
+ * `resolveCatalogDefaults()` in `org-models.ts`.
  */
 export interface ModelMetadata {
   label?: string;
   contextWindow?: number | null;
   maxTokens?: number | null;
   /** Input modalities this model supports (e.g. `["text", "image"]`). */
-  input?: string[] | null;
+  input?: ModelInputModality[] | null;
   /** Whether the model exposes a reasoning/thinking mode. */
   reasoning?: boolean | null;
   /** Per-1M-token pricing in USD. */
@@ -937,8 +921,14 @@ export interface OrgModelInfo extends ModelMetadata {
    * (part of the stripped backing) and for any row whose `providerId` has no
    * registry entry (custom providers).
    */
-  providerName: string | null;
-  baseUrl: string | null;
+  provider_name: string | null;
+  /**
+   * Pi builtin provider key of {@link providerId}'s models (e.g. `moonshotai`
+   * for `moonshot`) — what a client builds the Pi model record from. `null`
+   * for a gateway and for model aliases (part of the stripped backing).
+   */
+  pi_provider: string | null;
+  base_url: string | null;
   modelId: string | null;
   enabled: boolean;
   is_default: boolean;
@@ -958,7 +948,7 @@ export interface OrgModelInfo extends ModelMetadata {
   /**
    * Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a
    * public alias; user-facing surfaces strip the real binding (`modelId`,
-   * `apiShape`, `baseUrl`, `credentialId`, capabilities/cost). Clients render
+   * `apiShape`, `base_url`, `credentialId`, capabilities/cost). Clients render
    * an alias badge and never learn the backing model.
    */
   aliased: boolean;
@@ -968,7 +958,7 @@ export interface OrgModelInfo extends ModelMetadata {
    * provider. Set deliberately on an alias (`SYSTEM_PROVIDER_KEYS` model entry)
    * so an aliased model can show an icon without exposing its hidden binding;
    * `null` means the client falls back to resolving the icon from the real
-   * `apiShape`/`baseUrl` (non-aliased models) or shows a generic alias icon.
+   * `apiShape`/`base_url` (non-aliased models) or shows a generic alias icon.
    */
   iconUrl: string | null;
   source: "built-in" | "custom";
@@ -998,7 +988,7 @@ export interface ModelProviderCredentialInfo {
    * the binding themselves).
    */
   apiShape: ModelApiShape | null;
-  baseUrl: string | null;
+  base_url: string | null;
   source: "built-in" | "custom";
   /** Auth mode of the underlying credential (matches the registry vocabulary). */
   authMode: "api_key" | "oauth2";
@@ -1006,15 +996,8 @@ export interface ModelProviderCredentialInfo {
   providerId?: string | null;
   /** Surface email of the OAuth account (extracted from the access-token identity claim). UI shows it as transparency hint. */
   oauth_email?: string | null;
-  /** True when the worker (or token-resolver) detected an `invalid_grant`. UI surfaces a "Reconnect" badge. */
+  /** True when the credential is dead (an OAuth `invalid_grant`, or undecryptable). */
   needs_reconnection?: boolean;
-  /**
-   * Model ids empirically verified against this credential by the
-   * discovery probe — the server-side authorization record gating model
-   * seeding. Per-credential because availability depends on the account's
-   * plan. NULL/absent = never probed.
-   */
-  available_model_ids?: string[] | null;
   created_by: string | null;
   createdAt: string;
   updatedAt: string;
@@ -1040,30 +1023,27 @@ export interface ProviderRegistryEntry {
   authMode: "api_key" | "oauth2";
   /** Surface in the picker's "Featured" group. Module-supplied metadata. */
   featured: boolean;
+  /** Models are searched live on the provider and any id is accepted, not only `models`. */
+  live_model_search: boolean;
   models: ProviderRegistryModelEntry[];
 }
 
 /**
- * Single curated-catalog entry — used both runtime-side (vendored LiteLLM
- * pricing files in `apps/api/src/data/pricing/*.json` consumed by
- * `pricing-catalog.ts`) and wire-side (the registry endpoint splices `id`
- * back in and tags `featured` per provider).
- *
- * `label` and `cost` are non-nullable: the vendoring script drops entries
- * without usable pricing, and labels are title-cased from the id at
- * vendoring time.
+ * Single catalog entry — derived from Pi's pinned model registry
+ * (`apps/api/src/services/model-catalog.ts`) and served verbatim by the
+ * registry endpoint, which splices `id` back in and tags `featured`.
  */
 export interface CatalogModelEntry {
-  /** Human-readable label, derived from the id at vendoring time. */
+  /** Human-readable label — the registry record's name. */
   label: string;
   contextWindow: number;
   /** Provider-defined ceiling for the response. Null when unpublished. */
   maxTokens: number | null;
   capabilities: readonly string[];
-  /** Normalized generation controls derived from the pinned LiteLLM snapshot. */
-  generation?: ModelGenerationCapabilities;
-  /** Per-1M-token pricing in USD. */
-  cost: ModelCost;
+  /** Normalized generation controls derived from the registry record. */
+  generation: ModelGenerationCapabilities;
+  /** Per-1M-token pricing in USD; null when the registry prices the model at zero (unpriced). */
+  cost: ModelCost | null;
 }
 
 /**
@@ -1153,7 +1133,7 @@ export interface SpaceInfo {
 /** What `POST /api/spaces/:id/sweep-now` did to an orphaned personal space. */
 export interface SpaceSweepResult {
   object: "space_sweep";
-  space_id: string;
+  spaceId: string;
   /** Homed packages another space had placed: handed to the org catalogue. */
   rehomed_packages: number;
   /** Homed packages nothing else had placed: deleted. */
@@ -1181,7 +1161,7 @@ export interface SpaceMember {
  */
 export interface SpacePackage {
   packageId: string;
-  generationConfig: ModelGenerationSettings | null;
+  generation_config: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
   /** Whether the space RUNS it. The row and its settings survive a `false`. */

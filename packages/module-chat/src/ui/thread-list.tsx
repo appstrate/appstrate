@@ -11,13 +11,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PlusIcon, PencilIcon, Trash2Icon, Loader2Icon } from "lucide-react";
-import { useChatHeaders, useSelectConversation } from "./runtime-context.ts";
+import { useChatHeaders, useChatHost, useSelectConversation } from "./runtime-context.ts";
 import {
   renameSession,
   deleteSession,
+  patchSessionsCache,
   sessionsQueryKey,
   spaceIdFromHeaders,
   SESSIONS_QUERY_KEY,
+  type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
@@ -66,8 +68,15 @@ export function ThreadList({
   unreadIds?: ReadonlySet<string>;
 }) {
   const select = useSelectConversation();
-  const { data: sessions, isLoading } = useSessions();
+  const {
+    data: sessions,
+    isLoading,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = useSessions();
   const now = useNowTick();
+  const { can, t } = useChatHost();
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
@@ -92,9 +101,19 @@ export function ThreadList({
             now={now}
           />
         ))}
+        {hasNextPage && (
+          <button
+            type="button"
+            disabled={isFetchingNextPage}
+            onClick={() => void fetchNextPage()}
+            className="text-muted-foreground hover:text-foreground hover:bg-accent/50 w-full rounded-md px-2 py-1 text-xs disabled:opacity-50"
+          >
+            {isFetchingNextPage ? "Chargement…" : "Afficher plus"}
+          </button>
+        )}
         {!isLoading && (sessions ?? []).length === 0 && (
           <p className="text-muted-foreground px-2 py-6 text-center text-xs">
-            Envoie un message ! Ton historique de conversations apparaîtra ici.
+            {t(can("chat:write") ? "threads.empty" : "threads.emptyReadOnly")}
           </p>
         )}
       </div>
@@ -133,6 +152,7 @@ function ConversationRow({
   const select = useSelectConversation();
   const queryClient = useQueryClient();
   const { editing, setEditing, save } = useInlineRename(session.id);
+  const canWrite = useChatHost().can("chat:write");
 
   const onDelete = async () => {
     await deleteSession(getHeaders, session.id);
@@ -141,9 +161,9 @@ function ConversationRow({
     // row; then drop the row. The server is already updated and the periodic
     // poll reconciles any later drift.
     await queryClient.cancelQueries({ queryKey: SESSIONS_QUERY_KEY });
-    queryClient.setQueryData<SessionSummary[]>(
+    queryClient.setQueryData<SessionsCache>(
       sessionsQueryKey(spaceIdFromHeaders(getHeaders)),
-      (prev) => (prev ?? []).filter((s) => s.id !== session.id),
+      (prev) => patchSessionsCache(prev, (rows) => rows.filter((s) => s.id !== session.id)),
     );
     if (active) select?.(null);
   };
@@ -193,26 +213,28 @@ function ConversationRow({
         {/* pointer-events must track visibility: opacity-0 alone keeps the
             invisible buttons tappable — on touch devices (no hover) a tap on
             the timestamp area would hit the hidden Delete. */}
-        <div className="bg-background pointer-events-none absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 shadow-sm transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
-          <button
-            type="button"
-            aria-label="Renommer"
-            title="Renommer"
-            onClick={() => setEditing(true)}
-            className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-md p-0.5"
-          >
-            <PencilIcon className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            aria-label="Supprimer"
-            title="Supprimer"
-            onClick={() => void onDelete()}
-            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md p-0.5"
-          >
-            <Trash2Icon className="size-3.5" />
-          </button>
-        </div>
+        {canWrite && (
+          <div className="bg-background pointer-events-none absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 shadow-sm transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+            <button
+              type="button"
+              aria-label="Renommer"
+              title="Renommer"
+              onClick={() => setEditing(true)}
+              className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-md p-0.5"
+            >
+              <PencilIcon className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              aria-label="Supprimer"
+              title="Supprimer"
+              onClick={() => void onDelete()}
+              className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md p-0.5"
+            >
+              <Trash2Icon className="size-3.5" />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -222,9 +244,15 @@ function ConversationRow({
 export function ActiveConversationTitle({ activeId }: { activeId: string | null }) {
   const { editing, setEditing, save } = useInlineRename(activeId ?? "");
   const { data: sessions } = useSessions();
+  const canWrite = useChatHost().can("chat:write");
   if (!activeId) return null;
   const session = sessions?.find((s) => s.id === activeId);
   if (!session) return null;
+  const title = session.title ?? "Nouvelle conversation";
+
+  if (!canWrite) {
+    return <span className="min-w-0 truncate px-1.5 text-sm font-medium">{title}</span>;
+  }
 
   if (editing) {
     return (
@@ -238,9 +266,7 @@ export function ActiveConversationTitle({ activeId }: { activeId: string | null 
       className="hover:bg-accent flex max-w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5"
       title="Renommer"
     >
-      <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
-        {session.title ?? "Nouvelle conversation"}
-      </span>
+      <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">{title}</span>
       <PencilIcon className="text-muted-foreground size-3.5 shrink-0" />
     </button>
   );

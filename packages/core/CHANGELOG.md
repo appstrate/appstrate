@@ -12,6 +12,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New export `packageIdSchema` (`@appstrate/core/validation`)** — a Zod
   string schema for a `@scope/name` package id (`scopedNameRegex`), for request
   bodies and queries that name packages.
+
+- **`DEFAULT_MODEL_REASONING_LEVEL`** (`@appstrate/core/model-generation`, #1574) —
+  the reasoning level runs and chat apply when no layer sets one (`medium`). Pi has
+  no "provider default" reasoning state, so an unset level resolves to this one,
+  and the model settings UI names it instead of claiming the provider decides.
+
+- **`RunOrchestrator.sidecarExitsIndependently`** (`@appstrate/core/platform-types`,
+  optional, #1561) — `true` when `waitForExit` on a sidecar handle resolves on the
+  sidecar's own exit. The run launcher then fails a run the moment its sidecar dies
+  instead of waiting for the agent. Absent means the sidecar shares the agent's
+  lifecycle (a microVM running both), and the launcher waits for the agent alone.
+
+- **`partitionInputFields`**, **`resolvedInputDefaults`**, **`AgentInputSettings`**
+  and **`InputFieldPartition`** (`@appstrate/core/input-resolution`, #1268) — an
+  agent's launch contract: split its input fields into `locked` (never sent, 400
+  `locked_input_field`), `prefilled` (author `default` or a stored per-space value)
+  and `prompted`, from the per-space `{ values, locked_fields }` wire shape. Moved
+  from the web app so the CLI's generated commands and the launch form apply the
+  same rule.
+
+- **`packagePermission`**, **`packageSightPermissions`**,
+  **`spacePackagePermission`** and **`PACKAGE_WRITE_PERMISSIONS`**
+  (`@appstrate/core/permissions`, #1556) — a package type's `<resource>:<action>`
+  permission, the permissions that let a caller see a package of that type
+  (`agents:run` also opens an agent, RBAC spec §3.4), the one an activate /
+  configure / deactivate act on a space placement asks for, and every type's
+  `<resource>:write` (any one opens the type-agnostic import and fork routes). The
+  platform's guards and the SPA's gates read the same rules.
+
+- **`findNonSnakeCaseIdentityClaimKeys`** and **`IdentityClaimKeyViolation`**
+  (`@appstrate/core/integration`, #1545) — list the `auths.{key}.identity_claims`
+  keys and `connect.login.identity_outputs` names that are not snake_case, with
+  their manifest path. A write-path policy: the platform refuses such content on
+  create, save, publish and import, while `integrationManifestSchema` keeps reading a
+  stored manifest that predates it (a published version is immutable).
+
+- **`ModelCost.tiers`** and **`ModelCostTier`** (`@appstrate/core/module`,
+  optional) — request-wide price tiers in the shape of Pi's model registry:
+  `{ inputTokensAbove, input, output, cacheRead, cacheWrite }`, the highest
+  threshold a request's input (input + cache-read + cache-write tokens)
+  exceeds prices the whole request (OpenAI's long-context rates above 272k
+  tokens, #1549). `modelCostSchema` validates them: every rate is a required
+  non-negative number and `inputTokensAbove` is positive. Additive — a cost
+  without `tiers` is unchanged.
+
+- **`ModelProviderDefinition.publicModelListing`** (`@appstrate/core/module`,
+  optional) — declares the vendor fact that a provider answers
+  `GET <baseUrl>/models` without checking the API key (OpenCode Go), so a
+  listing success proves nothing about the credential. The platform then
+  validates the key with one minimal chat completion on a model of the
+  provider's offer, in the connection test and before trusting the listing in
+  model discovery (#1549). Supported on `apiShape: "openai-completions"` with a
+  non-empty offer; registration refuses any other declaration.
+  Additive — existing definitions are unaffected.
+
+- **`AFPS_SCHEMA_VERSION`** (`@appstrate/core/validation`) — the AFPS
+  `schema_version` every manifest the platform writes declares (`"0.3"`, the
+  revision spec Appendix A tells producers to emit). The skill-only import, the
+  seeded Hello World agent, the MCP `get_runtime_capabilities` template, the
+  inline `run_and_wait` manifest and the web editor wrote `0.1` or `0.2`
+  depending on the path (#1520); they all read this constant now. Reading is
+  unchanged: any MINOR of `SUPPORTED_SCHEMA_VERSION_MAJOR` is still accepted.
+
+- **`formatLogLine`**, **`PINO_LEVELS`** and **`LogLevel`**
+  (`@appstrate/core/log-line`, new import-free subpath) — one pino-compatible
+  JSON log line (numeric `level`, epoch-ms `time`, `msg`, fields) for the
+  processes that must not carry pino: the Pi runner, the agent entrypoint and
+  the sidecar.
+
+- **`runStatusValues`**, **`terminalRunStatusValues`**, **`activeRunStatusValues`**,
+  **`RunStatus`** and **`TerminalRunStatus`** (`@appstrate/core/run-status`, new
+  import-free subpath) — the canonical run-status tuples, moved here from
+  `@appstrate/db/run-status` (which now derives from them) so core can use them.
+  `RUN_AND_WAIT_TERMINAL_STATUSES` is now built from `terminalRunStatusValues`
+  (same members), and the module event's `status` is typed
+  `"started" | TerminalRunStatus` (same union).
+- **`setCursorLinkHeader`** and **`setSinceLinkHeader`** (`@appstrate/core/pagination-link`,
+  new subpath) — set the RFC 5988 `Link` header of a cursor-paginated list
+  (`?startingAfter=`/`?endingBefore=` keyset or `?since=` sequence), rooted on
+  a caller-supplied public origin, so a module router pages with the same
+  header as the platform's own lists.
+- **`MODEL_INPUT_MODALITIES`**, **`modelInputModalitySchema`** and
+  **`ModelInputModality`** (`@appstrate/core/module`) — the closed set of model
+  input modalities (`text`, `image`) the Pi runtime accepts, shared by the model
+  API's request schemas, the `org_models.input` column type and the runtime's
+  `MODEL_INPUT` reader.
+- **`withByteCap(maxBytes)`** (`@appstrate/core/safe-json`) — Zod refinement
+  capping the UTF-8 size of a value's JSON serialization, so a module can cap a
+  JSONB payload it persists with the same idiom and wording as the platform.
+- **`scopesNotCovered`** (`@appstrate/core/integration`) — the required OAuth
+  scopes a grant does not cover once expanded through `scope_catalog[].implies`,
+  so an alias a provider echoes (Google `userinfo.email` for `email`) counts as
+  granted. One diff for the connection-gap check, the refresh shrink check and
+  the OAuth callback.
 - **`PACKAGE_TYPE_ROUTE_SEGMENT`** (`@appstrate/core/package-files`) — the URL
   segment of each package type's collection (`skill` → `skills`, …), declared
   once for the API router, the dashboard and the CLI.
@@ -33,17 +127,137 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   something to that `(orgId, userId)` pair drops it here, so it does not come
   back if the same user is invited again. Optional to implement; must be
   idempotent.
+- **`PlatformServices.audit.record(c, entry)` (`@appstrate/core/module`)** —
+  a module route writes a row to the platform's `audit_events` trail. The org,
+  space, actor, IP, user agent and request id come from the request context,
+  as for a core route; the entry names `action`, `resourceType` and optionally
+  `resourceId`, `before` and `after`, typed **`AuditPayload`**: a snake_case
+  top-level key (a raw request body) is a compile error. Best-effort: never rejects.
+
+### Fixed
+
+- **A presigned PUT's `sha256` is verified by the store** (`@appstrate/core/storage-s3`).
+  `createUploadUrl` let the presigner hoist `x-amz-checksum-sha256` into the
+  query string, where S3/MinIO do not check it: a body with a different digest
+  was accepted. The checksum is now a signed header (the descriptor already
+  returned it for the client to echo), so a mismatch is rejected server-side —
+  and MinIO releases that refuse unsigned `x-amz-*` headers accept the upload.
 
 ### Changed
 
-- **A guard carrying the boolean `appstrate.permissionGuard` marker but no
-  `PERMISSION_REQUIREMENT_MARKER` requirement is no longer read as row-aware**
-  — the platform now reads it as naming no requirement, where 11.1.0 read it as
-  conditional. A middleware whose verdict comes from the row it loads declares
-  that with the registry symbol `Symbol.for("appstrate.rowAuthority")` set to
-  `true` on the mounted function
-  (`Object.defineProperty(mw, Symbol.for("appstrate.rowAuthority"), { value: true })`);
-  being a registry symbol, a module stamps it without importing the platform.
+- **BREAKING: `LlmProxyConfig` is `LlmProxyOauthConfig | LlmProxyPlatformConfig`**
+  (`@appstrate/core/sidecar-types`). The new `LlmProxyPlatformConfig`,
+  `authMode: "platform"`: the sidecar's `/llm/*` upstream is the platform's
+  metered LLM proxy for the run's `apiShape`, authenticated with the run token;
+  `baseUrl` is the model's own endpoint (never dialed), with an optional
+  `modelSwap`. It carries no provider credential, and replaces the removed
+  `api_key` member (see Removed). A consumer that switches exhaustively on
+  `LlmProxyConfig["authMode"]` must handle the new member and drop `api_key`.
+- **BREAKING: `checkAliasInvariants` takes no `apiShape`, and
+  `AliasInvariantViolation` has no `non_aliasable_shape` member**
+  (`@appstrate/core/model-swap`, #1568). An alias's backing shape is its
+  provider's, and the platform refuses to register a provider on
+  `ALIAS_CLIENT_API_SHAPE`, so the check could no longer fail. A caller drops
+  the `apiShape` input and any branch on the removed violation.
+- **BREAKING: model generation settings are snake_case** (`@appstrate/core/model-generation`,
+  #1545): `modelGenerationSettingsSchema` reads `reasoning_level` (was
+  `reasoningLevel`), and `ModelGenerationCapabilities` spells
+  `reasoning.temperature_compatible` (was `temperatureCompatible`). The
+  settings schema is `.strict()`, so the old key is refused, not dropped.
+- **BREAKING: `ProblemDetail` extension members are snake_case**
+  (`@appstrate/core/api-errors`, #1545): `ApiError.toProblemDetail()` writes
+  `request_id` (was `requestId`) and `retry_after` (was `retryAfter`), and both
+  new names are reserved against `extensions`. The RFC 9457 members and the
+  `Request-Id` / `Retry-After` headers are unchanged; the `ApiError`
+  constructor option and property stay `retryAfter`.
+- **BREAKING: a file's producing run is `runId`** (#1545, `runId` joins the
+  universal carve-out): `isFileProducedByRun` (`@appstrate/core/file-uri`) reads
+  the File DTO's `runId`, and `runProducedFilesPath`
+  (`@appstrate/core/run-and-wait-client`) filters `GET /api/files` with
+  `?runId=`. The `file.published` run event (`FilePublishedEvent`,
+  `@appstrate/core/runtime-tool-defs`) carries `fileId` (CloudEvents payloads
+  are camelCase, carve-out 4i).
+- **BREAKING: `OAuthTokenResponse` is snake_case at the JSON boundary**
+  (`@appstrate/core/sidecar-types`, #1545): `access_token` and `account_id`
+  (omitted when the provider surfaced none) replace `accessToken` /
+  `accountId`; `expiresAt` keeps its universal carve-out name. The sidecar
+  image must match the API.
+
+- **`ModelSwapBacking.reasoning`** (`@appstrate/core/sidecar-types`) is now
+  optional: absent means unknown, and Pi's record decides.
+
+- **BREAKING: `ModelSwapBacking.providerId` is `string | null`**
+  (`@appstrate/core/sidecar-types`). It still names the backing's Pi provider
+  key; `null` is a gateway Pi keeps no record of (`openai-compatible`,
+  `anthropic-compatible`), for which the sidecar builds a record-less model
+  (#1549).
+
+- **BREAKING: `ModelProviderDefinition.featuredModels` is `readonly string[]`**
+  (`@appstrate/core/module`), no longer `ModelIdSelection`: a provider pins its
+  featured ids, and every one must be in its offer (boot fails otherwise). A
+  module declaring a `{ catalogFamilies, generations }` selector lists the ids
+  instead (#1549).
+
+- **BREAKING: `ModelProviderDefinition.catalogProviderId`** (`@appstrate/core/module`)
+  names a **Pi builtin provider key** (defaults to `providerId`): the
+  provider's offer is that Pi provider's records served over its `apiShape`.
+  It no longer names a vendored pricing catalog, so a module that set it to
+  reuse another catalog (`codex` → `"openai"`) sets the Pi key that records its
+  models (`"openai-codex"`). A definition naming no Pi provider offers nothing
+  and takes any model id (#1549).
+
+- **`run_and_wait` inline manifest defaults** (`@appstrate/core/run-and-wait-client`):
+  a manifest that omits `schema_version` now gets `"0.3"` (was `"0.2"`), and the
+  default `$schema` is read from `AFPS_SCHEMA_URLS.agent` (same URL as before).
+
+- **`@appstrate/afps-shared` dependency range moved to `^0.9.0`** (from
+  `^0.8.0`): core imports its new `./jsonpath` subpath and
+  `allocateMcpToolName`. **Requires `@appstrate/afps-shared@0.9.0` on npm before
+  this release is published.**
+- **`integrationManifestSchema`** (`@appstrate/core/integration`) refuses every
+  manifest JSONPath outside the subset of `@appstrate/afps-shared/jsonpath`
+  (`$`, `.name`, `['name']`, `[0]`, `[-1]`): an `auths.{key}.identity_claims`
+  value, a `connect.login.outputs.{name}` selector of `type: "jsonpath"` and a
+  `connect.login.success_criteria[i]` condition of `type: "jsonpath"`. Before,
+  the last two were evaluated by the login engine's own lenient tokenizer and
+  `identity_claims` by a dot-split walk, so forms outside the subset worked:
+  `$.x-auth-token`, `$.data.0`, `$.data[00]`, and a bare claim name (`"sub"`,
+  read as `"$.sub"`). They are now refused, and the schema also runs when the
+  platform reads a stored manifest, so a stored one fails there with
+  `invalid_manifest`. Write `$['x-auth-token']`, `$.data[0]`, `$.sub`. A login
+  selector's `[-1]` now selects the last element; the previous engine
+  selected nothing.
+- **`integrationManifestSchema`** (`@appstrate/core/integration`) validates
+  templated `auths.{key}.authorized_uris` entries (`{$credential.<field>}`,
+  rendered per connection by `renderAuthorizedUris`): every referenced field
+  must be a `credentials.schema` property listed in its `required`, the entry
+  must start with `scheme://` and carry placeholders only in the host and
+  port, and a template is refused on an `oauth2` auth, on an auth declaring `connect` and
+  on an auth exposing `api_call`.
+  The private delivery-reference extractor now uses the shared
+  `credentialTemplateRefs`. The `@appstrate/afps-shared` range moves to
+  `^0.9.1`, which must be on npm before this release is published.
+- **BREAKING: `IntegrationSpawnSpec.needsEgress` is removed, replaced by
+  `IntegrationSpawnSpec.egress`** (`@appstrate/core/sidecar-types`,
+  `{ authorizedUris: string[]; allowAllUris: boolean }`) — the local runner's
+  egress allowlist: the connection's rendered `authorized_uris` plus
+  `allow_all_uris`, set for every local runner whose auth declares an outbound
+  surface (mtls, `delivery.http` and `connect.tool` runners included) and
+  enforced by the sidecar listener that runner goes through (issue #1458).
+  `HttpDeliveryAuthSpec.authorizedUris` now carries the rendered list too.
+- **`SubscriptionChatModel.input`** (`@appstrate/core/chat-contract`) is typed
+  `ModelInputModality[] | null` instead of `string[] | null`.
+- **`formatErrorChain`** (`@appstrate/core/errors`) starts a cause as a new
+  sentence after a message that already ends one (`"Refused. Conflict"`, never
+  `"Refused.: Conflict"`), and no longer appends a cause whose message the text
+  already quotes as a whole word — a wrapper that quoted it printed it twice
+  (`"gone: gone"` is now `"gone"`), and an empty cause message adds nothing.
+  An error with no cause renders exactly as before.
+- **BREAKING: a guard carrying the boolean `appstrate.permissionGuard` marker
+  but no `PERMISSION_REQUIREMENT_MARKER` requirement names no requirement**;
+  11.1.0 read it as conditional. The platform reports no per-operation
+  `conditional` flag, so a module declares nothing for a route that decides on
+  the row it loads: the route's own refusal is what the caller sees.
 - **BREAKING: every operation a module's `openApiPaths()` documents must be
   served by a terminal route handler, or the platform refuses to boot.** A
   documented operation no route served used to fail only in the MCP tool
@@ -53,6 +267,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each such operation from a route handler,
   `router.all("/x/*", (c) => handler(c.req.raw))`, or remove it from
   `openApiPaths()`.
+- **BREAKING: `SpaceAssignment.space_id` is renamed `spaceId`**
+  (`@appstrate/core/permissions`), the universal-id carve-out of the casing
+  conventions. The role keys (`preset_role`, `custom_role_id`) are unchanged.
+  Stored rows move with it: `scripts/migration/0021-space-assignments-spaceid-key.sql`.
+- **BREAKING: the MCP tool-name grammar keeps the upstream body**
+  (`@appstrate/core/naming`). `isValidToolName` now accepts
+  `{namespace}__{body}` with `body` in `[A-Za-z0-9_-]+` (case, `-`, a leading
+  digit and inner `__` allowed; the namespace stays lowercase snake-case), and
+  is re-exported from `@appstrate/afps-shared/mcp-naming`, the one copy of the
+  grammar. `normaliseMcpToolBody` no longer lowercases, collapses or strips an
+  upstream `ns__` prefix: it only maps characters providers reject to `_`.
+  New **`allocateMcpToolName(namespace, upstreamName, taken)`** replaces the
+  sidecar's `{ns}__tool_N` / `_2` fallbacks with a truncated body plus an
+  8-hex hash of the original name. Exposed names of upstream tools that used
+  upper case, `-`, `__` or overlong names change; stored manifests reference
+  ORIGINAL upstream names (`tools`, `hidden_tools`, `tools_policy`) and are
+  unaffected.
+- **BREAKING: the connect offer on `ResolutionFieldError`**
+  (`@appstrate/core/api-errors`) renames `expires_at` (epoch ms) to
+  **`expiresAt`** (RFC 3339 string) and `package_id` to **`packageId`**, the
+  universal DB-convention spellings. `connect_url` is unchanged.
+- **Sidecar `/llm/*` refusals are provider-shaped**: a new
+  **`llmProxyErrorBody(type, message)`** (`@appstrate/core/model-swap`) builds
+  `{ type: "error", error: { type, message } }`, the envelope
+  `syntheticAliasErrorBody` already used and both the Anthropic and the OpenAI
+  SDK parse. `syntheticAliasErrorBody` now builds on it (same output).
+
+### Removed
+
+- **`LlmProxyApiKeyConfig`** (`@appstrate/core/sidecar-types`) — BREAKING. No
+  sidecar holds a provider API key any more: every API-key run's inference is
+  served by the platform LLM proxy (`LlmProxyPlatformConfig`), so
+  `LlmProxyConfig` has no `authMode: "api_key"` member (#1568).
+
+- **Four values of `MODEL_API_SHAPES`** — `google-generative-ai`,
+  `google-vertex`, `azure-openai-responses` and `bedrock-converse-stream`
+  (`@appstrate/core/sidecar-types`), and so of `ModelApiShape` — BREAKING. No
+  provider declares them and the platform LLM proxy serves none of them
+  (#1568).
+
+- **`IsolationBoundaryOptions`** (`@appstrate/core/platform-types`), the
+  `opts` parameter of `RunOrchestrator.createIsolationBoundary`, and
+  `WorkloadSpec.egress` — BREAKING. Every run boots its sidecar, so no boundary
+  is created for a sidecar-less run and no workload is placed on the egress
+  network: an orchestrator drops the parameter and places every workload on
+  the run's isolation boundary.
+
+- **The `sidecar` attribute of `recordContainerSpawn`** (`@appstrate/core/telemetry`)
+  and of `TelemetryProvider.recordContainerSpawn` — BREAKING for a provider
+  implementation. Every run has a sidecar, so the attribute was constant.
+
+- **`undefined` as `DrainAndEmitOptions.drainer`** (`@appstrate/core/runtime-event-drain`)
+  — BREAKING. Every run has a sidecar journal to drain, so `drainAndEmitInto`
+  takes a `RuntimeEventDrainer` and no longer no-ops without one.
+
+- **`CatalogModelSelector`**, **`ModelIdSelection`**, **`isCatalogModelSelector`**
+  and **`ModelProviderDefinition.modelDiscoveryCandidates`**
+  (`@appstrate/core/module`) — BREAKING. A provider's discovery candidates, and
+  the set a `modelDiscovery: { mode: "static" }` provider serves, are its whole
+  offer in Pi's model registry; nothing is derived from an id grammar any more.
+  A module drops `modelDiscoveryCandidates` and declares `featuredModels` as an
+  id array (#1549).
+
+- **`SubscriptionChatModel.reasoningLevelMap`** (`@appstrate/core/chat-contract`)
+  and **`ModelSwapBacking.reasoningLevelMap`** (`@appstrate/core/sidecar-types`)
+  — BREAKING. The Pi model record the runtime builds from carries the
+  provider-native thinking levels, so neither channel ships a map (#1549).
+
+- **`ModelSwap.anthropicAdaptiveReasoning`** (`@appstrate/core/sidecar-types`) —
+  BREAKING. The backing's Pi record says whether Anthropic thinking is adaptive,
+  so the sidecar no longer needs the descriptor to restore it (#1549).
+
+- **`ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE`**, **`ModelGenerationCapabilitiesOverride`**
+  and **`applyModelGenerationCapabilitiesOverride`** (`@appstrate/core/model-generation`),
+  and **`ModelProviderDefinition.generationOverride`** (`@appstrate/core/module`)
+  — BREAKING. The platform catalog is now Pi's model registry, whose records
+  carry the facts a provider override patched in (Anthropic's temperature not
+  combinable with thinking, adaptive thinking, the supported effort levels), so
+  no provider declares one. A module drops `generationOverride` (#1549).
+
+- **`toNativeModelReasoningLevel`**, **`modelNativeReasoningLevelSchema`** and
+  **`ModelNativeReasoningLevel`** (`@appstrate/core/model-generation`), and
+  `ModelGenerationCapabilities.reasoning.native_levels` — BREAKING. The
+  provider-native effort values live on the Pi record the runtime builds from
+  (`thinkingLevelMap`), so the capabilities carry only the portable levels
+  (#1549).
 
 ## [11.1.0] — 2026-09-22
 

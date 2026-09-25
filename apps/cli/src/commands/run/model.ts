@@ -22,15 +22,16 @@
  */
 
 import type { Api, Model } from "../../lib/pi-sdk.ts";
+import { deriveProviderFromApi, llmProxyBaseUrl, PROVIDER_BY_API } from "@appstrate/runner-pi";
+import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
+import { buildPiModel } from "@appstrate/runner-pi/pi-model";
+import type { ModelInputModality } from "@appstrate/core/module";
 import {
-  deriveProviderFromApi,
-  derivePiProvider,
-  llmProxyBaseUrl,
-  PROVIDER_BY_API,
-} from "@appstrate/runner-pi";
-import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
-import { ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY } from "@appstrate/core/oauth-bearer-swap";
-import { listModelPresets, PROXY_SUPPORTED_APIS, type ModelPreset } from "../../lib/models.ts";
+  isProxySupported,
+  listModelPresets,
+  PROXY_SUPPORTED_APIS,
+  type ModelPreset,
+} from "../../lib/models.ts";
 
 export type ModelSource = "env" | "preset";
 
@@ -73,7 +74,6 @@ const ENV_KEY_BY_PROVIDER: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
   mistral: "MISTRAL_API_KEY",
-  google: "GOOGLE_API_KEY",
 };
 
 export class ModelResolutionError extends Error {
@@ -154,7 +154,7 @@ export function resolveModel(flags: ModelFlags): ResolvedModel {
  * "apiKey" — pi-ai sends it as `Authorization: Bearer …`.
  *
  * Only protocol families wired on `/api/llm-proxy/*` today are accepted;
- * picking an unsupported preset (e.g. `google-generative-ai`) fails fast
+ * picking an unsupported preset (e.g. `openai-codex-responses`) fails fast
  * with an actionable message so the user can switch preset or mode
  * before any LLM call goes out.
  */
@@ -162,7 +162,7 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   const loader = inputs.presetsLoader ?? listModelPresets;
   const presets = await loader(inputs.profileName);
   const preset = pickPreset(presets, inputs.modelId);
-  if (!PROXY_SUPPORTED_APIS.has(preset.apiShape)) {
+  if (!isProxySupported(preset.apiShape)) {
     throw new ModelResolutionError(
       `Preset "${preset.id}" uses protocol "${preset.apiShape}", which /api/llm-proxy/* does not route yet.`,
       `Supported today: ${Array.from(PROXY_SUPPORTED_APIS).join(", ")}. ` +
@@ -185,71 +185,31 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   // real upstream key from server-side storage. Net effect: the
   // placeholder never leaves the platform's network. See
   // `apps/api/src/services/llm-proxy/anthropic.ts:HEADERS_TO_FORWARD`.
-  //
-  // OAuth-keyed Anthropic presets need an extra trick: the upstream
-  // (`sk-ant-oat-*`) is gated at the BODY level to a specific identity
-  // shape — system prompt + tool-name renaming — which pi-ai injects
-  // locally only when its `apiKey.includes("sk-ant-oat")` detection
-  // fires. So we mirror the prefix in the placeholder. pi-ai then takes
-  // its OAuth
-  // path: it tries to set `Authorization: Bearer <oauth-placeholder>` AND
-  // reshapes the body. The Anthropic SDK's `defaultHeaders` (= our
-  // `model.headers`) is applied AFTER the auth header in `buildHeaders`
-  // (later wins), so our `Authorization: Bearer <appstrate-token>`
-  // overrides pi-ai's OAuth bearer before the request leaves the
-  // process — the proxy still authenticates with the Appstrate token,
-  // and the reshaped body flows through to the real OAuth upstream.
+  // No OAuth-shaped placeholder: the llm-proxy refuses OAuth-subscription
+  // models outright (`LlmProxyUnsupportedSubscriptionError`).
   const isAnthropic = preset.apiShape === "anthropic-messages";
-  const isAnthropicOAuth = isAnthropic && preset.keyKind === "oauth";
   const headers: Record<string, string> = { "X-Org-Id": inputs.orgId };
   if (isAnthropic) {
     headers["Authorization"] = `Bearer ${inputs.bearerToken}`;
   }
-  const model: Model<Api> = {
+  const model = buildPiModel({
     id: preset.id,
-    name: preset.label,
-    api: preset.apiShape as Api,
-    // `baseUrl` below is the llm-proxy's, so the provider key is the only
-    // upstream-detection input Pi has left: prefer the preset's real backing
-    // and fall back to the api shape's generic key (an aliased preset hides
-    // its backing, and preset.apiShape already passed the PROXY_SUPPORTED_APIS
-    // gate above, so the fallback is always a known api).
-    provider: derivePiProvider(preset.providerId, preset.apiShape),
+    registryModelId: preset.modelId,
+    apiShape: preset.apiShape,
+    // The platform names the Pi record (null for a gateway: no record); its
+    // limits apply unless the preset carries its own.
+    piProvider: preset.pi_provider,
     baseUrl,
-    reasoning: preset.reasoning ?? false,
-    input: (preset.input ?? ["text"]) as ("text" | "image")[],
-    cost: {
-      input: preset.cost?.input ?? 0,
-      output: preset.cost?.output ?? 0,
-      cacheRead: preset.cost?.cacheRead ?? 0,
-      cacheWrite: preset.cost?.cacheWrite ?? 0,
-    },
-    contextWindow: preset.contextWindow ?? 200_000,
-    maxTokens: preset.maxTokens ?? 8192,
-    // Preset mode is platform-billed: `baseUrl` points at `/api/llm-proxy/*`,
-    // which resolves the upstream credential server-side and writes an
-    // `llm_usage` row. Without this the record stayed silent, pi-ai defaulted
-    // the flag to TRUE, and `PI_CACHE_RETENTION=long` in the USER'S OWN shell —
-    // the CLI runs on their machine — emitted a 1h cache write that the
-    // anthropic adapter forwards unaltered and the meter prices at the
-    // short-retention rate. See `PLATFORM_MODEL_COMPAT`.
-    compat: { ...PLATFORM_MODEL_COMPAT },
+    reasoning: preset.reasoning,
+    input: preset.input as ModelInputModality[] | null,
+    cost: preset.cost,
+    contextWindow: preset.contextWindow,
+    maxTokens: preset.maxTokens,
     headers,
-  };
+  });
   // Placeholder for anthropic — never reaches upstream (see comment above).
-  // For OAuth-keyed presets the placeholder must carry the `sk-ant-oat`
-  // marker so pi-ai's local detection picks it up — shared with the run
-  // path's provider module through core so the two can't drift; for plain
-  // API-key presets any non-OAuth string is fine. For other APIs, pi-ai's
-  // SDK sends `Authorization: Bearer <apiKey>` natively.
-  let apiKey: string;
-  if (isAnthropicOAuth) {
-    apiKey = ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY;
-  } else if (isAnthropic) {
-    apiKey = "x-platform-bearer-injected-via-headers";
-  } else {
-    apiKey = inputs.bearerToken;
-  }
+  // For other APIs, pi-ai's SDK sends `Authorization: Bearer <apiKey>` natively.
+  const apiKey = isAnthropic ? "x-platform-bearer-injected-via-headers" : inputs.bearerToken;
   return { model, apiKey };
 }
 
@@ -290,7 +250,7 @@ function pickPreset(presets: ModelPreset[], requestedId?: string): ModelPreset {
     if (match.needs_reconnection === true) throw deadPresetError(requestedId);
     return match;
   }
-  const defaultPreset = presets.find((p) => p.isDefault && p.enabled);
+  const defaultPreset = presets.find((p) => p.is_default && p.enabled);
   if (defaultPreset?.needs_reconnection === true) throw deadPresetError(defaultPreset.id);
   if (!defaultPreset) {
     throw new ModelResolutionError(

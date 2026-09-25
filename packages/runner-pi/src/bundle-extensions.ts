@@ -7,10 +7,9 @@
  * The platform runtime tools (`output` / `log` / `note` / `pin`)
  * are NO LONGER registered here. They are transport-neutral MCP tool
  * definitions (`@appstrate/core/runtime-tool-defs`) hosted either by the
- * sidecar (served over `/mcp`) or — on the no-sidecar path — registered as
- * Pi extensions via {@link buildRuntimeToolExtensions} at the call site
- * (`runtime-pi/entrypoint.ts` skip-sidecar branch + the `appstrate run`
- * CLI). This helper is now skills-only.
+ * sidecar (served over `/mcp`) or — in the `appstrate run` CLI — registered as
+ * Pi extensions via {@link buildRuntimeToolExtensions} at the call site.
+ * This helper is now skills-only.
  *
  * Used by:
  *   1. `runtime-pi/entrypoint.ts` — the in-container agent bootloader.
@@ -44,8 +43,8 @@ export async function prepareBundleForPi(
   // Materialise each skill dep package under its .pi/ subtree. Runtime tools
   // (output/log/note/pin) are NOT handled here — they are MCP tool
   // definitions (`@appstrate/core/runtime-tool-defs`) hosted by the sidecar or
-  // registered as Pi extensions by the no-sidecar call site via
-  // `buildRuntimeToolExtensions`. This helper is skills-only.
+  // registered as Pi extensions by the CLI via `buildRuntimeToolExtensions`.
+  // This helper is skills-only.
   for (const [identity, pkg] of bundle.packages) {
     if (identity === bundle.root) continue;
     const parsed = parsePackageIdentity(identity);

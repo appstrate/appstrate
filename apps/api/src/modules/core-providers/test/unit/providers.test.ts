@@ -15,7 +15,6 @@ describe("core-providers module", () => {
       "cerebras",
       "deepseek",
       "fireworks-ai",
-      "google-ai",
       "groq",
       "mistral",
       "moonshot",
@@ -57,10 +56,9 @@ describe("core-providers module", () => {
     expect(byId.get("openai-compatible")?.apiShape).toBe("openai-completions");
     expect(byId.get("anthropic-compatible")?.apiShape).toBe("anthropic-messages");
     expect(byId.get("mistral")?.apiShape).toBe("mistral-conversations");
-    expect(byId.get("google-ai")?.apiShape).toBe("google-generative-ai");
     expect(byId.get("groq")?.apiShape).toBe("openai-completions");
     expect(byId.get("cerebras")?.apiShape).toBe("openai-completions");
-    expect(byId.get("xai")?.apiShape).toBe("openai-completions");
+    expect(byId.get("xai")?.apiShape).toBe("openai-responses");
     expect(byId.get("openrouter")?.apiShape).toBe("openai-completions");
   });
 

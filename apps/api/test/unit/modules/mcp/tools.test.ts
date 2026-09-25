@@ -20,7 +20,7 @@ import {
 } from "../../../../src/modules/mcp/catalog.ts";
 import type { Dispatch } from "../../../../src/modules/mcp/tools.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
-import { validateManifest } from "@appstrate/core/validation";
+import { AFPS_SCHEMA_VERSION, validateManifest } from "@appstrate/core/validation";
 import { orgPermissions, presetPermissions } from "../../../../src/lib/permissions.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { toolsFor } from "./helpers.ts";
@@ -56,6 +56,8 @@ function makeTools(
       status: 200,
       headers: { "content-type": "application/json" },
     }),
+  /** A delegated credential's scopes; `undefined` for a session. */
+  ceiling?: ReadonlySet<string>,
 ) {
   const calls: Request[] = [];
   const dispatch: Dispatch = async (req) => {
@@ -66,6 +68,7 @@ function makeTools(
     origin: "https://test.local",
     authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
     permissions: new Set(permissions),
+    ceiling,
     dispatch,
     actor,
     scope: { orgId: "org_1", spaceId: "spc_1" },
@@ -239,22 +242,23 @@ describe("import_package_file declaration", () => {
 
 describe("operationIdGranted", () => {
   it("answers from the route table and refuses an id the catalog does not know", () => {
-    expect(operationIdGranted("runInline", new Set(["agents:run"]))).toBe(false);
-    expect(operationIdGranted("runInline", new Set(["agents:run", "agents:write"]))).toBe(true);
+    expect(operationIdGranted("runInline", new Set(["agents:run"]), undefined)).toBe(false);
+    expect(
+      operationIdGranted("runInline", new Set(["agents:run", "agents:write"]), undefined),
+    ).toBe(true);
     // A rename, not a denial: `false` here would silently hide a tool.
-    expect(() => operationIdGranted("noSuchOperation", new Set())).toThrow(/noSuchOperation/);
+    expect(() => operationIdGranted("noSuchOperation", new Set(), undefined)).toThrow(
+      /noSuchOperation/,
+    );
   });
 });
 
-describe("pre-#1177 argument vocabulary", () => {
-  it("does not rename a retired document_uri argument", async () => {
+describe("validate_package_file arguments", () => {
+  it("refuses an argument other than `file_uri`", async () => {
     const { byName } = makeTools(["mcp:read", "mcp:invoke", "agents:write"]);
-    // `validate_package_file` reads `file_uri`. A caller pinned to the old
-    // vocabulary now gets the plain "required" error rather than a silent
-    // rename — the argument it sent is simply not one the tool knows.
     await expect(
       byName.get("validate_package_file")!.handler({ document_uri: "appfile://file_x" }, noExtra),
-    ).rejects.toThrow(/file_uri is required/);
+    ).rejects.toThrow("Unknown argument(s): document_uri");
   });
 });
 
@@ -431,10 +435,11 @@ describe("describe_operation", () => {
       // only, so the operation stays describable and reports itself denied.
       const body = await describeOp(RUNNER, "runInline");
       expect(body.required_permissions).toEqual(["agents:write", "agents:run"]);
-      // The other half of the split: both stamped guards sit in the caller's own space, yet the handler still judges the posted manifest's dependencies on the row — hence conditional.
+      // The other half of the split: both stamped guards sit in the caller's own space.
       expect(body.target_space_permissions).toEqual([]);
-      expect(body.conditional).toBe(true);
       expect(body.granted).toBe(false);
+      // The route's own refusal names a row decision; no field pre-announces one.
+      expect(body).not.toHaveProperty("conditional");
     });
 
     it("reports a granted operation as granted for the same caller", async () => {
@@ -456,8 +461,54 @@ describe("describe_operation", () => {
       const body = await describeOp(["mcp:read"], "listSpaceMembers");
       expect(body.target_space_permissions).toContain("space-members:read");
       expect(body.required_permissions).toEqual([]);
-      expect(body.conditional).toBe(true);
       expect(body.granted).toBe(true);
+    });
+
+    it("names a credential-ceiling requirement in its own field, never filtering a session on it", async () => {
+      // `DELETE /api/me/connections/{id}` is authorized by ownership: only a
+      // delegated credential's scopes are asked, so a caller holding nothing is granted.
+      const body = await describeOp(["mcp:read"], "deleteMyConnection");
+      expect(body.ceiling_permissions).toEqual(["integrations:disconnect"]);
+      expect(body.required_permissions).toEqual([]);
+      expect(body.granted).toBe(true);
+    });
+
+    it("refuses a ceiling requirement a delegated credential's scopes omit", async () => {
+      const toolsWith = (ceiling: ReadonlySet<string> | undefined) =>
+        new Map(
+          toolsFor({
+            origin: "https://test.local",
+            authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
+            permissions: new Set(["mcp:read"]),
+            ceiling,
+            dispatch: async () => new Response("{}"),
+            actor: { type: "user", id: "user_1" },
+            scope: { orgId: "org_1", spaceId: "spc_1" },
+            authorizeBundle: async () => {},
+            mayShareRoot: async () => false,
+          }).map((t) => [t.descriptor.name, t]),
+        );
+      const granted = async (ceiling: ReadonlySet<string> | undefined) =>
+        parseResult(
+          await toolsWith(ceiling)
+            .get("describe_operation")!
+            .handler({ operation_id: "deleteMyConnection" }, noExtra),
+        ).granted;
+
+      expect(await granted(new Set(["integrations:read"]))).toBe(false);
+      expect(await granted(new Set(["integrations:disconnect"]))).toBe(true);
+      expect(await granted(undefined)).toBe(true);
+
+      // The denial names the scope that refused it.
+      const search = parseResult(
+        await toolsWith(new Set(["integrations:read"]))
+          .get("search_operations")!
+          .handler({ query: "deleteMyConnection" }, noExtra),
+      );
+      const denied = search.denied as { operation_id: string; ceiling_permissions?: string[] }[];
+      expect(
+        denied.find((d) => d.operation_id === "deleteMyConnection")?.ceiling_permissions,
+      ).toEqual(["integrations:disconnect"]);
     });
   });
 
@@ -543,6 +594,55 @@ describe("invoke_operation", () => {
     expect(pathname).toContain("@appstrate/firecrawl");
     expect(pathname).not.toContain("%2F");
     expect(pathname).not.toContain("%40");
+  });
+
+  it("round-trips the ETag: a result carries `etag`, `if_match` goes out as If-Match", async () => {
+    const { byName, calls } = makeTools(
+      ["mcp:invoke"],
+      false,
+      undefined,
+      () =>
+        new Response(JSON.stringify({ id: "@acme/a" }), {
+          status: 200,
+          headers: { "content-type": "application/json", etag: '"5"' },
+        }),
+    );
+    const invoke = byName.get("invoke_operation")!;
+    const path_params = { scope: "@acme", name: "a" };
+
+    const read = parseResult(
+      await invoke.handler({ operation_id: "getAgentPackage", path_params }, noExtra),
+    );
+    expect(read.etag).toBe('"5"');
+    expect(calls[0]!.headers.get("If-Match")).toBeNull();
+
+    await invoke.handler(
+      {
+        operation_id: "updateAgent",
+        path_params,
+        if_match: read.etag,
+        body: { content: "edited" },
+      },
+      noExtra,
+    );
+    expect(calls[1]!.method).toBe("PATCH");
+    expect(calls[1]!.headers.get("If-Match")).toBe('"5"');
+  });
+
+  it("answers an `if_match` carrying CR/LF with a tool error, not a throw", async () => {
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    const res = await byName.get("invoke_operation")!.handler(
+      {
+        operation_id: "updateAgent",
+        path_params: { scope: "@acme", name: "a" },
+        if_match: '"5"\r\nX-Injected: 1',
+        body: { content: "edited" },
+      },
+      noExtra,
+    );
+    expect(res.isError).toBe(true);
+    expect(parseResult(res).error).toContain("If-Match");
+    expect(calls).toHaveLength(0);
   });
 
   it("auto-maps a declared header param supplied in query onto a real header", async () => {
@@ -660,6 +760,9 @@ describe("invoke_operation", () => {
     expect(body.status).toBe(403);
     expect(body.required_permissions).toEqual(["agents:read|agents:run"]);
     expect(body.hint).toContain("do not retry");
+    // A session has no credential scopes to blame.
+    expect(body.hint).toStartWith("Your role does not hold this permission.");
+    expect(body).not.toHaveProperty("ceiling_permissions");
   });
 
   it("adds no permission hint to a non-403 failure", async () => {
@@ -707,6 +810,49 @@ describe("invoke_operation", () => {
     expect(body.status).toBe(403);
     expect("hint" in body).toBe(false);
     expect("required_permissions" in body).toBe(false);
+  });
+
+  describe("a delegated credential's ceiling", () => {
+    const forbidden = () =>
+      new Response(JSON.stringify({ title: "Forbidden" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      });
+    const invokeDelete = async (ceiling: ReadonlySet<string>) => {
+      const { byName } = makeTools(
+        ["mcp:read", "mcp:invoke"],
+        false,
+        { type: "user", id: "user_1" },
+        forbidden,
+        ceiling,
+      );
+      return parseResult(
+        await byName.get("invoke_operation")!.handler(
+          {
+            operation_id: "deleteMyConnection",
+            path_params: { connectionId: "conn_1" },
+          },
+          noExtra,
+        ),
+      );
+    };
+
+    it("names the ceiling scope when the credential's scopes refused the 403", async () => {
+      const body = await invokeDelete(new Set(["integrations:read"]));
+      expect(body.status).toBe(403);
+      expect(body.ceiling_permissions).toEqual(["integrations:disconnect"]);
+      expect(body.hint).toStartWith(
+        "Your role, or your credential's scopes, do not hold this permission.",
+      );
+    });
+
+    it("adds no permission answer to a 403 the row decided under a satisfied ceiling", async () => {
+      const body = await invokeDelete(new Set(["integrations:disconnect"]));
+      expect(body.status).toBe(403);
+      expect(body).not.toHaveProperty("hint");
+      expect(body).not.toHaveProperty("ceiling_permissions");
+      expect(body).not.toHaveProperty("required_permissions");
+    });
   });
 
   it("errors when required path params are missing", async () => {
@@ -795,18 +941,18 @@ describe("buildOperationIndex", () => {
 
   it("lists every operation this caller's guards grant, grouped under tag headers", () => {
     const permissions = new Set(["mcp:read", "agents:read"]);
-    const index = buildOperationIndex(permissions);
+    const index = buildOperationIndex(permissions, undefined);
     const { operations } = getCatalog();
     // A tag section header is present.
     expect(index).toMatch(/^## /m);
     const listed = indexIds(index);
     for (const op of operations.values()) {
-      expect(listed.includes(op.operationId)).toBe(operationGranted(op, permissions));
+      expect(listed.includes(op.operationId)).toBe(operationGranted(op, permissions, undefined));
     }
   });
 
   it("indexes the agent reads `agents:read` opens and none of the acts it does not", () => {
-    const listed = indexIds(buildOperationIndex(new Set(["mcp:read", "agents:read"])));
+    const listed = indexIds(buildOperationIndex(new Set(["mcp:read", "agents:read"]), undefined));
     // Granted: `GET /api/agents` (`agents:read|agents:run`) and
     // `GET /api/packages/agents` (`agents:read`).
     expect(listed).toContain("listAgents");
@@ -818,7 +964,7 @@ describe("buildOperationIndex", () => {
   });
 
   it("keeps only what no guard gates when the caller holds nothing", () => {
-    const listed = indexIds(buildOperationIndex(new Set<string>()));
+    const listed = indexIds(buildOperationIndex(new Set<string>(), undefined));
     // `/api/me/*` mounts no permission guard — self-scoped, filtered by
     // ownership — so the index is narrowed, never emptied.
     expect(listed).toContain("getMyContext");
@@ -828,8 +974,17 @@ describe("buildOperationIndex", () => {
     expect(listed).not.toContain("runAgent");
   });
 
+  it("drops a ceiling-guarded operation for a delegated credential lacking its scope, never for a session", () => {
+    expect(indexIds(buildOperationIndex(new Set<string>(), new Set()))).not.toContain(
+      "deleteMyConnection",
+    );
+    expect(indexIds(buildOperationIndex(new Set<string>(), undefined))).toContain(
+      "deleteMyConnection",
+    );
+  });
+
   it("carries no structured method+path columns (those come from describe / best_match)", () => {
-    const index = buildOperationIndex(new Set(["mcp:read", "agents:read"]));
+    const index = buildOperationIndex(new Set(["mcp:read", "agents:read"]), undefined);
     const { operations } = getCatalog();
     const knownIds = new Set([...operations.values()].map((op) => op.operationId));
     // Each tag section is `## Tag` followed by ONE comma-separated line of
@@ -862,6 +1017,7 @@ describe("buildMcpTools contextInjected", () => {
       // The full surface, so this asserts on get_me's absence and nothing
       // else — every other tool here has a grant of its own.
       permissions: new Set(FULL_SURFACE),
+      ceiling: undefined,
       dispatch,
       contextInjected: true,
       actor: { type: "user", id: "user_1" },
@@ -894,6 +1050,7 @@ describe("buildMcpTools contextInjected", () => {
     expect(payload).toMatchObject({
       archive_required: true,
       entry_point_must_exist: true,
+      schema_version: AFPS_SCHEMA_VERSION,
       package_archive_max_bytes: 10 * 1024 * 1024,
       runtimes: [
         { runtime: "node", manifest_version: "0.3", server_type: "node" },
@@ -903,7 +1060,7 @@ describe("buildMcpTools contextInjected", () => {
           server_type: "node",
           manifest_template: {
             manifest_version: "0.3",
-            schema_version: "0.1",
+            schema_version: AFPS_SCHEMA_VERSION,
             type: "mcp-server",
             server: {
               type: "node",
@@ -948,5 +1105,58 @@ describe("buildMcpTools contextInjected", () => {
       );
       expect(validateManifest(template)).toMatchObject({ valid: true, errors: [] });
     }
+  });
+});
+
+/**
+ * The SDK does not validate `tools/call` arguments, so `buildMcpTools` refuses
+ * an undeclared top-level key for every tool whose schema is closed — before
+ * the handler, so nothing is dispatched.
+ */
+describe("undeclared tool arguments", () => {
+  const ADMIN_LIKE = [
+    "mcp:read",
+    "mcp:invoke",
+    "agents:read",
+    "agents:write",
+    "agents:run",
+    "runs:read-all",
+    "files:read",
+  ];
+
+  it("refuses an undeclared argument, naming it, on every closed tool", async () => {
+    const { byName, calls } = makeTools(ADMIN_LIKE);
+    const closed = [...byName.values()].filter(
+      (t) => t.descriptor.inputSchema.additionalProperties === false,
+    );
+    expect(closed.map((t) => t.descriptor.name).sort()).toEqual([...byName.keys()].sort());
+    expect(byName.has("run_and_wait")).toBe(true);
+    for (const tool of closed) {
+      const call = tool.handler({ stray_key: 1 }, noExtra);
+      await expect(call).rejects.toBeInstanceOf(McpError);
+      await expect(call).rejects.toMatchObject({
+        code: ErrorCode.InvalidParams,
+        message: expect.stringContaining("Unknown argument(s): stray_key"),
+      });
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("lets every declared argument through", async () => {
+    const { byName, calls } = makeTools(ADMIN_LIKE);
+    await byName
+      .get("search_operations")!
+      .handler({ query: "agent", tag: "Agents", limit: 1 }, noExtra);
+    await byName.get("get_me")!.handler({}, noExtra);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("refuses list_files' `run_id` — its filter is `runId`", async () => {
+    const { byName, calls } = makeTools(ADMIN_LIKE);
+    await expect(byName.get("list_files")!.handler({ run_id: "run_1" }, noExtra)).rejects.toThrow(
+      "Unknown argument(s): run_id",
+    );
+    await byName.get("list_files")!.handler({ runId: "run_1" }, noExtra);
+    expect(new URL(calls[0]!.url).searchParams.get("runId")).toBe("run_1");
   });
 });

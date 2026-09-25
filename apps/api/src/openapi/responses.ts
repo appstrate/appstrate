@@ -8,7 +8,7 @@ import { REQUEST_ID_ONLY_HEADERS } from "./headers.ts";
 export const responses = {
   VersionArtifactUnavailable: {
     description:
-      "The selected published agent has no readable prompt archive (`version_artifact_unavailable`). The working copy is never substituted.",
+      "The selected published version's archive is missing, corrupt, or lacks the content entry its type requires (`prompt.md` for an agent, `SKILL.md` for a skill) — `version_artifact_unavailable`. Nothing is substituted for it, not even the working copy, and nothing is written. When the version is about to run (a run or schedule) and `AFPS_SIGNATURE_POLICY` is `required`, the signature gate answers first: a corrupt archive is `bundle_invalid` and an unsigned or untrusted one `bundle_signature_invalid`, both 422. An archive past the decompression ceiling answers `422 package_archive_unreadable`.",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
@@ -28,7 +28,7 @@ export const responses = {
           status: 401,
           detail: "Invalid or missing session",
           code: "unauthorized",
-          requestId: "req_abc123",
+          request_id: "req_abc123",
         },
       },
     },
@@ -44,7 +44,7 @@ export const responses = {
           status: 403,
           detail: "Insufficient permissions",
           code: "forbidden",
-          requestId: "req_abc123",
+          request_id: "req_abc123",
         },
       },
     },
@@ -60,7 +60,44 @@ export const responses = {
           status: 404,
           detail: "Resource not found",
           code: "not_found",
-          requestId: "req_abc123",
+          request_id: "req_abc123",
+        },
+      },
+    },
+  },
+  PreconditionFailed: {
+    description:
+      "`If-Match` does not match the resource's current `ETag`: it changed since it was read. Nothing was written. The response carries the current `ETag`; re-read, reapply, retry.",
+    headers: { ...REQUEST_ID_ONLY_HEADERS, ETag: { $ref: "#/components/headers/ETag" } },
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/precondition-failed",
+          title: "Precondition Failed",
+          status: 412,
+          detail:
+            "The resource changed since you read it: If-Match does not match its current ETag. Re-read it, reapply your change, and send the new ETag.",
+          code: "precondition_failed",
+          request_id: "req_abc123",
+        },
+      },
+    },
+  },
+  PreconditionRequired: {
+    description: "The write requires an `If-Match` header and none was sent (RFC 6585 §3).",
+    headers: REQUEST_ID_ONLY_HEADERS,
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/precondition-required",
+          title: "Precondition Required",
+          status: 428,
+          detail:
+            "This write requires an If-Match header carrying the ETag of the representation you read. GET the resource, then send its ETag.",
+          code: "precondition_required",
+          request_id: "req_abc123",
         },
       },
     },
@@ -83,7 +120,7 @@ export const responses = {
               status: 400,
               detail: "name: Required (+2 more)",
               code: "validation_failed",
-              requestId: "req_abc123",
+              request_id: "req_abc123",
               errors: [
                 { field: "name", code: "invalid_type", message: "Required" },
                 { field: "email", code: "invalid_format", message: "Invalid email" },
@@ -100,7 +137,7 @@ export const responses = {
               detail: "Field is required",
               code: "invalid_request",
               param: "limit",
-              requestId: "req_abc123",
+              request_id: "req_abc123",
             },
           },
         },
@@ -118,7 +155,7 @@ export const responses = {
           status: 415,
           detail: "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
           code: "archive_required",
-          requestId: "req_abc123",
+          request_id: "req_abc123",
         },
       },
     },
@@ -140,8 +177,8 @@ export const responses = {
           status: 429,
           detail: "Too many requests. Please try again shortly.",
           code: "rate_limited",
-          requestId: "req_abc123",
-          retryAfter: 30,
+          request_id: "req_abc123",
+          retry_after: 30,
         },
       },
     },
@@ -159,7 +196,7 @@ export const responses = {
           detail:
             "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
           code: "idempotency_in_progress",
-          requestId: "req_abc123",
+          request_id: "req_abc123",
         },
       },
     },
@@ -173,7 +210,10 @@ export const responses = {
     description:
       "`idempotency_in_progress` — a request with the same `Idempotency-Key` is already being " +
       "processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, " +
-      "so no new work is admitted and a retry will not succeed.",
+      "so no new work is admitted and a retry will not succeed. Or `missing_integration_connection` — " +
+      "a declared integration has no usable connection for the caller: `errors[]` carries one item " +
+      "per integration (`field: integrations.<id>`), and a `must_choose_connection` item lists " +
+      "`candidate_connections` to pick from via `connection_overrides`.",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
@@ -188,7 +228,7 @@ export const responses = {
               detail:
                 "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
               code: "idempotency_in_progress",
-              requestId: "req_abc123",
+              request_id: "req_abc123",
             },
           },
           orgDeleting: {
@@ -199,7 +239,25 @@ export const responses = {
               status: 409,
               detail: "This organization is being deleted; no new work can be admitted.",
               code: "org_deleting",
-              requestId: "req_abc123",
+              request_id: "req_abc123",
+            },
+          },
+          missingIntegrationConnection: {
+            summary: "A declared integration has no usable connection",
+            value: {
+              type: "https://docs.appstrate.dev/errors/missing-integration-connection",
+              title: "Missing Integration Connection",
+              status: 409,
+              detail: "Integration '@acme/gmail' is not connected",
+              code: "missing_integration_connection",
+              request_id: "req_abc123",
+              errors: [
+                {
+                  field: "integrations.@acme/gmail",
+                  code: "not_connected",
+                  message: "Integration '@acme/gmail' is not connected",
+                },
+              ],
             },
           },
         },
@@ -235,7 +293,7 @@ export const responses = {
           detail:
             "An organization must keep at least one owner. Promote another member to owner first, or delete the organization.",
           code: "last_owner",
-          requestId: "req_abc123",
+          request_id: "req_abc123",
         },
       },
     },
@@ -251,14 +309,15 @@ export const responses = {
           status: 500,
           detail: "An unexpected error occurred. Please try again or contact support.",
           code: "internal_error",
-          requestId: "req_abc123",
+          request_id: "req_abc123",
         },
       },
     },
   },
   /**
-   * A STORED package artifact could not be expanded within the platform's
-   * decompression ceiling. Shared by the package file-explorer operations,
+   * A STORED package artifact cannot be served: it could not be expanded within
+   * the platform's decompression ceiling, or the selected published version's
+   * archive is gone (#1533). Shared by the file-explorer and download operations,
    * which all read the caller's own package and share one remedy (republish).
    *
    * `POST .../fork` deliberately does NOT `$ref` this: its 422 carries two
@@ -267,10 +326,12 @@ export const responses = {
    */
   PackageArchiveUnreadable: {
     description:
-      "The stored artifact expands past the package decompression ceiling and was refused " +
-      "(`package_archive_unreadable`). This is the SAME ceiling the import gate applies, so " +
-      "reaching it means the archive is a bomb or was stored before the gate covered this path " +
-      "— republish the package. RFC 9457 problem+json.",
+      "The stored archive cannot be served. `package_archive_unreadable`: it expands past the " +
+      "package decompression ceiling and was refused — the SAME ceiling the import gate applies, " +
+      "so reaching it means the archive is a bomb or was stored before the gate covered this " +
+      "path; republish the package. `version_artifact_unavailable`: the selected PUBLISHED " +
+      "version exists but its archive is gone from storage; nothing is substituted for it, the " +
+      "draft included. RFC 9457 problem+json.",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
@@ -282,7 +343,7 @@ export const responses = {
           detail:
             "The package archive expands past the 50 MB decompression limit and was refused (decompressed-budget-exceeded). Republish the package from bytes that fit the limit.",
           code: "package_archive_unreadable",
-          requestId: "req_abc123",
+          request_id: "req_abc123",
         },
       },
     },
@@ -292,25 +353,25 @@ export const responses = {
    *
    * It is NOT one cause on both: `POST` resolves the manifest the schedule will
    * FIRE and 404s a never-published agent (`assertScheduleTargetValid`), while
-   * `PUT` loads the schedule row FIRST (`loadScheduleOr404`) — so an unknown
+   * `PATCH` loads the schedule row FIRST (`loadScheduleOr404`) — so an unknown
    * schedule id is the DOMINANT 404 there, and the publish cause only reaches
-   * `PUT` when the patch carries `input` or `version_override`. The description
+   * `PATCH` when the patch carries `input` or `version_override`. The description
    * therefore names every cause and says which operation each belongs to; the
    * component is shared so the two operations cannot drift, not because they
    * refuse for identical reasons.
    *
-   * It was written out inline on `POST` only, so `PUT` declared the generic
+   * It was written out inline on `POST` only, so `PATCH` declared the generic
    * `NotFound` while returning this — and the test that was supposed to catch
    * that read the create operation alone and reported green. Then the first fix
-   * `$ref`'d POST's wording onto PUT verbatim, which left PUT's own primary 404
+   * `$ref`'d POST's wording onto PATCH verbatim, which left PATCH's own primary 404
    * (unknown schedule id) undocumented.
    */
   NoPublishedVersion: {
     description:
-      "Resource not found. On `PUT /api/schedules/{id}`, most commonly the schedule id itself " +
+      "Resource not found. On `PATCH /api/schedules/{id}`, most commonly the schedule id itself " +
       "does not exist (or belongs to another space) — that check runs first. Both writes " +
       "also answer 404 when the target agent does not exist, or has no published version " +
-      "(`no_published_version`): on `POST` always, on `PUT` when the patch carries `input` or " +
+      "(`no_published_version`): on `POST` always, on `PATCH` when the patch carries `input` or " +
       "`version_override`. A schedule with no `version_override` fires the PUBLISHED manifest, " +
       "so a never-published agent is refused at the write rather than 404ing on every tick; pin " +
       'the working copy with `version_override: "draft"` to schedule it anyway.',
@@ -323,7 +384,7 @@ export const responses = {
           status: 404,
           detail: "Agent '@acme/reporter' has no published version",
           code: "no_published_version",
-          requestId: "req_abc123",
+          request_id: "req_abc123",
         },
       },
     },
@@ -355,7 +416,7 @@ export const responses = {
               detail: "X-View-As could not be parsed: space and role must be provided together",
               code: "invalid_view_as",
               param: "X-View-As",
-              requestId: "req_abc123",
+              request_id: "req_abc123",
             },
           },
           notFound: {
@@ -367,7 +428,7 @@ export const responses = {
               detail: "Space 'spc_…' not found in this organization",
               code: "view_as_not_found",
               param: "X-View-As",
-              requestId: "req_abc123",
+              request_id: "req_abc123",
             },
           },
           unsupported: {
@@ -380,7 +441,7 @@ export const responses = {
                 "X-View-As is only supported for a user session or the CLI/instance token, not for api_key authentication.",
               code: "view_as_unsupported",
               param: "X-View-As",
-              requestId: "req_abc123",
+              request_id: "req_abc123",
             },
           },
         },
@@ -400,7 +461,7 @@ export const responses = {
           detail:
             "This Idempotency-Key was already used with a different method, URL or body. Use a new key for different requests.",
           code: "idempotency_conflict",
-          requestId: "req_abc123",
+          request_id: "req_abc123",
         },
       },
     },

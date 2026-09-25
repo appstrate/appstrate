@@ -18,8 +18,8 @@
  *   3. A run whose sink is already closed is untouched (no double
  *      finalize — CAS idempotency).
  *   4. The sweep is bounded by `maxFinalizesPerTick`.
- *   5. The sweep also stops the stalled run's workload through the
- *      orchestrator (same route as user cancel) — a stalled runner is
+ *   5. The sweep also aborts the run's in-process signal and stops its
+ *      workload (same route as user cancel) — a stalled runner is
  *      not necessarily dead, and a remote microVM left running keeps
  *      executing and billing.
  *   6. The startup phase: a run still being provisioned (no runner event
@@ -39,6 +39,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { runWatchdogTick } from "../../../src/services/run-watchdog.ts";
+import { trackRun, untrackRun } from "../../../src/services/run-tracker.ts";
 import {
   _setOrchestratorForTesting,
   type RunOrchestrator,
@@ -336,6 +337,41 @@ describe("run watchdog — unified stall detection", () => {
       const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
       expect(row?.status).toBe("failed");
     } finally {
+      _setOrchestratorForTesting(null);
+    }
+  });
+
+  // The launcher reads its run's abort signal to tell a requested stop from a
+  // sidecar/agent crash, and leaves the terminal to whoever aborted. Stopping
+  // without aborting logged the watchdog's own kill as a sidecar crash and let
+  // the launcher race a "container exited with code 137" terminal.
+  it("aborts the run's signal before stopping its workload, keeping `failed`", async () => {
+    const runId = await seedRun(ctx, "@test/watchdog-agent", {
+      status: "running",
+      lastHeartbeatAt: new Date(Date.now() - 3600_000),
+    });
+    const { signal } = trackRun(runId);
+    const abortedAtStop: boolean[] = [];
+    _setOrchestratorForTesting({
+      ...createRecordingOrchestrator([]),
+      stopByRunId: async (): Promise<StopResult> => {
+        abortedAtStop.push(signal.aborted);
+        return "stopped";
+      },
+    });
+    try {
+      await runWatchdogTick({
+        intervalSeconds: 30,
+        stallThresholdSeconds: 60,
+        maxFinalizesPerTick: 100,
+      });
+
+      expect(abortedAtStop).toEqual([true]);
+      const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(row?.status).toBe("failed");
+      expect(row?.error).toContain("Runner stopped reporting");
+    } finally {
+      untrackRun(runId);
       _setOrchestratorForTesting(null);
     }
   });

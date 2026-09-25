@@ -20,9 +20,8 @@
  *      surface alongside `run_history` / `recall_memory` and the
  *      integration tools. Any harness that speaks MCP gets them for free —
  *      this is what decouples the runtime tools from the Pi SDK.
- *   2. As Pi extensions registered directly in the agent for the
- *      no-sidecar execution path (`runtime-pi/entrypoint.ts` skip-sidecar
- *      branch + the public `appstrate run` CLI), via the thin wrapper in
+ *   2. As Pi extensions registered directly in the agent by the public
+ *      `appstrate run` CLI, which has no sidecar, via the thin wrapper in
  *      `@appstrate/runner-pi/runtime-tools/runtime-tool-extensions`.
  *
  * Both adapters share this module's per-tool logic (input schema +
@@ -33,7 +32,7 @@
  * canonical run events under the result `_meta` key
  * {@link RUNTIME_TOOL_EVENTS_META_KEY}; the host re-emits them into the
  * run's single event sink (the sidecar path relays them agent-side via
- * `reEmitRuntimeToolEvents`; the no-sidecar Pi wrapper does the same). This
+ * `reEmitRuntimeToolEvents`; the CLI's Pi wrapper does the same). This
  * keeps a single sequence source for the run-event pipeline — no behavioural
  * change to ingestion, the reducer, or finalize.
  *
@@ -137,7 +136,7 @@ function withEvents(text: string, events: RuntimeToolEvent[]): RuntimeToolResult
   // point they are wrapped. Canonical run events (`log.written`, …) carry a
   // required `timestamp` (consumed by the reducer → RunResult.logs), but the
   // sidecar/MCP re-emit path (`reEmitRuntimeToolEvents` → bridged sink) does
-  // not stamp one — unlike the no-sidecar stdout path. An event left without a
+  // not stamp one — unlike the CLI's stdout path. An event left without a
   // timestamp surfaced as `undefined` in the finalize RunResult and failed the
   // whole run. Stamping here fixes both paths; an event that already carries
   // its own timestamp keeps it.
@@ -401,7 +400,7 @@ export interface PublishedFile extends RunAndWaitFile {
 /** The canonical `file.published` run event for a stored file. */
 export interface FilePublishedEvent extends RuntimeToolEvent {
   type: "file.published";
-  file_id: string;
+  fileId: string;
   uri: string;
   name: string;
   mime: string;
@@ -419,7 +418,7 @@ export interface FilePublishedEvent extends RuntimeToolEvent {
 export function filePublishedEvent(file: PublishedFile): FilePublishedEvent {
   return {
     type: "file.published",
-    file_id: file.id,
+    fileId: file.id,
     uri: file.uri,
     name: file.name,
     mime: file.mime,
@@ -502,7 +501,7 @@ export function buildPublishFileDef(uploader: FileUploader): RuntimeToolDef {
 /**
  * Re-emit the canonical run events a runtime tool call returned under
  * {@link RUNTIME_TOOL_EVENTS_META_KEY}. Called by the host (agent-side MCP
- * bridge or the no-sidecar Pi wrapper) so the events land in the run's
+ * bridge or the CLI's Pi wrapper) so the events land in the run's
  * single event sink. No-op when the meta key is absent or malformed.
  */
 export function reEmitRuntimeToolEvents(

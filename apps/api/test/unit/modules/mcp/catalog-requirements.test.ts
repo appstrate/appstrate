@@ -28,6 +28,7 @@ import {
   canReadRuns,
   canRunAgents,
 } from "@appstrate/core/permissions";
+import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { reaches, turnCapabilities } from "@appstrate/module-chat/capabilities";
 import { getCatalog, type CatalogOperation } from "../../../../src/modules/mcp/catalog.ts";
 import type { AppEnv } from "../../../../src/types/index.ts";
@@ -156,14 +157,25 @@ const TERMINAL_CATCH_ALLS: ReadonlyArray<{ route: string; why: string }> = [
   { route: "ALL /api/credential-proxy/proxy", why: "forwards the caller's method upstream" },
 ];
 
+/** Without `methods`, every method at the path. */
+type AllowlistEntry = { methods?: readonly string[]; path: string; why: string };
+
+/** One entry per `[methods, path]`, all standing on the same authority. */
+function rowDecided(
+  why: string,
+  routes: ReadonlyArray<readonly [readonly string[], string]>,
+): AllowlistEntry[] {
+  return routes.map(([methods, path]) => ({ methods, path, why }));
+}
+
 /**
- * `/api/` operations with no permission guard and no `rowAuthority()` marker —
- * an unguarded route, GET included, is advertised to every caller — each with
- * the authority that stands in for a guard. A trailing `/*` matches beneath
+ * `/api/` operations with no permission guard — an unguarded route, GET
+ * included, is advertised to every caller — each with the authority that
+ * stands in for a guard. A trailing `/*` matches beneath
  * the path, anything else is exact — a bare `x*` matches nothing and reads as
  * stale, since it would also admit `x-anything`. An entry that stops matching fails the suite.
  */
-const NO_MOUNTED_GUARD: ReadonlyArray<{ path: string; why: string }> = [
+const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   // ── The request's own credential is the authority — no RBAC grant to check.
   {
     path: "/api/auth/*",
@@ -216,11 +228,52 @@ const NO_MOUNTED_GUARD: ReadonlyArray<{ path: string; why: string }> = [
     why: "the person's own membership, dashboard session only (`orgRole`); last owner decided under lock",
   },
 
-  // ── No org data at all.
-  {
-    path: "/api/models/openrouter",
-    why: "proxies OpenRouter's public model catalog, rate-limited; nothing of the org's",
-  },
+  // ── The row the handler loads decides, and refuses with the route's own error.
+  // Method-precise: the other methods at these paths carry a mounted guard.
+  ...rowDecided("the caller's own org role (owner/admin), read in the handler", [
+    [["GET"], "/api/library"],
+  ]),
+  ...rowDecided("`gateSpacePackageWrite`: the per-type permission in the path's space", [
+    [["POST"], "/api/spaces/{spaceId}/packages"],
+    [["PATCH", "DELETE"], "/api/spaces/{spaceId}/packages/{scope}/{name}"],
+  ]),
+  ...rowDecided("SSE: `validateSSEAuth`, then which runs the caller may read", [
+    [["GET"], "/api/realtime/runs"],
+    [["GET"], "/api/realtime/runs/{id}"],
+    [["GET"], "/api/realtime/agents/{packageId}/runs"],
+  ]),
+  ...rowDecided("`files:delete` OR the file's own creator", [
+    [["DELETE"], "/api/files/{id}"],
+    [["POST"], "/api/files/{id}/keep"],
+  ]),
+  ...rowDecided("`loadWebhookForAction`, judged in the webhook's space", [
+    [["GET", "PATCH", "DELETE"], "/api/webhooks/{id}"],
+    [["POST"], "/api/webhooks/{id}/test"],
+    [["POST"], "/api/webhooks/{id}/rotate"],
+    [["GET"], "/api/webhooks/{id}/deliveries"],
+  ]),
+  ...rowDecided("the package's home space", [
+    [["GET", "PUT"], "/api/packages/{scope}/{name}/home"],
+  ]),
+  ...rowDecided("`assertPackageShareAccess`: `<type>:share` in the package's home", [
+    [["GET", "POST"], "/api/packages/{scope}/{name}/shares"],
+    [["DELETE"], "/api/packages/{scope}/{name}/shares/{target}"],
+  ]),
+  ...rowDecided("`loadFileExplorerPackage`: placement and `<type>:read`; a draft asks its home", [
+    [["GET"], "/api/packages/{scope}/{name}/files"],
+    [["GET"], "/api/packages/{scope}/{name}/files/content"],
+  ]),
+  ...rowDecided("placement, `<type>:read` and the org's copy restriction; a draft asks its home", [
+    [["GET"], "/api/packages/{scope}/{name}/{version}/download"],
+  ]),
+  ...Object.values(PACKAGE_TYPE_ROUTE_SEGMENT).flatMap((segment) =>
+    rowDecided("`requirePackageInOrg()`: the type's write/delete permission in its home", [
+      [["PATCH", "DELETE"], `/api/packages/${segment}/{scope}/{name}`],
+      [["POST"], `/api/packages/${segment}/{scope}/{name}/versions`],
+      [["DELETE"], `/api/packages/${segment}/{scope}/{name}/versions/{version}`],
+      [["POST"], `/api/packages/${segment}/{scope}/{name}/versions/{version}/restore`],
+    ]),
+  ),
 
   // ── Platform-operator authority, outside org RBAC entirely.
   {
@@ -236,81 +289,116 @@ const NO_MOUNTED_GUARD: ReadonlyArray<{ path: string; why: string }> = [
 /** Entries a deployment without `@appstrate/module-ee` cannot match. */
 const PRESENT_ONLY_WITH_EE: ReadonlySet<string> = new Set(["/api/billing/webhooks"]);
 
-function covers(list: ReadonlyArray<{ path: string }>, pathTemplate: string): boolean {
-  return list.some(({ path }) =>
-    path.endsWith("/*") ? pathTemplate.startsWith(path.slice(0, -1)) : pathTemplate === path,
+function covers(
+  list: ReadonlyArray<AllowlistEntry>,
+  { method, pathTemplate }: { method: string; pathTemplate: string },
+): boolean {
+  return list.some(
+    ({ methods, path }) =>
+      (methods === undefined || methods.includes(method)) &&
+      (path.endsWith("/*") ? pathTemplate.startsWith(path.slice(0, -1)) : pathTemplate === path),
   );
 }
 
-/** `/api/` operations naming no permission in either space and not row-decided. */
+/** `/api/` operations naming no permission in either space. */
 function unguardedOperations(): CatalogOperation[] {
   return [...getCatalog().operations.values()].filter(
     (operation) =>
       operation.pathTemplate.startsWith("/api/") &&
       operation.requirement.requirements.length === 0 &&
-      operation.requirement.targetSpaceRequirements.length === 0 &&
-      !operation.requirement.conditional,
+      operation.requirement.targetSpaceRequirements.length === 0,
   );
 }
 
 describe("every /api/ operation has a readable requirement", () => {
-  it("names a permission, defers to the row, or is allowlisted", () => {
+  it("names a permission or is allowlisted", () => {
     const offenders = unguardedOperations()
-      .filter((operation) => !covers(NO_MOUNTED_GUARD, operation.pathTemplate))
+      .filter((operation) => !covers(NO_MOUNTED_GUARD, operation))
       .map((operation) => `${operation.operationId} (${key(operation)})`);
     expect(offenders).toEqual([]);
   });
 
   it("still has reads and writes to judge", () => {
     // Control for the loop above: a filter excluding everything would pass it.
+    // Row-decided GETs are allowlisted by method, so they are not counted as judged.
     const judged = [...getCatalog().operations.values()].filter(
       (operation) =>
-        operation.pathTemplate.startsWith("/api/") &&
-        !covers(NO_MOUNTED_GUARD, operation.pathTemplate),
+        operation.pathTemplate.startsWith("/api/") && !covers(NO_MOUNTED_GUARD, operation),
     );
-    expect(judged.filter((operation) => operation.method === "GET").length).toBeGreaterThan(80);
+    expect(judged.filter((operation) => operation.method === "GET").length).toBeGreaterThan(70);
     expect(judged.filter((operation) => operation.method !== "GET").length).toBeGreaterThan(80);
   });
 
   it("carries no allowlist entry that has stopped standing for anything", () => {
     // An entry matching nothing is a standing excuse for whatever mounts there next.
+    // A method entry stands per method: each one must match an unguarded operation.
     const unguarded = unguardedOperations();
-    const stale = NO_MOUNTED_GUARD.filter(
-      (entry) =>
-        !PRESENT_ONLY_WITH_EE.has(entry.path) &&
-        !unguarded.some((operation) => covers([entry], operation.pathTemplate)),
-    ).map((entry) => entry.path);
+    const stale = NO_MOUNTED_GUARD.filter((entry) => !PRESENT_ONLY_WITH_EE.has(entry.path))
+      .flatMap((entry) =>
+        entry.methods === undefined
+          ? [{ entry, label: entry.path }]
+          : entry.methods.map((method) => ({
+              entry: { ...entry, methods: [method] },
+              label: `${method} ${entry.path}`,
+            })),
+      )
+      .filter(({ entry }) => !unguarded.some((operation) => covers([entry], operation)))
+      .map(({ label }) => label);
     expect(stale).toEqual([]);
+  });
+
+  it("allowlists a method, not the path: a guarded method there is still judged", () => {
+    // `PUT`/`DELETE` on a package are row-decided; `GET` on the same path is not.
+    expect(op("getAgentPackage").requirement.requirements).toEqual(["agents:read|agents:run"]);
+    expect(covers(NO_MOUNTED_GUARD, op("getAgentPackage"))).toBe(false);
+    expect(covers(NO_MOUNTED_GUARD, op("updateAgent"))).toBe(true);
   });
 });
 
 describe("requirement anchors", () => {
-  it("reads every row-authoritative route as conditional", () => {
-    // Each refuses from a row its handler loads (file ACL, home space, placement,
-    // org role…); read as unconditional it would be granted to every caller.
-    const unconditional = [
-      "deleteFile",
-      "keepFile",
-      "getPackageHome",
-      "movePackageHome",
-      "sharePackage",
-      "listPackageShares",
-      "revokePackageShare",
-      "updateWebhook",
-      "activatePackage",
-      "updateSpacePackage",
-      "deactivatePackage",
-      "createRemoteRun",
-      "exportAgentBundle",
-      "getLibrary",
-    ].filter((operationId) => !op(operationId).requirement.conditional);
-    expect(unconditional).toEqual([]);
-
-    // The control: a guard-only route stays unconditional — no flag stuck on.
-    expect(op("createSpace").requirement).toMatchObject({
+  it("reads a guard-only route as exactly its guard", () => {
+    expect(op("createSpace").requirement).toEqual({
       requirements: ["spaces:write"],
-      conditional: false,
+      targetSpaceRequirements: [],
+      ceilingRequirements: [],
     });
+  });
+
+  it("reads the ownership-authorized routes as ceiling requirements, never as grants", () => {
+    // A session holder without the permission still acts on its own rows, so
+    // these must not filter; only a delegated credential's scopes are asked.
+    const expected = {
+      listMyConnections: req(["integrations:read"]),
+      deleteMyConnection: req(["integrations:disconnect"]),
+      getMyConnectionHandoff: req(["integrations:disconnect"]),
+      listMyIntegrationPins: req(["integrations:read"]),
+      upsertMyIntegrationPin: req(["integrations:connect"]),
+      deleteMyIntegrationPin: req(["integrations:connect"]),
+      listNotifications: req(["runs:read|runs:read-all"]),
+      getUnreadNotificationCount: req(["runs:read|runs:read-all"]),
+      getUnreadCountsByAgent: req(["runs:read|runs:read-all"]),
+      markNotificationReadById: req(["runs:read|runs:read-all"]),
+      markNotificationRead: req(["runs:read|runs:read-all"]),
+      markAllNotificationsRead: req(["runs:read|runs:read-all"]),
+      createUpload: req(["agents:run"]),
+    };
+    const ceilings = Object.fromEntries(
+      Object.keys(expected).map((operationId) => [operationId, op(operationId).requirement]),
+    );
+    expect(ceilings).toEqual(expected);
+    const deleteMine = op("deleteMyConnection").requirement;
+    // A session: ownership decides. A delegated credential: its scopes must hold the ceiling.
+    expect(isGranted(deleteMine, new Set())).toBe(true);
+    expect(isGranted(deleteMine, new Set(), new Set())).toBe(false);
+    expect(isGranted(deleteMine, new Set(), new Set(["integrations:disconnect"]))).toBe(true);
+
+    function req(ceilingRequirements: string[]) {
+      return { requirements: [], targetSpaceRequirements: [], ceilingRequirements };
+    }
+  });
+
+  it("reads the OpenRouter catalogue proxy as a `models:read` grant, like the model list", () => {
+    expect(op("searchOpenRouterModels").requirement.requirements).toEqual(["models:read"]);
   });
 
   it("reads `listSpaceMembers` as a requirement of the space the PATH names", () => {

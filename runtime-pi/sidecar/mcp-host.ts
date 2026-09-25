@@ -30,6 +30,7 @@
  */
 
 import {
+  allocateMcpToolName,
   allocateMcpToolNamespace,
   isValidToolName,
   normaliseMcpToolBody,
@@ -37,6 +38,9 @@ import {
 } from "@appstrate/core/naming";
 import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import {
+  MAX_PARAMETER_DESCRIPTION_BYTES,
+  MAX_TOOL_DESCRIPTION_BYTES,
+  sanitiseTextField,
   sanitiseToolDescriptor,
   type AppstrateMcpClient,
   type AppstrateToolDefinition,
@@ -124,7 +128,8 @@ interface McpHostOptions {
  *   1. `register({ namespace, client })` — ingest an upstream MCP server.
  *      Calls `listTools()` on the client and snapshots the descriptors.
  *   2. Tool dispatch: `tools/call` on the host's outward face routes to
- *      the right upstream by stripping the `{namespace}__` prefix.
+ *      the right upstream under the exact upstream name, kept per exposed
+ *      name (never re-derived by parsing it).
  *   3. `dispose()` — closes every client. Idempotent.
  *
  * The host renames each upstream tool to `{namespace}__{name}` and
@@ -326,81 +331,76 @@ export class McpHost {
         continue;
       }
       // Trusted first-party tools are already emitted in the canonical body
-      // form. Preserve it verbatim so auth-scoped synthetic names such as
-      // `api_call__primary` keep their auth-scoped token suffix. The third-party
-      // sanitiser deliberately treats the first `__` as an upstream namespace
-      // and strips it; applying that rule here would collapse the trusted name
-      // to `primary`, making the runtime surface diverge from the catalog.
-      // `isValidToolName` below still validates the fully namespaced result;
-      // malformed trusted descriptors fail loudly because an opaque fallback
-      // would diverge from the platform catalog. Both halves are platform-
-      // produced — the namespace normalises any AFPS-valid package id
-      // (including digit-leading scopes like `@1password`) and the body is
-      // emitted by `createApiCallToolDefs` within the shared length budget —
-      // so this throw is unreachable for any manifest the platform accepts;
-      // it guards future emitters, not user input. Untrusted names retain
-      // the defensive fallback below.
-      const sanitisedToolBody = upstream.trusted
-        ? sanitised.name
-        : normaliseMcpToolBody(sanitised.name);
-      const namespacedName = sanitisedToolBody ? `${normalisedNs}__${sanitisedToolBody}` : "";
-      if (upstream.trusted && !isValidToolName(namespacedName)) {
+      // form (e.g. `api_call__primary`), kept verbatim; a malformed one fails
+      // loudly since a fallback name would diverge from the platform catalog.
+      const plainName = `${normalisedNs}__${
+        upstream.trusted ? sanitised.name : normaliseMcpToolBody(sanitised.name)
+      }`;
+      if (upstream.trusted && !isValidToolName(plainName)) {
         throw new Error(
-          `McpHost: trusted tool ${JSON.stringify(sanitised.name)} produces invalid namespaced name ${JSON.stringify(namespacedName)}`,
+          `McpHost: trusted tool ${JSON.stringify(sanitised.name)} produces invalid namespaced name ${JSON.stringify(plainName)}`,
         );
       }
-      let finalName = isValidToolName(namespacedName)
-        ? namespacedName
-        : `${normalisedNs}__tool_${this.toolDescriptors.length}`;
-      // Dedup: two DISTINCT upstream tools can converge onto the same
-      // `finalName` after `normaliseMcpToolBody` collapses separators (e.g.
-      // `list-issues`, `list_issues`, and `list.issues` all → `list_issues`).
-      // Without this guard the later tool would silently overwrite the
-      // earlier one's index entries (toolToClient / originalToolNames) while
-      // both still get pushed onto `toolDescriptors` — the agent would see a
-      // duplicate name and the first tool would become unreachable. Suffix
-      // `_2`, `_3`, … until free, mirroring namespace disambiguation.
-      if (this.toolToNamespace.has(finalName)) {
-        // Trusted platform capabilities always own their canonical name,
-        // independent of registration order. When an untrusted upstream is
-        // registered after the synthetic tool, drop the colliding descriptor
-        // instead of inventing a suffixed capability that was never present in
-        // the integration catalog. The reverse order is handled atomically by
-        // `trustedReplacements` above.
-        if (!upstream.trusted && this.toolTrusted.get(finalName) === true) {
-          this.options.onLog?.({
-            source: `host:${normalisedNs}`,
-            level: "warn",
-            data: {
-              event: "untrusted_tool_shadowed_by_trusted",
-              originalName: tool.name,
-              name: finalName,
-            },
-          });
-          continue;
-        }
-        const base = finalName;
-        let suffix = 2;
-        while (this.toolToNamespace.has(finalName)) {
-          finalName = `${base}_${suffix}`;
-          suffix += 1;
-        }
+      // Trusted capabilities own their canonical name in either registration
+      // order (the reverse order is handled by `trustedReplacements` above).
+      if (!upstream.trusted && this.toolTrusted.get(plainName) === true) {
         this.options.onLog?.({
           source: `host:${normalisedNs}`,
           level: "warn",
           data: {
-            event: "tool_name_collision",
+            event: "untrusted_tool_shadowed_by_trusted",
             originalName: tool.name,
-            base,
-            allocated: finalName,
+            name: plainName,
           },
         });
+        continue;
+      }
+      let finalName = plainName;
+      if (!upstream.trusted) {
+        try {
+          finalName = allocateMcpToolName(normalisedNs, tool.name, (name) =>
+            this.toolToNamespace.has(name),
+          );
+        } catch {
+          // An unresolvable collision costs that one tool, not the upstream.
+          this.options.onLog?.({
+            source: `host:${normalisedNs}`,
+            level: "warn",
+            data: {
+              event: "tool_rejected",
+              reason: "name_collision",
+              namespace: normalisedNs,
+              originalName: tool.name,
+            },
+          });
+          continue;
+        }
+      }
+      let descriptor: Tool = { ...sanitised, name: finalName };
+      if (finalName !== `${normalisedNs}__${tool.name}`) {
+        // The model only sees the exposed name; give it the upstream one so it
+        // can match the tool against the server's own documentation.
+        this.options.onLog?.({
+          source: `host:${normalisedNs}`,
+          level: "info",
+          data: { event: "tool_name_rewritten", originalName: tool.name, name: finalName },
+        });
+        const upstreamName = JSON.stringify(
+          sanitiseTextField(tool.name, MAX_PARAMETER_DESCRIPTION_BYTES),
+        );
+        descriptor = {
+          ...descriptor,
+          description: sanitiseTextField(
+            `Upstream tool name: ${upstreamName}.${sanitised.description ? `\n\n${sanitised.description}` : ""}`,
+            MAX_TOOL_DESCRIPTION_BYTES,
+          ),
+        };
       }
       this.toolToNamespace.set(finalName, normalisedNs);
       this.toolToClient.set(finalName, effectiveUpstream.client);
       this.toolTrusted.set(finalName, upstream.trusted === true);
       this.originalToolNames.set(finalName, tool.name);
-      this.toolDescriptors.push({ ...sanitised, name: finalName });
+      this.toolDescriptors.push(descriptor);
     }
 
     // Merged upstreams (`intoNamespace`) contribute tools but never become the

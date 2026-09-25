@@ -55,7 +55,9 @@ const { run: RUN, daemon } = resolveContainerE2eGate("inference-container.e2e", 
 ]);
 
 const RID = "run_inference_e2e";
-const MODEL_ID = "gpt-5-codex";
+// In Pi's `openai-codex` offer, so the container resolves the registry record
+// exactly as it does for a run the platform launches.
+const MODEL_ID = "gpt-5.5";
 const ACCOUNT_ID = "acct_inference_e2e";
 const CREDENTIAL_ID = "cred_inference_e2e";
 const SINK_SECRET = "inference-e2e-secret-0123456789";
@@ -144,7 +146,7 @@ describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verb
         if (path.startsWith("/internal/oauth-token/")) {
           tokenReadAuthorization = req.headers.get("authorization") ?? undefined;
           return Response.json({
-            accessToken: REAL_ACCESS_TOKEN,
+            access_token: REAL_ACCESS_TOKEN,
             expiresAt: Date.now() + 3_600_000,
           });
         }
@@ -198,6 +200,7 @@ describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verb
           networkAlias: "sidecar",
           env: {
             PORT: "8080",
+            FORWARD_PROXY_PORT: "8081",
             RUN_ID: RID,
             RUN_TOKEN,
             PLATFORM_API_URL: platformUrl,
@@ -229,7 +232,8 @@ describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verb
             APPSTRATE_SINK_SECRET: SINK_SECRET,
             MODEL_API: "openai-codex-responses",
             MODEL_ID,
-            MODEL_PROVIDER: "codex",
+            // Pi's provider key, as `buildRuntimePiEnv` emits it — not Appstrate's `codex`.
+            MODEL_PROVIDER: "openai-codex",
             MODEL_BASE_URL: "http://sidecar:8080/llm",
             MODEL_API_KEY: PLACEHOLDER_JWT,
             SIDECAR_URL: "http://sidecar:8080",

@@ -3,15 +3,14 @@
 /**
  * Pricing provenance — the single policy home for `llm_usage.pricing_status`.
  *
- * `computeTokenCost` is permissive by design (`if (!cost) return 0`, `?? 0` on
- * both cache rates), which is correct arithmetic but makes "no rates exist for
+ * The ledger price (`token-cost.ts`) is permissive by design (no rates → 0, an
+ * absent cache rate → 0), which is correct arithmetic but makes "no rates exist for
  * this model" indistinguishable from "this consumption was genuinely free".
  * Every producer of a ledger row therefore runs its usage + rates through
  * {@link resolvePricingStatus}, which does two things at once:
  *
  *   1. classifies, by DELEGATING to `classifyTokenPricing`
- *      (`@appstrate/afps-runtime/runner`, next to the cost formula itself) —
- *      the rules are never re-derived here;
+ *      (`@appstrate/afps-runtime/runner`) — the rules are never re-derived here;
  *   2. logs the gap, so a model the platform cannot price is visible to
  *      operators the first time it is spent on, not only via a later SQL query.
  *

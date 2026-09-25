@@ -21,10 +21,10 @@
  * space-scoped prefixes). The explicit path never touches the singleton cache.
  */
 import { Hono, type Context } from "hono";
-import { cors } from "hono/cors";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { clientIp } from "../../src/middleware/client-ip.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
+import { apiCors } from "../../src/lib/cors.ts";
 import { apiVersion } from "../../src/middleware/api-version.ts";
 import { isSpaceScopedPath, requireSpaceContext } from "../../src/middleware/space-context.ts";
 import { idempotencyGuard } from "../../src/middleware/idempotency-guard.ts";
@@ -58,7 +58,6 @@ import { createRunsEventsRouter } from "../../src/routes/runs-events.ts";
 import { createRunsRemoteRouter } from "../../src/routes/runs-remote.ts";
 import { createSchedulesRouter } from "../../src/routes/schedules.ts";
 import { createLibraryRouter } from "../../src/routes/library.ts";
-import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
 import { createProxiesRouter } from "../../src/routes/proxies.ts";
 import { createModelsRouter } from "../../src/routes/models.ts";
@@ -75,7 +74,8 @@ import { createUploadsRouter, createUploadContentRouter } from "../../src/routes
 import { createFilesRouter, createFilePreviewRouter } from "../../src/routes/files.ts";
 import { createAdminStorageDeletionRouter } from "../../src/routes/admin-storage-deletion.ts";
 import { createCredentialProxyRouter } from "../../src/routes/credential-proxy.ts";
-import { createLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
+import { createLlmProxyRouter, createRunLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
+import { LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT } from "@appstrate/runner-pi";
 import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
@@ -174,7 +174,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.use("*", clientIp());
 
   // CORS
-  app.use("*", cors({ origin: "*", credentials: true }));
+  app.use("*", apiCors("*"));
 
   // Response-contract gate: validate every JSON response against its OpenAPI
   // schema, fail-closed. The spec is assembled from the SAME module set this
@@ -259,7 +259,6 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.use("*", idempotencyGuard());
 
   // Mount routes (same order as production)
-  const userAgentsRouter = createUserAgentsRouter();
   const agentsRouter = createAgentsRouter();
   const runsRouter = createRunsRouter();
   const schedulesRouter = createSchedulesRouter();
@@ -273,7 +272,6 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/orgs", orgsRouter);
   app.route("/api/me", meRouter);
   app.route("/api/library", createLibraryRouter());
-  app.route("/api/agents", userAgentsRouter);
   app.route("/api/agents", agentsRouter);
   app.route("/api", createNotificationsRouter());
   // HMAC-signed event ingestion. Must mount BEFORE runsRouter so the
@@ -316,10 +314,11 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/integrations", createIntegrationsRouter());
   app.route("/api/credential-proxy", createCredentialProxyRouter());
-  app.route("/api/llm-proxy", createLlmProxyRouter());
+  app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
   app.route("/invite", invitationsRouter);
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());
+  app.route(RUN_LLM_PROXY_MOUNT, createRunLlmProxyRouter());
 
   // Mirrors production: unknown /api/* → 404 problem+json (no SPA fallback in tests).
   app.all(

@@ -10,6 +10,7 @@
  * never gain it.
  */
 
+import { ifMatch } from "../../helpers/etag.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { auditEvents, packages, packageShares, spacePackages, spaces } from "@appstrate/db/schema";
@@ -94,9 +95,9 @@ const builderIn = (spaceId: string) => memberIn(spaceId, "builder");
 async function editSkill(headers: Record<string, string>) {
   const row = await getDbRow(packages, eq(packages.id, ID));
   return app.request(`/api/packages/skills/${ID}`, {
-    method: "PUT",
-    headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ content: `${CONTENT} edited`, lock_version: row.lockVersion }),
+    method: "PATCH",
+    headers: { ...headers, "Content-Type": "application/json", ...ifMatch(row.lockVersion) },
+    body: JSON.stringify({ content: `${CONTENT} edited` }),
   });
 }
 
@@ -920,9 +921,9 @@ describe("the home on the wire", () => {
     // The refusal it now agrees with.
     const row = await getDbRow(packages, eq(packages.id, SYS));
     const write = await app.request(`/api/packages/skills/${SYS}`, {
-      method: "PUT",
-      headers: { ...owner(), "Content-Type": "application/json" },
-      body: JSON.stringify({ content: `${CONTENT} edited`, lock_version: row.lockVersion }),
+      method: "PATCH",
+      headers: { ...owner(), "Content-Type": "application/json", ...ifMatch(row.lockVersion) },
+      body: JSON.stringify({ content: `${CONTENT} edited` }),
     });
     expect(write.status, await write.clone().text()).toBe(403);
   });

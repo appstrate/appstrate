@@ -38,14 +38,6 @@ function OpenAIIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-function GeminiIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" />
-    </svg>
-  );
-}
-
 function MistralIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
@@ -158,7 +150,6 @@ function OpenCodeIcon(props: SVGProps<SVGSVGElement>) {
 export const PROVIDER_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   anthropic: AnthropicIcon,
   openai: OpenAIIcon,
-  "google-ai": GeminiIcon,
   mistral: MistralIcon,
   xai: XAIIcon,
   groq: GroqIcon,
@@ -213,7 +204,7 @@ function AliasIcon(props: SVGProps<SVGSVGElement>) {
  *     they show an icon without exposing the backing model).
  *  2. The provider the row is bound to — by `providerId`, so a model on an
  *     operator's own endpoint carries its wire format's icon; by the visible
- *     `apiShape`/`baseUrl` where the binding is hidden.
+ *     `apiShape`/`base_url` where the binding is hidden.
  *  3. A generic {@link AliasIcon} for aliases that declare no icon, so an
  *     aliased model is never icon-less.
  */
@@ -223,7 +214,7 @@ export function getModelIcon(
     iconUrl: string | null;
     providerId?: string | null;
     apiShape: string | null;
-    baseUrl: string | null;
+    base_url: string | null;
     aliased: boolean;
   },
   registry: readonly ProviderRegistryEntry[],

@@ -76,8 +76,8 @@ async function helperRedeem(page: Page, token: string) {
     data: {
       providerId: PROVIDER_ID,
       label: "E2E survive-close",
-      accessToken: `fake-${PROVIDER_ID}-access`,
-      refreshToken: `fake-${PROVIDER_ID}-refresh`,
+      access_token: `fake-${PROVIDER_ID}-access`,
+      refresh_token: `fake-${PROVIDER_ID}-refresh`,
       expiresAt: Date.now() + 3_600_000,
       email: `pairing-survive-${Date.now()}@example.test`,
     },

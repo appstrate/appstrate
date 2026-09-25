@@ -79,11 +79,13 @@ section.
 `apps/web/src/pages/test/billing-admin-sections.test.tsx`,
 `apps/web/src/pages/test/billing-plan-change.test.tsx`.
 
-**4. SPA — edit (6 files)**
+**4. SPA — edit (7 files)**
 
 - `apps/web/src/app.tsx` — drop the two `lazy()` imports (`OnboardingPlanStep`,
-  `OrgSettingsBillingPage`) and their two `<Route>` blocks (`/onboarding/plan`,
-  and `path="billing"` under `RequirePermission billing:read`).
+  `OrgSettingsBillingPage`), the `/onboarding/plan` `<Route>` block, and the
+  `"/org-settings/billing"` entry of the `PAGES` table.
+- `apps/web/src/lib/route-access.ts` — drop the `/org-settings/billing` entry
+  (`PAGES` is keyed by `RoutePath`, so the two go together or `tsc` fails).
 - `apps/web/src/components/app-sidebar.tsx` — drop the `SidebarBilling` import
   and its usage.
 - `apps/web/src/components/onboarding-layout.tsx` — drop `"plan"` from the
@@ -525,7 +527,7 @@ org deletion (onOrgDelete, awaited by the platform BEFORE its cascade):
   → a second call for the same org is a no-op — the account is already gone
 ```
 
-Only platform-provided models (`credentialSource === "system"`) are billed; org-credential (BYOK) and null-credential rows advance the watermark but are never debited. **Runner rows are cumulative** (one growing row per run) and only settle at a terminal run status — the sweep never advances past an unsettled _system_ row, so a mid-run system row is billed only once it is final. Cutover: the cursor is seeded to the platform's **settled frontier** (`usage.settledFrontier()` — the highest id below which every row is settled, NOT a plain max id, which would strand an in-flight runner row already holding a low id) **synchronously in the module's `init()`, at boot before the server takes traffic** (`ensureCursorSeeded`, shared with an in-sweep safety-net fallback). That same frontier is written to `ee_billing_cursor.floor_id` and never moves again: the watermark drifts forward and every pass reads `REPLAY_WINDOW` ids below it, so without the floor the second pass walks back under the seed and bills the very history the cutover excluded. `floor_id` defaults to `0` for a cursor that predates the column — its original frontier was never recorded, and 0 is exactly the behaviour those deployments already have. Seeding at init rather than at the first sweep tick closes the loss window: usage recorded between boot and that first tick (~5 min) is billed by the tick instead of falling below a watermark only set at the tick. Rows already claimed by the previous model are never re-billed — the claim table dedupes. But because the first sweep starts at the settled frontier, settled-but-unclaimed rows ABOVE it (the recent window since the oldest in-flight run began) ARE billed on the first pass — deliberate, so an in-flight run's revenue is not stranded; rows at or below the floor are never revisited.
+Only platform-provided models (`credentialSource === "system"`) are billed; org-credential (BYOK) and null-credential rows advance the watermark but are never debited. A run on a platform-provided model has no runner row: its inference goes through the platform's LLM proxy (`runs.inference_route = 'proxy'`), which writes one settled row per call. A NULL route is a remote-origin run: it resolved no platform model, so its runner row is null-credential (never debited), and when its inference went through the system LLM proxy that runner row is dropped from `usage.list` as a mirror of its proxy rows. **Runner rows are cumulative** (one growing row per run) and only settle at a terminal run status — the sweep never advances past an unsettled _system_ row, and skips past an unsettled BYOK or null-credential one. Cutover: the cursor is seeded to the platform's **settled frontier** (`usage.settledFrontier()` — the highest id below which every row is settled, NOT a plain max id, which would strand an in-flight runner row already holding a low id) **synchronously in the module's `init()`, at boot before the server takes traffic** (`ensureCursorSeeded`, shared with an in-sweep safety-net fallback). That same frontier is written to `ee_billing_cursor.floor_id` and never moves again: the watermark drifts forward and every pass reads `REPLAY_WINDOW` ids below it, so without the floor the second pass walks back under the seed and bills the very history the cutover excluded. `floor_id` defaults to `0` for a cursor that predates the column — its original frontier was never recorded, and 0 is exactly the behaviour those deployments already have. Seeding at init rather than at the first sweep tick closes the loss window: usage recorded between boot and that first tick (~5 min) is billed by the tick instead of falling below a watermark only set at the tick. Rows already claimed by the previous model are never re-billed — the claim table dedupes. But because the first sweep starts at the settled frontier, settled-but-unclaimed rows ABOVE it (the recent window since the oldest in-flight run began) ARE billed on the first pass — deliberate, so an in-flight run's revenue is not stranded; rows at or below the floor are never revisited.
 
 #### Known over-quote on the system-proxy seam (accepted)
 
@@ -538,6 +540,12 @@ quoted far above what it will consume. The direction is safe (a soft cap that
 over-gates, never under-gates) and the fix is deliberately deferred: it needs a
 unit discriminant (launch vs. call) on `BeforeUsageParams`, i.e. a core contract
 change. The comment sits on the multiplication in `billing/usage-quote.ts`.
+
+A platform run's OWN inference on a platform-provided model also goes through
+the proxy (`/internal/llm-proxy`, authenticated by the run token), but it is not
+this second unit: the preflight gate already admitted that launch, model
+component included, so the proxy dispatches no `beforeUsage` for those calls —
+the same rule as a chat turn's proxied calls.
 
 ### Billing managers and billing contact
 

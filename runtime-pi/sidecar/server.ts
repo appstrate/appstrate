@@ -4,8 +4,9 @@ import { createCipheriv, randomBytes } from "node:crypto";
 
 import { createApp, buildSidecarRuntimeDeps, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
-import type { LlmProxyConfig } from "./helpers.ts";
+import type { LlmProxyConfig, LlmProxyOauthConfig } from "./helpers.ts";
 import { parseModelSwapEnv } from "./model-swap.ts";
+import { isProxiedApiShape } from "@appstrate/runner-pi/llm-proxy-routes";
 import { logger } from "./logger.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
 import {
@@ -18,6 +19,8 @@ import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/cor
 import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
 import { RuntimeEventJournal, journalRuntimeToolDefs } from "./runtime-event-journal.ts";
 import { scrubSecretMaterial } from "./redact.ts";
+import { parseSidecarEnv, type SidecarEnv } from "./env.ts";
+import { admitsAgentProxyPeer, type PeerAttribution } from "./runner-peers.ts";
 
 /** Parse the agent-selected runtime tools forwarded as `RUNTIME_TOOLS_JSON`. */
 function readRuntimeToolsFromEnv(): string[] {
@@ -45,14 +48,13 @@ function readOutputSchemaFromEnv(): Record<string, unknown> | null {
 
 /**
  * Validate the parsed credential config crossing into the sidecar (the
- * credential-handling process). A blind `as` cast would let union drift (a
- * renamed `authMode`, a removed required field) parse cleanly and surface far
- * later as a confusing 401/503 from `/llm`. We assert the discriminant + the
- * per-mode required fields here so drift fails at boot, at the cause. No Zod:
- * the sidecar deliberately
- * carries no validation dependency; this is a focused shape guard.
+ * credential-handling process). A blind `as` cast would let drift (a renamed
+ * `authMode`, a removed required field) parse cleanly and surface far later as
+ * a confusing 401/503 from `/llm`. We assert the discriminant + the required
+ * fields here so drift fails at boot, at the cause. No Zod: the sidecar
+ * deliberately carries no validation dependency; this is a focused shape guard.
  */
-function assertLlmProxyConfig(value: unknown): LlmProxyConfig {
+function assertLlmOauthConfig(value: unknown): LlmProxyOauthConfig {
   if (!value || typeof value !== "object") {
     throw new Error("PI_LLM_OAUTH_CONFIG_JSON: expected an object");
   }
@@ -62,42 +64,37 @@ function assertLlmProxyConfig(value: unknown): LlmProxyConfig {
       throw new Error(`PI_LLM_OAUTH_CONFIG_JSON: ${String(c.authMode)} config missing "${field}"`);
     }
   };
-  switch (c.authMode) {
-    case "api_key":
-      need("baseUrl");
-      need("apiKey");
-      need("placeholder");
-      break;
-    case "oauth":
-      need("baseUrl");
-      need("credentialId");
-      break;
-    default:
-      throw new Error(`PI_LLM_OAUTH_CONFIG_JSON: unknown authMode "${String(c.authMode)}"`);
+  if (c.authMode !== "oauth") {
+    throw new Error(`PI_LLM_OAUTH_CONFIG_JSON: unknown authMode "${String(c.authMode)}"`);
   }
-  return value as LlmProxyConfig;
+  need("baseUrl");
+  need("credentialId");
+  return value as LlmProxyOauthConfig;
 }
 
 function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
   // OAuth credentials ship as a single JSON env var carrying the full
-  // LlmProxyConfig. A malformed payload here is a launcher bug — let JSON.parse
-  // throw (and assertLlmProxyConfig reject shape drift) rather than fall through
-  // silently to the API-key path.
+  // LlmProxyOauthConfig. A malformed payload here is a launcher bug — let
+  // JSON.parse throw (and assertLlmOauthConfig reject shape drift) rather than
+  // fall through silently to the platform path.
   const oauthJson = process.env.PI_LLM_OAUTH_CONFIG_JSON;
-  if (oauthJson) return assertLlmProxyConfig(JSON.parse(oauthJson));
-  if (process.env.PI_BASE_URL && process.env.PI_API_KEY) {
+  if (oauthJson) return assertLlmOauthConfig(JSON.parse(oauthJson));
+  const platformApiShape = process.env.PI_LLM_PLATFORM_API_SHAPE;
+  if (platformApiShape) {
+    if (!isProxiedApiShape(platformApiShape)) {
+      throw new Error(
+        `PI_LLM_PLATFORM_API_SHAPE: "${platformApiShape}" is not served by the platform LLM proxy`,
+      );
+    }
+    if (!process.env.PI_BASE_URL) throw new Error("PI_BASE_URL: required in platform mode");
+    const modelSwapJson = process.env.PI_MODEL_SWAP_JSON;
     return {
-      authMode: "api_key",
+      authMode: "platform",
+      apiShape: platformApiShape,
       baseUrl: process.env.PI_BASE_URL,
-      apiKey: process.env.PI_API_KEY,
-      placeholder: process.env.PI_PLACEHOLDER || "sk-placeholder",
-      // Model-alias swap (api-key path only — the oauth mode carries no
-      // modelSwap; aliases are rejected platform-side for oauth providers).
       // A malformed or incomplete payload is a launcher bug: `parseModelSwapEnv`
       // throws at boot rather than silently disabling the swap and leaking the real id.
-      ...(process.env.PI_MODEL_SWAP_JSON
-        ? { modelSwap: parseModelSwapEnv(process.env.PI_MODEL_SWAP_JSON) }
-        : {}),
+      ...(modelSwapJson ? { modelSwap: parseModelSwapEnv(modelSwapJson) } : {}),
     };
   }
   return undefined;
@@ -118,16 +115,38 @@ function readPositiveIntFromEnv(name: string): number | undefined {
   return parsed;
 }
 
+/**
+ * Connect-mode failure channel: the launcher reads only the stdout sentinel,
+ * so every connect-run failure — env included — must land on it.
+ */
+function failConnectRun(err: unknown): never {
+  // The login tool's own error prose lands on stdout, which the platform
+  // stores: keep its wording, scrub any token it echoed.
+  const message = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
+  process.stdout.write(`APPSTRATE_CONNECT_ERROR:${message}\n`);
+  process.exit(1);
+}
+
+const connectLoginJson = process.env.CONNECT_LOGIN_JSON;
+
+let env: SidecarEnv;
+try {
+  env = parseSidecarEnv();
+} catch (err) {
+  if (connectLoginJson) failConnectRun(err);
+  throw err;
+}
+
 // Config is set once at startup via env vars — sidecars are spawned per-run
 // with credentials already baked in.
 const config = {
-  platformApiUrl: process.env.PLATFORM_API_URL || "http://localhost:3000",
-  runToken: process.env.RUN_TOKEN || "",
+  platformApiUrl: env.platformApiUrl,
+  runToken: env.runToken,
   // Per-run agent↔sidecar secret. Absent ⇒ the control surface answers 401 to
   // everyone (see `SidecarConfig.sidecarAuthToken`) — there is no
   // unauthenticated mode to fall back to.
-  sidecarAuthToken: process.env.SIDECAR_AUTH_TOKEN || undefined,
-  proxyUrl: process.env.PROXY_URL || "",
+  sidecarAuthToken: env.sidecarAuthToken,
+  proxyUrl: env.proxyUrl,
   llm: readLlmConfigFromEnv(),
   modelContextWindow: readPositiveIntFromEnv("MODEL_CONTEXT_WINDOW"),
   modelMaxTokens: readPositiveIntFromEnv("MODEL_MAX_TOKENS"),
@@ -154,9 +173,7 @@ const config = {
 // line; the launcher holds the key and decrypts. The wire payload is
 // base64(iv‖authTag‖ciphertext). Error messages are NOT secrets and stay
 // plaintext so a boot failure is diagnosable from logs.
-if (process.env.CONNECT_LOGIN_JSON) {
-  const platformApiUrl = process.env.PLATFORM_API_URL || "http://localhost:3000";
-  const runToken = process.env.RUN_TOKEN || "";
+if (connectLoginJson) {
   const resultKeyB64 = process.env.CONNECT_RESULT_KEY || "";
   try {
     // Fail closed: without the ephemeral key we cannot emit the bundle without
@@ -168,8 +185,11 @@ if (process.env.CONNECT_LOGIN_JSON) {
     if (resultKey.length !== 32) {
       throw new Error("connect-run: CONNECT_RESULT_KEY must decode to 32 bytes (AES-256 key)");
     }
-    const spec = JSON.parse(process.env.CONNECT_LOGIN_JSON) as IntegrationSpawnSpec;
-    const bundle = await runConnectOnce(spec, { platformApiUrl, runToken });
+    const spec = JSON.parse(connectLoginJson) as IntegrationSpawnSpec;
+    const bundle = await runConnectOnce(spec, {
+      platformApiUrl: env.platformApiUrl,
+      runToken: env.runToken,
+    });
     // Encrypt the bundle JSON — plaintext credentials never reach stdout.
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", resultKey, iv);
@@ -181,20 +201,20 @@ if (process.env.CONNECT_LOGIN_JSON) {
     process.stdout.write(`APPSTRATE_CONNECT_RESULT:${payload}\n`);
     process.exit(0);
   } catch (err) {
-    // `runConnectOnce` surfaces the third-party login tool's own error prose
-    // verbatim (see `parseLoginToolResult`), and this line goes to stdout,
-    // which the platform reads and stores. Scrub credential shapes out of it —
-    // the diagnostic value is in the wording, never in a token it echoed.
-    const message = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
-    process.stdout.write(`APPSTRATE_CONNECT_ERROR:${message}\n`);
-    process.exit(1);
+    failConnectRun(err);
   }
 }
 
 const cookieJar = new Map<string, string[]>();
 
-const port = parseInt(process.env.PORT || "8080", 10);
-const proxy = createForwardProxy({ config, listenPort: port + 1 });
+// #1458 — the agent's proxy refuses runner peers (they have their own policed
+// listener). Bound once the adapter is prepared; no runner exists before that.
+let peerAttribution: PeerAttribution | null = null;
+const proxy = createForwardProxy({
+  config,
+  listenPort: env.forwardProxyPort,
+  isPeerAllowed: (ip) => admitsAgentProxyPeer(peerAttribution, ip),
+});
 // One cache per sidecar process — a sidecar serves a single run, so
 // cross-run pollution is impossible.
 const oauthTokenCache = new OAuthTokenCache({
@@ -261,6 +281,9 @@ const integrationBootPromise =
           runToken: config.runToken,
         },
         runtimeDeps,
+        (adapter) => {
+          peerAttribution = adapter.peerAttribution();
+        },
       )
         .then((result) => {
           integrationTools = result.tools;
@@ -306,10 +329,13 @@ const app = createApp({
   runtimeEventJournal,
 });
 
-logger.info("Sidecar proxy listening", { port, integrationsDeclared: specs?.length ?? 0 });
+logger.info("Sidecar proxy listening", {
+  port: env.port,
+  integrationsDeclared: specs?.length ?? 0,
+});
 
 // `idleTimeout` mirrors `apps/api/src/index.ts` — value + rationale live
 // in `SIDECAR_IDLE_TIMEOUT_SECONDS` so the test suite can pin the bound
 // without booting this entry point (which has port-binding side effects).
 // See issue #426.
-export default { port, fetch: app.fetch, idleTimeout: SIDECAR_IDLE_TIMEOUT_SECONDS };
+export default { port: env.port, fetch: app.fetch, idleTimeout: SIDECAR_IDLE_TIMEOUT_SECONDS };

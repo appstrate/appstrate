@@ -13,6 +13,22 @@ export const parameters = {
     description: "Number of items to skip before the first returned item.",
     schema: { type: "integer", minimum: 0, default: 0 },
   },
+  IfMatch: {
+    name: "If-Match",
+    in: "header" as const,
+    required: false,
+    description:
+      "Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins.",
+    schema: { type: "string", example: '"42"' },
+  },
+  IfMatchRequired: {
+    name: "If-Match",
+    in: "header" as const,
+    required: true,
+    description:
+      "The `ETag` of the draft the write is based on (read it from the package GET, or from the previous write's response). Mandatory: absent is `428 precondition_required`; stale is `412 precondition_failed` and nothing is written. `*` writes over whatever is current.",
+    schema: { type: "string", example: '"42"' },
+  },
   XOrgId: {
     name: "X-Org-Id",
     in: "header" as const,
@@ -42,7 +58,7 @@ export const parameters = {
     required: false,
     description:
       "Comma-separated list of SSE channels to subscribe to (`run_update`, `run_log`, `run_metric`, `connection_update`, `chat_session_update`). " +
-      "Omit to receive every channel (default, unchanged behaviour). Unknown names are ignored; if nothing is recognised the stream falls back to every channel. " +
+      "Omit to receive every channel the caller may receive (default). Unknown names are ignored; if nothing is recognised the stream falls back to that same default. " +
       "Declaring only the channels you consume avoids fanning the `run_log` firehose out to a stream that discards it.",
     schema: { type: "string", example: "run_update,connection_update" },
   },
@@ -81,7 +97,7 @@ export const parameters = {
     required: false,
     description:
       "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable " +
-      "item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` " +
+      "item of a 409 `missing_integration_connection` also carries a ready-to-open `connect_url` " +
       "(a single-use bearer link that connects AS the actor). Set only by clients that render the " +
       "connect card or hand the link to that human.",
     schema: { type: "string", enum: ["1"] },
@@ -102,7 +118,7 @@ export const parameters = {
       "Role preview for this stream — the same value, grammar and refusals as the `X-View-As` " +
       "header (see that parameter). It is a query parameter here because `EventSource` cannot " +
       "send headers — presenting it as the `X-View-As` header on these routes is " +
-      "`400 invalid_view_as`. Sessions only: with `?token=ask_…` it is " +
+      "`400 invalid_view_as`. Sessions only: with `?token=apst_…` it is " +
       "`400 view_as_unsupported`. A stream opened under a persona sees what that role would see " +
       "and stops where that role would stop (`403 not_a_space_member`, or `404` for a private " +
       "space), and carries `X-View-As-Active: 1`.",
@@ -113,7 +129,7 @@ export const parameters = {
     in: "query" as const,
     required: false,
     description:
-      "API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
+      "API key (`apst_` prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
     schema: { type: "string" },
   },
   XViewAs: {
@@ -131,7 +147,7 @@ export const parameters = {
       "The persona is enforced server-side: `permissions`, the space role and every listing are " +
       "the persona's, and a write the persona cannot make is refused exactly as it would be for a " +
       "real holder of that role. The authenticated identity and the audit actor stay the real " +
-      "caller; audit rows carry the persona under `after.view_as`.\n\n" +
+      "caller; audit rows carry the persona under `after.viewAs`.\n\n" +
       "Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` " +
       "(header does not parse), `400 view_as_unsupported` (the credential is not one that can " +
       "carry a persona — only a cookie session and the CLI/instance token, which authenticate the " +

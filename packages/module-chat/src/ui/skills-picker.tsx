@@ -160,15 +160,15 @@ export function SkillsPicker({ sessionId, getHeaders, initialSelection }: Skills
               // By row: a package id's `@` and `/` break selectors, and a slug
               // of it can collide (`@a-b/c`, `@a/b-c`).
               const id = `skills-pin-${index}`;
-              const checked = pinnedSet.has(skill.package_id);
+              const checked = pinnedSet.has(skill.packageId);
               return (
-                <div key={skill.package_id} className="flex items-start gap-2 rounded-md p-1">
+                <div key={skill.packageId} className="flex items-start gap-2 rounded-md p-1">
                   <Checkbox
                     id={id}
-                    data-testid={`skill-pin-${skill.package_id}`}
+                    data-testid={`skill-pin-${skill.packageId}`}
                     checked={checked}
                     disabled={saving || (!checked && atPinCap)}
-                    onCheckedChange={() => togglePin(skill.package_id)}
+                    onCheckedChange={() => togglePin(skill.packageId)}
                     className="mt-0.5 shrink-0"
                   />
                   <label
@@ -180,7 +180,7 @@ export function SkillsPicker({ sessionId, getHeaders, initialSelection }: Skills
                   >
                     <span className="flex items-baseline gap-1.5">
                       <span className="truncate text-xs font-medium">
-                        {skill.display_name ?? skill.package_id}
+                        {skill.display_name ?? skill.packageId}
                       </span>
                       {skill.version && (
                         <span className="text-muted-foreground shrink-0 text-[0.65rem]">

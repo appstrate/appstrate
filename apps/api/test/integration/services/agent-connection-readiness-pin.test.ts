@@ -2,7 +2,7 @@
 
 /**
  * `resolveAgentConnectionReadiness` must judge integration manifests at the
- * PINNED version, exactly like the run-kickoff 412 gate.
+ * PINNED version, exactly like the run-kickoff 409 gate.
  *
  * The readiness endpoint's whole contract is "the UI's pre-run signal can never
  * disagree with the actual gate". The run freezes every declared integration to
@@ -144,6 +144,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
       actor: { type: "user", id: ctx.user.id },
+      canConnect: true,
       canConfigureIntegrations: true,
       // The selector is the ROUTER's decision now, and the service takes it as
       // given. `draft` is what the route hands over for a caller who may write
@@ -193,6 +194,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
       actor: { type: "user", id: ctx.user.id } as const,
+      canConnect: true,
       canConfigureIntegrations: true,
     };
 

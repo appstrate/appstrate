@@ -62,12 +62,12 @@ describe("fetchSkills", () => {
     expect(capture.init?.headers).toEqual({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" });
     expect(got).toEqual([
       {
-        package_id: "@acme/tone",
+        packageId: "@acme/tone",
         display_name: "Tone",
         description: "Adjusts tone",
         version: "1.2.0",
       },
-      { package_id: "@acme/bare", display_name: "@acme/bare", description: null, version: null },
+      { packageId: "@acme/bare", display_name: "@acme/bare", description: null, version: null },
     ]);
   });
 

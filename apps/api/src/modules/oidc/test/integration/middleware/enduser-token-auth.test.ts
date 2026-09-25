@@ -13,7 +13,7 @@
  *      to core auth (401 without other credentials).
  *   3. A malformed `Bearer ey...` (valid structure, invalid signature) →
  *      null → falls through to core auth.
- *   4. An `Authorization: Bearer ask_...` header does NOT match this
+ *   4. An `Authorization: Bearer apst_...` header does NOT match this
  *      strategy (fast no-match path) so core API-key auth keeps working.
  *
  * This is the Stage 3 smoke test proving the full wiring chain:
@@ -245,13 +245,13 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     expect(res.status).toBe(401);
   });
 
-  it("ignores `Bearer ask_...` (API key) — fast no-match path", async () => {
-    // The strategy must not shadow core API-key auth. An invalid ask_ key
+  it("ignores `Bearer apst_...` (API key) — fast no-match path", async () => {
+    // The strategy must not shadow core API-key auth. An invalid apst_ key
     // should reach core's API-key path and come back as 401 from there,
     // not as a JWT verification error.
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
-        Authorization: "Bearer ask_invalid_key_000000000000000000000000",
+        Authorization: "Bearer apst_invalid_key_000000000000000000000000",
         "X-Space-Id": spaceId,
       },
     });
@@ -795,4 +795,59 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     });
     expect(res.status).toBe(200);
   });
+  /**
+   * `DELETE /api/me/connections/:id` is authorized by ownership, not a role
+   * grant, so the token's scope claim is the only cap on it (RBAC spec §7.2).
+   */
+  async function seedOwnedConnection(): Promise<string> {
+    const { integrationConnections } = await import("@appstrate/db/schema");
+    const { seedPackage } = await import("../../../../../../test/helpers/seed.ts");
+    await seedPackage({ id: "@oidcstrat/svc", orgId, type: "integration", source: "local" });
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: "@oidcstrat/svc",
+        authKey: "primary",
+        accountId: "acct-oidc",
+        spaceId,
+        userId: authUserId,
+        credentialsEncrypted: "x",
+        scopesGranted: [],
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
+  }
+
+  async function connectionExists(connectionId: string): Promise<boolean> {
+    const { integrationConnections } = await import("@appstrate/db/schema");
+    const rows = await db
+      .select({ id: integrationConnections.id })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    return rows.length === 1;
+  }
+
+  for (const [scope, status, kept] of [
+    ["openid integrations:read integrations:connect", 403, true],
+    ["openid integrations:disconnect", 204, false],
+  ] as const) {
+    it(`dashboard token with "${scope}" deleting its own connection: ${status}`, async () => {
+      await addDashboardMembership();
+      const connectionId = await seedOwnedConnection();
+      const token = await mintToken({
+        sub: authUserId,
+        actor_type: "dashboard_user",
+        org_id: orgId,
+        org_role: "admin",
+        email: "stage3@example.com",
+        scope,
+      });
+      const res = await app.request(`/api/me/connections/${connectionId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(status);
+      expect(await connectionExists(connectionId)).toBe(kept);
+    });
+  }
 });

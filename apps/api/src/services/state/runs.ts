@@ -20,6 +20,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { db, type Db } from "@appstrate/db/client";
+import { toPgSafe } from "@appstrate/db/pg-safe";
 import {
   runs,
   runLogs,
@@ -34,11 +35,14 @@ import {
   files,
   fileLinks,
   chatSessions,
+  type PricingStatus,
+  type InferenceRoute,
+} from "@appstrate/db/schema";
+import {
   activeRunStatusValues,
   terminalRunStatusValues,
   type RunStatus,
-  type PricingStatus,
-} from "@appstrate/db/schema";
+} from "@appstrate/core/run-status";
 import { extractFileIds } from "@appstrate/core/file-uri";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
@@ -550,6 +554,10 @@ interface CreateRunParams {
   proxyLabel?: string;
   modelLabel?: string;
   modelSource?: string;
+  /** The model the run launched with — see `runs.model_id`. */
+  modelId: string | null;
+  /** Who serves the run's inference — see `runs.inference_route`. Null on a remote-origin run. */
+  inferenceRoute: InferenceRoute | null;
   /**
    * Per-1M-token rates the run is launched with (the `MODEL_COST` the container
    * receives). Persisted so the runner's ledger row — whose `cost` the container
@@ -695,6 +703,8 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
       proxyLabel: params.proxyLabel,
       modelLabel: params.modelLabel,
       modelSource: params.modelSource,
+      modelId: params.modelId,
+      inferenceRoute: params.inferenceRoute,
       modelCost: params.modelCost ?? null,
       generationConfig:
         params.generationConfig == null
@@ -917,6 +927,20 @@ const notRunnerMirrorSql = sql<boolean>`NOT (
   )
 )`;
 
+/** `runs.model_source` of a resolved model: whose credential its inference spends. */
+export function modelSourceOf(model: { isSystemModel: boolean }): "system" | "org" {
+  return model.isSystemModel ? "system" : "org";
+}
+
+/**
+ * Whether the platform LLM proxy serves a run's inference — and so writes its
+ * ledger rows, leaving the runner none to report. `runs_proxy_route_has_model`
+ * guarantees such a run has a pinned model.
+ */
+export function isServedByLlmProxy(run: { inferenceRoute: InferenceRoute | null }): boolean {
+  return run.inferenceRoute === "proxy";
+}
+
 /** A run's attributable spend and how much of it is backed by real rates. */
 interface RunSpend {
   /** Total attributable spend in USD. */
@@ -1092,7 +1116,7 @@ export async function getRecentRuns(
  * The given actor's most recent runs in a space (own runs only, newest
  * first) — feeds the chat module's caller-context block. Unlike `getRecentRuns`
  * this spans all packages and all statuses (so failures surface), and returns a
- * minimal wire-shape (snake_case) tuned for the system prompt. Actor isolation
+ * minimal wire shape tuned for the system prompt. Actor isolation
  * is mandatory: a user never sees another actor's runs.
  */
 export async function listRecentForActor(
@@ -1101,9 +1125,9 @@ export async function listRecentForActor(
   options: { limit?: number } = {},
 ): Promise<
   Array<{
-    package_id: string;
+    packageId: string;
     status: string;
-    run_number: number | null;
+    runNumber: number | null;
     started_at: string | null;
     error: string | null;
   }>
@@ -1133,9 +1157,9 @@ export async function listRecentForActor(
       // there is nothing useful to reference in the prompt.
       .filter((row): row is typeof row & { packageId: string } => row.packageId != null)
       .map((row) => ({
-        package_id: row.packageId,
+        packageId: row.packageId,
         status: row.status,
-        run_number: row.runNumber,
+        runNumber: row.runNumber,
         started_at: toISO(row.startedAt),
         // Only surface the error message for non-success runs.
         error: row.status === "success" ? null : (row.error ?? null),
@@ -1178,7 +1202,8 @@ export async function getLastRun(
  * Append a log entry for a run. Only org-scoped — `run_logs` is keyed on
  * `runId` (unique globally) + `orgId` only; no space column exists.
  * Callers that hold a `SpaceScope` can still pass it — `OrgScope` is the
- * structural supertype so `SpaceScope` flows through naturally.
+ * structural supertype so `SpaceScope` flows through naturally. Message and
+ * data are made Postgres-safe here, for every writer.
  */
 export async function appendRunLog(
   scope: OrgScope,
@@ -1197,8 +1222,8 @@ export async function appendRunLog(
       orgId: scope.orgId,
       type,
       event,
-      message,
-      data: safeRunLogData(data),
+      message: toPgSafe(message),
+      data: toPgSafe(safeRunLogData(data)),
       level,
     })
     .returning({ id: runLogs.id });

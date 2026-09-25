@@ -15,6 +15,7 @@ import { bindAgentAuthoringUser } from "@appstrate/module-chat/agent-authoring";
 import { useAuth } from "../../hooks/use-auth";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useViewAsHeader } from "../../stores/view-as-store";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCollapsedGlobalSidebar } from "../../hooks/use-collapsed-global-sidebar";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
 import { useUploadClient } from "../../hooks/use-upload";
@@ -25,7 +26,6 @@ import {
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
 import { ChatAccessChip } from "./chat-access-chip";
 import { usePermissions } from "../../hooks/use-permissions";
-import { canAuthorAgents, canPinSkills } from "./chat-access";
 
 // One element for the page's lifetime: it sits in the composer slot, which the
 // chat memoizes, and the chip keeps itself current through its own hooks.
@@ -69,16 +69,15 @@ export function ChatModulePage() {
   // The same namespace's `t` is injected into the module, so the shell AROUND
   // those answers speaks the same language too — labels and aria-labels alike.
   const { t, i18n } = useTranslation("chat");
-  // The module resolves no RBAC of its own (see `ChatPageProps.canAuthorAgents`).
   const { can } = usePermissions();
-  // The persona is read reactively and threaded through so this callback's
-  // identity changes when the preview starts or ends. The module's SSE effects
-  // depend on `getHeaders`, and a stream reads its URL once — without this they
-  // would keep tailing under the authority the preview replaced.
+  // Persona and space are threaded through so this callback's identity moves
+  // with either: the module's streams read their URL once, and would otherwise
+  // keep tailing under the replaced authority or miss a space resolved late.
   const viewAs = useViewAsHeader();
+  const spaceId = useCurrentSpaceId();
   const getHeaders = useCallback(
-    () => ({ ...buildScopingHeaders(viewAs), "X-Chat-Locale": i18n.language }),
-    [i18n, viewAs],
+    () => ({ ...buildScopingHeaders(viewAs, spaceId), "X-Chat-Locale": i18n.language }),
+    [i18n, viewAs, spaceId],
   );
   const translate = useCallback(
     (key: string, params?: Record<string, string | number>) => t(key, params ?? {}),
@@ -115,12 +114,13 @@ export function ChatModulePage() {
   // The chat's tools (run agents, inspect runs, search…) are served by the
   // `mcp` module, which is a hard peer requirement of `chat` (enforced at
   // boot) — so tools are always available when the chat is reachable.
-  // Bound the chat to the viewport height below the app shell's h-16 header so
-  // the thread scrolls internally and the composer stays pinned (sticky) at the
-  // bottom. Without a definite height here the flex chain grows with the message
-  // list and the composer scrolls off-screen.
+  // Fill the shell's scroll container (a flex column already sized to the
+  // viewport minus the header and any banner) so the thread scrolls internally
+  // and the composer stays pinned at the bottom. A hard-coded viewport calc here
+  // ignored the banner and the collapsed header and overflowed into a second,
+  // page-level scrollbar.
   return (
-    <div className="relative flex h-[calc(100dvh-4rem)] min-h-0 min-w-0">
+    <div className="relative flex min-h-0 min-w-0 flex-1">
       <div className="min-w-0 flex-1">
         <ChatPage
           getHeaders={getHeaders}
@@ -136,8 +136,7 @@ export function ChatModulePage() {
           useFileImageSrc={useFileImageSrc}
           uploadFile={uploadFile}
           t={translate}
-          canAuthorAgents={canAuthorAgents({ can })}
-          canPinSkills={canPinSkills({ can })}
+          can={can}
         />
       </div>
       <ConversationSidebar

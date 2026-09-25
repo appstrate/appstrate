@@ -24,7 +24,7 @@
  * The pure event-emitter runtime tools: a call returns only canonical run
  * events (`output.emitted` / `log.written` / …) under `_meta`, with no
  * side-effect. These are the tools {@link buildRuntimeToolDefs} can construct
- * standalone (sidecar MCP surface + no-sidecar Pi extensions) — they need no
+ * standalone (sidecar MCP surface + the CLI's Pi extensions) — they need no
  * injected dependency.
  */
 export const EVENT_EMITTER_RUNTIME_TOOLS = ["output", "log", "note", "pin"] as const;

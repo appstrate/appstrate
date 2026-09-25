@@ -310,6 +310,7 @@ const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   cleanupSessionFiles: { owners: ["module-chat"] },
   checkUsageAllowed: { owners: ["module-chat"] },
   setFileStorageLimit: { owners: ["module-ee"] },
+  audit: { owners: ["module-ee"] },
 };
 
 /**

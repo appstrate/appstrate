@@ -161,6 +161,7 @@ const MCP_RATE_LIMIT_PER_MIN = 120;
  */
 export function buildServerInstructions(
   permissions: ReadonlySet<string>,
+  ceiling: ReadonlySet<string> | undefined,
   surface: McpSurface,
   contextInjected = false,
 ): string {
@@ -168,7 +169,8 @@ export function buildServerInstructions(
   const { invokes, runs, composes: inline, authors, importsPackages } = surface;
   // A sentence naming an operation renders only for a caller its route grants,
   // unless the gate it sits under already implies that grant.
-  const granted = (operationId: string): boolean => operationIdGranted(operationId, permissions);
+  const granted = (operationId: string): boolean =>
+    operationIdGranted(operationId, permissions, ceiling);
   const listsIntegrations = invokes && granted("listIntegrations");
   const connects = runs && granted("initiateIntegrationConnect");
   const runningAgents = runs ? "configuring or running" : "configuring";
@@ -209,6 +211,10 @@ export function buildServerInstructions(
     : "MCP package files — to check an existing archive, pass its `appfile://` URI to `validate_package_file`.";
   // Both need `invoke_operation`; the integration preference order they sit
   // beside names no tool, so every caller gets it.
+  const concurrencyBullet = invokes
+    ? `- Writes are read-then-write — a versioned resource's result carries \`etag\`; send it back verbatim as \`if_match\` on the next write to it. Package draft updates (\`updateAgent\`, \`updateSkill\`, …) REQUIRE it (428 without): read the package first, then write with its \`etag\`, and use the \`etag\` of each write's result for the next one. A 412 means it changed in between: re-read, reapply your change, retry.
+`
+    : "";
   const heavyListBullet = invokes
     ? `- Heavy list responses — list operations paginate with \`query: { limit, offset }\`, and some${listsIntegrations ? " (e.g. `listIntegrations`)" : ""} also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need${listsIntegrations ? ' — e.g. `fields: "id,active,block_user_connections"` on `listIntegrations` —' : ""} and read a single row's detail operation when you need its full \`manifest\`.
 `
@@ -234,7 +240,7 @@ export function buildServerInstructions(
     : "";
   const connectBullets = runs
     ? `
-- Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT pre-validate just to launch a "do it now" ${inline ? "inline run" : "run"}: \`run_and_wait\` already runs the same readiness preflight and returns a 412 without consuming credits when the ${inline ? "manifest" : "agent"} cannot run. If \`run_and_wait\` fails with field errors whose \`field\` is \`integrations.<id>\`${inline ? " (or if you intentionally call `validateInlineRun` only to iterate/check readiness without launching)" : ""}, that integration is not ready — whatever the \`code\` (\`not_connected\`, \`needs_reconnection\`, \`insufficient_scopes\`, \`auth_key_mismatch\`, …), with ONE exception below. Handle each such error item by looking ${connects ? "FIRST " : ""}for a \`connect_url\` on the item. When it HAS one, the connect session is already minted and this tool result already carries it: do NOT call ${connects ? "`initiateIntegrationConnect`, do NOT call any other tool" : "any tool"}, do not restate the connection request.${connectFlow} ${connectDelivery} On a later turn, call \`run_and_wait\` again${inline ? " (or `validateInlineRun` if you are only checking readiness)" : ""}; when readiness passes, proceed with the run.
+- Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT pre-validate just to launch a "do it now" ${inline ? "inline run" : "run"}: \`run_and_wait\` already runs the same readiness preflight and returns a 409 \`missing_integration_connection\` without consuming credits when the ${inline ? "manifest" : "agent"} cannot run. If \`run_and_wait\` fails with field errors whose \`field\` is \`integrations.<id>\`${inline ? " (or if you intentionally call `validateInlineRun` only to iterate/check readiness without launching)" : ""}, that integration is not ready — whatever the \`code\` (\`not_connected\`, \`needs_reconnection\`, \`insufficient_scopes\`, \`auth_key_mismatch\`, …), with ONE exception below. Handle each such error item by looking ${connects ? "FIRST " : ""}for a \`connect_url\` on the item. When it HAS one, the connect session is already minted and this tool result already carries it: do NOT call ${connects ? "`initiateIntegrationConnect`, do NOT call any other tool" : "any tool"}, do not restate the connection request.${connectFlow} ${connectDelivery} On a later turn, call \`run_and_wait\` again${inline ? " (or `validateInlineRun` if you are only checking readiness)" : ""}; when readiness passes, proceed with the run.
 - The exception — code \`must_choose_connection\` on \`integrations.<id>\` is NOT a connect problem: the integration is connected more than once and the platform needs you to say which connection to use. Do NOT start a connect flow for it (another connection makes the ambiguity worse). Retry the SAME \`run_and_wait\` call with the top-level \`connection_overrides\` argument, mapping that integration id to one candidate's \`id\`: \`connection_overrides: { "<id>": "<candidate_connection_id>" }\`. The key is the integration id itself — not the error's \`field\` path. The error's \`candidate_connections\` carry a \`label\`, an \`account_id\` and \`owned_by_actor\`: read those to choose — if the user named an account, match it there rather than listing connections in a separate call. Pick the candidate yourself when nothing distinguishes them; ask the user only if the choice visibly matters.`
     : "";
   return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you ${verbs} any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, ${pickOperation}. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema.${runIntro}
@@ -249,7 +255,7 @@ This MCP server is scoped to ONE organization — the one this endpoint serves �
 ${runBullets}- ${packageFiles}${packageImportGuidance} Archive bytes stay server-side throughout.
 - Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
-${heavyListBullet}${
+${heavyListBullet}${concurrencyBullet}${
     authors
       ? `- Integration tool selection — an agent's \`integrations_configuration[id].tools\` resolves as: omitted/undefined → inherits the integration's \`default_tools\`; \`[]\` → no tools (overrides the default); \`["a","b"]\` → exactly those tools; \`"*"\` → all upstream tools (requires \`allow_undeclared_tools\`). A declared integration whose selection resolves to NOTHING is rejected at publish and at import (\`no_tools_selected\` on \`integrations_configuration.<id>.tools\`) and aborts the run at container boot — so never leave an integration declared with an empty effective selection: either select at least one tool, or remove it from \`dependencies.integrations\`.${
           granted("getIntegration")
@@ -261,7 +267,7 @@ ${heavyListBullet}${
   }- Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed in your caller context / get_me — connecting it was an explicit choice), then (2) one that is activated for this space but not yet connected, then (3) one that is neither.${integrationListing}${connectBullets}
 
 ${OPERATION_INDEX_HEADING}
-${buildOperationIndex(permissions)}`;
+${buildOperationIndex(permissions, ceiling)}`;
 }
 
 function forwardAuthHeaders(src: Headers): Headers {
@@ -462,6 +468,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // means the chain was rewired, not that the caller holds nothing.
     const permissions = c.get("permissions");
     if (!permissions) throw new Error("mcp: permissions missing on a guarded route");
+    // A delegated credential's scopes; ceiling guards refuse what they omit.
+    const ceiling = c.get("scopeCeiling");
     const authHeaders = forwardAuthHeaders(c.req.raw.headers);
     const dispatch: Dispatch = dispatchInProcess;
     // The caller identity + space scope for tools that call a service directly (the
@@ -532,6 +540,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       mayShareRoot: (packageId: string) => holdsPackageShareAuthority(c, packageId),
       origin,
       permissions,
+      ceiling,
       authHeaders,
       dispatch,
       observe,
@@ -539,7 +548,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       actor,
       scope,
     };
-    const surface = deriveMcpSurface(permissions, actor);
+    const surface = deriveMcpSurface(permissions, ceiling, actor);
     const tools = buildMcpTools(toolCtx, surface);
     // `resources/read` for `appfile://file_xxx` — resolves through the same
     // forwarded-auth in-process dispatch as the tools (files are NOT listed
@@ -549,7 +558,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
       {
-        instructions: buildServerInstructions(permissions, surface, contextInjected),
+        instructions: buildServerInstructions(permissions, ceiling, surface, contextInjected),
         resources,
       },
     );

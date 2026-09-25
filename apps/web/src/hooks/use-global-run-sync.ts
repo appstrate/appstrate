@@ -4,9 +4,12 @@ import { useEffect, useRef } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
+import { usePermissions } from "./use-permissions";
+import { useCanReach } from "./use-can-reach";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateNotificationQueries } from "./use-notifications";
 import { parseSseFrames } from "@appstrate/core/sse";
+import { canReadRuns } from "@appstrate/core/permissions";
 import { SESSIONS_QUERY_KEY as CHAT_SESSIONS_QUERY_KEY } from "@appstrate/module-chat/unread";
 import { chatSessionUpdateEventSchema } from "@appstrate/shared-types";
 import { withViewAsParam } from "../lib/scoping-headers";
@@ -66,7 +69,7 @@ function handleConnectionUpdate(qc: QueryClient) {
  *    whose path id is this session.
  *  - the typed file list, `["get","/api/files",init]` with
  *    `init.params.query.context_chat_session_id` — only the page filtered on
- *    this session. A run's file tab (`run_id` filter), the gallery (no
+ *    this session. A run's file tab (`runId` filter), the gallery (no
  *    filter) or another conversation's sidebar must not refetch on every
  *    frame of a turn that is not theirs (≥5 frames per turn).
  *
@@ -303,6 +306,40 @@ function handleSSEMessage(
 }
 
 /**
+ * The channels the hook dispatches on that the caller can receive — never the
+ * `run_log` firehose. An effect dep: a new set reopens the stream under the new
+ * grants. Exported for its test.
+ */
+export function globalStreamChannels(caller: { readsRuns: boolean; readsChat: boolean }): string {
+  return [
+    ...(caller.readsRuns ? ["run_update"] : []),
+    "connection_update",
+    ...(caller.readsChat ? ["chat_session_update"] : []),
+  ].join(",");
+}
+
+/**
+ * A 4xx other than 429 answers the request itself (session, grants, space,
+ * persona): the effect reopens when one changes, not on a timer. Exported for its test.
+ */
+export function isRetryableStreamStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+/** Reconnect until aborted or refused; a throw is retried like an ended stream. Exported for its test. */
+export async function reconnectUntilRefused(
+  connect: () => Promise<"refused" | "ended">,
+  signal: AbortSignal,
+  backoff: () => Promise<void>,
+): Promise<void> {
+  while (!signal.aborted) {
+    const outcome = await connect().catch(() => "failed" as const);
+    if (signal.aborted || outcome === "refused") return;
+    await backoff();
+  }
+}
+
+/**
  * Global SSE subscription on run changes.
  * Uses fetch + ReadableStream instead of EventSource to avoid
  * Safari's aggressive auto-reconnect behavior on connection failure.
@@ -314,11 +351,18 @@ export function useGlobalRunSync() {
   // Same reason as the org/space ids beside it: this stream is opened once and
   // would otherwise keep filling the cache with the other authority's rows.
   const viewAs = useViewAsHeader();
+  const { can, ready } = usePermissions();
+  const canReach = useCanReach();
+  // Null until the grants load, or the stream would open without `run_update`
+  // and reopen a moment later.
+  const channels = ready
+    ? globalStreamChannels({ readsRuns: canReadRuns(can), readsChat: canReach("/chat") })
+    : null;
   const qcRef = useRef(qc);
   qcRef.current = qc;
 
   useEffect(() => {
-    if (!orgId || !spaceId) return;
+    if (!orgId || !spaceId || !channels) return;
 
     const controller = new AbortController();
     const broad = createBroadInvalidator(() => qcRef.current);
@@ -351,23 +395,14 @@ export function useGlobalRunSync() {
         controller.signal.addEventListener("abort", onAbort, { once: true });
       });
 
-    // A persona this route refuses is not a transient outage: retrying it would
-    // loop an idle tab forever against a preview the server has already
-    // rejected, while the banner still claimed one.
-    let previewRefused = false;
-
-    // One connection attempt. Returns when the stream ends or errors; throws
-    // only for a non-OK response (handled by the reconnect loop).
+    // One connection attempt: "refused" for an answer the server would give
+    // again, "ended" when the stream closes; throws on a transient failure.
     const connectOnce = async () => {
       const res = await fetch(
-        // Declare the three channels this hook actually dispatches on. Without
-        // it the server fans the whole `run_log` firehose (every log line of
-        // every run in the space) into this stream just for the reader
-        // loop to drop it — and admins/owners got the `debug` level too.
         // `verbose` is deliberately absent: it only affects `run_log`, which
         // we no longer subscribe to.
         withViewAsParam(
-          `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=run_update,connection_update,chat_session_update`,
+          `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=${channels}`,
           viewAs,
         ),
         {
@@ -376,7 +411,9 @@ export function useGlobalRunSync() {
         },
       );
       if (!res.ok || !res.body) {
-        previewRefused = await endPreviewIfRefused(res);
+        // A refused persona also ends the preview the banner still claims.
+        await endPreviewIfRefused(res);
+        if (!res.ok && !isRetryableStreamStatus(res.status)) return "refused" as const;
         throw new Error(`realtime stream unavailable (${res.status})`);
       }
 
@@ -433,28 +470,21 @@ export function useGlobalRunSync() {
           }
         }
       }
+      return "ended" as const;
     };
 
-    (async () => {
-      while (!controller.signal.aborted) {
-        try {
-          await connectOnce();
-        } catch {
-          // Failed to connect — fall through to the backoff below.
-        }
-        if (controller.signal.aborted || previewRefused) break;
-        // Jitter — de-synchronize reconnect stampedes (every tab reconnects
-        // at once after a redeploy).
-        const delay =
-          Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS) * (0.5 + Math.random() * 0.5);
-        attempt++;
-        await sleep(delay);
-      }
-    })();
+    void reconnectUntilRefused(connectOnce, controller.signal, () => {
+      // Jitter — de-synchronize reconnect stampedes (every tab reconnects
+      // at once after a redeploy).
+      const delay =
+        Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS) * (0.5 + Math.random() * 0.5);
+      attempt++;
+      return sleep(delay);
+    });
 
     return () => {
       controller.abort();
       broad.dispose();
     };
-  }, [orgId, spaceId, viewAs]);
+  }, [orgId, spaceId, viewAs, channels]);
 }

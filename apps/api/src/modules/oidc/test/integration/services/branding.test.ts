@@ -40,11 +40,11 @@ describe("resolveSpaceBranding", () => {
     const spaceId = await seedSpaceWithSettings({
       branding: {
         name: "Mon Workspace",
-        logoUrl: "https://cdn.example.com/logo.png",
-        primaryColor: "#22c55e",
-        accentColor: "#16a34a",
-        supportEmail: "support@example.com",
-        fromName: "Mon Workspace Support",
+        logo_url: "https://cdn.example.com/logo.png",
+        primary_color: "#22c55e",
+        accent_color: "#16a34a",
+        support_email: "support@example.com",
+        from_name: "Mon Workspace Support",
       },
     });
     const resolved = await resolveSpaceBranding(spaceId);
@@ -57,7 +57,7 @@ describe("resolveSpaceBranding", () => {
   });
 
   it("falls back to space.name when branding.name is missing", async () => {
-    const spaceId = await seedSpaceWithSettings({ branding: { primaryColor: "#abcdef" } });
+    const spaceId = await seedSpaceWithSettings({ branding: { primary_color: "#abcdef" } });
     const resolved = await resolveSpaceBranding(spaceId);
     // spaces.name defaults to "Default" (seeded by createTestOrg)
     expect(resolved.name).toBe("Default");
@@ -75,10 +75,10 @@ describe("resolveSpaceBranding", () => {
   });
 
   it("safely falls back when branding has a malformed shape (Zod rejects)", async () => {
-    // `primaryColor` must be #RRGGBB — a 3-char shorthand fails the regex
+    // `primary_color` must be #RRGGBB — a 3-char shorthand fails the regex
     // and the whole object is rejected; we fall back to defaults.
     const spaceId = await seedSpaceWithSettings({
-      branding: { name: "X", primaryColor: "#fff" },
+      branding: { name: "X", primary_color: "#fff" },
     });
     const resolved = await resolveSpaceBranding(spaceId);
     expect(resolved.name).toBeTruthy();
@@ -91,7 +91,7 @@ describe("resolveSpaceBranding", () => {
     expect(resolved.primaryColor).toBe("#4f46e5");
   });
 
-  // C4 — logoUrl host/scheme allowlist.
+  // C4 — logo_url host/scheme allowlist.
   // Arbitrary URLs in <img src> would let a compromised admin plant
   // tracking beacons or point at internal metadata endpoints. The schema
   // refinement rejects non-HTTPS schemes and SSRF targets; the resolver
@@ -104,31 +104,46 @@ describe("resolveSpaceBranding", () => {
     ["RFC1918", "https://10.0.0.1/logo.png"],
   ];
   for (const [label, logoUrl] of blockedLogoUrls) {
-    it(`safely falls back when logoUrl is blocked (${label})`, async () => {
+    it(`safely falls back when logo_url is blocked (${label})`, async () => {
       const spaceId = await seedSpaceWithSettings({
-        branding: { name: "X", logoUrl },
+        branding: { name: "X", logo_url: logoUrl },
       });
       const resolved = await resolveSpaceBranding(spaceId);
       expect(resolved.logoUrl).toBeNull();
     });
   }
 
-  it("accepts a public https logoUrl", async () => {
+  it("accepts a public https logo_url", async () => {
     const spaceId = await seedSpaceWithSettings({
-      branding: { logoUrl: "https://cdn.example.com/logo.png" },
+      branding: { logo_url: "https://cdn.example.com/logo.png" },
     });
     const resolved = await resolveSpaceBranding(spaceId);
     expect(resolved.logoUrl).toBe("https://cdn.example.com/logo.png");
   });
 
-  it("accentColor inherits from primaryColor when primary is set and accent is not", async () => {
+  it("accent_color inherits from primary_color when primary is set and accent is not", async () => {
     const spaceId = await seedSpaceWithSettings({
-      branding: { primaryColor: "#22c55e" },
+      branding: { primary_color: "#22c55e" },
     });
     const resolved = await resolveSpaceBranding(spaceId);
     expect(resolved.primaryColor).toBe("#22c55e");
-    // Resolver uses parsed.accentColor ?? parsed.primaryColor ?? DEFAULT_ACCENT
+    // Resolver uses parsed.accent_color ?? parsed.primary_color ?? DEFAULT_ACCENT
     expect(resolved.accentColor).toBe("#22c55e");
+  });
+
+  it("ignores a branding blob with camelCase keys and falls back to defaults", async () => {
+    const spaceId = await seedSpaceWithSettings({
+      branding: {
+        name: "Mon Workspace",
+        logoUrl: "https://cdn.example.com/logo.png",
+        primaryColor: "#22c55e",
+      },
+    });
+    const resolved = await resolveSpaceBranding(spaceId);
+    // `.strict()` refuses the unknown keys, so the whole blob is ignored.
+    expect(resolved.name).toBe("Default");
+    expect(resolved.logoUrl).toBeNull();
+    expect(resolved.primaryColor).toBe("#4f46e5");
   });
 });
 

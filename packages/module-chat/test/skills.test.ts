@@ -10,7 +10,7 @@ import {
 } from "../src/skills.ts";
 
 const hint = (id: string): SkillHint => ({
-  package_id: id,
+  packageId: id,
   display_name: id,
   description: "A skill.",
   version: "1.0.0",
@@ -37,7 +37,7 @@ describe("resolveChatSkills", () => {
       selection: { pinnedSkills: ["@a/mike", "@a/alpha", "@a/zulu"] },
       requested: [hint("@a/mike"), hint("@a/zulu"), hint("@a/alpha")],
     });
-    expect(out.pinned.map((s) => s.package_id)).toEqual(["@a/alpha", "@a/mike", "@a/zulu"]);
+    expect(out.pinned.map((s) => s.packageId)).toEqual(["@a/alpha", "@a/mike", "@a/zulu"]);
   });
 
   it("drops a requested hint nothing pinned, and de-duplicates the rest", () => {
@@ -45,7 +45,7 @@ describe("resolveChatSkills", () => {
       selection: { pinnedSkills: ["@a/alpha"] },
       requested: [hint("@a/alpha"), hint("@a/alpha"), hint("@a/stray")],
     });
-    expect(out.pinned.map((s) => s.package_id)).toEqual(["@a/alpha"]);
+    expect(out.pinned.map((s) => s.packageId)).toEqual(["@a/alpha"]);
   });
 
   it("catalogue on: shows the catalogue minus what is pinned, with its truncation", () => {
@@ -55,7 +55,7 @@ describe("resolveChatSkills", () => {
       catalogue: [hint("@a/alpha"), hint("@a/other")],
       catalogueTruncated: true,
     });
-    expect(out.catalogue.map((s) => s.package_id)).toEqual(["@a/other"]);
+    expect(out.catalogue.map((s) => s.packageId)).toEqual(["@a/other"]);
     expect(out.catalogueTruncated).toBe(true);
   });
 
@@ -66,7 +66,7 @@ describe("resolveChatSkills", () => {
       catalogue: [hint("@a/other")],
       catalogueTruncated: true,
     });
-    expect(out.pinned.map((s) => s.package_id)).toEqual(["@a/mine"]);
+    expect(out.pinned.map((s) => s.packageId)).toEqual(["@a/mine"]);
     expect(out.catalogue).toEqual([]);
     expect(out.catalogueTruncated).toBe(false);
   });
@@ -77,7 +77,7 @@ describe("resolveChatSkills", () => {
       requested: [hint("@a/here")],
       catalogue: [hint("@a/other")],
     });
-    expect(out.pinned.map((s) => s.package_id)).toEqual(["@a/here"]);
+    expect(out.pinned.map((s) => s.packageId)).toEqual(["@a/here"]);
     expect(out.notices).toHaveLength(1);
     expect(out.notices[0]).toContain("@a/gone-pin");
   });

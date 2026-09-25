@@ -45,7 +45,10 @@ import type { AgentSessionEvent } from "./pi-events.ts";
 import { buildPlatformMcpTools } from "./mcp-tools.ts";
 import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
-import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import {
+  DEFAULT_MODEL_REASONING_LEVEL,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
 import {
   PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS,
@@ -370,7 +373,8 @@ export function runPiChat(input: PiChatInput): Response {
         } = sdk;
 
         const piModel = model;
-        const requestedThinkingLevel = input.generation.reasoningLevel ?? "medium";
+        const requestedThinkingLevel =
+          input.generation.reasoning_level ?? DEFAULT_MODEL_REASONING_LEVEL;
         const {
           model: sessionModel,
           thinkingLevel,

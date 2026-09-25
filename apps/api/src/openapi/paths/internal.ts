@@ -160,7 +160,7 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Fetch a fresh access token for an OAuth model provider connection",
       description:
-        "Sidecar-only. Auth via Bearer run token. Returns the resolved access token plus the runtime config (apiShape, baseUrl, accountId, …). Refreshes the token proactively if it expires within 5 minutes.",
+        "Sidecar-only. Auth via Bearer run token. Returns the resolved `access_token`, its `expiresAt` and, when the provider surfaced one, the `account_id`. Refreshes the token proactively if it expires within 5 minutes.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         {
@@ -320,7 +320,7 @@ export const internalPaths = {
         },
         "502": {
           description:
-            "Transient OAuth refresh failure upstream — same semantics as the GET endpoint.",
+            "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` rejections accumulate since it was last (re)connected. Not a streak: only a reconnect resets the count.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

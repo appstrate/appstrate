@@ -4,7 +4,7 @@
 // in the system prompt's single `cache_control` block.
 
 export interface SkillHint {
-  package_id: string;
+  packageId: string;
   display_name?: string | null;
   description?: string | null;
   version?: string | null;
@@ -40,8 +40,8 @@ interface ResolvedChatSkills {
   notices: string[];
 }
 
-function byPackageId(a: { package_id: string }, b: { package_id: string }): number {
-  return a.package_id < b.package_id ? -1 : a.package_id > b.package_id ? 1 : 0;
+function byPackageId(a: { packageId: string }, b: { packageId: string }): number {
+  return a.packageId < b.packageId ? -1 : a.packageId > b.packageId ? 1 : 0;
 }
 
 export function resolveChatSkills(input: ResolveChatSkillsInput): ResolvedChatSkills {
@@ -50,7 +50,7 @@ export function resolveChatSkills(input: ResolveChatSkillsInput): ResolvedChatSk
 
   const byId = new Map<string, SkillHint>();
   for (const hint of input.requested) {
-    if (wanted.has(hint.package_id)) byId.set(hint.package_id, hint);
+    if (wanted.has(hint.packageId)) byId.set(hint.packageId, hint);
   }
 
   // A pin is the user's own act, so the model is told when it no longer resolves.
@@ -65,7 +65,7 @@ export function resolveChatSkills(input: ResolveChatSkillsInput): ResolvedChatSk
   return {
     pinned: [...byId.values()].sort(byPackageId),
     catalogue: selection.skillCatalogue
-      ? input.catalogue.filter((hint) => !byId.has(hint.package_id))
+      ? input.catalogue.filter((hint) => !byId.has(hint.packageId))
       : [],
     catalogueTruncated: selection.skillCatalogue && input.catalogueTruncated,
     notices,

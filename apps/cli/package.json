@@ -13,7 +13,7 @@
   "author": "Appstrate <hello@appstrate.dev>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/appstrate/appstrate.git",
+    "url": "git+https://github.com/appstrate/appstrate.git",
     "directory": "apps/cli"
   },
   "homepage": "https://github.com/appstrate/appstrate/tree/main/apps/cli",

@@ -23,7 +23,8 @@
 
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions } from "@appstrate/db/schema";
+import { chatMessages, chatSessions, type ChatMessageContent } from "@appstrate/db/schema";
+import { toPgSafe } from "@appstrate/db/pg-safe";
 import { notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
 import { notifySessionUpdate } from "./realtime.ts";
@@ -39,9 +40,9 @@ import type { UIMessage } from "ai";
 type ChatDbClient = Pick<typeof db, "select" | "insert" | "update">;
 
 /** Storage content = UIMessage minus its id (the id rides in `message_id`). */
-function toContent(message: UIMessage): Record<string, unknown> {
+function toContent(message: UIMessage): ChatMessageContent {
   const { id: _id, ...rest } = message;
-  return rest as Record<string, unknown>;
+  return rest;
 }
 
 /**
@@ -151,9 +152,11 @@ async function deterministicMessageId(
 async function upsertMessage(
   client: ChatDbClient,
   sessionId: string,
-  message: UIMessage,
+  rawMessage: UIMessage,
   precedingMessageId: string | null,
 ): Promise<{ messageId: string; seq: number }> {
+  // A NUL (tool/MCP output, model delta) makes Postgres refuse the row: the message is lost (#1501).
+  const message = toPgSafe(rawMessage);
   // Why the hash material cannot be trimmed now that no column stores it: every
   // `gen_…` id already in the table was derived WITH `precedingMessageId`, so
   // dropping it from the material would mint a different id for the same
@@ -166,7 +169,7 @@ async function upsertMessage(
   // *random* fallback id would instead break idempotency — a retried finalize
   // would mint a new id each attempt and insert a duplicate row — so derive a
   // stable, content-addressed id when one is missing.
-  const content = toContent(message) as typeof chatMessages.$inferInsert.content;
+  const content = toContent(message);
   const messageId =
     message.id || (await deterministicMessageId(sessionId, precedingMessageId, content));
   // `seq` feeds the read-state watermark. On a retried finalize the conflict
@@ -424,7 +427,8 @@ function titleCandidate(message: UIMessage): string | null {
 /** A message's text as a title: trimmed to 60 chars (57 + ellipsis); null when empty. */
 function titleFromText(text: string): string | null {
   if (!text) return null;
-  return text.length > 60 ? `${text.slice(0, 57)}…` : text;
+  // `chat_sessions.title` is text: a NUL would fail the turn's session UPDATE (#1501).
+  return toPgSafe(text.length > 60 ? `${text.slice(0, 57)}…` : text);
 }
 
 /**

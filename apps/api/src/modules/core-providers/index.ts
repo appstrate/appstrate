@@ -5,26 +5,17 @@
  * shipped with every Appstrate deployment.
  *
  * Each entry is a `ModelProviderDefinition` carrying wire format, auth
- * metadata, and a featured list (just catalog ids). All per-model
- * metadata (label, contextWindow, maxTokens, capabilities, cost) comes
- * from the vendored LiteLLM catalog
- * (`apps/api/src/services/pricing-catalog.ts`). A boot-time check fails
- * loudly if any featured id is absent from the catalog — there are no
- * inline overrides.
+ * metadata, and a featured list (catalog ids). All per-model metadata
+ * (label, contextWindow, maxTokens, capabilities, cost) comes from Pi's
+ * pinned model registry (`apps/api/src/services/model-catalog.ts`): a
+ * provider offers the records of its Pi provider (`catalogProviderId ??
+ * providerId`) on its `apiShape`.
  *
- * Featured lists are AUTO-GENERATED (`data/featured-models.json`): the
- * newest tool-calling models per provider, computed weekly by
- * `scripts/refresh-pricing-catalog.ts` from the LiteLLM catalog ∩
- * models.dev release dates, regenerated atomically with the catalogs
- * so every id is guaranteed present. To pin an editorial choice,
- * replace `featured("<id>")` with a hardcoded string[] on that
- * definition — the weekly diff then leaves it untouched.
- *
- * Featured semantics: any id present in `featuredModels` is marked
- * `featured: true` in the registry response. For catalog-covered
- * providers, the picker also exposes every other catalog model under
- * "All models". The same `featuredModels` set also drives the
- * onboarding auto-seed (`use-auto-seed-models.ts`).
+ * Featured lists are pinned here, a few current flagships per provider.
+ * Any id present in `featuredModels` is marked `featured: true` in the
+ * registry response and auto-seeded on first connection
+ * (`use-auto-seed-models.ts`); the rest of the offer lives under "All
+ * models". Registration fails when a featured id leaves the offer.
  *
  * The UI consumes this catalog exclusively via
  * `GET /api/model-provider-credentials/registry` — no client-side
@@ -45,17 +36,6 @@
  */
 
 import type { AppstrateModule, ModelProviderDefinition } from "@appstrate/core/module";
-import { ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE } from "@appstrate/core/model-generation";
-import autoFeatured from "../../data/featured-models.json" with { type: "json" };
-
-/**
- * Generated featured lists — see module docstring. Lookup is total: a
- * provider absent from the JSON (models.dev coverage gap) gets an empty
- * featured group, which the picker and onboarding auto-seed both
- * tolerate.
- */
-const FEATURED = autoFeatured as Record<string, string[]>;
-const featured = (providerId: string): string[] => FEATURED[providerId] ?? [];
 
 const anthropic: ModelProviderDefinition = {
   providerId: "anthropic",
@@ -68,10 +48,7 @@ const anthropic: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
-  // Keep LiteLLM's portable support facts, then apply Anthropic wire-level
-  // constraints (temperature with thinking, and minimal → low effort).
-  generationOverride: ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE,
-  featuredModels: featured("anthropic"),
+  featuredModels: ["claude-fable-5-1", "claude-opus-5", "claude-sonnet-5"],
 };
 
 const cerebras: ModelProviderDefinition = {
@@ -84,7 +61,7 @@ const cerebras: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.cerebras.ai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  featuredModels: featured("cerebras"),
+  featuredModels: ["qwen-3.8-27b", "gpt-oss-120b"],
 };
 
 const deepseek: ModelProviderDefinition = {
@@ -97,11 +74,12 @@ const deepseek: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.deepseek.com/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  featuredModels: featured("deepseek"),
+  featuredModels: ["deepseek-flash", "deepseek-v4-pro"],
 };
 
 const fireworksAi: ModelProviderDefinition = {
   providerId: "fireworks-ai",
+  catalogProviderId: "fireworks",
   displayName: "Fireworks AI",
   iconUrl: "fireworks-ai",
   description: "Bring your own Fireworks AI API key.",
@@ -110,21 +88,11 @@ const fireworksAi: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.fireworks.ai/inference/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  featuredModels: featured("fireworks-ai"),
-};
-
-const googleAi: ModelProviderDefinition = {
-  providerId: "google-ai",
-  displayName: "Google AI",
-  iconUrl: "google-ai",
-  description: "Bring your own Google AI Studio API key.",
-  docsUrl: "https://ai.google.dev/gemini-api/docs",
-  apiShape: "google-generative-ai",
-  defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
-  baseUrlOverridable: false,
-  authMode: "api_key",
-  featured: true,
-  featuredModels: featured("google-ai"),
+  featuredModels: [
+    "accounts/fireworks/routers/glm-5p3-fast",
+    "accounts/fireworks/models/glm-5p3-flash",
+    "accounts/fireworks/models/kimi-k3",
+  ],
 };
 
 const groq: ModelProviderDefinition = {
@@ -137,9 +105,8 @@ const groq: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.groq.com/openai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  // Groq serves several models under namespaced ids (`openai/gpt-oss-120b`,
-  // `moonshotai/kimi-k2-instruct-0905`) — the catalog vendors them verbatim.
-  featuredModels: featured("groq"),
+  // Groq serves several models under namespaced ids (`openai/gpt-oss-120b`).
+  featuredModels: ["qwen/qwen3.8-27b", "qwen/qwen3.6-27b", "openai/gpt-oss-safeguard-20b"],
 };
 
 const mistral: ModelProviderDefinition = {
@@ -153,11 +120,12 @@ const mistral: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
-  featuredModels: featured("mistral"),
+  featuredModels: ["zai-glm-5-3", "zai-glm-5-2", "mistral-medium-2604"],
 };
 
 const moonshot: ModelProviderDefinition = {
   providerId: "moonshot",
+  catalogProviderId: "moonshotai",
   displayName: "Moonshot AI",
   iconUrl: "moonshot",
   description: "Bring your own Moonshot AI (Kimi) API key.",
@@ -166,7 +134,7 @@ const moonshot: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.moonshot.ai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  featuredModels: featured("moonshot"),
+  featuredModels: ["kimi-k3", "kimi-k2.7-code", "kimi-k2.6"],
 };
 
 const openai: ModelProviderDefinition = {
@@ -180,7 +148,7 @@ const openai: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
-  featuredModels: featured("openai"),
+  featuredModels: ["gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-sol"],
 };
 
 const openrouter: ModelProviderDefinition = {
@@ -193,12 +161,14 @@ const openrouter: ModelProviderDefinition = {
   defaultBaseUrl: "https://openrouter.ai/api/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  // Empty catalog — the UI fetches models live via the OpenRouter search combobox.
   featuredModels: [],
+  // `GET /models` answers any key: keys are checked by inference.
+  publicModelListing: true,
 };
 
 const togetherAi: ModelProviderDefinition = {
   providerId: "together-ai",
+  catalogProviderId: "together",
   displayName: "Together AI",
   iconUrl: "together-ai",
   description: "Bring your own Together AI API key.",
@@ -207,7 +177,7 @@ const togetherAi: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.together.xyz/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  featuredModels: featured("together-ai"),
+  featuredModels: ["deepseek-ai/DeepSeek-V4.1-Flash", "zai-org/GLM-5.3-Flash", "zai-org/GLM-5.3"],
 };
 
 const xai: ModelProviderDefinition = {
@@ -216,11 +186,11 @@ const xai: ModelProviderDefinition = {
   iconUrl: "xai",
   description: "Bring your own xAI API key.",
   docsUrl: "https://docs.x.ai/api",
-  apiShape: "openai-completions",
+  apiShape: "openai-responses",
   defaultBaseUrl: "https://api.x.ai/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
-  featuredModels: featured("xai"),
+  featuredModels: ["grok-4.6", "grok-4.5", "grok-4.3"],
 };
 
 const zai: ModelProviderDefinition = {
@@ -233,28 +203,22 @@ const zai: ModelProviderDefinition = {
   defaultBaseUrl: "https://api.z.ai/api/paas/v4",
   baseUrlOverridable: false,
   authMode: "api_key",
-  featuredModels: featured("zai"),
+  featuredModels: ["glm-5.3-flash", "glm-5.3", "glm-5.2"],
 };
 
 /**
  * OpenCode Go — single-key subscription aggregating several open-source
  * coding models (GLM, Kimi, DeepSeek, MiMo) behind one OpenAI-compatible
- * endpoint. Structurally an aggregator (openrouter-class), but unlike
- * openrouter it exposes a small, fixed model set, so we vendor a dedicated
- * `opencode-go` pricing catalog and pin `featuredModels` here rather than
+ * endpoint. Structurally an aggregator (openrouter-class), but it exposes a
+ * small, fixed model set, so `featuredModels` pins that set rather than
  * relying on live search.
  *
  * Only the `/chat/completions` (openai-completions) models are wired. Go
- * also serves Qwen/MiniMax on an Anthropic-style `/messages` endpoint;
- * those need a second provider entry (different apiShape) and are out of
- * scope for this first pass. Auth is a static Bearer key — no OAuth.
- *
- * Pinned `featuredModels` (not `featured("opencode-go")`) so the weekly
- * LiteLLM-driven `featured-models.json` regen can never touch this
- * non-LiteLLM provider. Costs in `data/pricing/opencode-go.json` are
- * per-token approximations cribbed from the underlying vendors — Go bills
- * by a dollar-equivalent cap, not per token, so ledger cost is indicative
- * only.
+ * serves some models (MiniMax M3) only on an Anthropic-style `/messages`
+ * endpoint; those need a second provider entry (different apiShape) and are
+ * out of scope for this first pass. Auth is a static Bearer key — no OAuth.
+ * `GET /models` answers any key, hence `publicModelListing`. Go bills by a
+ * dollar-equivalent cap, not per token, so ledger cost is indicative only.
  */
 const opencodeGo: ModelProviderDefinition = {
   providerId: "opencode-go",
@@ -267,12 +231,12 @@ const opencodeGo: ModelProviderDefinition = {
   defaultBaseUrl: "https://opencode.ai/zen/go/v1",
   baseUrlOverridable: false,
   authMode: "api_key",
+  publicModelListing: true,
   featuredModels: [
     "kimi-k2.7-code",
     "kimi-k2.6",
     "glm-5.2",
     "glm-5.1",
-    "minimax-m3",
     "minimax-m2.7",
     "qwen3.7-max",
     "qwen3.7-plus",
@@ -326,7 +290,6 @@ const coreProvidersModule: AppstrateModule = {
       cerebras,
       deepseek,
       fireworksAi,
-      googleAi,
       groq,
       mistral,
       moonshot,

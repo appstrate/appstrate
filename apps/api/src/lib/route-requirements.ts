@@ -7,29 +7,32 @@
  * handler that matches all of it, whatever its method or path shape; middleware
  * matching before it only adds its guard. Guards mounted after a space
  * re-scope (`markSpaceRescope`) are enforced in the space the PATH names, so
- * they are reported apart and never filter.
+ * they are reported apart and never filter. So are ceiling guards
+ * (`requireCeiling`), except against a delegated credential: they cap its
+ * scopes, not a role, so a caller acting on a session is never refused by them.
  */
 
 import { PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";
 import { findTargetHandler, isMiddleware } from "hono/utils/handler";
 import { getPattern, splitPath, splitRoutingPath } from "hono/utils/url";
 import { hasHandlerMarker, markHandler, readHandlerMarker } from "../middleware/handler-marker.ts";
-import { isRowAuthority, isSpaceRescope } from "../middleware/require-permission.ts";
+import { ceilingRequirementOf, isSpaceRescope } from "../middleware/require-permission.ts";
 
 export interface RouteRequirement {
   /** One per guard evaluated in the caller's own space, mount order, all required; `"a|b"` is a disjunction. Filters. */
   readonly requirements: readonly string[];
   /** Guards mounted after a space re-scope: enforced in the space the path names. Shown, never filtered. */
   readonly targetSpaceRequirements: readonly string[];
-  /** The row, or the target space, decides: `requirements` is a lower bound. */
-  readonly conditional: boolean;
+  /** Ceiling guards: a delegated credential's scopes must include each; no role grant is asked. Filter a delegated caller only. */
+  readonly ceilingRequirements: readonly string[];
 }
 
-/** A route no guard narrows — granted to anyone who reached the transport. */
+/** A route whose mounts state no permission string — the handler, or a guard
+ *  that names none, may still refuse. */
 const UNGUARDED: RouteRequirement = Object.freeze({
   requirements: Object.freeze([]) as readonly string[],
   targetSpaceRequirements: Object.freeze([]) as readonly string[],
-  conditional: false,
+  ceilingRequirements: Object.freeze([]) as readonly string[],
 });
 
 /** Answers the requirement for `METHOD pathTemplate`; `undefined` when no route serves it. */
@@ -58,7 +61,7 @@ interface TableEntry {
   readonly prefix: boolean;
   readonly serves: boolean;
   readonly requirement: string | null;
-  readonly rowDecides: boolean;
+  readonly ceiling: string | null;
   readonly rescope: boolean;
 }
 
@@ -110,7 +113,7 @@ export function deriveRouteRequirements(
       prefix,
       serves: servesOperation(route.handler),
       requirement: typeof required === "string" && required.length > 0 ? required : null,
-      rowDecides: isRowAuthority(route.handler),
+      ceiling: ceilingRequirementOf(route.handler),
       rescope: isSpaceRescope(route.handler),
     });
   }
@@ -125,20 +128,23 @@ function lookup(
 ): RouteRequirement | undefined {
   let served = false;
   let rescoped = false;
-  let conditional = false;
   const requirements: string[] = [];
   const targetSpaceRequirements: string[] = [];
+  // The ceiling is set at authentication, so no space re-scope moves it.
+  const ceilingRequirements: string[] = [];
   // Mount order, so a guard is attributed to the space in force where it sits.
   for (const entry of entries) {
     if (entry.method !== "ALL" && entry.method !== method) continue;
     const match = matches(entry, template);
     if (match === "none") continue;
     if (entry.rescope) rescoped = true;
-    if (entry.rowDecides) conditional = true;
     if (entry.requirement !== null) {
       // A guard reached twice is one requirement to the model.
       const into = rescoped ? targetSpaceRequirements : requirements;
       if (!into.includes(entry.requirement)) into.push(entry.requirement);
+    }
+    if (entry.ceiling !== null && !ceilingRequirements.includes(entry.ceiling)) {
+      ceilingRequirements.push(entry.ceiling);
     }
     // Hono answers with the first terminal handler; nothing after it runs.
     // A partial one leaves the other values to later entries, guards included.
@@ -148,12 +154,17 @@ function lookup(
     }
   }
   if (!served) return undefined;
-  if (targetSpaceRequirements.length > 0) conditional = true;
-  if (requirements.length === 0 && !conditional) return UNGUARDED;
+  if (
+    requirements.length === 0 &&
+    targetSpaceRequirements.length === 0 &&
+    ceilingRequirements.length === 0
+  ) {
+    return UNGUARDED;
+  }
   return Object.freeze({
     requirements: Object.freeze(requirements) as readonly string[],
     targetSpaceRequirements: Object.freeze(targetSpaceRequirements) as readonly string[],
-    conditional,
+    ceilingRequirements: Object.freeze(ceilingRequirements) as readonly string[],
   });
 }
 
@@ -187,13 +198,30 @@ function tokenCovers(token: Token, segment: TemplateSegment): Match {
   }
 }
 
-/** Every requirement holds, a `|` entry on any alternative. Target-space and
- *  row-conditional routes count as granted: only that space or row can refuse. */
+/** Every requirement holds, a `|` entry on any alternative. Target-space
+ *  requirements never count: only that space can refuse them. Ceiling
+ *  requirements count only for a delegated credential (`ceiling` defined):
+ *  its scopes, not `permissions`, must hold each. The row a handler loads may
+ *  still refuse, with the route's own error. */
 export function isGranted(
   requirement: RouteRequirement,
   permissions: ReadonlySet<string>,
+  ceiling?: ReadonlySet<string>,
 ): boolean {
-  return requirement.requirements.every((entry) =>
-    entry.split("|").some((alternative) => permissions.has(alternative)),
+  return (
+    holdsEach(requirement.requirements, permissions) &&
+    (ceiling === undefined || ceilingHolds(requirement.ceilingRequirements, ceiling))
   );
+}
+
+/** A delegated credential's scopes hold every ceiling requirement. */
+export function ceilingHolds(
+  ceilingRequirements: readonly string[],
+  ceiling: ReadonlySet<string>,
+): boolean {
+  return holdsEach(ceilingRequirements, ceiling);
+}
+
+function holdsEach(entries: readonly string[], held: ReadonlySet<string>): boolean {
+  return entries.every((entry) => entry.split("|").some((alternative) => held.has(alternative)));
 }

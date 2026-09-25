@@ -24,12 +24,14 @@ import {
   partitionScopesByAuthCatalog,
   scopesContributedByTools,
   expandScopesGranted,
+  scopesNotCovered,
   missingScopesForConnection,
   validateAgentIntegrationScopes,
   RESERVED_INTEGRATION_UPLOAD_PROTOCOLS,
   readDefaultTools,
   resolveEffectiveToolSelection,
   resolveIntegrationToolCatalog,
+  findNonSnakeCaseIdentityClaimKeys,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
 import { TOOL_NAME_MAX_LEN } from "../src/naming.ts";
@@ -186,7 +188,7 @@ describe("integrationManifestSchema — oauth2 discovery + manual", () => {
     auths.oauth!.code_challenge_methods_supported = ["S256"];
     auths.oauth!.authorization_params = { access_type: "offline" };
     auths.oauth!.token_endpoint_auth_method = "client_secret_post";
-    auths.oauth!.identity_claims = { account_id: "sub", email: "email" };
+    auths.oauth!.identity_claims = { account_id: "$.sub", email: "$.email" };
     auths.oauth!.required_identity_claims = ["sub"];
     expect(integrationManifestSchema.safeParse(m).success).toBe(true);
   });
@@ -373,6 +375,132 @@ describe("integrationManifestSchema — authorized_uris", () => {
     const auths = m.auths as Record<string, Record<string, unknown>>;
     delete auths.oauth!.authorized_uris;
     auths.oauth!.allow_all_uris = true;
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+});
+
+describe("integrationManifestSchema — templated authorized_uris", () => {
+  function sshLike(auth: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) {
+    return baseManifest({
+      source: { kind: "local", server: { name: "@appstrate/ssh-mcp", version: "^1.0.0" } },
+      auths: {
+        primary: {
+          type: "custom",
+          authorized_uris: ["ssh://{$credential.host}:{$credential.port}"],
+          credentials: {
+            schema: {
+              type: "object",
+              required: ["host", "port"],
+              properties: { host: { type: "string" }, port: { type: "string" } },
+            },
+          },
+          delivery: { env: { SSH_HOST: { value: "{$credential.host}" } } },
+          ...auth,
+        },
+      },
+      ...extra,
+    });
+  }
+
+  function entryIssues(raw: Record<string, unknown>): string[] {
+    const r = integrationManifestSchema.safeParse(raw);
+    if (r.success) return [];
+    return r.error.issues
+      .filter((i) => i.path.join(".") === "auths.primary.authorized_uris.0")
+      .map((i) => i.message);
+  }
+
+  it("accepts fields that are declared and required", () => {
+    expect(integrationManifestSchema.safeParse(sshLike()).success).toBe(true);
+  });
+
+  it("rejects an undeclared field", () => {
+    const issues = entryIssues(
+      sshLike({ authorized_uris: ["ssh://{$credential.hostname}:{$credential.port}"] }),
+    );
+    expect(issues).toEqual([expect.stringContaining("'hostname', which is not a credentials")]);
+  });
+
+  it("rejects a declared field that is not required", () => {
+    const issues = entryIssues(
+      sshLike({
+        credentials: {
+          schema: {
+            type: "object",
+            required: ["host"],
+            properties: { host: { type: "string" }, port: { type: "string" } },
+          },
+        },
+      }),
+    );
+    expect(issues).toEqual([expect.stringContaining("'port', which is not listed")]);
+  });
+
+  it("rejects a template on an auth declaring connect", () => {
+    const issues = entryIssues(
+      sshLike({
+        connect: {
+          login: {
+            request: { method: "POST", url: "https://api.example.com/login" },
+            success_criteria: [{ condition: "$statusCode == 200" }],
+            outputs: { host: "$response.body#/host" },
+          },
+        },
+      }),
+    );
+    expect(issues).toEqual([expect.stringContaining("forbidden on an auth declaring connect")]);
+  });
+
+  it("rejects a template on an oauth2 auth", () => {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    auths.oauth!.authorized_uris = ["https://{$credential.tenant}.example.com/**"];
+    const messages = (integrationManifestSchema.safeParse(m).error?.issues ?? [])
+      .filter((i) => i.path.join(".") === "auths.oauth.authorized_uris.0")
+      .map((i) => i.message);
+    expect(messages).toContainEqual(expect.stringContaining("forbidden on an oauth2 auth"));
+  });
+
+  it("rejects a template on an auth exposing api_call", () => {
+    const issues = entryIssues(
+      sshLike({}, { _meta: { "dev.appstrate/api": { auths: { primary: {} } } } }),
+    );
+    expect(issues).toEqual([expect.stringContaining("forbidden on an auth exposing api_call")]);
+  });
+
+  it("rejects a placeholder in the path", () => {
+    const issues = entryIssues(
+      sshLike({ authorized_uris: ["https://api.example.com/tenants/{$credential.host}/**"] }),
+    );
+    expect(issues).toEqual([expect.stringContaining("only allowed in the host and port")]);
+  });
+
+  it("rejects a placeholder in the query", () => {
+    const issues = entryIssues(
+      sshLike({ authorized_uris: ["https://api.example.com?t={$credential.host}"] }),
+    );
+    expect(issues).toEqual([expect.stringContaining("only allowed in the host and port")]);
+  });
+
+  it("rejects a templated entry without a scheme:// prefix", () => {
+    const issues = entryIssues(
+      sshLike({ authorized_uris: ["{$credential.host}:{$credential.port}"] }),
+    );
+    expect(issues).toEqual([expect.stringContaining("without a scheme:// prefix")]);
+  });
+
+  it("accepts placeholders in the host with a static path", () => {
+    const m = sshLike({
+      authorized_uris: ["https://{$credential.host}:{$credential.port}/api/**"],
+    });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("leaves untemplated entries unaffected on an api_call auth", () => {
+    const m = sshLike(
+      { authorized_uris: ["https://api.example.com/**"] },
+      { _meta: { "dev.appstrate/api": { auths: { primary: {} } } } },
+    );
     expect(integrationManifestSchema.safeParse(m).success).toBe(true);
   });
 });
@@ -583,6 +711,66 @@ describe("integrationManifestSchema — delivery.http.prefix install gate", () =
   });
 });
 
+const withClaims = (identity_claims: Record<string, string>) =>
+  baseManifest({
+    source: { kind: "none" },
+    auths: {
+      key: {
+        type: "api_key",
+        credentials: { schema: { type: "object", properties: {} } },
+        authorized_uris: ["https://api.example.com/**"],
+        delivery: { http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" } },
+        identity_claims,
+      },
+    },
+  });
+
+describe("integrationManifestSchema — identity_claims JSONPath install gate", () => {
+  // The grammar itself is tested in packages/afps-shared/test/jsonpath.test.ts.
+  it("accepts a path in the subset and refuses one outside it on the claim's own path", () => {
+    expect(integrationManifestSchema.safeParse(withClaims({ a: "$.data[0].id" })).success).toBe(
+      true,
+    );
+    expect(errorPaths(withClaims({ accountId: "$..email" }))).toContain(
+      "auths.key.identity_claims.accountId",
+    );
+  });
+});
+
+describe("findNonSnakeCaseIdentityClaimKeys — write-path identity key casing", () => {
+  const withLogin = (identity_outputs: string[]) =>
+    customWithConnect({
+      login: {
+        request: { method: "POST", url: "https://x" },
+        outputs: { token: "$response.body#/token", userId: "$response.body#/u", user_id: "$" },
+        identity_outputs,
+      },
+    });
+
+  it("is not a read-path rule: a stored camelCase manifest still validates", () => {
+    expect(validateManifest(withClaims({ accountId: "$.id" })).valid).toBe(true);
+    expect(errorPaths(withLogin(["userId"]))).toEqual([]);
+  });
+
+  it("names every non-snake_case claim key and login identity output on its own path", () => {
+    const found = [
+      ...findNonSnakeCaseIdentityClaimKeys(withClaims({ accountId: "$.id", avatar_url: "$.a" })),
+      ...findNonSnakeCaseIdentityClaimKeys(withLogin(["user_id", "userId"])),
+    ];
+    expect(found.map((v) => [v.key, v.path.join(".")])).toEqual([
+      ["accountId", "auths.key.identity_claims.accountId"],
+      ["userId", "auths.session.connect.login.identity_outputs.1"],
+    ]);
+    expect(found[0]!.message).toContain("snake_case");
+  });
+
+  it("finds nothing on a snake_case manifest or a non-manifest", () => {
+    expect(findNonSnakeCaseIdentityClaimKeys(withClaims({ account_id: "$.id" }))).toEqual([]);
+    expect(findNonSnakeCaseIdentityClaimKeys(withLogin(["user_id"]))).toEqual([]);
+    expect(findNonSnakeCaseIdentityClaimKeys(null)).toEqual([]);
+  });
+});
+
 // ─────────────────────────────────────────────
 // mtls + delivery.http install gate (§7.6)
 // ─────────────────────────────────────────────
@@ -733,6 +921,41 @@ describe("integrationManifestSchema — connect.login", () => {
         }),
       ),
     ).toContain("auths.session.connect.login.expires_in_output");
+  });
+
+  it("rejects a jsonpath output selector outside the subset at import", () => {
+    expect(
+      errorPaths(
+        customWithConnect({
+          login: {
+            request: { method: "POST", url: "https://x" },
+            outputs: {
+              token: { context: "$response.body", selector: "$..token", type: "jsonpath" },
+            },
+          },
+        }),
+      ),
+    ).toContain("auths.session.connect.login.outputs.token.selector");
+  });
+
+  it("rejects a jsonpath success criterion outside the subset, and leaves other types alone", () => {
+    const paths = errorPaths(
+      customWithConnect({
+        login: {
+          request: { method: "POST", url: "https://x" },
+          success_criteria: [
+            { condition: "$statusCode == 200" },
+            { condition: "$[?(@.ok)]", type: "jsonpath" },
+            { condition: "[a-z]+", type: "regex" },
+          ],
+          outputs: {
+            token: { context: "$response.body", selector: "$.session['id']", type: "jsonpath" },
+            raw: { context: "$response.body", selector: "/token", type: "jsonpointer" },
+          },
+        },
+      }),
+    );
+    expect(paths).toEqual(["auths.session.connect.login.success_criteria.1.condition"]);
   });
 
   it("rejects identity_outputs that are not declared outputs", () => {
@@ -1269,6 +1492,45 @@ describe("expandScopesGranted", () => {
 
   it("returns granted unchanged for an unknown auth key", () => {
     expect(expandScopesGranted(["x"], scopedManifest(), "nope")).toEqual(["x"]);
+  });
+});
+
+describe("scopesNotCovered", () => {
+  const USERINFO_EMAIL = "https://www.googleapis.com/auth/userinfo.email";
+  const GMAIL_READONLY = "https://www.googleapis.com/auth/gmail.readonly";
+  const m = baseManifest();
+  const auths = m.auths as Record<string, Record<string, unknown>>;
+  auths.oauth!.scope_catalog = [
+    { value: USERINFO_EMAIL, label: "Email", implies: ["email"] },
+    { value: "email", label: "Email (short)" },
+    { value: GMAIL_READONLY, label: "Read mail" },
+  ];
+  auths.plain = {
+    ...auths.oauth!,
+    scope_catalog: [
+      { value: USERINFO_EMAIL, label: "Email" },
+      { value: "email", label: "Email (short)" },
+    ],
+  };
+  const google = parse(m);
+
+  it("counts a scope as covered by the alias the catalog declares", () => {
+    // Google echoes `userinfo.email` for a requested `email` (issue #1131).
+    expect(
+      scopesNotCovered(["openid", "email"], ["openid", USERINFO_EMAIL], google, "oauth"),
+    ).toEqual([]);
+  });
+
+  it("reports a required scope the grant genuinely lacks", () => {
+    expect(scopesNotCovered(["email", GMAIL_READONLY], [USERINFO_EMAIL], google, "oauth")).toEqual([
+      GMAIL_READONLY,
+    ]);
+  });
+
+  it("compares verbatim for an auth key without the alias", () => {
+    // The alias is per auth: `plain` lists the same scopes without `implies`.
+    expect(scopesNotCovered(["email"], [USERINFO_EMAIL], google, "oauth")).toEqual([]);
+    expect(scopesNotCovered(["email"], [USERINFO_EMAIL], google, "plain")).toEqual(["email"]);
   });
 });
 

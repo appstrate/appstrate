@@ -8,6 +8,7 @@
  * then attempts cross-org access from org B.
  */
 
+import { ifMatch } from "../helpers/etag.ts";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../helpers/app.ts";
 import { truncateAll } from "../helpers/db.ts";
@@ -76,11 +77,13 @@ describe("Multi-tenancy isolation", () => {
       const pkg = await seedAgent({ id: "@org-a/secret-agent", orgId: orgA.orgId });
 
       const res = await app.request("/api/packages/agents/@org-a/secret-agent", {
-        method: "PUT",
-        headers: authHeaders(orgB, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(orgB, {
+          "Content-Type": "application/json",
+          ...ifMatch(pkg.lockVersion),
+        }),
         body: JSON.stringify({
           content: "Hijacked prompt",
-          lock_version: pkg.lockVersion,
         }),
       });
 
@@ -256,23 +259,6 @@ describe("Multi-tenancy isolation", () => {
         headers: authHeaders(orgB),
       });
 
-      expect(res.status).toBe(404);
-    });
-  });
-
-  // ─── Agent dependency isolation ──────────────────────────
-
-  describe("Agent dependencies", () => {
-    it("cannot modify another org's agent skills", async () => {
-      await seedAgent({ id: "@org-a/agent", orgId: orgA.orgId });
-
-      const res = await app.request("/api/agents/@org-a/agent/skills", {
-        method: "PUT",
-        headers: authHeaders(orgB, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ skillIds: ["@org-b/evil-skill"] }),
-      });
-
-      // requireAgent() guard returns 404 for cross-org
       expect(res.status).toBe(404);
     });
   });

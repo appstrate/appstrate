@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The cross-process lock `appstrate packages sync` holds for its whole body.
+ * The cross-process lock `appstrate code sync` holds for its whole body.
  *
  * Tested through the helper rather than the command: the production wait is
  * 60 seconds, and a suite that exercised it for real would take a minute to
@@ -15,8 +15,8 @@ import { lstat, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { closeSync, openSync } from "node:fs";
-import { getLockPath, SyncLockBusyError, withSyncLock } from "../src/lib/skills-sync/lock.ts";
-import { resolveTryLock } from "../src/lib/file-lock.ts";
+import { getLockPath, withSyncLock } from "../src/lib/skills-sync/lock.ts";
+import { FileLockBusyError, resolveTryLock } from "../src/lib/file-lock.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 
 const originalDataHome = process.env.XDG_DATA_HOME;
@@ -32,6 +32,16 @@ afterEach(async () => {
   else process.env.XDG_DATA_HOME = originalDataHome;
   await rm(dataHome, { recursive: true, force: true });
 });
+
+/** The busy error, and from the sync's own lock rather than another one. */
+async function expectSyncBusy(run: Promise<unknown>): Promise<void> {
+  const error = await run.then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(error).toBeInstanceOf(FileLockBusyError);
+  expect((error as FileLockBusyError).label).toBe("code sync");
+}
 
 describe("withSyncLock", () => {
   it("runs the body and leaves the lock file in place, unlocked", async () => {
@@ -92,9 +102,7 @@ describe("withSyncLock", () => {
     });
     await entry;
 
-    await expect(
-      withSyncLock(async () => "never", { timeoutMs: 30, pollMs: 5 }),
-    ).rejects.toBeInstanceOf(SyncLockBusyError);
+    await expectSyncBusy(withSyncLock(async () => "never", { timeoutMs: 30, pollMs: 5 }));
     release();
     await holder;
   });
@@ -117,9 +125,7 @@ describe("withSyncLock", () => {
     const { value } = await reader.read();
     expect(new TextDecoder().decode(value)).toContain("held");
 
-    await expect(
-      withSyncLock(async () => "never", { timeoutMs: 30, pollMs: 5 }),
-    ).rejects.toBeInstanceOf(SyncLockBusyError);
+    await expectSyncBusy(withSyncLock(async () => "never", { timeoutMs: 30, pollMs: 5 }));
 
     holder.kill("SIGKILL");
     await holder.exited;
@@ -161,7 +167,7 @@ describe("withSyncLock without a working flock", () => {
       tryLock: () => ({ status: "unsupported", reason: "Windows has no flock(2)" }),
     });
     expect(result).toBe("ran");
-    expect(stderr()).toContain("packages sync lock unavailable (Windows has no flock(2))");
+    expect(stderr()).toContain("code sync lock unavailable (Windows has no flock(2))");
     expect(stderr()).toContain("continuing unlocked");
   });
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { packageSourceValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_REQUESTED_SKILLS } from "../../lib/skill-requests.ts";
 
@@ -18,7 +19,7 @@ import { MAX_REQUESTED_SKILLS } from "../../lib/skill-requests.ts";
 const skillHintSchema = {
   type: "object",
   required: [
-    "package_id",
+    "packageId",
     "display_name",
     "description",
     "version",
@@ -27,7 +28,7 @@ const skillHintSchema = {
     "source",
   ],
   properties: {
-    package_id: {
+    packageId: {
       type: "string",
       description:
         'Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills.',
@@ -53,7 +54,7 @@ const skillHintSchema = {
         "theirs to run — `dependency_overrides` with `draft` answers 403 " +
         "`draft_not_writable` otherwise.",
     },
-    source: { type: "string", enum: ["system", "local"] },
+    source: { type: "string", enum: [...packageSourceValues] },
   },
 } as const;
 
@@ -534,17 +535,11 @@ export const mePaths = {
                       "an agent reference a recent or failed run without a discovery round-trip.",
                     items: {
                       type: "object",
-                      required: ["package_id", "status"],
+                      required: ["packageId", "status"],
                       properties: {
-                        package_id: { type: "string" },
+                        packageId: { type: "string" },
                         status: { type: "string" },
-                        // CASING: `run_number` is snake_case here, diverging from
-                        // the universal `runNumber` carve-out used by the Run
-                        // schema. This is a distinct, prompt-oriented projection
-                        // (`services/state/runs.ts:listRecentForActor`) that emits
-                        // snake_case keys; spec matches that runtime output
-                        // (spec==runtime invariant). Documented divergence.
-                        run_number: { type: ["integer", "null"] },
+                        runNumber: { type: ["integer", "null"] },
                         started_at: { type: ["string", "null"], format: "date-time" },
                         error: {
                           type: ["string", "null"],
@@ -589,7 +584,7 @@ export const mePaths = {
                     items: {
                       type: "object",
                       required: [
-                        "package_id",
+                        "packageId",
                         "display_name",
                         "description",
                         "takes_input",
@@ -598,7 +593,7 @@ export const mePaths = {
                         "source",
                       ],
                       properties: {
-                        package_id: {
+                        packageId: {
                           type: "string",
                           description: 'Invokable identifier, e.g. "@appstrate/triage".',
                         },
@@ -624,7 +619,7 @@ export const mePaths = {
                             "otherwise). Read with `published`: false/false is an agent this " +
                             "caller cannot execute at all until its author publishes one.",
                         },
-                        source: { type: "string", enum: ["system", "local"] },
+                        source: { type: "string", enum: [...packageSourceValues] },
                       },
                     },
                   },
@@ -675,16 +670,16 @@ export const mePaths = {
                 ],
                 recent_runs: [
                   {
-                    package_id: "@appstrate/triage",
+                    packageId: "@appstrate/triage",
                     status: "failed",
-                    run_number: 7,
+                    runNumber: 7,
                     started_at: "2026-06-25T09:12:00.000Z",
                     error: "Gmail token expired",
                   },
                 ],
                 agents: [
                   {
-                    package_id: "@appstrate/triage",
+                    packageId: "@appstrate/triage",
                     display_name: "Inbox Triage",
                     description: "Sorts and labels incoming email.",
                     takes_input: false,
@@ -697,7 +692,7 @@ export const mePaths = {
                 agents_total: 1,
                 skills: [
                   {
-                    package_id: "@appstrate/web-research",
+                    packageId: "@appstrate/web-research",
                     display_name: "Web Research",
                     description: "Multi-source web search and synthesis.",
                     version: "1.2.0",
@@ -710,13 +705,13 @@ export const mePaths = {
                 skills_total: 1,
                 requested_skills: [
                   {
-                    package_id: "@appstrate/copilot",
-                    display_name: "Agent Copilot",
-                    description: "Interviews the user, then assembles an agent.",
+                    packageId: "@acme/tone",
+                    display_name: "House tone",
+                    description: "Rewrites a draft in the company's tone of voice.",
                     version: "1.0.0",
                     published: true,
-                    home_writable: false,
-                    source: "system",
+                    home_writable: true,
+                    source: "local",
                   },
                 ],
               },

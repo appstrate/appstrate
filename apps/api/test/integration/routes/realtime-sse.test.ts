@@ -720,14 +720,14 @@ describe("realtime SSE routes (integration)", () => {
     });
 
     it("returns 401 with invalid API key", async () => {
-      const res = await app.request(`/api/realtime/runs?token=ask_invalid_key`);
+      const res = await app.request(`/api/realtime/runs?token=apst_invalid_key`);
       expect(res.status).toBe(401);
     });
   });
 
   // ── CRIT-04 — SSE auth: `runs:read` required, isAdmin derived (not hardcoded) ──
   //
-  // `validateSSEAuth` (routes/realtime.ts) used to accept ANY valid `ask_`
+  // `validateSSEAuth` (routes/realtime.ts) used to accept ANY valid API key
   // token without checking its scopes AND passed `isAdmin: true` to the
   // subscriber filter unconditionally. The fix (a) resolves the key's
   // effective permissions (scopes ∩ creator role) and requires `runs:read`,
@@ -744,7 +744,7 @@ describe("realtime SSE routes (integration)", () => {
       return key.rawKey;
     }
 
-    it("rejects an ask_ token WITHOUT `runs:read` with 403 on all three stream routes", async () => {
+    it("rejects an API key WITHOUT `runs:read` with 403 on all three stream routes", async () => {
       // Valid key, valid scope — just not `runs:read`. Pre-fix, any valid
       // key opened every stream, so all three requests below returned 200.
       const token = await seedSseKey({ createdBy: ctx.user.id, scopes: ["agents:read"] });
@@ -760,7 +760,7 @@ describe("realtime SSE routes (integration)", () => {
       }
     });
 
-    it("accepts an ask_ token WITH `runs:read` on all three stream routes (feature intact)", async () => {
+    it("accepts an API key WITH `runs:read` on all three stream routes (feature intact)", async () => {
       const token = await seedSseKey({ createdBy: ctx.user.id, scopes: ["runs:read"] });
 
       const paths = [
@@ -849,6 +849,309 @@ describe("realtime SSE routes (integration)", () => {
       expect(events).toHaveLength(1);
       expect(events[0]!.event).toBe("run_log");
       expect(JSON.parse(events[0]!.data).message).toBe("debug-for-admin");
+    });
+  });
+
+  // ── connection_update under the credential ceiling ─────────
+  //
+  // The channel carries the caller's own connection rows, which the HTTP
+  // surface caps with `integrations:read`; a key opened with `runs:read` alone
+  // must not receive them.
+  describe("owner-row channels under the credential ceiling", () => {
+    async function openStream(token?: string): Promise<Response> {
+      const res = token
+        ? await app.request(`/api/realtime/runs?token=${token}`)
+        : await sseRequest("/api/realtime/runs", ctx);
+      expect(res.status).toBe(200);
+      await wait();
+      return res;
+    }
+
+    async function keyToken(scopes: string[]): Promise<string> {
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes,
+      });
+      return key.rawKey;
+    }
+
+    const fireConnection = () =>
+      pgNotify("connection_update", {
+        operation: "UPDATE",
+        id: "conn-ceiling",
+        integration_package_id: "@x/svc",
+        auth_key: "primary",
+        user_id: ctx.user.id,
+        end_user_id: null,
+        space_id: ctx.defaultSpaceId,
+        needs_reconnection: true,
+        deleted: false,
+      });
+    const fireChat = () =>
+      pgNotify("chat_session_update", {
+        session_id: "chs-ceiling",
+        org_id: ctx.orgId,
+        user_id: ctx.user.id,
+      });
+
+    /** One lead frame then one run frame, both the caller's own. */
+    async function fireBoth(lead: () => Promise<void>): Promise<void> {
+      await lead();
+      await wait();
+      await pgNotify("run_update", {
+        org_id: ctx.orgId,
+        space_id: ctx.defaultSpaceId,
+        id: run.id,
+        user_id: ctx.user.id,
+        status: "running",
+        package_id: agentPkg.id,
+      });
+    }
+
+    async function firstEvent(res: Response, lead = fireConnection): Promise<string> {
+      await fireBoth(lead);
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      return events[0]!.event;
+    }
+
+    it("a key without integrations:read does not receive it", async () => {
+      const res = await openStream(await keyToken(["runs:read"]));
+      // The run frame arrives first: the connection frame was dropped, not delayed.
+      expect(await firstEvent(res)).toBe("run_update");
+    });
+
+    it("a key with integrations:read receives it", async () => {
+      const res = await openStream(await keyToken(["runs:read", "integrations:read"]));
+      expect(await firstEvent(res)).toBe("connection_update");
+    });
+
+    it("a cookie session, which carries no ceiling, receives it", async () => {
+      expect(await firstEvent(await openStream())).toBe("connection_update");
+    });
+
+    // `chat:read` is never key-grantable, so no key receives chat signals.
+    it("chat_session_update: a key never receives it", async () => {
+      const res = await openStream(await keyToken(["runs:read", "integrations:read"]));
+      expect(await firstEvent(res, fireChat)).toBe("run_update");
+    });
+
+    it("chat_session_update: a cookie session receives it", async () => {
+      expect(await firstEvent(await openStream(), fireChat)).toBe("chat_session_update");
+    });
+  });
+
+  // ── A caller without a run read (#1556) ─────────────────────
+  //
+  // `/api/realtime/runs` multiplexes the run channels with the caller's own
+  // connection and chat rows, so a missing run read drops the run channels
+  // instead of refusing the stream — until nothing requested is left.
+  describe("a caller without a run read (#1556)", () => {
+    let member: Awaited<ReturnType<typeof createTestUser>>;
+    let spaceId: string;
+    let memberRun: Awaited<ReturnType<typeof seedRun>>;
+
+    beforeEach(async () => {
+      const space = await seedSpace({
+        orgId: ctx.orgId,
+        name: "SSE chat only",
+        visibility: "closed",
+      });
+      spaceId = space.id;
+      const chatOnly = await seedSpaceRole({
+        orgId: ctx.orgId,
+        key: "sse-chat-only",
+        permissions: ["agents:read", "chat:read"],
+      });
+      member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+      await seedSpaceMember({
+        spaceId,
+        userId: member.id,
+        presetRole: null,
+        customRoleId: chatOnly.id,
+      });
+      // The member's OWN run: ownership alone would pass the run gate, so its
+      // absence below is the channel being dropped.
+      memberRun = await seedRun({
+        packageId: agentPkg.id,
+        orgId: ctx.orgId,
+        spaceId,
+        userId: member.id,
+      });
+    });
+
+    const stream = (path: string) =>
+      app.request(`${path}${path.includes("?") ? "&" : "?"}orgId=${ctx.orgId}&spaceId=${spaceId}`, {
+        headers: { Cookie: member.cookie, Accept: "text/event-stream" },
+      });
+
+    it("opens the stream and delivers the caller's chat and connection frames, not its runs", async () => {
+      const res = await stream("/api/realtime/runs");
+      expect(res.status).toBe(200);
+      await wait();
+
+      const runFrame = { org_id: ctx.orgId, space_id: spaceId, user_id: member.id };
+      await pgNotify("run_update", { ...runFrame, id: memberRun.id, status: "running" });
+      await pgNotify("run_log_insert", {
+        ...runFrame,
+        run_id: memberRun.id,
+        level: "info",
+        message: "x",
+      });
+      await pgNotify("run_metric", {
+        ...runFrame,
+        run_id: memberRun.id,
+        package_id: agentPkg.id,
+        token_usage: null,
+        cost_so_far: 0,
+      });
+      await wait();
+      await pgNotify("chat_session_update", {
+        session_id: "chs-1556",
+        org_id: ctx.orgId,
+        user_id: member.id,
+      });
+      await wait();
+      await pgNotify("connection_update", {
+        operation: "UPDATE",
+        id: "conn-1556",
+        integration_package_id: "@x/svc",
+        auth_key: "primary",
+        user_id: member.id,
+        end_user_id: null,
+        space_id: spaceId,
+        needs_reconnection: true,
+        deleted: false,
+      });
+
+      const events = await collectSSEEvents(res.body!, 2, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      expect(events.map((e) => e.event)).toEqual(["chat_session_update", "connection_update"]);
+    });
+
+    it("refuses with 403 when every requested channel is a run channel", async () => {
+      for (const channels of ["run_update", "run_update,run_log,run_metric"]) {
+        const res = await stream(`/api/realtime/runs?channels=${channels}`);
+        expect(res.status).toBe(403);
+        expect(res.headers.get("content-type")).toContain("application/problem+json");
+      }
+      // Control: one receivable channel among them is enough to open it.
+      const opened = await stream("/api/realtime/runs?channels=run_update,chat_session_update");
+      expect(opened.status).toBe(200);
+      await opened.body?.cancel();
+    });
+
+    it("withholds chat frames from a role without chat:read, as `/api/chat/*` does", async () => {
+      const noChat = await seedSpaceRole({
+        orgId: ctx.orgId,
+        key: "sse-no-chat",
+        permissions: ["agents:read", "integrations:read"],
+      });
+      const other = await createTestUser();
+      await addOrgMember(ctx.orgId, other.id, "member");
+      await seedSpaceMember({
+        spaceId,
+        userId: other.id,
+        presetRole: null,
+        customRoleId: noChat.id,
+      });
+      const asOther = (query: string) =>
+        app.request(`/api/realtime/runs?${query}orgId=${ctx.orgId}&spaceId=${spaceId}`, {
+          headers: { Cookie: other.cookie, Accept: "text/event-stream" },
+        });
+
+      expect((await asOther("channels=chat_session_update&")).status).toBe(403);
+
+      const res = await asOther("");
+      expect(res.status).toBe(200);
+      await wait();
+      await pgNotify("chat_session_update", {
+        session_id: "chs-no-chat",
+        org_id: ctx.orgId,
+        user_id: other.id,
+      });
+      await wait();
+      await pgNotify("connection_update", {
+        operation: "UPDATE",
+        id: "conn-no-chat",
+        integration_package_id: "@x/svc",
+        auth_key: "primary",
+        user_id: other.id,
+        end_user_id: null,
+        space_id: spaceId,
+        needs_reconnection: true,
+        deleted: false,
+      });
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      expect(events.map((e) => e.event)).toEqual(["connection_update"]);
+    });
+
+    it("still refuses the single-run and per-agent streams, which carry runs alone", async () => {
+      for (const path of [
+        `/api/realtime/runs/${memberRun.id}`,
+        `/api/realtime/runs/${memberRun.id}?channels=chat_session_update`,
+        `/api/realtime/agents/${encodeURIComponent(agentPkg.id)}/runs`,
+      ]) {
+        expect((await stream(path)).status).toBe(403);
+      }
+    });
+
+    it("an API key without a run read keeps only what its scopes carry", async () => {
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["integrations:read"],
+      });
+      const withKey = (path: string) => app.request(`${path}?token=${key.rawKey}`);
+
+      expect((await withKey(`/api/realtime/runs/${run.id}`)).status).toBe(403);
+      expect(
+        (await withKey(`/api/realtime/agents/${encodeURIComponent(agentPkg.id)}/runs`)).status,
+      ).toBe(403);
+
+      const res = await withKey("/api/realtime/runs");
+      expect(res.status).toBe(200);
+      await wait();
+      await pgNotify("run_update", {
+        org_id: ctx.orgId,
+        space_id: ctx.defaultSpaceId,
+        id: run.id,
+        user_id: ctx.user.id,
+        status: "running",
+      });
+      await pgNotify("chat_session_update", {
+        session_id: "chs-key",
+        org_id: ctx.orgId,
+        user_id: ctx.user.id,
+      });
+      await wait();
+      await pgNotify("connection_update", {
+        operation: "UPDATE",
+        id: "conn-key",
+        integration_package_id: "@x/svc",
+        auth_key: "primary",
+        user_id: ctx.user.id,
+        end_user_id: null,
+        space_id: ctx.defaultSpaceId,
+        needs_reconnection: true,
+        deleted: false,
+      });
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      expect(events.map((e) => e.event)).toEqual(["connection_update"]);
     });
   });
 

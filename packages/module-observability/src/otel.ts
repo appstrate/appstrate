@@ -542,13 +542,9 @@ export function recordFilePartialPublication(): void {
   filesPartialPublications?.add(1);
 }
 
-export function recordContainerSpawn(
-  durationMs: number,
-  attrs?: { sidecar?: boolean; errorType?: string },
-): void {
+export function recordContainerSpawn(durationMs: number, attrs?: { errorType?: string }): void {
   if (!enabled) return;
   containerSpawn?.record(durationMs / MS_PER_S, {
-    sidecar: attrs?.sidecar ?? false,
     // OTel semconv (Recording errors): a single duration histogram covers both
     // outcomes — `error.type` is present on FAILURE only and omitted on success,
     // so spawn error-rate and clean-latency are both derivable from one metric.

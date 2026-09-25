@@ -47,7 +47,11 @@ interface ExchangeAuthorizationCodeInput {
   redirectUri: string;
   /** Authorization code returned by the IdP. */
   code: string;
-  /** Scopes requested at authorize time — used for shortfall/creep classification. */
+  /**
+   * Scopes requested at authorize time. Used as the granted set when the token
+   * response omits `scope` (RFC 6749 §5.1). The integration callback reads the
+   * same signed-state value into its result's `scopesRequested`.
+   */
   scopesRequested: string[];
   /**
    * Extra body params (e.g. RFC 8707 `resource` for integration flows).

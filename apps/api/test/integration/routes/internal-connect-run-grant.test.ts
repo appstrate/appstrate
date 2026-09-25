@@ -556,15 +556,15 @@ describe("/internal/* — connect-run grant authorization", () => {
 
     it("POST /refresh still works for a real run token", async () => {
       // Regression control for the refresh branch: an api_key auth is
-      // unrefreshable, so the resolver flags the connection and answers 410 —
-      // the same terminal answer it gave before this change, reached through
-      // the untouched run path.
+      // unrefreshable, so the resolver counts the rejection and answers 502
+      // below the failure threshold — reached through the untouched run path
+      // (an unauthorized caller would get 401/403 before the resolver).
       await seedLiveConnection(INTEGRATION);
       const res = await app.request(`/internal/integration-credentials/${INTEGRATION}/refresh`, {
         method: "POST",
         headers: { Authorization: `Bearer ${runToken}` },
       });
-      expect(res.status).toBe(410);
+      expect(res.status).toBe(502);
     });
   });
 });

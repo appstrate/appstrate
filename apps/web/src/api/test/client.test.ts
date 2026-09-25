@@ -27,7 +27,7 @@ describe("toApiError", () => {
         {
           code: "quota_exceeded",
           detail: "quota exceeded",
-          requestId: "req_1",
+          request_id: "req_1",
           param: "input.file",
         },
         413,

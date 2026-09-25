@@ -111,6 +111,10 @@ describe.skipIf(!RUN)("runtime-pi container provisions files without spinning", 
           MODEL_BASE_URL: `http://host.docker.internal:${port}/llm`,
           MODEL_API_KEY: "test",
           AGENT_PROMPT: "Stop immediately.",
+          // Required by the env contract. The stub answers nothing on it, which
+          // is fine: the marker below is emitted before the sidecar handshake.
+          SIDECAR_URL: `http://host.docker.internal:${port}`,
+          SIDECAR_AUTH_TOKEN: "provision-e2e-sidecar-token",
         },
       });
       expect(run.status, `docker run failed: ${run.stderr}`).toBe(0);

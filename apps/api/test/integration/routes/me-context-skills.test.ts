@@ -22,8 +22,8 @@ const FOREIGN = "@ctxother/foreign";
 const SWITCHED_OFF = "@ctxskill/off";
 
 interface ContextBody {
-  skills: { package_id: string }[];
-  requested_skills: { package_id: string; version: string | null; source: string }[];
+  skills: { packageId: string }[];
+  requested_skills: { packageId: string; version: string | null; source: string }[];
 }
 
 async function createSkill(ctx: TestContext, id: string) {
@@ -72,7 +72,7 @@ describe("GET /api/me/context?skills=", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as ContextBody;
 
-    expect(body.requested_skills.map((s) => s.package_id).sort()).toEqual([FIRST, SECOND]);
+    expect(body.requested_skills.map((s) => s.packageId).sort()).toEqual([FIRST, SECOND]);
     expect(body.requested_skills[0]?.version).toBe("1.0.0");
   });
 
@@ -110,7 +110,7 @@ describe("GET /api/me/context?skills=", () => {
     });
     expect(ok.status).toBe(200);
     const body = (await ok.json()) as ContextBody;
-    expect(body.requested_skills.map((s) => s.package_id)).toEqual([FIRST]);
+    expect(body.requested_skills.map((s) => s.packageId)).toEqual([FIRST]);
 
     const over = Array.from({ length: MAX_REQUESTED_SKILLS + 1 }, (_, i) => `@ctxskill/x-${i}`);
     const refused = await app.request(

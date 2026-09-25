@@ -24,12 +24,8 @@ import {
 import { ChevronDown } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { AgentInputForm } from "./agent-input-form";
-import {
-  changedInputValues,
-  hasInputFields,
-  initialInputValues,
-  type AgentInputSettings,
-} from "../lib/agent-input";
+import type { AgentInputSettings } from "@appstrate/core/input-resolution";
+import { changedInputValues, hasInputFields, initialInputValues } from "../lib/agent-input";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
 import { ActorSelect, type ActorValue } from "./actor-select";
@@ -245,8 +241,8 @@ export function ScheduleForm({
   // it must not wipe the frozen connection picks.
   const actorChanged =
     !!actor &&
-    ((actor.user_id ?? null) !== (currentActor?.user_id ?? null) ||
-      (actor.end_user_id ?? null) !== (currentActor?.end_user_id ?? null));
+    ((actor.userId ?? null) !== (currentActor?.userId ?? null) ||
+      (actor.endUserId ?? null) !== (currentActor?.endUserId ?? null));
 
   const {
     register,

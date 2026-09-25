@@ -17,18 +17,38 @@ import {
   useNotifications,
 } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
+import { useCanReach } from "../hooks/use-can-reach";
+import type { RoutePath } from "../lib/route-access";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { formatDateField } from "../lib/format-date";
+import type { paths } from "../api/client";
 
 /** One notification as returned by `GET /api/notifications`. */
-type NotificationItem = {
-  id: string;
-  /** The KIND, which decides how the row reads — `run_completed`, `package_shared`, … */
-  type: string;
-  run_id: string | null;
-  payload: Record<string, unknown> | null;
-  created_at: string;
-};
+type NotificationItem =
+  paths["/api/notifications"]["get"]["responses"]["200"]["content"]["application/json"]["data"][number];
+
+const ITEM_CLASS =
+  "hover:bg-muted/50 group flex w-full gap-3 px-4 py-3 text-left transition-colors";
+
+/**
+ * Where a notification leads, or `null` when that page is closed to the caller:
+ * notifications follow the session's ceiling, not the space's run reads.
+ */
+function notificationTarget(
+  notification: NotificationItem,
+  packageId: string | null,
+  canReach: (path: RoutePath) => boolean,
+): string | null {
+  if (notification.type === "package_shared") {
+    return canReach("/space/packages") ? "/space/packages" : null;
+  }
+  if (packageId && notification.runId) {
+    return canReach("/agents/:scope/:name/runs/:runId")
+      ? `/agents/${packageId}/runs/${notification.runId}`
+      : null;
+  }
+  return canReach("/runs") ? "/runs" : null;
+}
 
 /** Narrow a jsonb payload field to a string. */
 function payloadString(payload: Record<string, unknown> | null, key: string): string | null {
@@ -45,6 +65,7 @@ export function NotificationContent({
   unread,
   notifications,
   agentNameMap,
+  canReach,
   onItemClick,
   onClose,
   markAllRead,
@@ -52,6 +73,7 @@ export function NotificationContent({
   unread: number;
   notifications: NotificationItem[];
   agentNameMap: Map<string, string>;
+  canReach: (path: RoutePath) => boolean;
   onItemClick: (notificationId: string) => void;
   onClose: () => void;
   markAllRead: () => void;
@@ -93,8 +115,7 @@ export function NotificationContent({
       ) : (
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
           {notifications.map((notification) => {
-            const agentId = payloadString(notification.payload, "agent_id");
-            const packageId = payloadString(notification.payload, "package_id");
+            const packageId = payloadString(notification.payload, "packageId");
             // A SHARE names the sharer and the package and has no run behind
             // it, so it carries no status to badge — reading every row as a
             // finished run titled it "Agent supprimé", the fallback for a run
@@ -106,25 +127,12 @@ export function NotificationContent({
                   name: payloadString(notification.payload, "shared_by_name") ?? "",
                   package: packageId ?? "",
                 })
-              : agentId
-                ? (agentNameMap.get(agentId) ?? agentId)
+              : packageId
+                ? (agentNameMap.get(packageId) ?? packageId)
                 : t("runs.deletedAgent", { ns: "agents" });
-            // Source agent gone → fall back to the run-scoped route. Marking
-            // it read still flows through `onItemClick`.
-            const linkTarget = shared
-              ? "/space/packages"
-              : agentId && notification.run_id
-                ? `/agents/${agentId}/runs/${notification.run_id}`
-                : notification.run_id
-                  ? `/runs/${notification.run_id}`
-                  : "/runs";
-            return (
-              <Link
-                key={notification.id}
-                to={linkTarget}
-                onClick={() => onItemClick(notification.id)}
-                className="hover:bg-muted/50 group flex gap-3 px-4 py-3 transition-colors"
-              >
+            const target = notificationTarget(notification, packageId, canReach);
+            const body = (
+              <>
                 <Circle size={8} className="fill-destructive text-destructive mt-1.5 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <div className="mb-0.5 flex items-center justify-between gap-2">
@@ -132,26 +140,49 @@ export function NotificationContent({
                     {status && <Badge status={status} />}
                   </div>
                   <p className="text-muted-foreground text-xs">
-                    {formatDateField(notification.created_at)}
+                    {formatDateField(notification.createdAt)}
                   </p>
                 </div>
+              </>
+            );
+            // Nowhere to go: clicking still marks it read.
+            return target ? (
+              <Link
+                key={notification.id}
+                to={target}
+                onClick={() => onItemClick(notification.id)}
+                className={ITEM_CLASS}
+              >
+                {body}
               </Link>
+            ) : (
+              <button
+                key={notification.id}
+                type="button"
+                onClick={() => onItemClick(notification.id)}
+                className={ITEM_CLASS}
+              >
+                {body}
+              </button>
             );
           })}
         </div>
       )}
 
-      {/* Footer */}
-      <Separator />
-      <div className="p-2">
-        <Link
-          to="/runs"
-          onClick={onClose}
-          className="text-muted-foreground hover:text-foreground hover:bg-muted/50 flex items-center justify-center rounded-md py-2 text-xs font-medium transition-colors"
-        >
-          {t("notifications.viewAll")}
-        </Link>
-      </div>
+      {canReach("/runs") && (
+        <>
+          <Separator />
+          <div className="p-2">
+            <Link
+              to="/runs"
+              onClick={onClose}
+              className="text-muted-foreground hover:text-foreground hover:bg-muted/50 flex items-center justify-center rounded-md py-2 text-xs font-medium transition-colors"
+            >
+              {t("notifications.viewAll")}
+            </Link>
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -165,6 +196,7 @@ export function NotificationBell() {
   const markAllRead = useMarkAllRead();
   const [open, setOpen] = useState(false);
   const isMobile = useIsMobile();
+  const canReach = useCanReach();
   const unread = count ?? 0;
   const hasRunning = agents?.some((f) => f.running_runs > 0) ?? false;
 
@@ -202,6 +234,7 @@ export function NotificationBell() {
     unread,
     notifications: notificationItems,
     agentNameMap,
+    canReach,
     onItemClick: handleClick,
     onClose: () => setOpen(false),
     markAllRead: () => markAllRead.mutate({}),

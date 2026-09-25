@@ -38,6 +38,7 @@ function fakeDeps(respond: (req: Request) => Response): {
         return respond(req);
       },
       rateLimit: () => async (_c, next) => next(),
+      publicOrigin: "http://localhost:3000",
       resolveChatModel: async () => ({ subscription: false }),
       recordChatUsage: async () => {},
       checkUsageAllowed: async () => null,
@@ -136,14 +137,14 @@ describe("formatCallerContext", () => {
         org: { role: "member" },
         agents: [
           {
-            package_id: "@acme/mine",
+            packageId: "@acme/mine",
             display_name: "Mine",
             takes_input: false,
             published: false,
             home_writable: true,
           },
           {
-            package_id: "@acme/theirs",
+            packageId: "@acme/theirs",
             display_name: "Theirs",
             takes_input: false,
             published: false,
@@ -209,7 +210,7 @@ describe("formatCallerContext", () => {
       org: { role: "member" },
       agents: [
         {
-          package_id: "@acme/mine",
+          packageId: "@acme/mine",
           display_name: "Mine",
           takes_input: false,
           published: false,
@@ -241,7 +242,7 @@ describe("formatCallerContext", () => {
       org: { role: "member" },
       agents: [
         {
-          package_id: "@acme/mine",
+          packageId: "@acme/mine",
           display_name: "Mine",
           takes_input: false,
           published: false,
@@ -267,7 +268,7 @@ describe("formatCallerContext", () => {
   it("advertises no draft as runnable when the turn may not author agents", () => {
     // The turn's token then lacks `agents:write`, and a draft launch 403s.
     const draft = {
-      package_id: "@acme/mine",
+      packageId: "@acme/mine",
       display_name: "Mine",
       takes_input: false,
       published: false,
@@ -288,7 +289,7 @@ describe("formatCallerContext", () => {
     const raw = {
       user: { name: "Ada" },
       org: { role: "member" },
-      skills: [{ package_id: "@acme/research", display_name: "Research" }],
+      skills: [{ packageId: "@acme/research", display_name: "Research" }],
     };
     for (const permissions of [BUILDER, NO_AUTHORING]) {
       const out = formatCallerContext(raw, { ...BASE_OPTS, capabilities: caps(permissions) });
@@ -304,12 +305,12 @@ describe("formatCallerContext", () => {
         org: { role: "member" },
         requested_skills: [
           {
-            package_id: "@acme/zeta",
+            packageId: "@acme/zeta",
             display_name: "Zeta",
             description: "Last.",
             version: "1.0.0",
           },
-          { package_id: "@acme/mine", display_name: "Mine", description: "Pinned.", version: null },
+          { packageId: "@acme/mine", display_name: "Mine", description: "Pinned.", version: null },
         ],
       },
       {
@@ -328,10 +329,10 @@ describe("formatCallerContext", () => {
       {
         user: { name: "Ada" },
         org: { role: "member" },
-        requested_skills: [{ package_id: "@acme/mine", display_name: "Mine" }],
+        requested_skills: [{ packageId: "@acme/mine", display_name: "Mine" }],
         skills: [
-          { package_id: "@acme/mine", display_name: "Mine" },
-          { package_id: "@acme/pdf", display_name: "PDF", description: "Reads PDFs." },
+          { packageId: "@acme/mine", display_name: "Mine" },
+          { packageId: "@acme/pdf", display_name: "PDF", description: "Reads PDFs." },
         ],
         skills_truncated: true,
       },
@@ -353,7 +354,7 @@ describe("formatCallerContext", () => {
         user: { name: "Ada" },
         org: { role: "member" },
         requested_skills: [],
-        skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
+        skills: [{ packageId: "@acme/pdf", display_name: "PDF" }],
       },
       { ...BASE_OPTS, skills: { skillCatalogue: true, pinnedSkills: [] } },
     );
@@ -371,9 +372,9 @@ describe("formatCallerContext", () => {
         user: { name: "Ada" },
         org: { role: "member" },
         requested_skills: [
-          { package_id: "@acme/mine", display_name: "Mine", description: "Pinned." },
+          { packageId: "@acme/mine", display_name: "Mine", description: "Pinned." },
         ],
-        skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
+        skills: [{ packageId: "@acme/pdf", display_name: "PDF" }],
         skills_truncated: true,
       },
       { ...BASE_OPTS, skills: { skillCatalogue: false, pinnedSkills: ["@acme/mine"] } },
@@ -413,7 +414,7 @@ describe("formatCallerContext", () => {
         org: { role: "member" },
         agents: [
           {
-            package_id: "@acme/shipped",
+            packageId: "@acme/shipped",
             display_name: "Shipped",
             takes_input: true,
             published: true,
@@ -462,13 +463,13 @@ describe("formatCallerContext", () => {
         connections: [],
         agents: [
           {
-            package_id: "@appstrate/triage",
+            packageId: "@appstrate/triage",
             display_name: "Inbox Triage",
             description: "Sorts incoming email.",
             takes_input: false,
           },
           {
-            package_id: "@acme/report",
+            packageId: "@acme/report",
             display_name: "Report",
             description: "Builds a report.",
             takes_input: true,
@@ -494,7 +495,7 @@ describe("formatCallerContext", () => {
         user: { name: "Ada" },
         org: { role: "member" },
         connections: [],
-        agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+        agents: [{ packageId: "@appstrate/triage", takes_input: false }],
         agents_truncated: true,
       },
       BASE_OPTS,
@@ -507,7 +508,7 @@ describe("formatCallerContext", () => {
   it("renders a context block from agents alone (no identity/connections)", () => {
     const out = formatCallerContext(
       {
-        agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+        agents: [{ packageId: "@appstrate/triage", takes_input: false }],
       },
       BASE_OPTS,
     );
@@ -536,19 +537,19 @@ describe("formatCallerContext", () => {
         connections: [],
         skills: [
           {
-            package_id: "@appstrate/web-research",
+            packageId: "@appstrate/web-research",
             display_name: "Web Research",
             description: "Multi-source web search.",
             version: "1.2.0",
           },
           {
-            package_id: "@acme/pdf",
+            packageId: "@acme/pdf",
             display_name: "PDF",
             description: "Reads PDFs.",
             version: null,
           },
           // A display name that only repeats the id is not worth a second copy.
-          { package_id: "@acme/bare", display_name: "@acme/bare", description: "Bare." },
+          { packageId: "@acme/bare", display_name: "@acme/bare", description: "Bare." },
         ],
       },
       BASE_OPTS,
@@ -572,7 +573,7 @@ describe("formatCallerContext", () => {
         user: { name: "Ada" },
         org: { role: "member" },
         connections: [],
-        skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+        skills: [{ packageId: "@appstrate/web-research", version: "1.2.0" }],
         skills_truncated: true,
       },
       BASE_OPTS,
@@ -588,7 +589,7 @@ describe("formatCallerContext", () => {
   it("renders a context block from skills alone (no identity/connections/agents)", () => {
     const out = formatCallerContext(
       {
-        skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+        skills: [{ packageId: "@appstrate/web-research", version: "1.2.0" }],
       },
       BASE_OPTS,
     );
@@ -640,13 +641,13 @@ describe("formatCallerContext", () => {
         org: { role: "member" },
         recent_runs: [
           {
-            package_id: "@appstrate/triage",
+            packageId: "@appstrate/triage",
             status: "failed",
-            run_number: 7,
+            runNumber: 7,
             started_at: "2026-06-25T09:00:00.000Z",
             error: "Gmail token expired",
           },
-          { package_id: "@acme/report", status: "success", run_number: 6 },
+          { packageId: "@acme/report", status: "success", runNumber: 6 },
         ],
       },
       BASE_OPTS,
@@ -666,7 +667,7 @@ describe("formatCallerContext", () => {
     expect(
       formatCallerContext(
         {
-          recent_runs: [{ package_id: "@acme/report", status: "success", run_number: 1 }],
+          recent_runs: [{ packageId: "@acme/report", status: "success", runNumber: 1 }],
         },
         BASE_OPTS,
       ),
@@ -681,11 +682,11 @@ describe("formatCallerContext", () => {
       user: { name: "Ada" },
       org: { role: "member" },
       requested_skills: [
-        { package_id: "@acme/zeta", display_name: "Zeta", version: "1.0.0" },
-        { package_id: "@acme/beta", display_name: "Beta", version: "1.0.0" },
-        { package_id: "@acme/mine", display_name: "Mine" },
+        { packageId: "@acme/zeta", display_name: "Zeta", version: "1.0.0" },
+        { packageId: "@acme/beta", display_name: "Beta", version: "1.0.0" },
+        { packageId: "@acme/mine", display_name: "Mine" },
       ],
-      skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
+      skills: [{ packageId: "@acme/pdf", display_name: "PDF" }],
     };
     const opts = {
       ...BASE_OPTS,
@@ -720,8 +721,8 @@ describe("formatCallerContext", () => {
       user: { name: "Ada", email: "ada@acme.com" },
       org: { role: "member", name: "Acme", slug: "acme" },
       connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
-      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
-      skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+      agents: [{ packageId: "@appstrate/triage", takes_input: false }],
+      skills: [{ packageId: "@appstrate/web-research", version: "1.2.0" }],
     };
     const at = new Date("2026-06-25T09:05:00.000Z");
     const later = new Date("2026-06-25T09:50:00.000Z");
@@ -754,7 +755,7 @@ describe("buildCallerContextBlock", () => {
       user: { name: "Ada", email: "ada@acme.com" },
       org: { role: "member", name: "Acme", slug: "acme" },
       connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
-      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+      agents: [{ packageId: "@appstrate/triage", takes_input: false }],
     };
     const { deps, lastRequest } = fakeDeps(() => Response.json(payload));
     const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
@@ -805,7 +806,7 @@ describe("buildCallerContextBlock", () => {
     const payload = {
       user: { name: "Ada", email: "ada@acme.com" },
       org: { role: "member" },
-      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+      agents: [{ packageId: "@appstrate/triage", takes_input: false }],
     };
     const { deps } = fakeDeps(() => Response.json(payload));
     const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
@@ -829,7 +830,7 @@ describe("buildCallerContextBlock", () => {
       org: { role: "member" },
       agents: [
         {
-          package_id: "@acme/mine",
+          packageId: "@acme/mine",
           display_name: "Mine",
           takes_input: false,
           published: false,

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono, type Context } from "hono";
-import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
 import { recordProcessAnomaly } from "@appstrate/core/telemetry";
@@ -19,7 +18,6 @@ import { createRunsRouter } from "./routes/runs.ts";
 import { createRunsRemoteRouter } from "./routes/runs-remote.ts";
 import { createRunsEventsRouter } from "./routes/runs-events.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
-import { createUserAgentsRouter } from "./routes/user-agents.ts";
 import { createApiKeysRouter } from "./routes/api-keys.ts";
 import { createProxiesRouter } from "./routes/proxies.ts";
 import { createModelsRouter } from "./routes/models.ts";
@@ -40,7 +38,8 @@ import { staticCacheControl } from "./lib/static-cache.ts";
 import healthRouter, { bootGate, markServerReady } from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
-import { createLlmProxyRouter } from "./routes/llm-proxy.ts";
+import { createLlmProxyRouter, createRunLlmProxyRouter } from "./routes/llm-proxy.ts";
+import { LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT } from "@appstrate/runner-pi";
 import { createLibraryRouter } from "./routes/library.ts";
 import { createAuthBootstrapRouter } from "./routes/auth-bootstrap.ts";
 import orgsRouter from "./routes/organizations.ts";
@@ -65,6 +64,7 @@ import { getCachedOrgApiVersion } from "./services/organizations.ts";
 import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
 import { applyAuthPipeline, skipAuth } from "./lib/auth-pipeline.ts";
 import type { AppEnv } from "./types/index.ts";
+import { apiCors } from "./lib/cors.ts";
 
 // Fail-fast: validate all env vars at startup
 const env = getEnv();
@@ -93,7 +93,7 @@ app.use("*", clientIp());
 // Middleware
 const trustedOrigins = env.TRUSTED_ORIGINS;
 
-app.use("*", cors({ origin: trustedOrigins, credentials: true }));
+app.use("*", apiCors(trustedOrigins));
 
 // Global body-size cap. Skipped for the public FS upload sink — that route
 // authenticates via a signed token whose payload encodes its own size limit
@@ -106,6 +106,9 @@ const globalBodyLimit = bodyLimit(env.API_BODY_LIMIT_BYTES);
 const RUN_FILE_UPLOAD_PATH = /^\/api\/runs\/[^/]+\/files$/;
 app.use("*", async (c, next) => {
   if (c.req.path === "/api/uploads/_content") return next();
+  // A run's own inference is capped by `LLM_PROXY_LIMITS.max_request_bytes`
+  // on its router, so one knob sizes it.
+  if (c.req.path.startsWith(`${RUN_LLM_PROXY_MOUNT}/`)) return next();
   if (c.req.method === "POST" && RUN_FILE_UPLOAD_PATH.test(c.req.path)) return next();
   return globalBodyLimit(c, next);
 });
@@ -171,6 +174,7 @@ let shuttingDown = false;
 // arriving mid-shutdown would otherwise slip past the gate and race the
 // in-flight wait, leaving a half-applied write behind.
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const SHUTDOWN_RETRY_AFTER_SECONDS = 5;
 
 app.use("*", async (c, next) => {
   if (shuttingDown && MUTATING_METHODS.has(c.req.method)) {
@@ -179,6 +183,9 @@ app.use("*", async (c, next) => {
       code: "shutting_down",
       title: "Service Unavailable",
       detail: "Server is shutting down",
+      // Short on purpose: behind a load balancer the retry lands on a live
+      // replica (or this one's successor) within seconds, not after the drain.
+      retryAfter: SHUTDOWN_RETRY_AFTER_SECONDS,
     });
   }
   return next();
@@ -317,7 +324,6 @@ process.on("uncaughtException", (err, origin) => {
 });
 
 // Routes
-const userAgentsRouter = createUserAgentsRouter();
 const agentsRouter = createAgentsRouter();
 const runsRouter = createRunsRouter();
 const schedulesRouter = createSchedulesRouter();
@@ -336,7 +342,6 @@ app.route("/api/orgs", orgsRouter);
 // inside org (or space) context.
 app.route("/api/me", meRouter);
 
-app.route("/api/agents", userAgentsRouter); // Must be before agentsRouter (import/delete routes)
 app.route("/api/agents", agentsRouter);
 app.route("/api", createNotificationsRouter());
 // Unified-runner event ingestion — HMAC-authenticated, no user principal.
@@ -368,7 +373,7 @@ app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
 app.route("/api/integrations", createIntegrationsRouter());
 app.route("/api/credential-proxy", createCredentialProxyRouter());
-app.route("/api/llm-proxy", createLlmProxyRouter());
+app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
 
 // Public invitation routes (no auth required — path doesn't start with /api/ or /auth/)
 app.route("/invite", invitationsRouter);
@@ -379,6 +384,8 @@ app.route("/api", welcomeRouter);
 // Internal routes (container-to-host, auth via run token — no JWT)
 const internalRouter = createInternalRouter();
 app.route("/internal", internalRouter);
+// A platform run's own inference, metered by the llm-proxy (auth via run token).
+app.route(RUN_LLM_PROXY_MOUNT, createRunLlmProxyRouter());
 
 // Module routes — mounted at root. Modules declare full paths (typically
 // `/api/<name>/*` for business endpoints, plus `/.well-known/*` for any

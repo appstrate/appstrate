@@ -45,6 +45,8 @@ export interface ChatPlatformDeps {
   dispatch(request: Request): Promise<Response>;
   /** Platform per-route rate limiter factory. */
   rateLimit(maxPerMinute: number): MiddlewareHandler;
+  /** Public origin (`APP_URL`) that pagination `Link` headers are rooted on. */
+  publicOrigin: string;
   /**
    * Resolve the chosen model row (`presetId`) for a chat turn: an API-key /
    * unknown provider yields `{ subscription: false }` (llm-proxy-bound); an oauth2
@@ -115,6 +117,7 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
   return {
     dispatch: (request) => (inProcess ? inProcess.dispatch(request) : fetch(request)),
     rateLimit: (maxPerMinute) => ctx.services.http.rateLimit(maxPerMinute),
+    publicOrigin: ctx.appUrl,
     resolveChatModel: (orgId, presetId) => ctx.services.resolveChatModel(orgId, presetId),
     recordChatUsage: (record) => ctx.services.recordChatUsage(record),
     resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),

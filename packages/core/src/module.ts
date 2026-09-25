@@ -24,7 +24,7 @@ import type {
   ChatModelResolution,
 } from "./chat-contract.ts";
 import type { OrchestratorRegistration } from "./platform-types.ts";
-import type { ModelGenerationCapabilitiesOverride } from "./model-generation.ts";
+import type { TerminalRunStatus } from "./run-status.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -141,7 +141,7 @@ export interface AppstrateModule {
   /**
    * Custom authentication strategies contributed by this module.
    *
-   * Strategies are tried in module load order, BEFORE core auth (Bearer ask_
+   * Strategies are tried in module load order, BEFORE core auth (Bearer apst_
    * API key → session cookie). The first strategy whose `authenticate()` returns
    * a non-null `AuthResolution` claims the request; subsequent strategies and
    * core auth are skipped.
@@ -270,6 +270,9 @@ export interface AppstrateModule {
    *   - `presets` is upward-closed: naming a preset also names every preset
    *     that already grants a superset of it. `runner` and `viewer` are
    *     incomparable, so neither implies the other.
+   *   - a preset granted an action on a space resource that has a `read`
+   *     action is granted that `read` too — the rule custom space roles
+   *     follow (RBAC spec §3.3).
    *
    * No-op on platforms that don't load this module — neither the type
    * augmentation nor the runtime grants reach core, preserving the
@@ -576,7 +579,27 @@ export interface ModelCost {
   cacheRead?: number;
   /** USD per 1M cache-write tokens (Anthropic-style prompt caching). */
   cacheWrite?: number;
+  /** Request-wide price tiers: the highest threshold the request's input exceeds prices all of it. */
+  tiers?: ModelCostTier[];
 }
+
+/** A {@link ModelCost} tier — Pi's registry shape, every rate explicit. */
+export interface ModelCostTier {
+  /** Applies when input + cache-read + cache-write tokens exceed this count. */
+  inputTokensAbove: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+const modelCostTierSchema = z.object({
+  inputTokensAbove: z.number().positive(),
+  input: z.number().nonnegative(),
+  output: z.number().nonnegative(),
+  cacheRead: z.number().nonnegative(),
+  cacheWrite: z.number().nonnegative(),
+});
 
 /**
  * Zod validator for {@link ModelCost}. `cacheRead` / `cacheWrite` are optional —
@@ -587,7 +610,15 @@ export const modelCostSchema = z.object({
   output: z.number().nonnegative(),
   cacheRead: z.number().nonnegative().optional(),
   cacheWrite: z.number().nonnegative().optional(),
+  tiers: z.array(modelCostTierSchema).optional(),
 });
+
+/** Input modalities a model can declare — exactly what the Pi runtime accepts. */
+export const MODEL_INPUT_MODALITIES = ["text", "image"] as const;
+
+export const modelInputModalitySchema = z.enum(MODEL_INPUT_MODALITIES);
+
+export type ModelInputModality = z.infer<typeof modelInputModalitySchema>;
 
 /** OAuth2 endpoints + client config for OAuth-authenticated providers. */
 export interface ModelProviderOAuthConfig {
@@ -731,60 +762,6 @@ export interface ModelProviderHooks {
 }
 
 /**
- * Declarative model-list selector resolved against the platform's vendored
- * pricing catalog instead of being hand-enumerated.
- *
- * Why this exists: a hand-curated id list is a snapshot that rots silently.
- * The subscription providers (`claude-code`, `codex`) cannot probe their
- * upstream to enumerate models — `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`
- * forbids ANY platform-side API call for that — so their lists used to be
- * frozen prose that fell behind the catalog by whole model generations. A
- * selector re-derives the list from the catalog on every read, so the weekly
- * catalog refresh carries new generations through automatically.
- *
- * Resolution lives entirely platform-side (`apps/api/src/services/
- * model-providers/model-selection.ts`) — this type is only the declaration.
- *
- * Deliberately two knobs and no more. Anything that cannot be said with
- * `catalogFamilies` × `generations` — an exclusion, a hard cap, a hand-picked
- * ordering — is a sign the served set is NOT "the vendor's current
- * generations", and the honest declaration for that is an explicit array
- * (see {@link ModelIdSelection}), which carries its own reviewability.
- */
-export interface CatalogModelSelector {
-  /**
-   * Catalog id prefixes, in priority order (e.g. `"claude-opus"`). A catalog
-   * id belongs to the family when it reads `<family>-<version>` with a purely
-   * numeric version, dashed or dotted (`claude-opus-4-8`, `claude-opus-5`).
-   * A qualifier suffix disqualifies it (`claude-opus-5-thinking` is a variant
-   * of a generation, not a generation), and so do dated aliases
-   * (`claude-opus-4-20250514`) — they duplicate a canonical id under a
-   * snapshot name.
-   */
-  readonly catalogFamilies: readonly string[];
-  /**
-   * How many generations to keep per family, newest first. The resolved list
-   * interleaves families by generation index (newest of every family, then
-   * every second-newest), so its head is one current model per family.
-   */
-  readonly generations: number;
-}
-
-/**
- * Either an explicit id list or a {@link CatalogModelSelector}. An explicit
- * array stays the right answer whenever the set is defined by something the
- * catalog does not model (e.g. the Codex ChatGPT sign-in set, which is
- * defined by OpenAI documentation and deliberately narrower than the OpenAI
- * API catalog).
- */
-export type ModelIdSelection = readonly string[] | CatalogModelSelector;
-
-/** Narrow a {@link ModelIdSelection} to its selector arm. */
-export function isCatalogModelSelector(value: ModelIdSelection): value is CatalogModelSelector {
-  return !Array.isArray(value);
-}
-
-/**
  * A model provider Appstrate knows how to talk to.
  *
  * Aggregated by the platform from every loaded module's
@@ -830,80 +807,30 @@ export interface ModelProviderDefinition {
 
   // — Catalog —
   /**
-   * Catalog key used to look up per-model metadata (`label`,
-   * `contextWindow`, `maxTokens`, `capabilities`, `cost`). Defaults to
-   * `providerId` when omitted — set this when an OAuth-flavoured
-   * provider reuses an underlying API catalog (e.g. `codex` →
-   * `"openai"`, `claude-code` → `"anthropic"`).
+   * Pi builtin provider key (defaults to `providerId`). The provider's OFFER is
+   * that Pi provider's records served over {@link apiShape}; a definition
+   * naming no Pi provider (a user-described gateway) offers nothing and takes
+   * any model id.
    */
   catalogProviderId?: string;
 
   /**
-   * Provider-transport restrictions applied after catalog lookup. Use this
-   * when a wrapper reuses vendor metadata but its execution backend is
-   * stricter (for example, ChatGPT Codex vs the OpenAI API).
+   * Model ids surfaced in the picker's "Featured" section AND auto-seeded in
+   * `org_models` on first connection. Every id MUST be in the provider's offer
+   * — boot fails loudly otherwise. Empty when the provider features nothing.
    */
-  generationOverride?: ModelGenerationCapabilitiesOverride;
+  featuredModels: readonly string[];
 
   /**
-   * Catalog model ids to surface in the picker's "Featured" section AND
-   * auto-seed in `org_models` on first connection. Every id MUST exist
-   * in the resolved catalog (`catalogProviderId ?? providerId`) — boot
-   * fails loudly otherwise. For providers whose catalog covers the
-   * whole product (openai/anthropic/mistral/google-ai/cerebras/groq/
-   * xai), the picker also exposes every other catalog model under
-   * "All models". For providers backed by a foreign catalog
-   * (`catalogProviderId` set), the picker shows ONLY these ids — the
-   * underlying API has more models than the OAuth product actually
-   * exposes. Empty for openrouter (live-search) and openai-compatible
-   * (Custom only).
-   *
-   * Accepts either an explicit id array or a {@link CatalogModelSelector}
-   * derived from the catalog at read time. A selector is the right choice
-   * when the product tracks the vendor's current generation (`claude-code`);
-   * an array is right when the served set is defined outside the catalog
-   * (`codex` — the ChatGPT sign-in set is narrower than the OpenAI API
-   * catalog). Either way the boot check applies to the RESOLVED ids.
-   */
-  featuredModels: ModelIdSelection;
-
-  /**
-   * Candidate model ids for discovery — the source list for whichever
-   * {@link modelDiscovery} strategy applies. For the default (probe) strategy
-   * the platform probes each one against the connected credential (1-token
-   * inference request) and persists the ids that respond 2xx; for the static
-   * strategy it serves these directly (∩ catalog), resolved on read and never
-   * persisted. Unlike
-   * {@link featuredModels}, ids here do NOT have to exist in the resolved
-   * catalog. When omitted, the platform uses `featuredModels`. Irrelevant for
-   * api_key providers whose full catalog is exposed.
-   *
-   * Same {@link ModelIdSelection} duality as {@link featuredModels}: a
-   * {@link CatalogModelSelector} typically declares more `generations` here
-   * than in the featured list, so a plan still serving a previous generation
-   * keeps it selectable.
-   */
-  modelDiscoveryCandidates?: ModelIdSelection;
-
-  /**
-   * Model-discovery strategy. When omitted, discovery is **empirical** (probe):
-   * the platform issues a 1-token inference request per candidate and persists
-   * the ids that respond 2xx as the credential's `availableModelIds`.
+   * Model-discovery strategy. When omitted, the platform may enumerate the
+   * endpoint (`GET <baseUrl>/models`) on an operator's request.
    *
    * `{ mode: "static" }` declares that the platform must issue ZERO API calls to
-   * discover models: the served set is {@link modelDiscoveryCandidates}
-   * (∩ catalog), WITHOUT per-model live probing. Set by subscription providers
+   * discover models: the served set is the provider's offer, WITHOUT per-model
+   * live probing. Set by subscription providers
    * (`claude-code`, `codex`) so a user's subscription token is never spent
    * enumerating models — real per-model availability is validated at the
-   * first agent run (on the Pi engine).
-   *
-   * Nothing is written to `availableModelIds` under this mode. With no probe,
-   * the answer is a pure function of (definition, catalog) and therefore
-   * identical for every credential of the provider; a persisted copy would
-   * carry no per-credential information and could only go stale — which is
-   * exactly how users kept being offered a model list two generations old.
-   * The platform resolves it on read instead, so a catalog refresh corrects
-   * every existing credential at once.
+   * first agent run (on the Pi engine). Required of every `oauth2` provider.
    *
    * Offline credential VALIDATION (no upstream probe to test a token) is a
    * separate, orthogonal concern inferred from the PRESENCE of
@@ -911,6 +838,13 @@ export interface ModelProviderDefinition {
    * field.
    */
   modelDiscovery?: { mode: "static" };
+
+  /**
+   * `GET <baseUrl>/models` answers any key, so the key is checked by one minimal
+   * chat completion on the first offered model the listing serves
+   * (`openai-completions` only).
+   */
+  publicModelListing?: boolean;
 
   // — Behavior —
   /** Provider-scoped hooks (identity extraction, placeholder, offline validation). */
@@ -1219,7 +1153,7 @@ export interface RunStatusChangeParams {
    */
   packageId: string | null;
   spaceId: string;
-  status: "started" | "success" | "failed" | "timeout" | "cancelled";
+  status: "started" | TerminalRunStatus;
   /** Cost in dollars (only on terminal status). */
   cost?: number;
   /** Duration in ms (only on terminal status). */
@@ -1389,6 +1323,12 @@ export interface LlmUsageLedgerRow {
    */
   settled: boolean;
 }
+
+/**
+ * Audit `before` / `after` payload with camelCase top-level keys (CASING_CONVENTIONS 4m):
+ * a raw snake_case body, or a `Record<string, unknown>` that could hide one, does not compile.
+ */
+export type AuditPayload = { [key: string]: unknown; [key: `${string}_${string}`]: never };
 
 export interface PlatformServices {
   /**
@@ -1598,4 +1538,21 @@ export interface PlatformServices {
    * 400 for a negative / non-integer `bytes`.
    */
   setFileStorageLimit(orgId: string, bytes: number | null): Promise<void>;
+  /**
+   * Append one `audit_events` row for a module route's state change; org, space,
+   * actor and request metadata come from `c`. `action` e.g. `billing.plan_changed`;
+   * `before` / `after` use camelCase keys, never a secret. Best-effort (never throws).
+   */
+  audit: {
+    record(
+      c: Context,
+      entry: {
+        action: string;
+        resourceType: string;
+        resourceId?: string | null;
+        before?: AuditPayload | null;
+        after?: AuditPayload | null;
+      },
+    ): Promise<void>;
+  };
 }

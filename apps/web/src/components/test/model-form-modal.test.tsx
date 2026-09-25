@@ -31,6 +31,7 @@ import type {
   ProviderRegistryEntry,
 } from "../../hooks/use-model-provider-credentials.ts";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
+import { UNKNOWN_MODEL_GENERATION_CAPABILITIES } from "@appstrate/core/model-generation";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -56,6 +57,7 @@ const OPENAI_COMPATIBLE: ProviderRegistryEntry = {
   baseUrlOverridable: true,
   authMode: "api_key",
   featured: false,
+  live_model_search: false,
   models: [],
 };
 
@@ -67,6 +69,7 @@ const SONNET = {
   contextWindow: 200000,
   maxTokens: 64000,
   capabilities: ["text", "image", "reasoning"],
+  generation: UNKNOWN_MODEL_GENERATION_CAPABILITIES,
   cost: { input: 3, output: 15 },
 };
 
@@ -81,6 +84,7 @@ const ANTHROPIC: ProviderRegistryEntry = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
+  live_model_search: false,
   models: [SONNET],
 };
 
@@ -98,8 +102,9 @@ function model(overrides: Partial<OrgModelInfo>): OrgModelInfo {
     label: "Local Qwen",
     apiShape: "openai-completions",
     providerId: "openai-compatible",
-    providerName: "OpenAI-compatible (custom)",
-    baseUrl: "http://localhost:11434/v1",
+    provider_name: "OpenAI-compatible (custom)",
+    pi_provider: null,
+    base_url: "http://localhost:11434/v1",
     modelId: "qwen3:8b",
     generation: null,
     enabled: true,
@@ -122,8 +127,9 @@ function catalogued(overrides: Partial<OrgModelInfo> = {}): OrgModelInfo {
     label: "Claude Sonnet 4.5",
     apiShape: "anthropic-messages",
     providerId: "anthropic",
-    providerName: "Anthropic",
-    baseUrl: "https://api.anthropic.com",
+    provider_name: "Anthropic",
+    pi_provider: "anthropic",
+    base_url: "https://api.anthropic.com",
     modelId: SONNET.id,
     credentialId: "cred_ant",
     input: ["text", "image"],
@@ -140,7 +146,7 @@ const LOCAL_KEY: ModelProviderCredentialInfo = {
   id: "cred_1",
   label: "localhost:11434 · OpenAI-compatible",
   apiShape: "openai-completions",
-  baseUrl: "http://localhost:11434/v1",
+  base_url: "http://localhost:11434/v1",
   providerId: "openai-compatible",
   source: "custom",
   authMode: "api_key",
@@ -154,7 +160,7 @@ const REMOTE_KEY: ModelProviderCredentialInfo = {
   ...LOCAL_KEY,
   id: "cred_2",
   label: "vllm.internal · OpenAI-compatible",
-  baseUrl: "https://vllm.internal/v1",
+  base_url: "https://vllm.internal/v1",
 };
 
 /** A pinned provider matches its keys on the endpoint, not on the provider id. */
@@ -163,7 +169,7 @@ const ANTHROPIC_KEY: ModelProviderCredentialInfo = {
   id: "cred_ant",
   label: "Anthropic",
   apiShape: "anthropic-messages",
-  baseUrl: "https://api.anthropic.com",
+  base_url: "https://api.anthropic.com",
   providerId: "anthropic",
 };
 
@@ -236,7 +242,7 @@ describe("ModelFormBody — editing a custom endpoint", () => {
   it("opens on the model the row already names, editable and free-text", () => {
     expect(html).toContain('id="mdl-modelId"');
     expect(html).toContain('id="mdl-label"');
-    // The name is required on a saved row: PUT reads an absent one as "keep",
+    // The name is required on a saved row: PATCH reads an absent one as "keep",
     // so promising a derived one would describe a save that changes nothing.
     expect(html).not.toContain(settingsFr["models.form.labelPlaceholder"]);
   });
@@ -333,7 +339,7 @@ describe("ModelFormBody — editing a catalogued row that overrides nothing", ()
   it("leaves the capabilities toggle off, because the row equals its catalog entry", () => {
     // `GET /api/models` resolves these from the catalog, so reading "carries a
     // number" as "overrides" would freeze the catalog's own values on the next
-    // save and stop the weekly refresh reaching the row.
+    // save and stop a catalog update (a Pi bump) reaching the row.
     expect(checkedState(html, "mdl-capabilities-explicit")).toBe("false");
     expect(html).toContain(settingsFr["models.form.capabilitiesAuto"]);
     expect(html).not.toContain('id="mdl-ctx"');
@@ -352,7 +358,11 @@ describe("ModelFormBody — editing a catalogued row that does override it", () 
 
 describe("ModelFormBody — editing a subscription row", () => {
   const html = form(
-    catalogued({ providerId: "claude-code", providerName: "Claude Code", credentialId: "cred_cc" }),
+    catalogued({
+      providerId: "claude-code",
+      provider_name: "Claude Code",
+      credentialId: "cred_cc",
+    }),
     [CONNECTION],
   );
 
@@ -376,7 +386,7 @@ describe("ModelFormBody — editing a subscription row", () => {
 });
 
 describe("ModelFormBody — editing a row whose provider left the registry", () => {
-  const html = form(model({ providerId: "gone", providerName: "Gone" }), [LOCAL_KEY]);
+  const html = form(model({ providerId: "gone", provider_name: "Gone" }), [LOCAL_KEY]);
 
   it("says so, instead of an empty form whose Save reports nothing", () => {
     // Nothing describes the endpoint and no credential can be matched to it, so

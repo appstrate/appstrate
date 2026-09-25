@@ -164,27 +164,17 @@ describe("waitForHttp", () => {
 });
 
 describe("isPortAvailable", () => {
-  it("returns true for a free ephemeral port", async () => {
-    // `listen(0)` → OS picks any free port. We grab one, close it, and
-    // probe the same port number. The race window (another process
-    // grabbing the just-released port before we probe) is negligible on
-    // loopback-only test machines — and if it flakes we'd see it across
-    // the suite, not as a one-off.
-    const port = await pickEphemeralPort();
+  it("flips from false to true once the holder releases the port", async () => {
+    // A port cannot be both reserved and free, so `true` is asserted on
+    // release; the close → probe window is the one accepted race (#1563).
+    const { holder, port } = await holdEphemeralPort();
+    expect(await isPortAvailable(port)).toBe(false);
+    await closeServer(holder);
     expect(await isPortAvailable(port)).toBe(true);
   });
 
   it("returns false when a listener already holds the port", async () => {
-    const holder = createServer();
-    holder.unref();
-    const port = await new Promise<number>((resolve, reject) => {
-      holder.once("error", reject);
-      holder.listen(0, "0.0.0.0", () => {
-        const addr = holder.address();
-        if (addr && typeof addr === "object") resolve(addr.port);
-        else reject(new Error("no port"));
-      });
-    });
+    const { holder, port } = await holdEphemeralPort();
     try {
       expect(await isPortAvailable(port)).toBe(false);
     } finally {
@@ -208,16 +198,7 @@ describe("describeProcessOnPort", () => {
     // `null` is the documented contract and the test passes trivially.
     if (!commandExists("lsof") && !commandExists("ss")) return;
 
-    const holder = createServer();
-    holder.unref();
-    const port = await new Promise<number>((resolve, reject) => {
-      holder.once("error", reject);
-      holder.listen(0, "0.0.0.0", () => {
-        const addr = holder.address();
-        if (addr && typeof addr === "object") resolve(addr.port);
-        else reject(new Error("no port"));
-      });
-    });
+    const { holder, port } = await holdEphemeralPort();
     try {
       const hint = await describeProcessOnPort(port);
       // `null` is an acceptable outcome on hosts where lsof requires
@@ -229,9 +210,9 @@ describe("describeProcessOnPort", () => {
   });
 
   it("returns null for a port nobody is holding", async () => {
-    // Pick an ephemeral port + immediately close it → nobody listens.
-    const port = await pickEphemeralPort();
-    const hint = await describeProcessOnPort(port);
+    // Port 1 sits below every ephemeral range, so no `listen(0)` in a
+    // concurrent test can take it (same choice as #1557).
+    const hint = await describeProcessOnPort(1);
     expect(hint).toBeNull();
   });
 });
@@ -338,19 +319,18 @@ describe("detectLanIpv4", () => {
   });
 });
 
-async function pickEphemeralPort(): Promise<number> {
-  const srv = createServer();
-  srv.unref();
+async function holdEphemeralPort(): Promise<{ holder: Server; port: number }> {
+  const holder = createServer();
+  holder.unref();
   const port = await new Promise<number>((resolve, reject) => {
-    srv.once("error", reject);
-    srv.listen(0, "0.0.0.0", () => {
-      const addr = srv.address();
+    holder.once("error", reject);
+    holder.listen(0, "0.0.0.0", () => {
+      const addr = holder.address();
       if (addr && typeof addr === "object") resolve(addr.port);
       else reject(new Error("no port"));
     });
   });
-  await closeServer(srv);
-  return port;
+  return { holder, port };
 }
 
 function closeServer(srv: Server): Promise<void> {

@@ -87,15 +87,28 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "List chat sessions",
       description:
-        "List the caller's chat sessions in the current organization (most recent first).",
+        "List the caller's chat sessions in the current space, most recent activity (`updatedAt`) first. Keyset-paginated: when `hasMore` is `true`, pass the last session's `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel=\"next\"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        {
+          name: "limit",
+          in: "query",
+          description: "Page size. Out-of-range or non-numeric values fall back to 100.",
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 100 },
+        },
+        {
+          name: "startingAfter",
+          in: "query",
+          description:
+            "Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's sessions in this space is a 400.",
+          schema: { type: "string" },
+        },
       ],
       responses: {
         "200": {
-          description: "Sessions list",
-          headers: stdHeaders,
+          description: "Sessions page",
+          headers: { ...stdHeaders, Link: { $ref: "#/components/headers/Link" } },
           content: {
             "application/json": {
               schema: {
@@ -104,12 +117,16 @@ export const chatPaths = {
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: { type: "array", items: { $ref: "#/components/schemas/ChatSession" } },
-                  hasMore: { type: "boolean" },
+                  hasMore: {
+                    type: "boolean",
+                    description: "True when older sessions follow this page.",
+                  },
                 },
               },
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
@@ -360,6 +377,7 @@ export const chatPaths = {
                 },
                 id: { type: "string", description: "Session id (the assistant-ui thread id)" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -370,10 +388,9 @@ export const chatPaths = {
           headers: stdHeaders,
           content: { "text/event-stream": { schema: { type: "string" } } },
         },
-        "400": { description: "No enabled model configured, or invalid body" },
-        "401": {
+        "400": {
           description:
-            'The selected model\'s subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json with `code: "needs_reconnection"`.',
+            "No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, or a last message whose JSON exceeds 256 KB.",
         },
         "402": {
           description:
@@ -383,9 +400,13 @@ export const chatPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. RFC 9457 problem+json.",
+            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json.",
         },
-        "429": { description: "Rate limited (20/min per caller)" },
+        "429": {
+          $ref: "#/components/responses/RateLimited",
+          description:
+            "Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`.",
+        },
       },
     },
   },

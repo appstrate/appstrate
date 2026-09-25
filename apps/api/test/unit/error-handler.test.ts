@@ -45,8 +45,9 @@ describe("errorHandler middleware", () => {
     expect(body.detail).toBe("Missing name field");
     expect(body.code).toBe("invalid_request");
     expect(body.param).toBe("name");
-    expect(typeof body.requestId).toBe("string");
-    expect((body.requestId as string).startsWith("req_")).toBe(true);
+    expect(typeof body.request_id).toBe("string");
+    expect((body.request_id as string).startsWith("req_")).toBe(true);
+    expect(body).not.toHaveProperty("requestId");
     expect((body.instance as string).startsWith("urn:appstrate:request:req_")).toBe(true);
   });
 
@@ -228,7 +229,7 @@ describe("errorHandler middleware", () => {
     expect(body.code).toBe("token_invalid");
   });
 
-  it("retryAfter field included when set", async () => {
+  it("retry_after member included when set", async () => {
     const app = createApp();
     app.get("/test", () => {
       throw new ApiError({
@@ -242,8 +243,37 @@ describe("errorHandler middleware", () => {
 
     const res = await app.request("/test");
     expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
     const body = (await res.json()) as any;
-    expect(body.retryAfter).toBe(30);
+    expect(body.retry_after).toBe(30);
+    expect(body).not.toHaveProperty("retryAfter");
+  });
+
+  it("emits Retry-After from retryAfter on any status, not only 429", async () => {
+    const app = createApp();
+    app.get("/test", () => {
+      throw new ApiError({
+        status: 503,
+        code: "shutting_down",
+        title: "Service Unavailable",
+        detail: "Server is shutting down",
+        retryAfter: 5,
+      });
+    });
+
+    const res = await app.request("/test");
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("5");
+  });
+
+  it("emits no Retry-After when retryAfter is unset", async () => {
+    const app = createApp();
+    app.get("/test", () => {
+      throw conflict("some_conflict", "Conflict.");
+    });
+
+    const res = await app.request("/test");
+    expect(res.headers.get("Retry-After")).toBeNull();
   });
 
   it("merges custom headers from ApiError into response", async () => {
@@ -330,7 +360,7 @@ describe("errorHandler middleware", () => {
     );
   });
 
-  it("requestId in body matches Request-Id header", async () => {
+  it("request_id in body matches Request-Id header", async () => {
     const app = createApp();
     app.get("/test", () => {
       throw invalidRequest("test");
@@ -339,7 +369,7 @@ describe("errorHandler middleware", () => {
     const res = await app.request("/test");
     const header = res.headers.get("Request-Id");
     const body = (await res.json()) as any;
-    expect(body.requestId).toBe(header);
+    expect(body.request_id).toBe(header);
   });
 });
 

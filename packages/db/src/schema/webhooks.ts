@@ -90,7 +90,8 @@ export const webhookDeliveries = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    index("idx_webhook_deliveries_webhook_id").on(table.webhookId),
+    // Delivery-history keyset; the leading column also serves the FK cascade.
+    index("idx_webhook_deliveries_webhook_created").on(table.webhookId, table.createdAt, table.id),
     // Closed vocabulary (migration 0051). One worker writes all three values;
     // the reader used to cast (`row.status as …`) rather than check.
     check("webhook_deliveries_status_valid", sql`status IN ('pending', 'success', 'failed')`),

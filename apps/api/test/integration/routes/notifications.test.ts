@@ -10,7 +10,8 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedEndUser, seedSpace } from "../../helpers/seed.ts";
+import { seedAgent, seedApiKey, seedRun, seedEndUser, seedSpace } from "../../helpers/seed.ts";
+import { walkLinkPages } from "../../helpers/pagination.ts";
 import {
   createRunNotifications,
   markNotificationReadByRun,
@@ -28,10 +29,10 @@ const app = getTestApp();
 interface NotificationDto {
   id: string;
   type: string;
-  run_id: string | null;
-  payload: { agent_id?: string; status?: string } | null;
+  runId: string | null;
+  payload: { packageId?: string; status?: string } | null;
   read_at: string | null;
-  created_at: string;
+  createdAt: string;
 }
 
 describe("Notifications API (per-recipient, issue #667)", () => {
@@ -137,7 +138,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
 
       const data = await listNotifications(authHeaders(ctx));
       expect(data).toHaveLength(1);
-      expect(data[0]!.run_id).toBe(run.id);
+      expect(data[0]!.runId).toBe(run.id);
       expect(data[0]!.payload?.status).toBe("failed");
     });
 
@@ -215,7 +216,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       // Exactly one notification, carrying the run's status, for the actor.
       const data = await listNotifications(authHeaders(ctx));
       expect(data).toHaveLength(1);
-      expect(data[0]!.run_id).toBe(run.id);
+      expect(data[0]!.runId).toBe(run.id);
       expect(data[0]!.payload?.status).toBe("success");
     });
 
@@ -261,9 +262,9 @@ describe("Notifications API (per-recipient, issue #667)", () => {
 
       const data = await listNotifications(authHeaders(ctx));
       expect(data).toHaveLength(1);
-      expect(data[0]!.run_id).toBe(run.id);
+      expect(data[0]!.runId).toBe(run.id);
       expect(data[0]!.type).toBe("run_completed");
-      expect(data[0]!.payload?.agent_id).toBe("@notiforg/notif-agent");
+      expect(data[0]!.payload?.packageId).toBe("@notiforg/notif-agent");
       expect(data[0]!.payload?.status).toBe("success");
       expect(data[0]!.read_at).toBeNull();
     });
@@ -281,10 +282,15 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       expect(await listNotifications(authHeaders(ctx))).toHaveLength(0);
       // …but still present without the filter.
       const all = await app.request("/api/notifications", { headers: authHeaders(ctx) });
-      const allBody = (await all.json()) as { data: NotificationDto[]; has_more: boolean };
+      const allBody = (await all.json()) as {
+        object: string;
+        data: NotificationDto[];
+        hasMore: boolean;
+      };
+      expect(allBody.object).toBe("list");
       expect(allBody.data).toHaveLength(1);
-      expect(allBody.has_more).toBe(false);
-      expect(allBody.data[0]!.run_id).toBe(run.id);
+      expect(allBody.hasMore).toBe(false);
+      expect(allBody.data[0]!.runId).toBe(run.id);
     });
 
     it("returns 401 without authentication", async () => {
@@ -699,12 +705,12 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     });
   });
 
-  // ─── unread-counts-by-agent: null agent_id ──────────────────
+  // ─── unread-counts-by-agent: null packageId ─────────────────
 
-  describe("GET /api/notifications/unread-counts-by-agent (null agent_id)", () => {
-    it("skips notifications whose payload carries no agent_id", async () => {
+  describe("GET /api/notifications/unread-counts-by-agent (null packageId)", () => {
+    it("skips notifications whose payload carries no packageId", async () => {
       await seedNotifiedRun({ agentName: "has-agent", actor: { userId: ctx.user.id } });
-      // Hand-insert a notification with a payload that lacks agent_id.
+      // Hand-insert a notification with a payload that lacks packageId.
       await db.insert(notifications).values({
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
@@ -720,8 +726,26 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       expect(res.status).toBe(200);
       const counts = ((await res.json()) as { counts: Record<string, number> }).counts;
       expect(counts["@notiforg/has-agent"]).toBe(1);
-      // The null-agent_id row is surfaced under no key at all.
+      // The null-packageId row is surfaced under no key at all.
       expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(1);
+    });
+
+    it("counts run notifications only — a share's `packageId` is not a run", async () => {
+      await seedNotifiedRun({ agentName: "shared", actor: { userId: ctx.user.id } });
+      await db.insert(notifications).values({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        recipientType: "user",
+        recipientId: ctx.user.id,
+        type: "package_shared",
+        payload: { packageId: "@notiforg/shared", package_type: "agent", shared_by_name: "A" },
+      });
+
+      const res = await app.request("/api/notifications/unread-counts-by-agent", {
+        headers: authHeaders(ctx),
+      });
+      const counts = ((await res.json()) as { counts: Record<string, number> }).counts;
+      expect(counts).toEqual({ "@notiforg/shared": 1 });
     });
   });
 
@@ -742,47 +766,32 @@ describe("Notifications API (per-recipient, issue #667)", () => {
 
       const res = await app.request("/api/notifications?limit=2", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
+      const body = (await res.json()) as { data: NotificationDto[]; hasMore: boolean };
       expect(body.data).toHaveLength(2);
-      expect(body.has_more).toBe(true);
+      expect(body.hasMore).toBe(true);
       // created_at descending (newest first).
-      expect(new Date(body.data[0]!.created_at).getTime()).toBeGreaterThanOrEqual(
-        new Date(body.data[1]!.created_at).getTime(),
+      expect(new Date(body.data[0]!.createdAt).getTime()).toBeGreaterThanOrEqual(
+        new Date(body.data[1]!.createdAt).getTime(),
       );
       // A further page exists → RFC 5988 next link carrying the keyset cursor.
       expect(nextCursor(res.headers.get("Link"))).toBe(body.data[1]!.id);
     });
 
-    it("walks every page with no skip or duplicate, has_more flips false at the end", async () => {
+    it("walks every page with no skip or duplicate, hasMore flips false at the end", async () => {
       // 5 notifications, paged 2 at a time → pages of [2, 2, 1].
       for (let i = 0; i < 5; i++) {
         await seedNotifiedRun({ agentName: `walk-${i}`, actor: { userId: ctx.user.id } });
       }
 
-      const seen: string[] = [];
-      let cursor: string | null = null;
-      let pages = 0;
-      // Bound the loop defensively so a pagination bug fails fast, not hangs.
-      while (pages < 10) {
-        pages++;
-        const url: string =
-          "/api/notifications?limit=2" + (cursor ? `&startingAfter=${cursor}` : "");
-        const res = await app.request(url, { headers: authHeaders(ctx) });
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
-        seen.push(...body.data.map((n) => n.id));
-        if (!body.has_more) break;
-        cursor = body.data.at(-1)!.id;
-        expect(cursor).not.toBeNull();
-      }
-
-      expect(pages).toBe(3);
+      const pages = await walkLinkPages<{ data: NotificationDto[]; hasMore: boolean }>(
+        app,
+        "/api/notifications?limit=2",
+        authHeaders(ctx),
+      );
+      expect(pages.map((p) => p.hasMore)).toEqual([true, true, false]);
+      const seen = pages.flatMap((p) => p.data.map((n) => n.id));
       expect(seen).toHaveLength(5);
-      // No duplicates across pages.
       expect(new Set(seen).size).toBe(5);
-      // Strictly newest-first across the whole walk (ids are random, so assert
-      // via created_at by re-reading is overkill — the per-page order assertion
-      // above plus the no-dup/no-skip set check pins the keyset invariant).
     });
 
     it("paginates correctly across rows sharing an identical created_at (tuple tiebreak)", async () => {
@@ -798,24 +807,17 @@ describe("Notifications API (per-recipient, issue #667)", () => {
           recipientType: "user",
           recipientId: ctx.user.id,
           type: "run_completed",
-          payload: { agent_id: "@notiforg/tie", status: "success" },
+          payload: { packageId: "@notiforg/tie", status: "success" },
           createdAt: fixed,
         });
       }
 
-      const seen: string[] = [];
-      let cursor: string | null = null;
-      let pages = 0;
-      while (pages < 10) {
-        pages++;
-        const url: string =
-          "/api/notifications?limit=2" + (cursor ? `&startingAfter=${cursor}` : "");
-        const res = await app.request(url, { headers: authHeaders(ctx) });
-        const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
-        seen.push(...body.data.map((n) => n.id));
-        if (!body.has_more) break;
-        cursor = body.data.at(-1)!.id;
-      }
+      const pages = await walkLinkPages<{ data: NotificationDto[] }>(
+        app,
+        "/api/notifications?limit=2",
+        authHeaders(ctx),
+      );
+      const seen = pages.flatMap((p) => p.data.map((n) => n.id));
       expect(seen).toHaveLength(5);
       expect(new Set(seen).size).toBe(5); // no duplicate, no skip
     });
@@ -827,21 +829,21 @@ describe("Notifications API (per-recipient, issue #667)", () => {
         { headers: authHeaders(ctx) },
       );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
+      const body = (await res.json()) as { data: NotificationDto[]; hasMore: boolean };
       expect(body.data).toHaveLength(0);
-      expect(body.has_more).toBe(false);
+      expect(body.hasMore).toBe(false);
     });
 
-    it("has_more is false on a final page that holds exactly `limit` rows", async () => {
+    it("hasMore is false on a final page that holds exactly `limit` rows", async () => {
       // 4 rows, limit 2 → pages of [2, 2]; the second page is full yet last.
       // Exercises the limit+1 fetch probe at its boundary (fetch 3, get ≤2).
       for (let i = 0; i < 4; i++) {
         await seedNotifiedRun({ agentName: `bound-${i}`, actor: { userId: ctx.user.id } });
       }
       const r1 = await app.request("/api/notifications?limit=2", { headers: authHeaders(ctx) });
-      const b1 = (await r1.json()) as { data: NotificationDto[]; has_more: boolean };
+      const b1 = (await r1.json()) as { data: NotificationDto[]; hasMore: boolean };
       expect(b1.data).toHaveLength(2);
-      expect(b1.has_more).toBe(true);
+      expect(b1.hasMore).toBe(true);
 
       const r2 = await app.request(
         `/api/notifications?limit=2&startingAfter=${b1.data.at(-1)!.id}`,
@@ -849,12 +851,12 @@ describe("Notifications API (per-recipient, issue #667)", () => {
           headers: authHeaders(ctx),
         },
       );
-      const b2 = (await r2.json()) as { data: NotificationDto[]; has_more: boolean };
+      const b2 = (await r2.json()) as { data: NotificationDto[]; hasMore: boolean };
       expect(b2.data).toHaveLength(2);
-      expect(b2.has_more).toBe(false);
+      expect(b2.hasMore).toBe(false);
       // Cross-page ordering: page 2's first row is older-or-equal to page 1's last.
-      expect(new Date(b1.data.at(-1)!.created_at).getTime()).toBeGreaterThanOrEqual(
-        new Date(b2.data[0]!.created_at).getTime(),
+      expect(new Date(b1.data.at(-1)!.createdAt).getTime()).toBeGreaterThanOrEqual(
+        new Date(b2.data[0]!.createdAt).getTime(),
       );
     });
 
@@ -872,10 +874,10 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       const res = await app.request("/api/notifications?unread=true&limit=2", {
         headers: authHeaders(ctx),
       });
-      const body = (await res.json()) as { data: NotificationDto[]; has_more: boolean };
+      const body = (await res.json()) as { data: NotificationDto[]; hasMore: boolean };
       // 2 unread remain → exactly one page, no more.
       expect(body.data).toHaveLength(2);
-      expect(body.has_more).toBe(false);
+      expect(body.hasMore).toBe(false);
       expect(body.data.some((n) => n.id === firstId)).toBe(false);
     });
   });
@@ -1127,6 +1129,62 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/runs");
       expect(res.status).toBe(401);
+    });
+  });
+
+  // ─── Credential ceiling ─────────────────────────────────────
+
+  describe("credential ceiling", () => {
+    // The feed is the caller's own, so no role grant is asked; a delegated
+    // credential is capped by the run read its entries are about.
+    async function keyHeaders(scopes: string[]): Promise<Record<string, string>> {
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes,
+      });
+      return { Authorization: `Bearer ${key.rawKey}` };
+    }
+
+    it("read: a key without a run-read scope is refused", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const headers = await keyHeaders(["agents:run"]);
+      const res = await app.request("/api/notifications", { headers });
+      expect(res.status).toBe(403);
+    });
+
+    it("read: a key with runs:read lists the caller's notification", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      expect(await listNotifications(await keyHeaders(["runs:read"]))).toHaveLength(1);
+    });
+
+    it("read: a cookie session, which carries no ceiling, lists it", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      expect(await listNotifications(authHeaders(ctx))).toHaveLength(1);
+    });
+
+    async function markAll(headers: Record<string, string>): Promise<number> {
+      const res = await app.request("/api/notifications/read-all", { method: "PUT", headers });
+      return res.status;
+    }
+
+    it("write: a key without a run-read scope is refused and nothing is marked", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      expect(await markAll(await keyHeaders(["agents:run"]))).toBe(403);
+      expect(await unreadCount(authHeaders(ctx))).toBe(1);
+    });
+
+    it("write: a key with runs:read-all marks the caller's notification read", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      expect(await markAll(await keyHeaders(["runs:read-all"]))).toBe(200);
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
+    });
+
+    it("write: a cookie session, which carries no ceiling, marks it read", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      expect(await markAll(authHeaders(ctx))).toBe(200);
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
     });
   });
 });

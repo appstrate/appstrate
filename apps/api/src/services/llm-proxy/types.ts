@@ -3,16 +3,20 @@
 /**
  * Shared types for the `/api/llm-proxy/*` pipeline.
  *
- * Two protocol families live alongside each other (`openai-completions`,
- * `anthropic-messages`); each ships a small adapter module in this
+ * Several protocol families live alongside each other (one per
+ * `LLM_PROXY_ROUTES` entry); each ships a small adapter module in this
  * directory implementing {@link LlmProxyAdapter}. The route layer picks
  * one adapter per endpoint and hands it to the shared core.
  */
 
-/** Principal that minted the proxy call — mirrors credential-proxy. */
+/**
+ * Principal that minted the proxy call — mirrors credential-proxy. A `run` is a
+ * platform run's own sidecar, authenticated by its run token.
+ */
 export type LlmProxyPrincipal =
   | { kind: "api_key"; apiKeyId: string; orgId: string; userId: string }
-  | { kind: "jwt_user"; userId: string; orgId: string };
+  | { kind: "jwt_user"; userId: string; orgId: string }
+  | { kind: "run"; orgId: string };
 
 /**
  * Build the {@link LlmProxyPrincipal} from the resolved auth identity: an API
@@ -33,7 +37,7 @@ export function buildLlmProxyPrincipal(args: {
 /**
  * Usage numbers parsed from the upstream response.
  *
- * Cost convention (`computeTokenCost` / `computeCostUsd`): the four token
+ * Cost convention (Pi's `calculateCost`, via `computeCostUsd`): the four token
  * buckets are DISJOINT and billed independently —
  * `input×input_rate + output×output_rate + cacheRead×cacheRead_rate +
  * cacheWrite×cacheWrite_rate`. `inputTokens` is therefore the cache-MISS input
@@ -63,7 +67,7 @@ export interface UpstreamUsage {
 
 /**
  * Protocol-specific hooks consumed by the shared core. Each concrete
- * adapter (OpenAI, Anthropic, Mistral) implements these three operations;
+ * adapter (OpenAI, OpenAI Responses, Anthropic, Mistral) implements these operations;
  * the core handles routing, auth wrapping, streaming, body rewrite, and
  * metering. Body rewrite (`body.model` substitution) is identical across
  * shapes and lives in `helpers.ts:substituteModelJson` — no adapter hook
@@ -72,21 +76,17 @@ export interface UpstreamUsage {
 export interface LlmProxyAdapter {
   /** Protocol string — must match the route's apiShape and the resolved model's apiShape. */
   readonly apiShape: string;
-  /** Build the upstream request headers (auth + protocol-specific). */
-  buildUpstreamHeaders(incoming: Headers, apiKey: string): Record<string, string>;
+  /** Build the upstream request headers: the shared forwarding policy + auth + header guards. */
+  buildUpstreamHeaders(incoming: Headers, apiKey: string): Headers;
   /**
-   * Mutate the outgoing request body so the upstream is REQUIRED to report
-   * usage — the accounting counterpart of {@link parseJsonUsage} /
-   * {@link parseSseUsage}. The core calls it on every forwarded request, for
-   * every preset (system and org-owned alike): an unreported usage is a paid
-   * call the ledger cannot price, so it must never depend on the caller SDK
-   * asking nicely.
-   *
-   * Omitted by protocols that always report usage (anthropic-messages). Adding
-   * a fifth apiShape therefore means implementing — or not implementing — this
-   * hook on the new adapter; the core never branches on `apiShape`.
+   * Make the outgoing body meterable, on every forwarded request and preset:
+   * refuse (a 400 naming the field) what the vendor bills but the proxy cannot
+   * meter, and mutate the rest so the upstream MUST report usage — the
+   * counterpart of {@link parseJsonUsage} / {@link parseSseUsage}, never left to
+   * the caller SDK. Omitted by a protocol with nothing to refuse or force; the
+   * core never branches on `apiShape`.
    */
-  forceUsageReporting?(body: Record<string, unknown>): void;
+  prepareRequest?(body: Record<string, unknown>): void;
   /** Extract usage from a non-streaming JSON body. Returns null if the shape is unexpected. */
   parseJsonUsage(body: unknown): UpstreamUsage | null;
   /** Extract usage from a streamed SSE payload. Returns null if none was observed. */

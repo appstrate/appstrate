@@ -72,7 +72,11 @@ function parseUstar(
   return out;
 }
 
-async function withFakeDocker<T>(body: (calls: DockerCall[]) => Promise<T>): Promise<T> {
+async function withFakeDocker<T>(
+  body: (calls: DockerCall[]) => Promise<T>,
+  /** Stdout for a call other than `create` (default: empty). */
+  respond: (args: string[]) => string = () => "",
+): Promise<T> {
   const calls: DockerCall[] = [];
   const globalBun = globalThis as unknown as { Bun: { spawn: unknown } };
   const original = globalBun.Bun.spawn;
@@ -91,7 +95,7 @@ async function withFakeDocker<T>(body: (calls: DockerCall[]) => Promise<T>): Pro
       call.envFileBody = readFileSync(args[envFileIdx + 1]!, "utf8");
     }
     calls.push(call);
-    const stdout = args[0] === "create" ? FAKE_CONTAINER_ID : "";
+    const stdout = args[0] === "create" ? FAKE_CONTAINER_ID : respond(args);
     return {
       stdout: new Response(stdout).body!,
       stderr: new Response("").body!,
@@ -450,5 +454,66 @@ describe("docker adapter spawn — delivery.files copy", () => {
       }
       await adapter.shutdown();
     });
+  });
+});
+
+describe("docker adapter — runner peer attribution (#1458)", () => {
+  async function withRunId<T>(runId: string | undefined, body: () => Promise<T>): Promise<T> {
+    const previous = process.env.RUN_ID;
+    if (runId === undefined) delete process.env.RUN_ID;
+    else process.env.RUN_ID = runId;
+    try {
+      return await body();
+    } finally {
+      if (previous === undefined) delete process.env.RUN_ID;
+      else process.env.RUN_ID = previous;
+    }
+  }
+
+  it("attributes a spawned runner's address on the run network to its integration", async () => {
+    let members: Record<string, { Name: string; IPv4Address: string }> = {};
+    const respond = (args: string[]) =>
+      args[0] === "network" ? JSON.stringify([{ Containers: members }]) : "";
+    await withRunId("run-peers-1", () =>
+      withFakeDocker(async (calls) => {
+        const adapter = dockerAdapter();
+        await adapter.prepare("run-peers-1");
+        await adapter.spawn({
+          runId: "run-peers-1",
+          spec: spec(),
+          bundleRoot: "/tmp/bundle-does-not-need-to-exist",
+          egress: null,
+          workspaceHandle: null,
+          onStderrLine: () => {},
+        });
+        const create = calls.find((c) => c.args[0] === "create")!;
+        const name = create.args[create.args.indexOf("--name") + 1]!;
+        members = {
+          a: { Name: name, IPv4Address: "172.18.0.3/16" },
+          b: { Name: "appstrate-agent", IPv4Address: "172.18.0.2/16" },
+        };
+
+        const attribute = adapter.peerAttribution()!;
+        expect(await attribute("172.18.0.3")).toBe("@tractr/gmail");
+        expect(await attribute("172.18.0.2")).toBeNull();
+        expect(await attribute("172.18.0.9")).toBeNull();
+        expect(calls.find((c) => c.args[0] === "network")!.args).toEqual([
+          "network",
+          "inspect",
+          "appstrate-exec-run-peers-1",
+        ]);
+        await adapter.shutdown();
+      }, respond),
+    );
+  });
+
+  it("cannot attribute peers without a per-run network", async () => {
+    await withRunId(undefined, () =>
+      withFakeDocker(async () => {
+        const adapter = dockerAdapter();
+        await adapter.prepare("run-peers-2");
+        expect(adapter.peerAttribution()).toBeNull();
+      }),
+    );
   });
 });

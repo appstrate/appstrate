@@ -3,7 +3,7 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Coins } from "lucide-react";
-import { useAppConfig } from "../hooks/use-app-config";
+import { useCanReach } from "../hooks/use-can-reach";
 import { useBilling } from "../hooks/use-billing";
 import { getUsageBarColor } from "../lib/usage-severity";
 import {
@@ -15,8 +15,9 @@ import {
 
 export function SidebarBilling() {
   const { t } = useTranslation();
-  const { features } = useAppConfig();
-  const { data: billing } = useBilling({ enabled: features.billing });
+  const canReach = useCanReach();
+  // The whole widget links to the billing tab: fetched only where that opens.
+  const { data: billing } = useBilling({ enabled: canReach("/org-settings/billing") });
 
   if (!billing) return null;
 

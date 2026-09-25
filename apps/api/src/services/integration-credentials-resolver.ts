@@ -28,9 +28,10 @@ import {
   type IntegrationCredentialsWire,
 } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { expandScopesGranted } from "@appstrate/core/integration";
+import { scopesNotCovered } from "@appstrate/core/integration";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
-import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
+import { renderAuthAuthorizedUris, type AfpsManifestAuth } from "./integration-manifest-helpers.ts";
+import { getEnv } from "@appstrate/env";
 
 import { logger } from "../lib/logger.ts";
 import { notFound, gone, conflict, internalError, badGateway } from "../lib/errors.ts";
@@ -44,6 +45,7 @@ import {
   assertIntegrationActive,
   selectAccessibleConnection,
   markIntegrationConnectionNeedsReconnection,
+  recordIntegrationRefreshFailure,
 } from "./integration-connections.ts";
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
 import {
@@ -82,10 +84,11 @@ interface ResolveLiveCredentialsOptions {
  *     be valid under another version, so it is NOT flagged.
  *   - 410: the credential is dead and the connection has been flagged
  *     `needsReconnection` — refresh token revoked upstream, an unrefreshable
- *     auth on a forced refresh, or stored credentials that cannot be
- *     decrypted. The sidecar propagates it as a 401 to the integration so the
+ *     auth whose forced refreshes reached the failure threshold, or stored
+ *     credentials that cannot be decrypted. The sidecar propagates it as a 401 to the integration so the
  *     LLM sees a clean "please re-connect" surface, and stops retrying.
- *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc).
+ *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc), or
+ *     an unrefreshable auth rejected fewer times than the failure threshold.
  *     The cached credential may still be valid; the sidecar treats it as
  *     retry-later and the listener's `refreshOnUnauthorized` cooldown
  *     keeps a flapping upstream from hammering this endpoint.
@@ -221,15 +224,8 @@ export async function resolveLiveIntegrationCredentials(
     );
   }
 
-  // The credential is terminally unusable and the connection must be re-made.
-  // Two entry classes, one behaviour so they cannot drift:
-  //   • a FORCED refresh (the sidecar already saw an upstream 401) that cannot
-  //     recover the credential — an oauth2 auth with no refresh client, or any
-  //     non-oauth2 auth, which has nothing to refresh;
-  //   • a credential nobody can decrypt (below), on ANY read — forced or not.
-  // Both flag the connection for re-connect and surface 410 so the sidecar
-  // stops retrying and the next-launch readiness gate fires. (A revoked refresh
-  // token is handled inline further down, with the same flag + status.)
+  // Terminally unusable: flag for re-connect and surface 410 so the sidecar
+  // stops retrying and the next-launch readiness gate fires.
   const flagTerminalAndThrow = async (reason: string): Promise<never> => {
     await markIntegrationConnectionNeedsReconnection(connection.id);
     logger.warn("Integration credential terminally unusable — flagging needsReconnection", {
@@ -245,6 +241,34 @@ export async function resolveLiveIntegrationCredentials(
       `Integration '${integrationId}' auth '${authKey}' is unusable (${reason}) — ` +
         `the connection has been flagged as needing re-connection. Re-connect ` +
         `'${integrationId}' and relaunch the run.`,
+    );
+  };
+
+  // A forced refresh nothing can recover (no refresh client, or not oauth2).
+  // One 401 can be a transient upstream fault, so it is counted: 502 until
+  // INTEGRATION_REFRESH_MAX_FAILURES, then terminal. Not a streak — only a
+  // credential write (reconnect) resets the counter, so isolated 401s add up.
+  const rejectUnrefreshable = async (reason: string): Promise<never> => {
+    const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    const { failures, needsReconnection } = await recordIntegrationRefreshFailure(
+      connection.id,
+      maxFailures,
+      null,
+    );
+    if (needsReconnection) return flagTerminalAndThrow(reason);
+    logger.warn("Integration credential rejected upstream — below the reconnect threshold", {
+      runId: context.runId,
+      integrationId,
+      authKey,
+      connectionId: connection.id,
+      failures,
+      maxFailures,
+      reason,
+    });
+    throw badGateway(
+      `Integration '${integrationId}' auth '${authKey}' was rejected upstream (${reason}); ` +
+        `${failures}/${maxFailures} upstream rejections since the connection was last ` +
+        `(re)connected before it is flagged`,
     );
   };
 
@@ -389,12 +413,9 @@ export async function resolveLiveIntegrationCredentials(
           integrationId: integrationId,
           authKey,
         });
-        // Expand the granted set through the manifest `implies` hierarchy
-        // before diffing — a parent grant (e.g. GitHub `repo`) covers the
-        // children it implies (`public_repo`), so a raw membership check
-        // would falsely flag the connection as below the required floor.
-        const expandedGranted = expandScopesGranted(granted, manifest, authKey);
-        const missing = required.filter((s) => !expandedGranted.includes(s));
+        // Diff through the manifest `implies` hierarchy: a parent grant (e.g.
+        // GitHub `repo`) covers the children it implies (`public_repo`).
+        const missing = scopesNotCovered(required, granted, manifest, authKey);
         if (missing.length > 0) {
           await markIntegrationConnectionNeedsReconnection(connection.id);
           logger.warn("Integration scope shrink dropped below required floor", {
@@ -419,16 +440,13 @@ export async function resolveLiveIntegrationCredentials(
       // OAuth2 but `buildIntegrationOAuthRefreshContext` returned null — no
       // per-space OAuth client (DCR / system-wide / shared) or no token_endpoint,
       // so the token can never be refreshed. Terminal.
-      await flagTerminalAndThrow("no OAuth client or token endpoint");
+      await rejectUnrefreshable("no OAuth client or token endpoint");
     }
   } else if (options.forceRefresh === true) {
     // A FORCED refresh of a NON-oauth2 auth (api_key / basic / a custom auth
     // with no connect.tool re-login handler — those route to re-login in the
-    // sidecar and never reach here). There is nothing to refresh and the
-    // sidecar only forces a refresh after a 401, so the credential is dead.
-    // This is what restores the "any terminal 401 invalidates the connection"
-    // guarantee for non-OAuth integrations — without a separate report path.
-    await flagTerminalAndThrow(`auth type '${authDef.type}' is not refreshable`);
+    // sidecar and never reach here). There is nothing to refresh.
+    await rejectUnrefreshable(`auth type '${authDef.type}' is not refreshable`);
   }
 
   const http = authDef.delivery?.http;
@@ -443,7 +461,8 @@ export async function resolveLiveIntegrationCredentials(
     authKey,
     authType: authDef.type,
     fields: Object.freeze({ ...fields }),
-    authorizedUris: Object.freeze([...(authDef.authorized_uris ?? [])]),
+    // Rendered from the post-refresh fields.
+    authorizedUris: Object.freeze(renderAuthAuthorizedUris(authDef, fields)),
     // AFPS §7.3 (RFC 8707) names this field `resource`.
     ...(authDef.resource !== undefined ? { resource: authDef.resource } : {}),
     ...(connection.expiresAt ? { expiresAt: connection.expiresAt.toISOString() } : {}),

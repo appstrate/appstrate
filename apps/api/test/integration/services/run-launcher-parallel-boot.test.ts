@@ -152,8 +152,10 @@ function buildRunPlan(): AppstrateRunPlan {
     runToken: "test-run-token",
     llmConfig: {
       providerId: "anthropic",
+      piProvider: "anthropic",
       apiShape: "anthropic-messages",
-      baseUrl: "https://api.anthropic.com",
+      // Allowlisted in the test preload: the launch-time egress check resolves no DNS.
+      baseUrl: "https://api.anthropic.test",
       modelId: "claude-3-5-sonnet-latest",
       apiKey: "sk-test-secret",
       label: "Test Model",
@@ -161,18 +163,6 @@ function buildRunPlan(): AppstrateRunPlan {
       aliased: false,
       aliasId: "claude-3-5-sonnet-latest",
     },
-    // Declare at least one integration so the launcher's sidecar-skip
-    // shortcut does not bypass createSidecar in this parallel-boot test.
-    integrations: [
-      {
-        integrationId: "@test/gmail-mcp",
-        namespace: "gmail",
-        sourceKind: "local",
-        manifest: { name: "@test/gmail-mcp", version: "1.0.0" },
-        spawnEnv: {},
-        toolAllowlist: [],
-      },
-    ],
     timeout: 60,
     resources: defaultTestAgentResources(),
   };

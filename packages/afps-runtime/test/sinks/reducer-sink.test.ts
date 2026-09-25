@@ -61,10 +61,13 @@ describe("createReducerSink", () => {
   it("finalize() replaces the snapshot with the runner-provided result", async () => {
     const { sink, snapshot } = createReducerSink();
     await sink.handle(event("memory.added", { content: "a" }));
-    const runnerResult = reduceEvents([
-      event("memory.added", { content: "final" }),
-      event("output.emitted", { data: { done: true } }),
-    ]);
+    const runnerResult = {
+      ...reduceEvents([
+        event("memory.added", { content: "final" }),
+        event("output.emitted", { data: { done: true } }),
+      ]),
+      status: "success" as const,
+    };
     await sink.finalize(runnerResult);
     expect(snapshot()).toBe(runnerResult);
   });

@@ -2,7 +2,7 @@
 
 /**
  * Fixtures for run tests that exercise the integration-connection readiness
- * gate — the `412 must_choose_connection` / `connection_overrides` contract.
+ * gate — the `409 must_choose_connection` / `connection_overrides` contract.
  *
  * Reproducing that gate takes a specific, non-obvious arrangement: an
  * integration package WITH a published version (the dependency freeze resolves
@@ -18,7 +18,8 @@
  */
 
 import { db } from "./db.ts";
-import { integrationConnections, runs, TERMINAL_RUN_STATUSES } from "@appstrate/db/schema";
+import { integrationConnections, runs } from "@appstrate/db/schema";
+import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { seedPackage, seedPackageVersion } from "./seed.ts";
 import { localIntegrationManifest, httpHeaderDelivery } from "./integration-manifests.ts";
@@ -41,7 +42,7 @@ import {
  *
  * Not connection-specific — it is here because this is the only shared home the
  * three suites that need an inert orchestrator have (`runs.test.ts`, the inline
- * 412 suite, the MCP `run_and_wait` suite). Every other fake in the tree records
+ * 409 suite, the MCP `run_and_wait` suite). Every other fake in the tree records
  * or configures something and is genuinely its own; this one was a verbatim
  * duplicate, which is exactly what silently drifts.
  */
@@ -229,7 +230,7 @@ async function waitUntil(what: string, check: () => Promise<boolean>): Promise<v
  * Reading the whole `runs` table is deliberate and is what lets this be shared:
  * every caller resets it in `beforeEach`, so whatever is on it belongs to the
  * test that is settling. An empty table settles immediately — a launch refused
- * before run creation (the 412 cases) has nothing to wait for.
+ * before run creation (the 409 cases) has nothing to wait for.
  */
 export async function waitForRunPipelineSettled(): Promise<void> {
   await waitUntil("every run of this test to reach a terminal status", async () => {

@@ -17,6 +17,8 @@ import { SUBNET_NETMASK, type RunSubnet } from "./subnet.ts";
 // The config-drive wire contract is shared with its in-guest consumer —
 // single definition next to the supervisor, imported type-only.
 import type { GuestConfig } from "./guest/guest-config.ts";
+// Same address the guest firewall drops once the credentials are fetched.
+import { MMDS_IPV4_ADDRESS } from "./guest/firewall.ts";
 
 interface BuildGuestConfigInput {
   runId: string;
@@ -24,10 +26,8 @@ interface BuildGuestConfigInput {
   exitMarkerNonce: string;
   platformIp: string;
   platformPort: number;
-  /** Absent for skipSidecar runs. */
-  sidecarEnv?: Record<string, string>;
+  sidecarEnv: Record<string, string>;
   agentEnv: Record<string, string>;
-  agentUnrestrictedEgress: boolean;
   /**
    * Where the guest's secrets come from — `"mmds"` (broker; the drive env
    * maps are stripped of secret keys) or `"inline"` (drive carries them).
@@ -44,10 +44,9 @@ export function buildGuestConfig(input: BuildGuestConfigInput): GuestConfig {
     credentials: { source: input.credentialSource },
     exit_marker_nonce: input.exitMarkerNonce,
     network: { platform_ip: input.platformIp, platform_port: input.platformPort },
-    sidecar: { enabled: !!input.sidecarEnv, env: input.sidecarEnv ?? {} },
+    sidecar: { env: input.sidecarEnv },
     agent: {
       env: input.agentEnv,
-      unrestricted_egress: input.agentUnrestrictedEgress,
       ...(input.agentArgv ? { argv: input.agentArgv } : {}),
     },
   };
@@ -112,8 +111,6 @@ interface BuildVmConfigInput {
   mmds?: boolean;
 }
 
-/** MMDS default link-local service address (Firecracker default). */
-const MMDS_IPV4_ADDRESS = "169.254.169.254";
 /** The guest NIC MMDS is bound to — wired into the `network-interfaces` iface_id below. */
 const MMDS_NETWORK_INTERFACE = "eth0";
 
@@ -195,27 +192,23 @@ export function buildVmConfig(input: BuildVmConfigInput): Record<string, unknown
 
 /**
  * VM sizing from the agent's workload resources. The microVM hosts the
- * agent AND (usually) the sidecar (+ kernel/init overhead), so the guest
- * budget is the agent budget plus a fixed envelope. skipSidecar runs
- * (`hasSidecar: false`) drop the sidecar's share of that envelope.
+ * agent AND the sidecar (+ kernel/init overhead), so the guest budget is
+ * the agent budget plus a fixed envelope.
  */
-export function vmSizing(
-  agent: { memoryBytes: number; nanoCpus: number },
-  hasSidecar: boolean,
-): {
+export function vmSizing(agent: { memoryBytes: number; nanoCpus: number }): {
   vcpuCount: number;
   memSizeMib: number;
 } {
   const agentMib = Math.ceil(agent.memoryBytes / (1024 * 1024));
-  const sidecarMib = hasSidecar ? 256 : 0;
+  const sidecarMib = 256;
   const systemMib = 256; // kernel + init + tmpfs overlay headroom
   const vcpuFromSpec = Math.ceil(agent.nanoCpus / 1_000_000_000);
   return {
     // The sidecar and the agent cold-start concurrently — on a single
     // vCPU they starve each other and the agent's first sink event can
     // slip past the platform's heartbeat deadline. Budget one extra
-    // vCPU for the sidecar (when there is one) and never go below two.
-    vcpuCount: Math.min(8, Math.max(2, vcpuFromSpec + (hasSidecar ? 1 : 0))),
+    // vCPU for the sidecar and never go below two.
+    vcpuCount: Math.min(8, Math.max(2, vcpuFromSpec + 1)),
     memSizeMib: agentMib + sidecarMib + systemMib,
   };
 }

@@ -460,6 +460,48 @@ describe("module-loader", () => {
     });
   });
 
+  describe("a preset acting on a module resource reads it", () => {
+    /** `tasks:read` to the upward-closed `readers`, `tasks:write` to `admin` + `builder`. */
+    function tasks(readers: readonly ("admin" | "builder" | "operator" | "viewer")[]) {
+      return mockModule("read-coherence", {
+        permissionsContribution: () => [
+          { resource: "tasks", actions: ["read"], level: "space", presets: readers },
+          { resource: "tasks", actions: ["write"], level: "space", presets: ["admin", "builder"] },
+        ],
+      });
+    }
+
+    it("boots when every preset granted the write is granted the read", () => {
+      expect(() => collectModulePermissions([tasks(["admin", "builder"])])).not.toThrow();
+      expect(() =>
+        collectModulePermissions([tasks(["admin", "builder", "operator", "viewer"])]),
+      ).not.toThrow();
+    });
+
+    it("refuses the same write to a preset the read skips, naming module, preset and read", () => {
+      const boot = () => collectModulePermissions([tasks(["admin"])]);
+      expect(boot).toThrow(/Module "read-coherence"/);
+      expect(boot).toThrow(
+        /preset "builder" what it cannot read: 'tasks:write' requires 'tasks:read'/,
+      );
+    });
+
+    it("judges only the module's own catalog: a resource with no read action needs none", () => {
+      const sweeper = mockModule("sweeper", {
+        permissionsContribution: () => [
+          { resource: "internal", actions: ["sweep"], level: "space", presets: ["admin"] },
+        ],
+      });
+      expect(() => collectModulePermissions([sweeper])).not.toThrow();
+    });
+
+    it("the built-in modules pass", () => {
+      // `module-chat` is not imported here (DOM-typed sources); the test preload
+      // boots it through `loadModulesFromInstances`, so this guard runs on it there.
+      expect(() => collectModulePermissions([mcpModule, webhooksModule])).not.toThrow();
+    });
+  });
+
   describe("what the built-in modules grant the `runner` preset", () => {
     /**
      * The real contributions, not a fixture: `runner` is the preset whose whole

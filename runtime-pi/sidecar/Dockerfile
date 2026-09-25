@@ -60,12 +60,14 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #   - @appstrate/core/{errors,ssrf}           getErrorMessage + isBlockedHost/Url,
 #                                             imported by credential-proxy.ts /
 #                                             mcp.ts / ssrf.ts
+#   - @appstrate/core/{url,log-line}          env.ts's URL check and logger.ts's
+#                                             pino-compatible line (import-free)
 #   - @earendil-works/pi-ai (npm, via     re-originates an aliased run's call against
 #     the `pi-sdk.ts` barrel)             the real backing, so pi-ai keeps deriving
-#                                         every vendor quirk itself. Only the five
+#                                         every vendor quirk itself: the five
 #                                         `./api/*` subpaths an alias can be backed
-#                                         by — the package root would pull its whole
-#                                         provider catalog.
+#                                         by, plus its registry (`./providers/all`,
+#                                         via `@appstrate/runner-pi/pi-model`).
 #   - @appstrate/runner-pi/runtime-tools      canonical run_history / recall_memory
 #                                             descriptors (name + description +
 #                                             parameter JSON Schema), imported by
@@ -74,6 +76,8 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #                                             subpath is pi-free (no pi-ai /
 #                                             pi-coding-agent imports) so the
 #                                             compiled binary stays minimal.
+#   - @appstrate/runner-pi/llm-proxy-routes   the platform LLM proxy's route table,
+#                                             for runs whose inference it serves.
 COPY packages/connect/src        packages/connect/src
 COPY packages/afps-runtime/src   packages/afps-runtime/src
 COPY packages/afps-shared/src    packages/afps-shared/src

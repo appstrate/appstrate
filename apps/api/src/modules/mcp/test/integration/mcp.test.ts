@@ -446,7 +446,7 @@ describe("mcp tool round-trip", () => {
         arguments: {
           operation_id: "sharePackage",
           path_params: { scope: "@mcpshare", name: "worker" },
-          body: { target: { kind: "space", space_id: ctx.defaultSpaceId } },
+          body: { target: { kind: "space", spaceId: ctx.defaultSpaceId } },
         },
       },
     });
@@ -555,7 +555,6 @@ describe("mcp tool round-trip", () => {
     };
 
     const described = await call(1, "describe_operation", { operation_id: "listSpaceMembers" });
-    expect(described.data.conditional).toBe(true);
     // The two halves are reported apart: nothing is asked in the caller's own
     // space, `space-members:read` is asked in the one the path names.
     expect(described.data.target_space_permissions).toContain("space-members:read");
@@ -582,7 +581,7 @@ describe("mcp tool round-trip", () => {
     expect(inForeign.data.required_permissions).toBeUndefined();
     expect(inForeign.data.hint).toBeUndefined();
 
-    // A conditional operation is a listed one: searching must offer it rather
+    // A target-space operation is a listed one: searching must offer it rather
     // than bury it under `denied`, which is where a caller-space reading of the
     // requirement would have put it.
     const searched = await call(4, "search_operations", { query: "members", limit: 100 });
@@ -623,6 +622,53 @@ describe("mcp tool round-trip", () => {
     // The control: the bundle names no `files:read`, so the file tool is gone
     // while the two above stay — a narrowing, not an empty list.
     expect(names).not.toContain("list_files");
+  });
+});
+
+describe("mcp ceiling guards for a delegated credential", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  // `DELETE /api/me/connections/{id}` asks no role grant, only the key's
+  // scopes: the router must hand the tools and the index `scopeCeiling`, or
+  // both halves below read `granted`.
+  async function surfaceFor(scopes: string[]): Promise<{ granted: unknown; indexed: boolean }> {
+    const headers = await apiKeyHeaders(scopes);
+    const init = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "t", version: "1" },
+      },
+    });
+    const instructions = init.envelope.result?.instructions as string;
+    const index = instructions.split("## Operation index")[1]!;
+    const described = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "describe_operation", arguments: { operation_id: "deleteMyConnection" } },
+    });
+    return {
+      granted: toolPayload(described.envelope).data.granted,
+      indexed: /\bdeleteMyConnection\b/.test(index),
+    };
+  }
+
+  it("withholds deleteMyConnection from a key without integrations:disconnect", async () => {
+    const surface = await surfaceFor(["mcp:read", "mcp:invoke"]);
+    expect(surface.granted).toBe(false);
+    expect(surface.indexed).toBe(false);
+  });
+
+  it("offers deleteMyConnection to the same key once it carries integrations:disconnect", async () => {
+    const surface = await surfaceFor(["mcp:read", "mcp:invoke", "integrations:disconnect"]);
+    expect(surface.granted).toBe(true);
+    expect(surface.indexed).toBe(true);
   });
 });
 

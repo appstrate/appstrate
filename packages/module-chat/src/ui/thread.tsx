@@ -48,11 +48,7 @@ import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel } from "./turn-model.ts";
-import {
-  FileAttachment,
-  ATTACHMENT_CHIP_CLASS,
-  ATTACHMENT_IMAGE_CLASS,
-} from "./file-attachment.tsx";
+import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
 import { isImageMime } from "@appstrate/core/mime";
 
 export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
@@ -76,8 +72,12 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
       <AuiIf condition={(s) => !s.thread.isEmpty}>
         {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
             instant — smoothing turns every content append into a visible glide
-            and amplifies any residual layout shift. */}
-        <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
+            and amplifies any residual layout shift. `relative` makes the
+            viewport the containing block of its absolutely positioned
+            descendants (the `sr-only` labels): placed against an ancestor
+            outside this scroller, they overflow the page into a second
+            scrollbar. */}
+        <ThreadPrimitive.Viewport className="relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
           <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
           <div className="min-h-6 flex-grow" />
@@ -103,6 +103,7 @@ const WELCOME_SUGGESTIONS = [
 ];
 
 function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
+  const canWrite = useChatHost().can("chat:write");
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4">
       <div className="flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
@@ -113,18 +114,20 @@ function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
           </p>
         </div>
         <Composer slot={composerSlot} />
-        <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-          {WELCOME_SUGGESTIONS.map((s) => (
-            <ThreadPrimitive.Suggestion key={s} prompt={s} method="replace" autoSend asChild>
-              <button
-                type="button"
-                className="hover:bg-accent rounded-lg border px-3 py-2 text-left text-sm transition-colors"
-              >
-                {s}
-              </button>
-            </ThreadPrimitive.Suggestion>
-          ))}
-        </div>
+        {canWrite && (
+          <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+            {WELCOME_SUGGESTIONS.map((s) => (
+              <ThreadPrimitive.Suggestion key={s} prompt={s} method="replace" autoSend asChild>
+                <button
+                  type="button"
+                  className="hover:bg-accent rounded-lg border px-3 py-2 text-left text-sm transition-colors"
+                >
+                  {s}
+                </button>
+              </ThreadPrimitive.Suggestion>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -198,16 +201,6 @@ function FileAttachmentPart(props: { filename?: string }) {
 // (it stays correct for assistant file parts). We render sent attachments from
 // the attachments channel instead (`MessagePrimitive.Attachments`).
 
-/** Inert chip: file icon + truncated name, no download (same look as FileAttachmentPart). */
-function InertAttachmentChip({ name }: { name: string }) {
-  return (
-    <div className={ATTACHMENT_CHIP_CLASS}>
-      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="truncate font-medium">{name || UNNAMED_FILE}</span>
-    </div>
-  );
-}
-
 /**
  * One sent attachment on a user message. An `appfile://` (server-persisted, or a
  * reloaded conversation) is interactive: image mime → thumbnail, else a
@@ -241,6 +234,15 @@ function SentAttachmentChip() {
 }
 
 function Composer({ slot }: { slot?: React.ReactNode }) {
+  const { can, t } = useChatHost();
+  // Sending, stopping and attaching all guard on `chat:write`.
+  if (!can("chat:write")) {
+    return (
+      <p className="text-muted-foreground bg-card w-full rounded-xl border px-3 py-3 text-center text-sm">
+        {t("composer.readOnly")}
+      </p>
+    );
+  }
   // No focus ring on the box: the app's global `textarea:focus` ring is too
   // intense here. min-h-9 + px-0 override the global `textarea { min-h-80px }`
   // base rule (utilities beat the base layer) for a compact, Codex-like field.

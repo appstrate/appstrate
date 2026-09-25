@@ -26,16 +26,16 @@ const upsertSmtpSchema = z.object({
   port: z.number().int().min(1).max(65535),
   username: z.string().min(1, "Username is required"),
   pass: z.string().min(1, "Password is required"),
-  fromAddress: z.email("Invalid email address"),
-  fromName: z.string().nullable().optional(),
-  secureMode: z.enum(["auto", "tls", "starttls", "none"]).optional(),
+  from_address: z.email("Invalid email address"),
+  from_name: z.string().nullable().optional(),
+  secure_mode: z.enum(["auto", "tls", "starttls", "none"]).optional(),
 });
 
 type UpsertSmtpInput = z.infer<typeof upsertSmtpSchema>;
 
 const upsertSocialSchema = z.object({
-  clientId: z.string().min(1, "Client ID is required"),
-  clientSecret: z.string().min(1, "Client secret is required"),
+  client_id: z.string().min(1, "Client ID is required"),
+  client_secret: z.string().min(1, "Client secret is required"),
   scopes: z.array(z.string()).nullable().optional(),
 });
 
@@ -76,8 +76,8 @@ export function useUpsertSmtpConfig() {
       const parsed = upsertSmtpSchema.parse(data);
       const { data: saved } = await client.PUT("/api/spaces/{id}/smtp-config", {
         params: { path: { id: spaceId! } },
-        // The wire format has no `null` — an empty fromName is omitted.
-        body: { ...parsed, fromName: parsed.fromName ?? undefined },
+        // The wire format has no `null` — an empty from_name is omitted.
+        body: { ...parsed, from_name: parsed.from_name ?? undefined },
       });
       if (!saved) throw new Error("empty response");
       return saved;

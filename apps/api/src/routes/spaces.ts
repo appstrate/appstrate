@@ -6,8 +6,10 @@ import type { Context, Next } from "hono";
 import { z } from "zod";
 import {
   makePermissionGuard,
+  packagePermission,
   SPACE_ROLE_PRESETS,
   SPACE_VISIBILITIES,
+  spacePackagePermission,
 } from "@appstrate/core/permissions";
 import type { SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
@@ -66,16 +68,14 @@ import {
   assertCatalogPackageAccess,
   assertPackageShareAccess,
   isPackageReadableInSpace,
-  packagePermission,
-  spacePackagePermission,
 } from "../lib/package-access.ts";
 import {
   markSpaceRescope,
   requireAnyPermission,
   requirePermission,
-  rowAuthority,
 } from "../middleware/require-permission.ts";
 import {
+  auditSpaceRole,
   exactlyOneRole,
   spaceRoleAssignmentShape,
   toAssignment,
@@ -228,7 +228,7 @@ export const activatePackageSchema = z
 // than a silent no-op.
 export const updatePackageSchema = z
   .object({
-    generationConfig: modelGenerationSettingsSchema.nullable().optional(),
+    generation_config: modelGenerationSettingsSchema.nullable().optional(),
     modelId: z.string().nullable().optional(),
     proxyId: z.string().nullable().optional(),
   })
@@ -309,7 +309,7 @@ async function coarseSpacePackageGate(
  *      so the route is not an enumeration oracle.
  *   2. **Catalog lookup**, through `assertCatalogPackageAccess` — the same
  *      reachability rule the READ routes obey, for all three ops, so `POST`,
- *      `DELETE` and `PUT` cannot be told apart by their refusals. Two different
+ *      `DELETE` and `PATCH` cannot be told apart by their refusals. Two different
  *      `detail` strings here (org-visible but unreachable vs nonexistent) would
  *      be an existence oracle over the whole catalogue.
  *   3. **Exact gate** for the resolved type.
@@ -354,14 +354,14 @@ async function gateSpacePackageWrite(
   return type;
 }
 
-/** snake_case on the wire, camelCase in the service that counted them. */
+/** Counts go snake_case on the wire; `spaceId` is the universal-id carve-out. */
 function toSweepWire(
   spaceId: string,
   counts: { rehomedPackages: number; deletedPackages: number },
 ): SpaceSweepResult {
   return {
     object: "space_sweep",
-    space_id: spaceId,
+    spaceId,
     rehomed_packages: counts.rehomedPackages,
     deleted_packages: counts.deletedPackages,
   };
@@ -521,7 +521,12 @@ export function createSpacesRouter() {
           action: "space.updated",
           resourceType: "space",
           resourceId: space.id,
-          after: data,
+          after: {
+            name: data.name,
+            settings: data.settings,
+            visibility: data.visibility,
+            defaultRole: default_role,
+          },
         });
         return c.json(spaceWireForCaller(c, space, c.get("spaceRole") ?? null));
       } catch (err) {
@@ -688,7 +693,7 @@ export function createSpacesRouter() {
       action: "space.member_added",
       resourceType: "space_member",
       resourceId: `${spaceId}:${userId}`,
-      after: assignment,
+      after: auditSpaceRole(assignment),
     });
     return c.json({ object: "space_member", userId, ...assignment }, 201);
   });
@@ -717,7 +722,7 @@ export function createSpacesRouter() {
         action: "space.member_role_changed",
         resourceType: "space_member",
         resourceId: `${spaceId}:${userId}`,
-        after: assignment,
+        after: auditSpaceRole(assignment),
       });
       return c.json({ object: "space_member", userId, ...assignment });
     },
@@ -792,10 +797,9 @@ export function createSpacesRouter() {
   // to hand out). Activating is therefore not a way around `share`. An API key
   // never carries it, so a key activates the already-placed and nothing else.
   //
-  // `rowAuthority()` declares what the mounts cannot show: the gate below reads
-  // the package's own rows (`gateSpacePackageWrite`, `assertPackageShareAccess`),
-  // so a caller holding every listed permission can still be refused.
-  router.post("/:spaceId/packages", rowAuthority(), async (c) => {
+  // No permission guard is mounted: the gate below reads the package's own rows
+  // (`gateSpacePackageWrite`, `assertPackageShareAccess`).
+  router.post("/:spaceId/packages", async (c) => {
     const orgId = c.get("orgId");
     const spaceId = c.req.param("spaceId")!;
     const scope = { orgId, spaceId };
@@ -885,8 +889,8 @@ export function createSpacesRouter() {
     },
   );
 
-  // PUT /api/spaces/:spaceId/packages/:packageId — update config
-  router.put(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, rowAuthority(), async (c) => {
+  // PATCH /api/spaces/:spaceId/packages/:packageId — merge-update config
+  router.patch(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const scope = { orgId, spaceId: spaceId };
@@ -907,7 +911,7 @@ export function createSpacesRouter() {
     const data = await readJsonBody(c, updatePackageSchema);
 
     const placement = await getSpacePackage(scope, packageId);
-    let generationConfig = data.generationConfig;
+    let generationConfig = data.generation_config;
     if (placement && (data.modelId !== undefined || generationConfig !== undefined)) {
       const effectiveModelId = data.modelId !== undefined ? data.modelId : placement.modelId;
       const explicitModel =
@@ -919,12 +923,12 @@ export function createSpacesRouter() {
         generationConfig = validateGenerationOverride(
           generationConfig,
           selectedModel,
-          "generationConfig",
+          "generation_config",
         );
       } else if (
         generationConfig === undefined &&
         data.modelId !== undefined &&
-        placement.generationConfig
+        placement.generation_config
       ) {
         // Reconcile only when `modelId` is part of THIS patch: re-clamping
         // stored settings is a response to the selected model possibly
@@ -933,13 +937,13 @@ export function createSpacesRouter() {
         // silently rewrite `generation_config` on a request that never named
         // it.
         generationConfig = reconcileModelGenerationSettings(
-          placement.generationConfig,
+          placement.generation_config,
           selectedModel?.generation,
         );
       }
     }
 
-    const { generationConfig: _generationConfig, ...rest } = data;
+    const { generation_config: _generationConfig, ...rest } = data;
     void _generationConfig;
     // `requirePlacement` — this route updates an EXISTING placement; a
     // packageId that is not placed here (or not visible to the org) is a 404,
@@ -969,7 +973,7 @@ export function createSpacesRouter() {
   // is off already and falls into the case below. 404 for anything else with no
   // row — an offer nobody has taken up is not on, and writing the row would
   // turn it into "switched off", a decision its recipient never made.
-  router.delete(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, rowAuthority(), async (c) => {
+  router.delete(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const scope = { orgId, spaceId: spaceId };

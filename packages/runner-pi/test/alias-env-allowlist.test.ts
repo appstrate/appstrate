@@ -27,7 +27,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
-  ALIAS_API_KEY_PLACEHOLDER,
+  API_KEY_PLACEHOLDER,
   buildRuntimePiEnv,
   SIDECAR_OPERATOR_ENV_KEYS,
 } from "../src/container-env.ts";
@@ -57,26 +57,18 @@ const RUN: RuntimePiEnvOptions = {
     // Held constant across both calls below, so the only input that differs is the
     // flag and the output difference is therefore the alias policy itself.
     modelId: "appstrate-medium",
-    baseUrl: "https://api.deepseek.com/v1",
-    providerId: "deepseek",
-    apiKey: "sk-real-backing-key",
-    // Vendor-REVEALING on purpose. The launcher derives this with
-    // `deriveKeyPlaceholder`, which preserves the key's dash-separated prefix so
-    // the SDK's prefix sniffing keeps working — and for a real key that prefix
-    // names the vendor. A neutral `"sk-placeholder"` here is what let
-    // `MODEL_API_KEY` ship unmasked: the fixture agreed with itself on both
-    // paths, so the value-diff below had nothing to catch.
-    apiKeyPlaceholder: "sk-ant-api03-placeholder",
+    piProvider: "deepseek",
+    // No `oauthApiKeyPlaceholder`: an OAuth run is never aliased (the launcher
+    // refuses the pair), and it changes a value, never the key set.
     input: ["text", "image"],
     // A real catalog pair, sent unchanged on both paths.
     contextWindow: 200_000,
     maxTokens: 64_000,
     reasoning: true,
-    reasoningLevelMap: { high: "xhigh" },
     cost: { input: 0.28, output: 0.42, cacheRead: 0.028 },
     aliased: true,
   },
-  generation: { temperature: 0.2, reasoningLevel: "high" },
+  generation: { temperature: 0.2, reasoning_level: "high" },
   agentPrompt: "You are a helpful agent.",
   runId: "run_1",
   agentInput: { topic: "quarterly report" },
@@ -84,8 +76,12 @@ const RUN: RuntimePiEnvOptions = {
   sidecarUrl: "http://sidecar:8080",
   sidecarAuthToken: "sidecar-auth-token-fixture",
   sidecarProxyLlmUrl: "http://sidecar:8080/llm",
-  outputSchema: { type: "object", properties: { summary: { type: "string" } } },
   maxFileBytes: 104_857_600,
+  // Set off their defaults so the builder emits them — the fixture has to reach
+  // every key the container can receive.
+  modelRetry: false,
+  modelCompaction: false,
+  toolResultByteLimit: 16_384,
   forwardProxyUrl: "http://sidecar:8081",
   noProxy: "sidecar,localhost,127.0.0.1",
   sink: {
@@ -105,8 +101,8 @@ const RUN: RuntimePiEnvOptions = {
  * - `MODEL_API` is the canonical `pi-messages` dialect for every alias, so it
  *   names no protocol family.
  * - `MODEL_ID` is the public alias id — the caller chose it.
- * - `MODEL_BASE_URL` is the sidecar's own proxy URL and `MODEL_API_KEY` the
- *   placeholder it swaps; neither reaches upstream.
+ * - `MODEL_BASE_URL` is the sidecar's own proxy URL and `MODEL_API_KEY` a
+ *   constant placeholder; neither reaches upstream.
  * - `MODEL_CONTEXT_WINDOW` / `MODEL_MAX_TOKENS` are the backing's real limits,
  *   which the container needs to size compaction. They narrow the candidate set
  *   without closing it, and the exact `usage.input` count the run reports
@@ -122,7 +118,7 @@ const RUN: RuntimePiEnvOptions = {
  *   once the run's network is gone.
  * - `MODEL_RETRY_ENABLED` is the operator's opt-out of the Pi SDK retry loop, and
  *   `MODEL_COMPACTION_ENABLED` the same opt-out for its auto-compaction loop.
- *   Both are the operator's own choice, read off the host env and identical
+ *   Both are the operator's own choice (platform env, passed as options) and identical
  *   whatever vendor backs the alias — a run either retries (or compacts) or it
  *   does not, and neither answer names a provider.
  * - the rest is run plumbing (prompt, input, sink, trace, proxy, caps) whose
@@ -153,7 +149,6 @@ const ALIASED_CONTAINER_ENV_KEYS = [
   "MODEL_COMPACTION_ENABLED",
   "MODEL_TEMPERATURE",
   "NO_PROXY",
-  "OUTPUT_SCHEMA",
   "SIDECAR_AUTH_TOKEN",
   "SIDECAR_MAX_REQUEST_BODY_BYTES",
   "SIDECAR_URL",
@@ -166,19 +161,18 @@ const ALIASED_CONTAINER_ENV_KEYS = [
 
 /**
  * What a NON-aliased run gets on top: the whole of what an alias withholds, each
- * naming the backing — `MODEL_PROVIDER` is the vendor key itself,
- * `MODEL_REASONING_LEVEL_MAP` its own effort vocabulary (a fingerprint), and
+ * naming the backing — `MODEL_PROVIDER` is the vendor key itself, and
  * `MODEL_COST` the published rate card, one catalog lookup from a name. A BYOK
- * model the org configured itself has nothing to hide, so it keeps all three.
+ * model the org configured itself has nothing to hide, so it keeps both.
  */
-const ALIAS_WITHHELD_KEYS = ["MODEL_COST", "MODEL_PROVIDER", "MODEL_REASONING_LEVEL_MAP"] as const;
+const ALIAS_WITHHELD_KEYS = ["MODEL_COST", "MODEL_PROVIDER"] as const;
 
 /**
  * Shared keys whose VALUE is masked rather than the key withheld. The key-set
  * difference alone would miss a variable that survives but starts carrying
  * something vendor-specific, so this is pinned as an exact set too.
  */
-const ALIAS_MASKED_VALUE_KEYS = ["MODEL_API", "MODEL_API_KEY"] as const;
+const ALIAS_MASKED_VALUE_KEYS = ["MODEL_API"] as const;
 
 const WHY_THIS_GATE_EXISTS = [
   "",
@@ -224,7 +218,7 @@ function expectExactKeySet(actual: readonly string[], expected: readonly string[
 /**
  * The knobs `buildRuntimePiEnv` reads from the HOST's `process.env` rather than
  * from its options. All of them are set here, from the exported list rather than
- * the two the builder forwards today, so that widening the forwarded subset also
+ * the subset the builder forwards today, so that widening the forwarded subset also
  * trips this gate: left ambient, a newly forwarded knob would just be absent on a
  * machine that does not set it, and the gate would pass while the container
  * gained a variable.
@@ -233,14 +227,7 @@ function expectExactKeySet(actual: readonly string[], expected: readonly string[
  * unknown one, and this key is read at module scope by anything building a logger
  * while it is set.
  */
-const HOST_ENV_KEYS = [
-  ...SIDECAR_OPERATOR_ENV_KEYS,
-  "TOOL_RESULT_BYTE_LIMIT",
-  // The two Pi SDK loop switches. Forwarded from the host env, not from an
-  // option, so they belong here rather than in the builder fixture.
-  "MODEL_RETRY_ENABLED",
-  "MODEL_COMPACTION_ENABLED",
-] as const;
+const HOST_ENV_KEYS = [...SIDECAR_OPERATOR_ENV_KEYS] as const;
 const originalHostEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -307,55 +294,14 @@ describe("aliased agent container env — exact allowlist (issue #1198, Threat B
     // The canonical dialect in place of the backing's protocol family.
     expect(aliased.MODEL_API).toBe("pi-messages");
     expect(byok.MODEL_API).toBe("openai-completions");
-    // The credential placeholder is a vendor tell in exactly the same way, and
-    // was the one that shipped: the launcher's placeholder keeps the key's
-    // prefix, so `sk-ant-…` / `sk-proj-…` / `sk-or-v1-…` names the backing to
-    // code that can read its own environment. An alias gets a constant instead;
-    // `pi-messages` authenticates with `Authorization: Bearer` and never reads
-    // the value's shape. BYOK keeps the derived one — that container is told its
-    // provider outright via MODEL_PROVIDER anyway.
-    expect(aliased.MODEL_API_KEY).toBe(ALIAS_API_KEY_PLACEHOLDER);
-    expect(aliased.MODEL_API_KEY).not.toContain("ant");
-    expect(byok.MODEL_API_KEY).toBe("sk-ant-api03-placeholder");
-    // Neither path ever carries the real upstream credential.
-    expect(aliased.MODEL_API_KEY).not.toContain("real-backing-key");
-    expect(byok.MODEL_API_KEY).not.toContain("real-backing-key");
+    // The credential placeholder would be a vendor tell in exactly the same
+    // way; an API-key run never gets a vendor-shaped one, aliased or not.
+    expect(aliased.MODEL_API_KEY).toBe(API_KEY_PLACEHOLDER);
+    expect(byok.MODEL_API_KEY).toBe(API_KEY_PLACEHOLDER);
     // The token limits are NOT masked: both paths carry the real numbers.
     expect(aliased.MODEL_CONTEXT_WINDOW).toBe(byok.MODEL_CONTEXT_WINDOW);
     expect(aliased.MODEL_MAX_TOKENS).toBe(byok.MODEL_MAX_TOKENS);
     expect(aliased.MODEL_CONTEXT_WINDOW).toBe("200000");
     expect(aliased.MODEL_MAX_TOKENS).toBe("64000");
-  });
-
-  it("refuses to build an aliased container env at all when there is no sidecar", () => {
-    // Every mask asserted above is applied by this builder except one: on the
-    // no-sidecar path `MODEL_BASE_URL` becomes `model.baseUrl`, the backing
-    // vendor's own hostname, because there is no proxy URL to put there instead.
-    // That mask lives in the sidecar, not here, so the only way to keep it is to
-    // refuse the combination — an aliased run without the component that performs
-    // the aliasing is not a run this contract can describe.
-    //
-    // Held HERE and not only at the caller: `run-launcher/pi.ts` gates its
-    // no-sidecar path on `!llmConfig.aliased` today, one package away, where this
-    // file's exact-set assertions cannot see it.
-    const noSidecar: RuntimePiEnvOptions = {
-      ...RUN,
-      sidecarUrl: undefined,
-      sidecarProxyLlmUrl: undefined,
-      forwardProxyUrl: undefined,
-      noSidecar: true,
-    };
-
-    expect(() =>
-      buildRuntimePiEnv({ ...noSidecar, model: { ...RUN.model, aliased: true } }),
-    ).toThrow(/aliased run cannot be launched with noSidecar/);
-
-    // Control: the refusal is about the ALIAS, not about noSidecar. The same
-    // options with the flag off build fine and hand over the vendor's endpoint —
-    // which is exactly what a BYOK run is entitled to, and exactly what an alias
-    // must never see.
-    const byok = buildRuntimePiEnv({ ...noSidecar, model: { ...RUN.model, aliased: false } });
-    expect(byok.MODEL_BASE_URL).toBe("https://api.deepseek.com/v1");
-    expect(byok.SIDECAR_URL).toBeUndefined();
   });
 });

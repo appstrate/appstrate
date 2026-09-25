@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { packageSourceValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
 /**
@@ -91,7 +92,7 @@ const integrationSummarySchema = {
     id: { type: "string" },
     manifest: { type: "object", additionalProperties: true },
     orgId: { type: ["string", "null"] },
-    source: { type: "string", enum: ["local", "system"] },
+    source: { type: "string", enum: [...packageSourceValues] },
     active: { type: "boolean" },
     block_user_connections: { type: "boolean" },
   },
@@ -398,7 +399,7 @@ const connectRunResponses = {
           detail:
             "This connection method is unavailable on this deployment. Contact your administrator.",
           code: "connect_unavailable",
-          requestId: "req_abc123",
+          request_id: "req_abc123",
         },
       },
     },
@@ -415,7 +416,7 @@ const connectRunResponses = {
           detail:
             "The connection attempt timed out after 60000ms — the login did not complete in time. Please try again.",
           code: "timeout",
-          requestId: "req_def456",
+          request_id: "req_def456",
         },
       },
     },
@@ -754,7 +755,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Import a connection by submitting credentials directly (programmatic)",
       description:
-        'Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).\n\nA credential the platform mints (auth declaring `_meta["dev.appstrate/provisioning"]`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`). An auth that declares provisioning on a non-system package, or names an unknown provisioning kind, is refused with a 400 whatever the body carries.',
+        "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).\n\nA credential the platform mints (the `private_key` of `@appstrate/ssh`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -887,12 +888,13 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["connect_url", "expires_at"],
+                required: ["connect_url", "expiresAt"],
                 properties: {
                   connect_url: { type: "string", format: "uri" },
-                  expires_at: {
-                    type: "integer",
-                    description: "Absolute expiry of the connect session (epoch ms).",
+                  expiresAt: {
+                    type: "string",
+                    format: "date-time",
+                    description: "Absolute expiry of the connect session (RFC 3339).",
                   },
                 },
               },
@@ -966,9 +968,9 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["package_id", "auth_key", "display_name", "auth"],
+                required: ["packageId", "auth_key", "display_name", "auth"],
                 properties: {
-                  package_id: { type: "string" },
+                  packageId: { type: "string" },
                   auth_key: { type: "string" },
                   display_name: { type: "string" },
                   icon: { type: ["string", "null"] },
@@ -976,7 +978,7 @@ export const integrationsPaths = {
                     type: "object",
                     additionalProperties: true,
                     description:
-                      'The auth declaration the form renders. Credentials the platform mints (`_meta["dev.appstrate/provisioning"]`, AFPS §10) are removed from `credentials.schema` — display only; submissions are validated against the full schema.',
+                      "The auth declaration the form renders. Credentials the platform mints (the `private_key` of `@appstrate/ssh`) are removed from `credentials.schema` — display only; submissions are validated against the full schema.",
                   },
                   connection_id: { type: ["string", "null"] },
                   csrf: { type: ["string", "null"] },
@@ -984,11 +986,6 @@ export const integrationsPaths = {
               },
             },
           },
-        },
-        "400": {
-          $ref: "#/components/responses/ValidationError",
-          description:
-            'The auth declares credential provisioning (`_meta["dev.appstrate/provisioning"]`, AFPS §10) on a non-system package, or names an unknown provisioning kind.',
         },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -1040,7 +1037,7 @@ export const integrationsPaths = {
                   handoff_steps: {
                     type: "array",
                     description:
-                      'Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must do with the material the platform minted, in order. Never contains a secret. Steps flagged `deferred` are due at deletion and are served again by `getMyConnectionHandoff`.',
+                      "Present when the platform minted credentials for this auth (`@appstrate/ssh`): what the user must do with the material the platform minted, in order. Never contains a secret. Steps flagged `deferred` are due at deletion and are served again by `getMyConnectionHandoff`.",
                     items: { $ref: "#/components/schemas/HandoffStep" },
                   },
                 },

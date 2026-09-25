@@ -201,7 +201,7 @@
     },
     "packages/afps-shared": {
       "name": "@appstrate/afps-shared",
-      "version": "0.8.0",
+      "version": "0.9.1",
       "dependencies": {
         "@types/semver": "^7.8.0",
         "fflate": "^0.8.3",
@@ -227,7 +227,7 @@
       "version": "11.1.0",
       "dependencies": {
         "@afps-spec/schema": "^0.7.0",
-        "@appstrate/afps-shared": "^0.8.0",
+        "@appstrate/afps-shared": "^0.9.1",
         "@types/json-schema": "7.0.15",
         "@types/semver": "^7.8.0",
         "ajv": "^8.20.0",
@@ -379,6 +379,7 @@
         "@opentelemetry/sdk-metrics": "^2.9.0",
         "@opentelemetry/sdk-trace-base": "^2.11.0",
         "@opentelemetry/semantic-conventions": "^1.43.0",
+        "zod": "^4.6.5",
       },
       "peerDependencies": {
         "hono": "^4.12.30",

@@ -57,12 +57,13 @@ let primedOrgs: ReturnType<typeof fetchOrgs> | null = null;
  * read as an *empty* org list to `OrgGate` and bounce a legitimate user into
  * onboarding after they log in.
  */
-export function primeOrgList(): void {
+export function primeOrgList(): Promise<OrgList> {
   const request = fetchOrgs();
   primedOrgs = request;
   request.catch(() => {
     if (primedOrgs === request) primedOrgs = null;
   });
+  return request;
 }
 
 function orgListQueryFn() {

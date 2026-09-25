@@ -106,8 +106,27 @@ services:
   # `docker compose exec appstrate-minio mc ...`. Only publish :9000
   # (add a `ports:` mapping) if you opt into direct-to-bucket presign by
   # setting S3_PUBLIC_ENDPOINT to a public MinIO domain.
+  #
+  # Image: Chainguard's MinIO build (MinIO RELEASE.2026-09-22T19-25-18Z).
+  # MinIO's own registries (quay.io/minio/*, Docker Hub minio/*) require
+  # authentication; Chainguard serves this build anonymously, and only as
+  # `latest`, so the ref pins the multi-arch index digest — `docker compose
+  # pull` can never swap the storage engine under running data. The same
+  # image serves `appstrate-minio-init`: it ships `mc` and `/bin/sh`, which
+  # `cgr.dev/chainguard/minio-client` (no shell) does not. It runs as uid
+  # 65532, so `/data` must be owned by 65532:65532: on root-owned files the
+  # server exits with "Unable to write to the backend" (the repair is under
+  # "Data Persistence" in examples/self-hosting/README.md).
+  #
+  # Every compose file pins this exact ref (scripts/test/minio-image-ref.test.ts
+  # fails while one differs). To refresh:
+  #   docker pull cgr.dev/chainguard/minio:latest
+  #   docker image inspect --format '{{index .RepoDigests 0}}' cgr.dev/chainguard/minio:latest
+  #   docker run --rm cgr.dev/chainguard/minio:latest --version
+  # then replace the digest everywhere `rg -l cgr.dev/chainguard/minio@`
+  # lists (CHANGELOG entries excepted) and the release in this comment.
   appstrate-minio:
-    image: quay.io/minio/minio:RELEASE.2025-03-12T18-04-18Z@sha256:46b3009bf7041eefbd90bd0d2b38c6ddc24d20a35d609551a1802c558c1c958f
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
     networks:
       - appstrate-data
     command: server /data
@@ -126,7 +145,7 @@ services:
       retries: 5
 
   appstrate-minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-03-12T17-29-24Z@sha256:470f5546b596e16c7816b9c3fa7a78ce4076bb73c2c73f7faeec0c8043923123
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
     networks:
       - appstrate-data
     restart: "no"
@@ -148,12 +167,12 @@ services:
   # Without this, the first execution would block on a slow image pull.
   # These containers exit immediately after pulling.
   appstrate-pi:
-    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-sidecar:
-    image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
@@ -162,27 +181,27 @@ services:
   # Pre-pulled so the first integration boot doesn't block on — or fail at —
   # an on-demand pull.
   appstrate-mcp-runner-node:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-mcp-runner-python:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-mcp-runner-bun:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-mcp-runner-uv:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   appstrate-mcp-runner-binary:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
@@ -249,7 +268,7 @@ services:
   #     - /var/run/docker.sock:/var/run/docker.sock:ro
 
   appstrate:
-    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.62}
     networks:
       - appstrate-data
       - appstrate-public
@@ -295,16 +314,16 @@ services:
       # from the effective container hostname. Forwarding `${PLATFORM_API_URL:-}`
       # injects an empty string, which bypasses the auto-detection path.
       # Set it only if you need to point sidecars at a different host.
-      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.60}
-      - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.60}
+      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.62}
       # Runner images forwarded to the sidecar (SIDECAR_OPERATOR_ENV_KEYS) so
       # it spawns integration runners from GHCR instead of bare `:latest` tags
       # (which the daemon would try — and fail — to pull from Docker Hub).
-      - RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.60}
-      - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.60}
-      - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.60}
-      - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.60}
-      - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.60}
+      - RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.62}
       # ── System config (JSON arrays) ──
       - SYSTEM_PROVIDER_KEYS
       - SYSTEM_PROXIES

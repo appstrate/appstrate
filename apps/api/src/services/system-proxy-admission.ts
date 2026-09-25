@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Admission gate for calls that enter through `/api/llm-proxy` — platform-paid
- * and BYOK alike.
+ * Admission gate for llm-proxy calls — platform-paid and BYOK alike.
  *
  * A run only discovers its model at inference time when it executes off-platform,
  * so the proxy is the first place that can know which credential a call resolved
@@ -23,6 +22,8 @@
  *   - chat context → zero dispatches; first-party chat already gated the turn
  *     at admission, and the signed loopback identity validated here proves
  *     this call is that same turn.
+ *   - run inference → zero dispatches, likewise: the preflight gate admitted
+ *     the launch, and the run token proves this is that run's own inference.
  *   - no context   → a platform-supplied call is REFUSED (400
  *     `usage_context_required`); a BYOK call is allowed through undispatched
  *     (see the deliberate gap documented below).
@@ -47,6 +48,7 @@ type SystemProxyUsageContext =
       runOrigin: "platform" | "remote";
     }
   | { context: "chat"; sessionId: string | null }
+  | { context: "run_inference" }
   | null;
 
 export async function enforceSystemProxyAdmission(args: {
@@ -94,11 +96,14 @@ export async function enforceSystemProxyAdmission(args: {
   }
 
   // `checkUsageAllowed` already called `beforeUsage` once for this exact turn
-  // before minting the inference loopback token. Calling it again here would
-  // duplicate hook side effects and quota reads. The signed loopback identity
-  // is still load-bearing: it is what distinguishes chat from an unattributed
-  // raw proxy call.
-  if (args.usageContext.context === "chat") return;
+  // before minting the inference loopback token (the preflight gate did, for a
+  // run's own inference). Calling it again here would duplicate hook side
+  // effects and quota reads. The signed loopback identity is still
+  // load-bearing: it is what distinguishes chat from an unattributed raw proxy
+  // call. An allowlist, so a new context is dispatched by default.
+  if (args.usageContext.context === "chat" || args.usageContext.context === "run_inference") {
+    return;
+  }
 
   // Every run-context call reaching THIS seam is gated, whatever the run's
   // origin. There is no "already admitted" short-circuit, because the unit the
@@ -106,8 +111,7 @@ export async function enforceSystemProxyAdmission(args: {
   //
   //   - `run-preflight-gates.ts` admits a run LAUNCH once (every run, whatever
   //     its credential source or execution plane). A platform-origin run's
-  //     inference then flows through the sidecar (`MODEL_BASE_URL`), which
-  //     never touches `/api/llm-proxy`.
+  //     inference then flows through the sidecar, never `/api/llm-proxy`.
   //   - This seam admits ONE raw proxy call, a distinct billable unit that
   //     mints its own `llm_usage` row (`source='proxy'`). It is never the
   //     continuation of the launch the preflight gate admitted.

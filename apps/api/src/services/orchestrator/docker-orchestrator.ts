@@ -15,10 +15,8 @@ import type {
 import * as docker from "../docker.ts";
 import { createNetworkWithPoolRetry } from "../docker-errors.ts";
 import { logger } from "../../lib/logger.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { SIDECAR_MEMORY_BYTES, SIDECAR_NANO_CPUS } from "./constants.ts";
 import { buildBaseSidecarEnv } from "./sidecar-env.ts";
-import { SidecarExitWatcher } from "./sidecar-exit-watcher.ts";
 import { warnOnRuntimeImageRevisionDrift } from "./runtime-image-pair.ts";
 
 class DockerWorkloadHandle implements WorkloadHandle {
@@ -72,25 +70,7 @@ const DOCKER_SIDECAR_ENDPOINTS: SidecarEndpoints = {
 };
 
 export class DockerOrchestrator implements RunOrchestrator {
-  private readonly sidecarExitWatcher = new SidecarExitWatcher({
-    waitForExit: (containerId) => docker.waitForExit(containerId),
-    streamLogs: (containerId, signal) => docker.streamLogs(containerId, signal),
-    onUnexpectedExit: ({ runId, containerId, exitCode, tail }) => {
-      logger.error("Sidecar exited before run completed", {
-        runId,
-        containerId,
-        exitCode,
-        ...(tail ? { tail } : {}),
-      });
-    },
-    onWatcherError: ({ runId, containerId, error }) => {
-      logger.debug("Sidecar exit watcher errored", {
-        runId,
-        containerId,
-        error: getErrorMessage(error),
-      });
-    },
-  });
+  readonly sidecarExitsIndependently = true;
   /**
    * Images verified present in this process's lifetime (pre-pulled at
    * {@link initialize} or ensured by a prior run). {@link ensureImages}
@@ -145,8 +125,6 @@ export class DockerOrchestrator implements RunOrchestrator {
     // infra shared with any other Appstrate process on this daemon (#834).
     // Removing it here used to break the runs of a concurrently-running
     // instance, whose cached network ID went stale.
-    //
-    this.sidecarExitWatcher.clearExpectedExits();
   }
 
   async ensureImages(images: string[]): Promise<void> {
@@ -322,6 +300,7 @@ export class DockerOrchestrator implements RunOrchestrator {
       spec,
       baseEnv: pickOperatorSidecarEnv(),
       port: "8080",
+      forwardProxyPort: "8081",
       // Phase 1.4 — RUN_ID lets the sidecar stamp `appstrate.run=<runId>`
       // on the integration runner containers it spawns, letting the
       // platform's orphan reaper match them back to the parent run.
@@ -370,32 +349,18 @@ export class DockerOrchestrator implements RunOrchestrator {
     // a retrying MCP handshake against `sidecar:8080/mcp`, which absorbs:
     //   - ECONNREFUSED while the sidecar is wiring its listener
     //   - ENOTFOUND while the Docker bridge propagates the "sidecar" alias
-    // Sidecar exit detection still happens loudly: a non-blocking watcher
-    // races `waitForExit` against the run. If the sidecar dies before MCP
-    // connects, the watcher logs `exitCode` + buffered stderr/stdout, so
-    // operators see "sidecar exited 1 (npm not found)" rather than the
-    // agent's eventual "deadline exceeded" hand-wave.
+    // A sidecar that dies early is caught by the run launcher, which races
+    // its exit against the agent's and fails the run with the sidecar's
+    // exit code and log tail.
     await docker.startContainer(containerId);
-    void this.sidecarExitWatcher.watch(runId, containerId);
 
     return new DockerWorkloadHandle(containerId, runId, "sidecar");
   }
 
   async createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle> {
-    // `skipSidecar` runs have no egress proxy, so the agent must reach the
-    // upstream LLM + platform sink itself. Give it the same network setup
-    // as the sidecar (egress network primary + host-gateway / platform net)
-    // instead of the internal-only isolation boundary, which has no route
-    // out and would fail the agent's first `emitRuntimeReady` POST.
-    // Same by-name resolution as createSidecar: never trust a cached
-    // network ID across the process lifetime (#834).
-    const [platformNetwork, egressNetworkId] = spec.egress
-      ? await Promise.all([
-          docker.detectPlatformNetwork(),
-          docker.ensureNetwork(docker.EGRESS_NETWORK_NAME),
-        ])
-      : [null, null];
-
+    // The workload sits on the run's internal isolation boundary only: every
+    // outbound call it makes goes through the sidecar.
+    //
     // Mount the per-run workspace into the agent container at
     // /workspace (already exists as the agent's CWD, chowned to `pi`
     // at image build time). The boundary's init step set the volume's
@@ -426,17 +391,10 @@ export class DockerOrchestrator implements RunOrchestrator {
       adapterName: spec.role,
       memory: spec.resources.memoryBytes,
       nanoCpus: spec.resources.nanoCpus,
-      networkId: egressNetworkId ?? boundary.id,
+      networkId: boundary.id,
       networkAlias: spec.role,
       ...(workspaceBinds.length > 0 ? { binds: workspaceBinds } : {}),
-      ...(spec.egress
-        ? { extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"] }
-        : {}),
     });
-
-    if (spec.egress && platformNetwork) {
-      await docker.connectContainerToNetwork(platformNetwork.networkId, containerId);
-    }
 
     return new DockerWorkloadHandle(containerId, spec.runId, spec.role);
   }
@@ -446,22 +404,10 @@ export class DockerOrchestrator implements RunOrchestrator {
   }
 
   async stopWorkload(handle: WorkloadHandle): Promise<void> {
-    if (handle.role === "sidecar") {
-      await this.sidecarExitWatcher.expectExitDuring(handle.id, () =>
-        docker.stopContainer(handle.id),
-      );
-      return;
-    }
     await docker.stopContainer(handle.id);
   }
 
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
-    if (handle.role === "sidecar") {
-      await this.sidecarExitWatcher.expectExitDuring(handle.id, () =>
-        docker.removeContainer(handle.id),
-      );
-      return;
-    }
     await docker.removeContainer(handle.id);
   }
 
@@ -474,9 +420,7 @@ export class DockerOrchestrator implements RunOrchestrator {
   }
 
   async stopByRunId(runId: string): Promise<StopResult> {
-    return this.sidecarExitWatcher.expectRunExitDuring(runId, () =>
-      docker.stopContainersByRun(runId),
-    );
+    return docker.stopContainersByRun(runId);
   }
 
   /**

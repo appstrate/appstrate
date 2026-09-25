@@ -123,6 +123,7 @@ function fakeDeps(o: DepsOverrides): ChatPlatformDeps {
       return new Response("unexpected dispatch: " + path, { status: 500 });
     },
     rateLimit: () => async (_c, next) => next(),
+    publicOrigin: "http://localhost:3000",
     resolveChatModel:
       o.resolveChatModel ?? (async (): Promise<ChatModelResolution> => ({ subscription: false })),
     recordChatUsage: async () => {},
@@ -223,9 +224,9 @@ describe("chat admission gate (handleChatStream)", () => {
       body: { messages: [userTurn("u1", "hello")] },
     });
     // A subscription model whose credential is dead short-circuits to the
-    // reconnect response — a clean way to observe the turn past the gate
+    // reconnect refusal — a clean way to observe the turn past the gate
     // without standing up the Pi engine.
-    const res = await handleChatStream(
+    const refusal = handleChatStream(
       c,
       fakeDeps({
         checkUsageAllowed: async (args) => {
@@ -239,8 +240,8 @@ describe("chat admission gate (handleChatStream)", () => {
       }),
     );
 
-    // Admitted → the turn proceeds and hits the reconnect (401) branch.
-    expect(res.status).toBe(401);
+    // Admitted → the turn proceeds and hits the reconnect (409) branch.
+    await expect(refusal).rejects.toMatchObject({ status: 409, code: "needs_reconnection" });
     expect(gateArgs).toEqual([
       {
         orgId: ctx.orgId,

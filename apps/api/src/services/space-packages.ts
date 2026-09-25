@@ -252,7 +252,7 @@ function spacePackageWire(
 ) {
   return {
     packageId: row.packageId,
-    generationConfig: row.generationConfig,
+    generation_config: row.generationConfig,
     modelId: row.modelId,
     proxyId: row.proxyId,
     enabled: row.enabled,
@@ -526,7 +526,7 @@ export async function deactivatePackage(
 // (`AgentDetail.input`).
 const spacePackageSelect = {
   packageId: spacePackages.packageId,
-  generationConfig: spacePackages.generationConfig,
+  generation_config: spacePackages.generationConfig,
   modelId: spacePackages.modelId,
   proxyId: spacePackages.proxyId,
   enabled: spacePackages.enabled,
@@ -672,7 +672,7 @@ export async function listActivePackages(scope: SpaceScope, type: PackageType) {
  */
 interface PackageHint {
   /** Package identifier, e.g. "@appstrate/triage" / "@appstrate/web-research". */
-  package_id: string;
+  packageId: string;
   display_name: string;
   description: string;
   source: string;
@@ -743,7 +743,7 @@ function projectPackageHint<T extends PackageHint>(
 ): T {
   const manifest = asRecord(row.draftManifest) as Record<string, unknown>;
   const base: PackageHint = {
-    package_id: typeof manifest.name === "string" ? manifest.name : row.id,
+    packageId: typeof manifest.name === "string" ? manifest.name : row.id,
     display_name: typeof manifest.display_name === "string" ? manifest.display_name : "",
     description: typeof manifest.description === "string" ? manifest.description : "",
     source: row.source ?? "local",

@@ -7,7 +7,7 @@ import { listResponse } from "../lib/list-response.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemModel, getSystemModelProviderCredentials } from "../services/model-registry.ts";
-import { modelCostSchema } from "@appstrate/core/module";
+import { modelCostSchema, modelInputModalitySchema } from "@appstrate/core/module";
 import {
   listOrgModels,
   getOrgModel,
@@ -19,19 +19,20 @@ import {
   seedOrgModelsForCredential,
   testModelConnection,
   testModelConfig,
-  loadModel,
   deriveModelLabel,
   projectAliasedModel,
   resolveCatalogDefaults,
   type CatalogDefaults,
 } from "../services/org-models.ts";
 import { getModelProvider, isOAuthModelProvider } from "../services/model-providers/registry.ts";
-import { resolveFeaturedModels } from "../services/model-providers/model-selection.ts";
 import { checkAliasInvariants, type AliasInvariantViolation } from "@appstrate/core/model-swap";
-import { listCatalogModels } from "../services/pricing-catalog.ts";
+import {
+  listCatalogModels,
+  lookupCatalogModel,
+  restrictsToOffer,
+} from "../services/model-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
-  getOrgModelProviderCredential,
   loadInferenceCredentials,
   loadCredentialRow,
 } from "../services/model-providers/credentials.ts";
@@ -46,6 +47,7 @@ import {
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { searchOpenRouterModels } from "../services/model-search.ts";
 
 export const createModelSchema = z
   .object({
@@ -67,10 +69,10 @@ export const createModelSchema = z
     credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
     /**
      * Catalog-derivable overrides. Omit (or send null on update) to let the
-     * read path fall back to the live catalog — keeps existing rows in sync
-     * with the weekly `refresh-pricing-catalog.ts` bump.
+     * read path fall back to the catalog — keeps existing rows in sync with
+     * a Pi registry bump.
      */
-    input: z.array(z.string()).optional(),
+    input: z.array(modelInputModalitySchema).optional(),
     contextWindow: z.number().int().positive().optional(),
     maxTokens: z.number().int().positive().optional(),
     reasoning: z.boolean().optional(),
@@ -105,7 +107,7 @@ export const updateModelSchema = z
     modelId: z.string().min(1).optional(),
     credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).optional(),
     enabled: z.boolean().optional(),
-    input: z.array(z.string()).nullable().optional(),
+    input: z.array(modelInputModalitySchema).nullable().optional(),
     contextWindow: z.number().int().positive().nullable().optional(),
     maxTokens: z.number().int().positive().nullable().optional(),
     reasoning: z.boolean().nullable().optional(),
@@ -129,15 +131,15 @@ export const setDefaultSchema = z
 export const seedModelsSchema = z
   .object({
     credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
-    modelIds: z
+    model_ids: z
       .array(z.string().min(1))
-      .min(1, "at least one modelId is required")
+      .min(1, "at least one model id is required")
       .max(50)
       // The same id twice is one binding asked for twice, and
       // `uq_org_models_unaliased_binding` refuses it. The seed insert is a
       // single atomic statement, so a self-duplicating body would fail the
       // whole batch on a constraint the caller cannot see — name it here.
-      .refine((ids) => new Set(ids).size === ids.length, "modelIds must be unique"),
+      .refine((ids) => new Set(ids).size === ids.length, "model_ids must be unique"),
   })
   .strict();
 
@@ -148,16 +150,15 @@ export const testInlineSchema = z
   .object({
     credentialId: z.string().min(1, "credentialId is required"),
     modelId: z.string().min(1),
-    apiKey: z.string().optional(),
-    existingModelId: z.string().optional(),
+    api_key: z.string().optional(),
   })
   .strict();
 
 /**
  * Map an alias-invariant violation to its 400 — shared by the create and
- * update handlers so PUT cannot accept a state POST rejects (issue #727).
+ * update handlers so PATCH cannot accept a state POST rejects (issue #727).
  */
-function throwOnAliasViolation(violation: AliasInvariantViolation | null, apiShape: string): void {
+function throwOnAliasViolation(violation: AliasInvariantViolation | null): void {
   // 1. Require an explicit label. The derive-from-catalog fallback (POST) —
   //    or a label derived at creation time and kept on update — would name
   //    the alias after its REAL backing ("DeepSeek Chat"), and `label`
@@ -169,17 +170,7 @@ function throwOnAliasViolation(violation: AliasInvariantViolation | null, apiSha
       "label",
     );
   }
-  // 2. The swap only rewrites the body `model` field, which exists for
-  //    openai/anthropic/mistral shapes; google/azure/bedrock carry the
-  //    model id in the URL path, so an alias there forwards verbatim and
-  //    404s upstream (and never gets swapped). Reject up front.
-  if (violation === "non_aliasable_shape") {
-    throw invalidRequest(
-      `Model aliases are not supported for the "${apiShape}" protocol (the model id is carried in the URL, not the request body).`,
-      "aliased",
-    );
-  }
-  // 3. The oauth-subscription run path is a pure sidecar bearer-swap —
+  // 2. The oauth-subscription run path is a pure sidecar bearer-swap —
   //    it never rewrites the body, so an alias there could not be
   //    swapped (nor masked). Reject up front.
   if (violation === "oauth_provider") {
@@ -207,6 +198,14 @@ function throwOnTokenBudgetViolation(
       `maxTokens (${maxTokens}) must be strictly less than the effective contextWindow (${contextWindow})`,
       "maxTokens",
     );
+  }
+}
+
+/** A named provider binds only the ids of its offer — see `restrictsToOffer`. */
+function throwOnModelOutsideOffer(providerId: string, modelId: string): void {
+  const def = getModelProvider(providerId);
+  if (def && restrictsToOffer(def) && !lookupCatalogModel(def, modelId)) {
+    throw invalidRequest(`Model ${modelId} is not offered by provider ${providerId}`, "modelId");
   }
 }
 
@@ -273,15 +272,14 @@ export function createModelsRouter() {
           "credentialId",
         );
       }
+      throwOnModelOutsideOffer(creds.providerId, modelId);
       // Model-alias guards (issue #727, Threat A) — shared invariant rule:
       if (aliased) {
         throwOnAliasViolation(
           checkAliasInvariants({
             label: data.label,
-            apiShape: creds.apiShape,
             authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
           }),
-          creds.apiShape,
         );
       }
       // Token-budget invariant on the EFFECTIVE state: an override omitted
@@ -331,7 +329,7 @@ export function createModelsRouter() {
   });
 
   // POST /api/models/seed — bulk-seed models from the registry for one credential.
-  // The credential's providerId pins the registry entry; modelIds are validated
+  // The credential's providerId pins the registry entry; model_ids are validated
   // against it. Atomic — either all rows insert or none. Idempotent: returns
   // `created: 0` when the org already has any model bound to this credential.
   router.post("/seed", requirePermission("models", "write"), async (c) => {
@@ -358,36 +356,14 @@ export function createModelsRouter() {
       throw notFound(`Provider ${creds.providerId} not registered`);
     }
 
-    // The vendored pricing catalog is the single source of truth for
-    // per-model metadata. The picker surfaces ids from this catalog
-    // (filtered by `featuredModels` when `catalogProviderId` is set), so
-    // we accept any id that lives in the resolved catalog.
-    const catalogKey = registry.catalogProviderId ?? creds.providerId;
-    const catalogById = new Map(listCatalogModels(catalogKey).map((m) => [m.id, m]));
-    // Foreign-catalog (subscription OAuth) gate: a model is seedable when
-    // it's in the featured list OR in the credential's servable set
-    // (`available_model_ids`) — the candidates the provider's `GET /models`
-    // listing confirmed for API-key providers (the listing knows the
-    // account's plan, the featured list doesn't), derived from the catalog
-    // for static providers. Reading it off the credential DTO is what keeps
-    // the gate from consulting a stale persisted copy.
-    const credentialInfo = registry.catalogProviderId
-      ? await getOrgModelProviderCredential(orgId, data.credentialId)
-      : undefined;
-    const allowedSet = new Set([
-      ...resolveFeaturedModels(registry),
-      ...(credentialInfo?.available_model_ids ?? []),
-    ]);
+    // Only ids of the provider's catalog offer are seedable — for a
+    // static-discovery provider that is exactly the credential's served set.
+    const catalogById = new Map(listCatalogModels(registry).map((m) => [m.id, m]));
     const models: Array<CatalogModelEntry & { id: string }> = [];
-    for (const modelId of data.modelIds) {
+    for (const modelId of data.model_ids) {
       const cat = catalogById.get(modelId);
       if (!cat) {
-        throw invalidRequest(`Model ${modelId} is not in the ${catalogKey} catalog`);
-      }
-      if (registry.catalogProviderId && !allowedSet.has(modelId)) {
-        throw invalidRequest(
-          `Model ${modelId} is not featured or verified for provider ${creds.providerId}`,
-        );
+        throw invalidRequest(`Model ${modelId} is not offered by provider ${creds.providerId}`);
       }
       models.push(cat);
     }
@@ -408,7 +384,10 @@ export function createModelsRouter() {
           promotedDefault: result.promotedDefault,
         },
       });
-      return c.json(result, 201);
+      return c.json(
+        { created: result.created, ids: result.ids, promoted_default: result.promotedDefault },
+        201,
+      );
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Model seed failed", { error: getErrorMessage(err) });
@@ -450,101 +429,9 @@ export function createModelsRouter() {
   });
 
   // GET /api/models/openrouter — search OpenRouter models (proxy)
-  router.get("/openrouter", rateLimit(10), async (c) => {
-    const q = c.req.query("q") || "";
-
-    try {
-      const res = await fetch("https://openrouter.ai/api/v1/models", {
-        signal: AbortSignal.timeout(10_000),
-      });
-
-      if (!res.ok) {
-        throw new ApiError({
-          status: 502,
-          code: "provider_error",
-          title: "Provider Error",
-          detail: `OpenRouter returned ${res.status}`,
-        });
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const json: any = await res.json();
-      const rawModels = json?.data;
-
-      if (!Array.isArray(rawModels)) {
-        return c.json(listResponse<unknown>([]));
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let models = rawModels.map((m: any) => {
-        // OpenRouter pricing is per-token; convert to $/M tokens for ModelCost
-        const pricing = m.pricing;
-        const promptPerToken = parseFloat(pricing?.prompt);
-        const completionPerToken = parseFloat(pricing?.completion);
-        const cacheReadPerToken = parseFloat(pricing?.input_cache_read);
-        const hasValidPricing = !isNaN(promptPerToken) && !isNaN(completionPerToken);
-
-        return {
-          id: String(m.id ?? ""),
-          name: String(m.name || m.id || ""),
-          contextWindow: typeof m.context_length === "number" ? m.context_length : null,
-          maxTokens:
-            typeof m.top_provider?.max_completion_tokens === "number"
-              ? m.top_provider.max_completion_tokens
-              : null,
-          input: m.architecture?.input_modalities?.includes?.("image")
-            ? ["text", "image"]
-            : ["text"],
-          reasoning: false,
-          // A rate OpenRouter does not report is left ABSENT, never `0`: a
-          // stored `0` is a positive claim that the vendor bills nothing, and
-          // `classifyTokenPricing` reads it as a real price — so a model with
-          // unknown cache-read rates would classify `priced` while its cached
-          // tokens (already carved out of the `input` bucket) are billed in no
-          // bucket at all. `cacheWrite` is never reported by this endpoint.
-          cost: hasValidPricing
-            ? {
-                input: promptPerToken * 1_000_000,
-                output: completionPerToken * 1_000_000,
-                ...(isNaN(cacheReadPerToken) ? {} : { cacheRead: cacheReadPerToken * 1_000_000 }),
-              }
-            : null,
-        };
-      });
-
-      // Filter by search query
-      if (q.trim()) {
-        const lower = q.toLowerCase();
-        models = models.filter(
-          (m) => m.id.toLowerCase().includes(lower) || m.name.toLowerCase().includes(lower),
-        );
-      }
-
-      // Limit results
-      models = models.slice(0, 50);
-
-      return c.json(listResponse(models));
-    } catch (err) {
-      if (err instanceof ApiError) throw err;
-      if (err instanceof DOMException && err.name === "TimeoutError") {
-        throw new ApiError({
-          status: 504,
-          code: "timeout",
-          title: "Gateway Timeout",
-          detail: "OpenRouter request timed out",
-        });
-      }
-      logger.error("OpenRouter model search failed", {
-        error: getErrorMessage(err),
-      });
-      throw new ApiError({
-        status: 502,
-        code: "network_error",
-        title: "Bad Gateway",
-        detail: "Failed to fetch OpenRouter models",
-      });
-    }
-  });
+  router.get("/openrouter", rateLimit(10), requirePermission("models", "read"), async (c) =>
+    c.json(listResponse(await searchOpenRouterModels(c.req.query("q") || ""))),
+  );
 
   // POST /api/models/test — test model config inline (before saving)
   // MUST be registered before /:id/test
@@ -553,21 +440,17 @@ export function createModelsRouter() {
     const data = await readJsonBody(c, testInlineSchema);
 
     // Resolve the provider via the credential's providerId — the registry
-    // owns apiShape and the default baseUrl. The user-supplied apiKey (if
-    // any) overrides the stored credential for "verify before save" flows.
+    // owns apiShape and the default baseUrl. The user-supplied `api_key` (if
+    // any) overrides the stored key for "verify before save" flows. A built-in
+    // credential is refused: its key never reaches a caller-chosen probe.
+    if (getSystemModelProviderCredentials().has(data.credentialId)) {
+      throw systemEntityForbidden("model provider credential", data.credentialId, "test");
+    }
     const creds = await loadInferenceCredentials(orgId, data.credentialId);
     if (!creds) {
       throw notFound("Credential not found");
     }
-
-    let apiKey = data.apiKey;
-    if (!apiKey && data.existingModelId) {
-      const existing = await loadModel(orgId, data.existingModelId);
-      if (existing) apiKey = existing.apiKey;
-    }
-    if (!apiKey) {
-      apiKey = creds.apiKey;
-    }
+    const apiKey = data.api_key || creds.apiKey;
     if (!apiKey) {
       throw invalidRequest("API key is required");
     }
@@ -634,8 +517,8 @@ export function createModelsRouter() {
     }
   });
 
-  // PUT /api/models/:id — update a custom model
-  router.put("/:id", requirePermission("models", "write"), async (c) => {
+  // PATCH /api/models/:id — update a custom model
+  router.patch("/:id", requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const modelId = c.req.param("id")!;
     const data = await readJsonBody(c, updateModelSchema);
@@ -670,8 +553,8 @@ export function createModelsRouter() {
     }
 
     // Model-alias guards on the EFFECTIVE post-update state (issue #727) —
-    // without this, PUT is a bypass of every invariant POST enforces: flip
-    // `aliased` on an oauth-subscription or url-model row, or re-point an
+    // without this, PATCH is a bypass of every invariant POST enforces: flip
+    // `aliased` on an oauth-subscription or non-backing row, or re-point an
     // aliased row to such a credential, and the row becomes a state creation
     // rejects (runs then fail-close late at launch; chat would diverge).
     const current = await getOrgModelRow(orgId, modelId);
@@ -693,34 +576,26 @@ export function createModelsRouter() {
           // A false→true flip must carry a fresh explicit label: the row's
           // existing label may be catalog-derived and name the backing. An
           // already-aliased row's label is explicit by construction (POST
-          // enforced it), so it stays valid when this PUT omits `label`.
+          // enforced it), so it stays valid when this PATCH omits `label`.
           label: data.label ?? (current.aliased ? current.label : undefined),
-          apiShape: creds.apiShape,
           authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
         }),
-        creds.apiShape,
       );
     }
 
-    // Token-budget invariant on the EFFECTIVE post-update state. The Zod
-    // refine only sees the payload: a lone `maxTokens` can exceed the stored
-    // (or catalog) contextWindow, a lone `contextWindow` can dip below the
-    // stored maxTokens, and a `modelId`/`credentialId` change swaps the
-    // catalog defaults under a kept override. Gated on the budget-relevant
-    // fields so a legacy-invalid row can still be disabled or relabelled.
-    if (
-      data.maxTokens !== undefined ||
-      data.contextWindow !== undefined ||
-      data.modelId !== undefined ||
-      data.credentialId !== undefined
-    ) {
+    // The offer and token-budget checks run on the EFFECTIVE post-update
+    // state, gated on the fields they read so a row that fails them can still
+    // be disabled or relabelled. The Zod refine only sees the payload: a lone
+    // `maxTokens` can exceed the stored (or catalog) contextWindow, and a
+    // binding change swaps the catalog defaults under a kept override.
+    const rebinds = data.modelId !== undefined || data.credentialId !== undefined;
+    if (rebinds || data.maxTokens !== undefined || data.contextWindow !== undefined) {
       const effectiveModelId = data.modelId ?? current.modelId;
-      // Metadata-only provider resolution — no decrypt, no reachability
-      // probe: the catalog lookup must work even when the row's credential
-      // is dead. A gone credential/provider yields no catalog defaults and
-      // the check runs on the stored overrides alone.
+      // Metadata-only (no decrypt): works even when the row's credential is
+      // dead. A gone credential/provider yields no catalog defaults.
       const providerId =
         newCreds?.providerId ?? (await loadCredentialRow(current.credentialId, orgId))?.providerId;
+      if (rebinds && providerId) throwOnModelOutsideOffer(providerId, effectiveModelId);
       const catalogDefaults: CatalogDefaults = providerId
         ? resolveCatalogDefaults(providerId, effectiveModelId)
         : {};
@@ -738,7 +613,7 @@ export function createModelsRouter() {
         action: "model.updated",
         resourceType: "model",
         resourceId: modelId,
-        after: data as unknown as Record<string, unknown>,
+        after: data,
       });
       // Return the bare updated resource (#657), projected for a model alias
       // (Threat A) — the same projection the list and effective-default paths
@@ -747,7 +622,7 @@ export function createModelsRouter() {
       // The asymmetry with POST is deliberate, not an oversight. A create
       // response echoes a binding the operator just sent in the request body,
       // so it discloses nothing the caller did not already hold. An update
-      // does not: `PUT {"enabled":true}` names no binding field, yet the raw
+      // does not: `PATCH {"enabled":true}` names no binding field, yet the raw
       // row answers with `apiShape`, `providerId`, `baseUrl`, `modelId`,
       // `contextWindow` and `cost`. `isSystemModel` above does not cover this
       // — it rejects env-declared models, while an alias is an ordinary DB row

@@ -5,7 +5,7 @@
  *
  * Two halves, and the split matters:
  *
- *  - `connectOfferTarget` is pure — the whole decision of WHICH 412 item may
+ *  - `connectOfferTarget` is pure — the whole decision of WHICH 409 item may
  *    carry a bearer capability, exercised as a matrix over every resolution
  *    code and every combination of the relay fields.
  *  - `attachConnectOffers` is asserted against the REAL `buildConnectUrl`, and
@@ -200,8 +200,8 @@ describe("attachConnectOffers", () => {
     });
 
     expect(item!.connect_url).toStartWith("http");
-    expect(item!.expires_at).toBeGreaterThan(Date.now());
-    expect(item!.package_id).toBe(INTEGRATION);
+    expect(Date.parse(item!.expiresAt!)).toBeGreaterThan(Date.now());
+    expect(item!.packageId).toBe(INTEGRATION);
 
     const claims = claimsOf(item!);
     expect(claims).toMatchObject({
@@ -243,8 +243,8 @@ describe("attachConnectOffers", () => {
     });
     // `mail.send` is not declared → the whole item stays bare, relay fields and all.
     expect(item!.connect_url).toBeUndefined();
-    expect(item!.expires_at).toBeUndefined();
-    expect(item!.package_id).toBeUndefined();
+    expect(item!.expiresAt).toBeUndefined();
+    expect(item!.packageId).toBeUndefined();
   });
 
   it("mints when every relayed scope IS in the catalog", async () => {
@@ -347,7 +347,7 @@ describe("attachConnectOffers", () => {
 
   it("mints one item's failure without costing the others theirs", async () => {
     // A manifest entry whose promise rejects makes exactly one mint throw; the
-    // sibling in the same 412 must still get its link.
+    // sibling in the same 409 must still get its link.
     const second = "@offers/other";
     const partial = manifestCache({ [second]: authManifest("oauth2") });
     partial.set(INTEGRATION, Promise.reject(new Error("manifest read exploded")));
@@ -361,6 +361,6 @@ describe("attachConnectOffers", () => {
     });
     expect(out[0]!.connect_url).toBeUndefined();
     expect(out[1]!.connect_url).toStartWith("http");
-    expect(out[1]!.package_id).toBe(second);
+    expect(out[1]!.packageId).toBe(second);
   });
 });

@@ -27,6 +27,10 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
 import { computeRunSpend } from "../../../src/services/state/runs.ts";
+import { writeRunnerLedgerRow } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
+import { db } from "@appstrate/db/client";
+import { llmUsage, type InferenceRoute } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 
 describe("computeRunSpend — remote-run mirror exclusion", () => {
@@ -92,8 +96,8 @@ describe("computeRunSpend — remote-run mirror exclusion", () => {
   });
 
   it("keeps a platform runner row (non-NULL credential_source) even alongside proxy rows", async () => {
-    // A platform run's runner row is stamped from runs.model_source, so it is
-    // authoritative and never treated as a remote mirror.
+    // A BYOK platform run's runner row is stamped from runs.model_source, so it
+    // is authoritative and never treated as a remote mirror.
     const run = await seedTestRun();
     await recordLlmUsage({
       source: "proxy",
@@ -111,7 +115,7 @@ describe("computeRunSpend — remote-run mirror exclusion", () => {
         source: "runner",
         orgId: ctx.orgId,
         runId: run.id,
-        credentialSource: "system", // platform run
+        credentialSource: "org", // BYOK platform run
         inputTokens: 20,
         outputTokens: 20,
         costUsd: 0.03,
@@ -302,5 +306,91 @@ describe("computeRunSpend — worst-of provenance over the same rows as the cost
     const spend = await computeRunSpend(run.id, "00000000-0000-4000-a000-000000000009");
     expect(spend.costUsd).toBe(0);
     expect(spend.pricingStatus).toBeNull();
+  });
+});
+
+describe("runner ledger row — the run's inference route decides", () => {
+  let ctx: TestContext;
+  const RATES = { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 };
+  const USAGE = { input_tokens: 1_000, output_tokens: 1_000 };
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "runcost-plane" });
+    await seedAgent({ id: "@runcost/plane", orgId: ctx.orgId, createdBy: ctx.user.id });
+  });
+
+  async function runnerRows(runId: string) {
+    return db
+      .select()
+      .from(llmUsage)
+      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+  }
+
+  function seedPlatformRun(modelSource: "system" | "org", inferenceRoute: InferenceRoute | null) {
+    return seedRun({
+      packageId: "@runcost/plane",
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      status: "running",
+      modelSource,
+      modelId: "pinned-preset",
+      inferenceRoute,
+    });
+  }
+
+  async function writeRunnerRow(
+    run: { id: string; inferenceRoute: InferenceRoute | null },
+    modelSource: string,
+  ) {
+    const row = {
+      cost: 1,
+      usage: USAGE,
+      modelSource,
+      inferenceRoute: run.inferenceRoute,
+      modelCost: RATES,
+    };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    await writeRunnerLedgerRow(scope, run.id, row);
+    await writeRunnerLedgerRow(scope, run.id, row, { required: true });
+  }
+
+  for (const modelSource of ["system", "org"] as const) {
+    it(`writes no runner row for a proxy-served ${modelSource} run — its spend is the proxy rows`, async () => {
+      const run = await seedPlatformRun(modelSource, "proxy");
+      await recordLlmUsage({
+        source: "proxy",
+        orgId: ctx.orgId,
+        runId: run.id,
+        credentialSource: modelSource,
+        inputTokens: 10,
+        outputTokens: 10,
+        costUsd: 0.01,
+        pricingStatus: "priced",
+        requestId: `req_plane_proxy_${modelSource}`,
+      });
+      await writeRunnerRow(run, modelSource);
+
+      expect(await runnerRows(run.id)).toEqual([]);
+      const spend = await computeRunSpend(run.id, ctx.orgId);
+      expect(spend.costUsd).toBeCloseTo(0.01, 10);
+      expect(spend.pricingStatus).toBe("priced");
+    });
+  }
+
+  it("writes the runner row of an OAuth run, which its sidecar serves", async () => {
+    const run = await seedPlatformRun("org", "sidecar");
+    await writeRunnerRow(run, "org");
+    const rows = await runnerRows(run.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.credentialSource).toBe("org");
+  });
+
+  it("writes the runner row of a run with no recorded route", async () => {
+    const run = await seedPlatformRun("system", null);
+    await writeRunnerRow(run, "system");
+    const rows = await runnerRows(run.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.credentialSource).toBe("system");
   });
 });

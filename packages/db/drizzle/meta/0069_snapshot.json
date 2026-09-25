@@ -1,5 +1,5 @@
 {
-  "id": "c1732d2c-8e43-4f78-bec4-df01a7fe489a",
+  "id": "1fda171f-0f85-4a59-9783-42da5f1b7919",
   "prevId": "287f825a-4f22-49a8-81e9-ca81535f1c9e",
   "version": "7",
   "dialect": "postgresql",
@@ -3007,7 +3007,7 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "bigserial",
           "primaryKey": true,
           "notNull": true
         },
@@ -3611,7 +3611,7 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "bigserial",
           "primaryKey": true,
           "notNull": true
         },
@@ -8789,7 +8789,7 @@
       "columns": {
         "seq": {
           "name": "seq",
-          "type": "serial",
+          "type": "bigserial",
           "primaryKey": true,
           "notNull": true
         },
@@ -8907,29 +8907,15 @@
         },
         "last_assistant_seq": {
           "name": "last_assistant_seq",
-          "type": "integer",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false
         },
         "last_read_seq": {
           "name": "last_read_seq",
-          "type": "integer",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false
-        },
-        "skill_catalogue": {
-          "name": "skill_catalogue",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "pinned_skills": {
-          "name": "pinned_skills",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
         },
         "created_at": {
           "name": "created_at",

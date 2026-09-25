@@ -18,6 +18,7 @@ import {
   type TransparentListenerHandle,
 } from "../integration-transparent-listener.ts";
 import type { EgressListenerEvent } from "../integration-egress-listener.ts";
+import { buildClientHello } from "./helpers/tls-client-hello.ts";
 
 const openListeners: TransparentListenerHandle[] = [];
 const openServers: Server[] = [];
@@ -47,13 +48,16 @@ async function startTcpEcho(): Promise<{ port: number; received: Buffer[] }> {
   return { port, received };
 }
 
+type PeerPolicy = { allowsAuthority(host: string, port: number): boolean };
+const allowAll: PeerPolicy = { allowsAuthority: () => true };
+
 async function makeListener(
   opts: {
     upstreamPort?: number;
     onEvent?: (e: EgressListenerEvent) => void;
     isBlockedHostFn?: (host: string) => boolean;
     resolveHostFn?: (host: string) => Promise<string[]>;
-    authorizedHostMatcher?: (host: string) => boolean;
+    policyForPeer?: (remoteAddress: string) => Promise<PeerPolicy | null>;
   } = {},
 ): Promise<TransparentListenerHandle> {
   const listener = createTransparentEgressListener({
@@ -61,9 +65,9 @@ async function makeListener(
     port: 0,
     isBlockedHostFn: opts.isBlockedHostFn ?? (() => false),
     resolveHostFn: opts.resolveHostFn ?? (async () => ["127.0.0.1"]),
+    policyForPeer: opts.policyForPeer ?? (async () => allowAll),
     ...(opts.upstreamPort !== undefined ? { upstreamPort: opts.upstreamPort } : {}),
     ...(opts.onEvent ? { onEvent: opts.onEvent } : {}),
-    ...(opts.authorizedHostMatcher ? { authorizedHostMatcher: opts.authorizedHostMatcher } : {}),
   });
   openListeners.push(listener);
   await listener.ready;
@@ -71,50 +75,10 @@ async function makeListener(
 }
 
 /**
- * Hand-build a minimal TLS 1.2/1.3-shaped ClientHello record carrying the
- * given SNI (RFC 8446 §4.1.2 + RFC 6066 §3). Pass `sni: null` for a hello
- * without the server_name extension.
+ * Connect, write chunks, collect echoed bytes until `expected` total or close.
+ * `closed` means the listener closed the socket — giving up after 3 s is not
+ * a close, so a listener that never hangs up fails `expect(closed)`.
  */
-function buildClientHello(sni: string | null): Buffer {
-  const extensions: Buffer[] = [];
-  if (sni !== null) {
-    const host = Buffer.from(sni, "utf-8");
-    const serverName = Buffer.alloc(5);
-    serverName.writeUInt16BE(host.length + 3, 0); // server_name_list length
-    serverName.writeUInt8(0, 2); // name_type host_name
-    serverName.writeUInt16BE(host.length, 3);
-    const extData = Buffer.concat([serverName, host]);
-    const extHeader = Buffer.alloc(4);
-    extHeader.writeUInt16BE(0x0000, 0); // extension_type server_name
-    extHeader.writeUInt16BE(extData.length, 2);
-    extensions.push(Buffer.concat([extHeader, extData]));
-  }
-  const extBlock = Buffer.concat(extensions);
-  const body = Buffer.concat([
-    Buffer.from([0x03, 0x03]), // legacy_version
-    Buffer.alloc(32), // random
-    Buffer.from([0x00]), // session_id length
-    Buffer.from([0x00, 0x02, 0x13, 0x01]), // one cipher suite
-    Buffer.from([0x01, 0x00]), // one compression method (null)
-    (() => {
-      const b = Buffer.alloc(2);
-      b.writeUInt16BE(extBlock.length, 0);
-      return b;
-    })(),
-    extBlock,
-  ]);
-  const handshake = Buffer.concat([
-    Buffer.from([0x01, (body.length >> 16) & 0xff, (body.length >> 8) & 0xff, body.length & 0xff]),
-    body,
-  ]);
-  const record = Buffer.alloc(5);
-  record.writeUInt8(0x16, 0);
-  record.writeUInt16BE(0x0301, 1);
-  record.writeUInt16BE(handshake.length, 3);
-  return Buffer.concat([record, handshake]);
-}
-
-/** Connect, write chunks, collect echoed bytes until `expected` total or close. */
 async function driveClient(
   port: number,
   chunks: Buffer[],
@@ -146,7 +110,7 @@ async function driveClient(
     });
     socket.on("close", () => finish(true));
     socket.on("error", () => finish(true));
-    setTimeout(() => finish(true), 3_000);
+    setTimeout(() => finish(false), 3_000);
   });
 }
 
@@ -252,10 +216,17 @@ describe("transparent egress listener — TLS SNI path", () => {
     expect(events[0]?.reason).toBe("dns-resolution-failed");
   });
 
-  it("refuses a host outside the authorized matcher", async () => {
+  it("refuses a host outside the peer's policy without ever resolving it", async () => {
+    const upstream = await startTcpEcho();
     const events: EgressListenerEvent[] = [];
+    const resolved: string[] = [];
     const listener = await makeListener({
-      authorizedHostMatcher: (host) => host === "allowed.test.local",
+      upstreamPort: upstream.port,
+      policyForPeer: async () => ({ allowsAuthority: (host) => host === "allowed.test.local" }),
+      resolveHostFn: async (host) => {
+        resolved.push(host);
+        return ["127.0.0.1"];
+      },
       onEvent: (e) => events.push(e),
     });
     const { closed } = await driveClient(
@@ -265,6 +236,86 @@ describe("transparent egress listener — TLS SNI path", () => {
     );
     expect(closed).toBe(true);
     expect(events[0]?.reason).toBe("not-authorized");
+    expect(resolved).toEqual([]);
+    expect(upstream.received.length).toBe(0);
+  });
+
+  it("checks the policy against the listener's upstream port", async () => {
+    const upstream = await startTcpEcho();
+    const events: EgressListenerEvent[] = [];
+    const seen: Array<[string, number]> = [];
+    const listener = await makeListener({
+      upstreamPort: upstream.port,
+      policyForPeer: async () => ({
+        allowsAuthority: (host, port) => {
+          seen.push([host, port]);
+          return port === 443;
+        },
+      }),
+      onEvent: (e) => events.push(e),
+    });
+    const { closed } = await driveClient(
+      listener.address().port,
+      [buildClientHello("api.test.local")],
+      1,
+    );
+    expect(closed).toBe(true);
+    expect(seen).toEqual([["api.test.local", upstream.port]]);
+    expect(events[0]?.reason).toBe("not-authorized");
+  });
+
+  it("refuses a peer with no egress policy (unknown runner / agent)", async () => {
+    const upstream = await startTcpEcho();
+    const events: EgressListenerEvent[] = [];
+    const peers: string[] = [];
+    const resolved: string[] = [];
+    const listener = await makeListener({
+      upstreamPort: upstream.port,
+      policyForPeer: async (ip) => {
+        peers.push(ip);
+        return null;
+      },
+      resolveHostFn: async (host) => {
+        resolved.push(host);
+        return ["127.0.0.1"];
+      },
+      onEvent: (e) => events.push(e),
+    });
+    const { closed, received } = await driveClient(
+      listener.address().port,
+      [buildClientHello("api.test.local")],
+      1,
+    );
+    expect(closed).toBe(true);
+    expect(received.length).toBe(0);
+    expect(peers).toEqual(["127.0.0.1"]);
+    expect(resolved).toEqual([]);
+    expect(upstream.received.length).toBe(0);
+    expect(events).toEqual([
+      {
+        kind: "tunnel-refused",
+        target: `<unknown>:${upstream.port}`,
+        reason: "peer-not-allowed",
+        peer: "127.0.0.1",
+      },
+    ]);
+  });
+
+  it("refuses (fails closed) when the peer lookup throws", async () => {
+    const events: EgressListenerEvent[] = [];
+    const listener = await makeListener({
+      policyForPeer: async () => {
+        throw new Error("docker network inspect failed");
+      },
+      onEvent: (e) => events.push(e),
+    });
+    const { closed } = await driveClient(
+      listener.address().port,
+      [buildClientHello("api.test.local")],
+      1,
+    );
+    expect(closed).toBe(true);
+    expect(events[0]?.reason).toBe("peer-not-allowed");
   });
 
   it("destroys a complete ClientHello that carries no SNI when the client gives up", async () => {
@@ -288,13 +339,10 @@ describe("transparent egress listener — TLS SNI path", () => {
   });
 
   it("emits tunnel-error when the upstream connection fails", async () => {
-    // Grab a port that refuses connections: bind + close a server.
-    const probe = createServer();
-    await new Promise<void>((res) => probe.listen(0, "127.0.0.1", () => res()));
-    const addr = probe.address();
-    const deadPort = addr && typeof addr === "object" ? addr.port : 1;
-    await new Promise<void>((res) => probe.close(() => res()));
-
+    // Port 1 sits below every ephemeral range, so no `listen(0)` — this
+    // listener's included — can take it. A freed ephemeral port can: when the
+    // listener got it, it dialled itself and emitted `tunnel-opened`.
+    const deadPort = 1;
     const events: EgressListenerEvent[] = [];
     const listener = await makeListener({
       upstreamPort: deadPort,

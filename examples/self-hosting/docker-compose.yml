@@ -71,10 +71,13 @@ services:
   # proxying is unsupported, minio/minio#7857) and set S3_PUBLIC_ENDPOINT
   # on the appstrate service.
   minio:
-    # Pinned to a verified release (digest-locked) — matches the tier3
-    # `docker-compose.yml`. `:latest` would let `docker compose pull`
-    # silently swap the storage engine under running data.
-    image: quay.io/minio/minio:RELEASE.2025-03-12T18-04-18Z@sha256:46b3009bf7041eefbd90bd0d2b38c6ddc24d20a35d609551a1802c558c1c958f
+    # Chainguard's MinIO build (MinIO's own registries require authentication),
+    # pinned by digest so `docker compose pull` can never swap the storage
+    # engine under running data. Runs as uid 65532: `miniodata` must be owned
+    # by it. Ownership repair: "Data Persistence" in examples/self-hosting/
+    # README.md; refresh recipe: docker-compose.yml — both in
+    # https://github.com/appstrate/appstrate.
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
     networks:
       - appstrate-data
     command: server /data
@@ -93,9 +96,9 @@ services:
 
   # ── MinIO bucket initialization ─────────────────────────────
   minio-init:
-    # Pinned to a verified release (digest-locked) — matches the tier3
-    # `docker-compose.yml`.
-    image: quay.io/minio/mc:RELEASE.2025-03-12T17-29-24Z@sha256:470f5546b596e16c7816b9c3fa7a78ce4076bb73c2c73f7faeec0c8043923123
+    # The server image above: it ships `mc` and `/bin/sh`, which
+    # `cgr.dev/chainguard/minio-client` (no shell) does not.
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
     networks:
       - appstrate-data
     restart: "no"
@@ -135,7 +138,7 @@ services:
   # happens in the platform's own boot pass, which is another reason not to
   # "optimise" the platform's migration step away.
   migrate:
-    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.62}
     networks:
       - appstrate-data
     restart: "no"
@@ -148,12 +151,12 @@ services:
 
   # ── Pre-pull runtime images ─────────────────────────────────
   pi-pull:
-    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   sidecar-pull:
-    image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
@@ -161,33 +164,33 @@ services:
   # platform) `docker create`s these, and it never issues an image pull — an
   # absent image is a hard failure at integration boot, not a slow first run.
   mcp-runner-node-pull:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   mcp-runner-python-pull:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   mcp-runner-bun-pull:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   mcp-runner-uv-pull:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   mcp-runner-binary-pull:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.62}
     entrypoint: ["true"]
     restart: "no"
 
   # ── Appstrate platform ─────────────────────────────────────
   appstrate:
-    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.60}
+    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.62}
     networks:
       - appstrate-data
       - appstrate-public
@@ -233,19 +236,19 @@ services:
       # default which points at Docker Hub).
       - PORT=3000
       - DOCKER_SOCKET=/var/run/docker.sock
-      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.60}
-      - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.60}
+      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.62}
       # Per-integration MCP runner images. The sidecar `docker create`s one of
       # these per LOCAL AFPS integration; the refs are forwarded into the
       # sidecar via SIDECAR_OPERATOR_ENV_KEYS. Without them the sidecar falls
       # back to bare `appstrate-mcp-runner-*:latest` tags, which the daemon
       # tries — and fails — to pull from Docker Hub, so every local
       # integration dies at boot. Same APPSTRATE_VERSION coupling as above.
-      - RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.60}
-      - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.60}
-      - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.60}
-      - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.60}
-      - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.60}
+      - RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.62}
+      - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.62}
       # ── Intentional overrides (YAML default ≠ code default) ──────
       # RUN_ADAPTER: code default is `process` for OSS dev — a
       # containerized self-host must run agents in Docker.

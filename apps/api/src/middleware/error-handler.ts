@@ -83,6 +83,12 @@ export function errorHandler(err: Error, c: Context<AppEnv>, log: Logger = logge
   // stamps this in `viewAsTransportGuard`; this one builds a fresh `Response`.
   if (c.get("viewAs")) headers.set(VIEW_AS_ACTIVE_HEADER, "1");
 
+  // The body's `retry_after` and the header are one fact; emitting it here means
+  // no thrower can set one and forget the other. Explicit headers still win.
+  if (apiError.retryAfter !== undefined) {
+    headers.set("Retry-After", String(apiError.retryAfter));
+  }
+
   // Merge custom headers from ApiError (e.g. rate-limit headers on 429).
   if (apiError.headers) {
     for (const [name, value] of Object.entries(apiError.headers)) {

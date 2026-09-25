@@ -21,6 +21,9 @@ describe("buildEventEnvelope", () => {
     expect(payload.type).toBe("run.success");
     expect(payload.object).toBe("event");
     expect(payload.id).toBe(eventId);
+    // Standard Webhooks' `timestamp`, RFC 3339 — no epoch-seconds `created`.
+    expect(new Date(payload.timestamp as string).toISOString()).toBe(payload.timestamp as string);
+    expect(payload).not.toHaveProperty("created");
 
     const data = payload.data as { object: Record<string, unknown> };
     expect(data.object.result).toBe("output data");

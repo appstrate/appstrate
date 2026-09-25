@@ -15,7 +15,13 @@ import { describe, expect, it } from "bun:test";
 import { pickModel, type OrgModel } from "../src/llm.ts";
 
 function model(id: string, over: Partial<OrgModel> = {}): OrgModel {
-  return { id, modelId: `upstream-${id}`, apiShape: "openai-completions", ...over };
+  return {
+    id,
+    modelId: `upstream-${id}`,
+    apiShape: "openai-completions",
+    pi_provider: null,
+    ...over,
+  };
 }
 
 describe("pickModel liveness", () => {
@@ -60,7 +66,7 @@ describe("pickModel liveness", () => {
 
   it("keeps the family fallback for a configured but unusable family", () => {
     // Unchanged path: nothing chat-usable at all is a different diagnosis.
-    expect(() => pickModel([model("preset_1", { apiShape: "google-generative-ai" })])).toThrow(
+    expect(() => pickModel([model("preset_1", { apiShape: "some-future-api" })])).toThrow(
       /No chat-usable model is configured/,
     );
   });

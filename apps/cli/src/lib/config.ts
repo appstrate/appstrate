@@ -329,7 +329,7 @@ export async function resolveActiveProfile(
 
 /**
  * `resolveActiveProfile` for callers that can proceed without a profile at
- * all — `appstrate run` with an `ask_…` API key is the whole reason this
+ * all — `appstrate run` with an `apst_…` API key is the whole reason this
  * exists. An unreadable or unparseable `config.toml` degrades to `null` so a
  * corrupt file cannot block a run that never needed the file.
  *

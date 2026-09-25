@@ -22,6 +22,8 @@ export interface ModelGenerationControlLabels {
   reasoningHint: string;
   inherit: string;
   inheritShort: string;
+  /** What an unset reasoning level resolves to — not the provider's choice. */
+  reasoningInherit: string;
   unsupported: string;
   unsupportedShort: string;
   levels: Record<ModelReasoningLevel, string>;
@@ -46,7 +48,7 @@ function withoutTemperature(value: ModelGenerationSettings): ModelGenerationSett
 }
 
 function withoutReasoning(value: ModelGenerationSettings): ModelGenerationSettings {
-  const { reasoningLevel: _reasoningLevel, ...rest } = value;
+  const { reasoning_level: _reasoningLevel, ...rest } = value;
   void _reasoningLevel;
   return rest;
 }
@@ -81,9 +83,9 @@ export function ModelGenerationControls({
   const reasoningDisabled = disabled || reasoningControlsUnavailable;
   const selectedTemperature =
     value.temperature == null ? labels.inherit : String(value.temperature);
-  const selectedReasoning = value.reasoningLevel
-    ? labels.levels[value.reasoningLevel]
-    : labels.inherit;
+  const selectedReasoning = value.reasoning_level
+    ? labels.levels[value.reasoning_level]
+    : labels.reasoningInherit;
 
   return (
     <FieldGroup className={cn("grid", compact ? "gap-2" : "gap-3", !stacked && "sm:grid-cols-2")}>
@@ -167,7 +169,7 @@ export function ModelGenerationControls({
           </div>
           <ToggleGroup
             type="single"
-            value={value.reasoningLevel ?? INHERIT}
+            value={value.reasoning_level ?? INHERIT}
             disabled={reasoningDisabled}
             variant="outline"
             aria-labelledby={`${id}-reasoning-label`}
@@ -178,14 +180,14 @@ export function ModelGenerationControls({
               onChange(
                 next === INHERIT
                   ? withoutReasoning(value)
-                  : { ...value, reasoningLevel: next as ModelReasoningLevel },
+                  : { ...value, reasoning_level: next as ModelReasoningLevel },
               );
             }}
           >
             <ToggleGroupItem
               value={INHERIT}
-              aria-label={labels.inherit}
-              title={labels.inherit}
+              aria-label={labels.reasoningInherit}
+              title={labels.reasoningInherit}
               className="h-8 min-w-0 rounded-r-none px-1 text-[0.65rem]"
             >
               {labels.inheritShort}

@@ -91,7 +91,7 @@ describe("observability — disabled (no-op)", () => {
   it("metric recorders + currentTraceparent are inert (never throw)", () => {
     expect(() => recordRunDuration(5, { status: "success" })).not.toThrow();
     expect(() => recordRunTerminal({ status: "failed", errorCode: "timeout" })).not.toThrow();
-    expect(() => recordContainerSpawn(10, { sidecar: true })).not.toThrow();
+    expect(() => recordContainerSpawn(10)).not.toThrow();
     expect(() => recordLlmLatency(5, { api_shape: "openai", status: 200 })).not.toThrow();
     expect(() => recordFileCreated({ purpose: "agent_output" })).not.toThrow();
     expect(() => recordFileDeleted(2)).not.toThrow();
@@ -153,7 +153,7 @@ describe("observability — enabled (in-memory exporters)", () => {
   it("records run duration histogram + terminal counter + container spawn", async () => {
     recordRunDuration(1234, { status: "success" });
     recordRunTerminal({ status: "success" });
-    recordContainerSpawn(50, { sidecar: true });
+    recordContainerSpawn(50);
     await _forceFlushForTesting();
 
     const rms = metricExporter.getMetrics();
@@ -187,9 +187,9 @@ describe("observability — enabled (in-memory exporters)", () => {
   });
 
   it("records container_spawn for both outcomes — error.type on failure only, clamped", async () => {
-    recordContainerSpawn(50, { sidecar: true }); // success
-    recordContainerSpawn(20, { sidecar: false, errorType: "boundary" }); // failure (known phase)
-    recordContainerSpawn(30, { sidecar: true, errorType: "totally-made-up" }); // failure (clamped)
+    recordContainerSpawn(50); // success
+    recordContainerSpawn(20, { errorType: "boundary" }); // failure (known phase)
+    recordContainerSpawn(30, { errorType: "totally-made-up" }); // failure (clamped)
     await _forceFlushForTesting();
 
     const spawn = findMetric(metricExporter.getMetrics(), "appstrate.run.container_spawn");
@@ -199,7 +199,7 @@ describe("observability — enabled (in-memory exporters)", () => {
     // latency is filterable; failures carry a bounded one.
     const success = dps.find((p) => p.attributes["error.type"] === undefined);
     expect(success).toBeDefined();
-    expect(success!.attributes.sidecar).toBe(true);
+    expect(success!.attributes).toEqual({});
 
     const errTypes = new Set(
       dps.map((p) => p.attributes["error.type"]).filter((t) => t !== undefined),

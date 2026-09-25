@@ -13,9 +13,13 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { buildPiModel, listPiModels } from "@appstrate/runner-pi/pi-model";
+import { captureRequest } from "../../../../packages/runner-pi/test/pi-payload.ts";
+import { ApiError } from "../../src/lib/errors.ts";
 import { openaiCompletionsAdapter } from "../../src/services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../../src/services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../../src/services/llm-proxy/mistral.ts";
+import { openaiResponsesAdapter } from "../../src/services/llm-proxy/openai-responses.ts";
 import { parseProxyRequest } from "../../src/services/llm-proxy/helpers.ts";
 
 function rewriteModel(rawBody: Uint8Array, upstreamModelId: string): Uint8Array {
@@ -24,6 +28,74 @@ function rewriteModel(rawBody: Uint8Array, upstreamModelId: string): Uint8Array 
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+
+// One forwarding policy (`@appstrate/connect/llm-request-headers`) for every
+// wire: the SDK's own headers reach upstream, the caller's credentials, the
+// platform's routing headers and the client's network identity never do.
+describe("upstream headers — shared forwarding policy", () => {
+  const incoming = new Headers({
+    "x-opencode-session": "ses_abc",
+    "http-referer": "https://pi.dev",
+    "x-vendor-foo": "bar",
+    "content-type": "text/plain",
+    authorization: "Bearer appstrate-caller-token",
+    "x-api-key": "ask_caller",
+    cookie: "session=abc",
+    "x-forwarded-for": "10.0.0.1",
+    "x-appstrate-pi-sdk": "0.86.1",
+    "x-org-id": "org_1",
+    "x-run-id": "run_1",
+  });
+  const adapters = [
+    openaiCompletionsAdapter,
+    openaiResponsesAdapter,
+    anthropicMessagesAdapter,
+    mistralConversationsAdapter,
+  ];
+
+  for (const adapter of adapters) {
+    it(`${adapter.apiShape}: forwards provider headers, never credentials or platform headers`, () => {
+      const headers = adapter.buildUpstreamHeaders(incoming, "sk-upstream");
+      expect(headers.get("x-opencode-session")).toBe("ses_abc");
+      expect(headers.get("http-referer")).toBe("https://pi.dev");
+      expect(headers.get("x-vendor-foo")).toBe("bar");
+      // The proxy re-serialises the body as JSON.
+      expect(headers.get("content-type")).toBe("application/json");
+      for (const name of [
+        "cookie",
+        "x-forwarded-for",
+        "x-appstrate-pi-sdk",
+        "x-org-id",
+        "x-run-id",
+      ]) {
+        expect(headers.get(name)).toBeNull();
+      }
+      // The only credential upstream is the platform's own key.
+      const credentials = [headers.get("authorization"), headers.get("x-api-key")].filter(Boolean);
+      expect(credentials).toEqual([
+        adapter === anthropicMessagesAdapter ? "sk-upstream" : "Bearer sk-upstream",
+      ]);
+    });
+
+    // An anthropic-compatible gateway behind any wire honours the header too.
+    it(`${adapter.apiShape}: forwards only Pi's own betas, never x-anthropic-beta`, () => {
+      const headers = adapter.buildUpstreamHeaders(
+        new Headers({
+          "Anthropic-Beta": "context-1m-2025-08-07, interleaved-thinking-2025-05-14",
+          "X-Anthropic-Beta": "interleaved-thinking-2025-05-14",
+        }),
+        "sk-upstream",
+      );
+      expect(headers.get("anthropic-beta")).toBe("interleaved-thinking-2025-05-14");
+      expect(headers.get("x-anthropic-beta")).toBeNull();
+      const none = adapter.buildUpstreamHeaders(
+        new Headers({ "anthropic-beta": "mcp-client-2025-04-04" }),
+        "sk-upstream",
+      );
+      expect(none.get("anthropic-beta")).toBeNull();
+    });
+  }
+});
 
 describe("openaiCompletionsAdapter", () => {
   it("apiShape discriminator matches the /api/llm-proxy/openai-completions/ route", () => {
@@ -47,16 +119,13 @@ describe("openaiCompletionsAdapter", () => {
     expect(parsed.tools).toEqual(original.tools);
   });
 
-  it("injects Authorization: Bearer <apiKey>", () => {
+  it("injects Authorization: Bearer <apiKey> in place of the caller's", () => {
     const headers = openaiCompletionsAdapter.buildUpstreamHeaders(
-      new Headers({ "x-something": "ignored" }),
+      new Headers({ authorization: "Bearer appstrate-caller-token" }),
       "sk-upstream",
     );
-    expect(headers["Authorization"]).toBe("Bearer sk-upstream");
-    expect(headers["Content-Type"]).toBe("application/json");
-    // The incoming Authorization (the caller's Appstrate bearer) MUST
-    // NOT leak to the upstream — the platform mints a fresh one.
-    expect(headers["x-something"]).toBeUndefined();
+    expect(headers.get("authorization")).toBe("Bearer sk-upstream");
+    expect(headers.get("content-type")).toBe("application/json");
   });
 
   it("parses OpenAI-shape usage, subtracting cached tokens out of inputTokens", () => {
@@ -205,22 +274,158 @@ describe("anthropicMessagesAdapter", () => {
       new Headers({ accept: "application/json" }),
       "sk-anthropic",
     );
-    expect(headers["x-api-key"]).toBe("sk-anthropic");
-    expect(headers["anthropic-version"]).toBe("2023-06-01");
-    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers.get("x-api-key")).toBe("sk-anthropic");
+    expect(headers.get("anthropic-version")).toBe("2023-06-01");
+    expect(headers.get("content-type")).toBe("application/json");
   });
 
   it("forwards anthropic-version + anthropic-beta when caller supplies them", () => {
     const headers = anthropicMessagesAdapter.buildUpstreamHeaders(
       new Headers({
         "anthropic-version": "2024-10-01",
-        "anthropic-beta": "prompt-caching-2024-07-31",
+        "anthropic-beta": "interleaved-thinking-2025-05-14",
       }),
       "sk-anthropic",
     );
-    expect(headers["anthropic-version"]).toBe("2024-10-01");
-    expect(headers["anthropic-beta"]).toBe("prompt-caching-2024-07-31");
+    expect(headers.get("anthropic-version")).toBe("2024-10-01");
+    expect(headers.get("anthropic-beta")).toBe("interleaved-thinking-2025-05-14");
   });
+
+  // A beta can switch on a feature billed outside the reported tokens (server
+  // fallbacks, MCP, premium context): only the betas Pi sends reach upstream.
+  it("forwards only the betas Pi itself sends", () => {
+    const headers = anthropicMessagesAdapter.buildUpstreamHeaders(
+      new Headers({
+        "anthropic-beta":
+          "server-side-fallback-2026-07-01, fine-grained-tool-streaming-2025-05-14,mcp-client-2025-04-04",
+      }),
+      "sk-anthropic",
+    );
+    expect(headers.get("anthropic-beta")).toBe("fine-grained-tool-streaming-2025-05-14");
+    const none = anthropicMessagesAdapter.buildUpstreamHeaders(
+      new Headers({ "anthropic-beta": "context-1m-2025-08-07" }),
+      "sk-anthropic",
+    );
+    expect(none.get("anthropic-beta")).toBeNull();
+  });
+
+  function refusedParam(body: Record<string, unknown>): string | undefined {
+    try {
+      anthropicMessagesAdapter.prepareRequest!(body);
+    } catch (err) {
+      if (err instanceof ApiError) return err.param ?? "(none)";
+      throw err;
+    }
+    return undefined;
+  }
+
+  it("refuses server-side fallbacks and server-executed tools", () => {
+    const base = { model: "p", max_tokens: 10, messages: [] };
+    expect(refusedParam({ ...base, fallbacks: [{ model: "claude-opus-5" }] })).toBe("fallbacks");
+    expect(
+      refusedParam({ ...base, tools: [{ type: "web_search_20250305", name: "web_search" }] }),
+    ).toBe("tools");
+    expect(
+      refusedParam({
+        ...base,
+        tools: [
+          { name: "search", input_schema: { type: "object" } },
+          { type: "custom", name: "echo", input_schema: { type: "object" } },
+        ],
+      }),
+    ).toBeUndefined();
+  });
+
+  // `auto` may serve (and bill) at priority-tier rates the proxy meters at standard.
+  it("refuses any service_tier but standard_only", () => {
+    const base = { model: "p", max_tokens: 10, messages: [] };
+    expect(refusedParam({ ...base, service_tier: "auto" })).toBe("service_tier");
+    expect(refusedParam({ ...base, service_tier: "priority" })).toBe("service_tier");
+    for (const service_tier of ["standard_only", null, undefined]) {
+      expect(refusedParam({ ...base, service_tier })).toBeUndefined();
+    }
+  });
+
+  // US-only inference is priced above the rates the proxy meters at.
+  it("refuses inference_geo", () => {
+    const base = { model: "p", max_tokens: 10, messages: [] };
+    expect(refusedParam({ ...base, inference_geo: "us" })).toBe("inference_geo");
+    expect(refusedParam({ ...base, inference_geo: null })).toBeUndefined();
+  });
+
+  // A 1-hour cache write bills 2× input; the meter prices every write as 5-minute.
+  describe("cache_control TTL", () => {
+    const hourly = { type: "ephemeral", ttl: "1h" };
+    const block = (cache_control: unknown) => ({ type: "text", text: "t", cache_control });
+    const tool = (cache_control: unknown) => ({
+      name: "f",
+      input_schema: { type: "object" },
+      cache_control,
+    });
+    const placements: [string, (cc: unknown) => Record<string, unknown>][] = [
+      ["top level", (cc) => ({ cache_control: cc })],
+      ["system block", (cc) => ({ system: [block(cc)] })],
+      ["message block", (cc) => ({ messages: [{ role: "user", content: [block(cc)] }] })],
+      [
+        "tool_result block",
+        (cc) => ({
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "tool_result", tool_use_id: "t1", content: [block(cc)] }],
+            },
+          ],
+        }),
+      ],
+      ["tool", (cc) => ({ tools: [tool(cc)] })],
+    ];
+    const base = { model: "p", max_tokens: 10, messages: [] };
+
+    for (const [where, place] of placements) {
+      it(`refuses a non-5m TTL on a ${where}`, () => {
+        expect(refusedParam({ ...base, ...place(hourly) })).toBe("cache_control");
+        expect(refusedParam({ ...base, ...place({ type: "ephemeral", ttl: 3600 }) })).toBe(
+          "cache_control",
+        );
+      });
+
+      it(`accepts the default and the explicit 5m TTL on a ${where}`, () => {
+        expect(refusedParam({ ...base, ...place({ type: "ephemeral" }) })).toBeUndefined();
+        expect(
+          refusedParam({ ...base, ...place({ type: "ephemeral", ttl: "5m" }) }),
+        ).toBeUndefined();
+      });
+    }
+  });
+
+  // What Pi puts on the wire for every Anthropic record, platform-built (as
+  // chat and llm-proxy presets build it), with a tool and with thinking.
+  it("lets a Pi-built request through unchanged", async () => {
+    const records = listPiModels("anthropic", "anthropic-messages");
+    expect(records.length).toBeGreaterThan(0);
+    const betasSent = new Set<string>();
+    for (const record of records) {
+      const model = buildPiModel({
+        id: "preset",
+        registryModelId: record.id,
+        apiShape: "anthropic-messages",
+        piProvider: "anthropic",
+        baseUrl: "http://127.0.0.1",
+      });
+      for (const reasoning of [undefined, "medium"] as const) {
+        const { headers, body } = await captureRequest(model, reasoning);
+        const prepared = structuredClone(body);
+        anthropicMessagesAdapter.prepareRequest!(prepared);
+        expect(prepared).toEqual(body);
+        const beta = headers.get("anthropic-beta");
+        const forwarded = anthropicMessagesAdapter.buildUpstreamHeaders(headers, "sk-anthropic");
+        expect(forwarded.get("anthropic-beta")).toBe(beta);
+        for (const sent of beta?.split(",") ?? []) betasSent.add(sent);
+      }
+    }
+    // The header comparison above is not vacuous.
+    expect(betasSent.size).toBeGreaterThan(0);
+  }, 30_000);
 
   // Note: the Anthropic OAuth (sk-ant-oat-…) code path that previously
   // injected subscription identity headers + required betas was removed
@@ -230,15 +435,15 @@ describe("anthropicMessagesAdapter", () => {
   // x-api-key treatment, which Anthropic rejects at the API layer.
   it("treats every token form as x-api-key (no Authorization header is ever set)", () => {
     const headers = anthropicMessagesAdapter.buildUpstreamHeaders(
-      new Headers({ "anthropic-beta": "prompt-caching-2024-07-31" }),
+      new Headers({ "anthropic-beta": "interleaved-thinking-2025-05-14" }),
       "sk-ant-api03-AbCd",
     );
-    expect(headers["x-api-key"]).toBe("sk-ant-api03-AbCd");
-    expect(headers["Authorization"]).toBeUndefined();
-    expect(headers["x-app"]).toBeUndefined();
-    expect(headers["user-agent"]).toBeUndefined();
+    expect(headers.get("x-api-key")).toBe("sk-ant-api03-AbCd");
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("x-app")).toBeNull();
+    expect(headers.get("user-agent")).toBeNull();
     // Caller's beta forwarded as-is, no OAuth markers.
-    expect(headers["anthropic-beta"]).toBe("prompt-caching-2024-07-31");
+    expect(headers.get("anthropic-beta")).toBe("interleaved-thinking-2025-05-14");
   });
 
   it("parses non-streaming JSON usage with cache tokens", () => {
@@ -325,23 +530,13 @@ describe("mistralConversationsAdapter", () => {
     expect(parsed.tools).toEqual(original.tools);
   });
 
-  it("injects Authorization: Bearer <apiKey> and forwards no extra headers", () => {
+  it("injects Authorization: Bearer <apiKey> in place of the caller's", () => {
     const headers = mistralConversationsAdapter.buildUpstreamHeaders(
-      new Headers({
-        "x-affinity": "session-123",
-        authorization: "Bearer caller-bearer-must-not-leak",
-      }),
+      new Headers({ authorization: "Bearer caller-bearer-must-not-leak" }),
       "mistral-upstream-key",
     );
-    expect(headers["Authorization"]).toBe("Bearer mistral-upstream-key");
-    expect(headers["Content-Type"]).toBe("application/json");
-    // No equivalent of openai-organization / anthropic-beta — nothing
-    // should be forwarded from the caller. The Mistral SDK's `x-affinity`
-    // sticky-session header is intentionally dropped.
-    expect(headers["x-affinity"]).toBeUndefined();
-    // The caller's Appstrate bearer (Authorization) must NOT replace
-    // the upstream key we just set.
-    expect(headers["Authorization"]).toBe("Bearer mistral-upstream-key");
+    expect(headers.get("authorization")).toBe("Bearer mistral-upstream-key");
+    expect(headers.get("content-type")).toBe("application/json");
   });
 
   it("parses non-streaming JSON usage with prompt/completion tokens", () => {
@@ -387,4 +582,123 @@ describe("mistralConversationsAdapter", () => {
       ]),
     ).toBeNull();
   });
+});
+
+describe("openaiCompletionsAdapter — request guard", () => {
+  function guard(extra: Record<string, unknown>): void {
+    openaiCompletionsAdapter.prepareRequest?.({ model: "m", messages: [], ...extra });
+  }
+
+  it("refuses server-side model fallbacks, which bill a model the proxy does not price", () => {
+    for (const [field, value] of [
+      ["models", ["openai/gpt-5", "anthropic/claude-opus-5"]],
+      ["route", "fallback"],
+    ] as const) {
+      try {
+        guard({ [field]: value });
+        throw new Error(`${field} was not refused`);
+      } catch (err) {
+        const e = err as { status?: number; param?: string };
+        expect(e.status).toBe(400);
+        expect(e.param).toBe(field);
+      }
+    }
+  });
+
+  function refusedParam(extra: Record<string, unknown>): string | undefined {
+    try {
+      guard(extra);
+    } catch (err) {
+      if (err instanceof ApiError) return err.param ?? "(none)";
+      throw err;
+    }
+    return undefined;
+  }
+
+  it("accepts an ordinary chat-completions body", () => {
+    expect(() => guard({ stream: true, tools: [{ type: "function" }] })).not.toThrow();
+  });
+
+  // A string `"true"` streams at the vendor but skips the forced usage opt-in.
+  it("refuses a non-boolean stream", () => {
+    for (const stream of ["true", 1, {}]) expect(refusedParam({ stream })).toBe("stream");
+    for (const stream of [true, false, null, undefined]) {
+      expect(refusedParam({ stream })).toBeUndefined();
+    }
+  });
+
+  it("refuses a service_tier billed above the standard rate, like the responses wire", () => {
+    for (const service_tier of ["priority", "flex", "scale"]) {
+      expect(refusedParam({ service_tier })).toBe("service_tier");
+    }
+    for (const service_tier of ["auto", "default", null, undefined]) {
+      expect(refusedParam({ service_tier })).toBeUndefined();
+    }
+  });
+
+  // Not rewritten to `false`: a non-OpenAI vendor may reject the unknown field.
+  it("refuses store: true and leaves store otherwise untouched", () => {
+    expect(refusedParam({ store: true })).toBe("store");
+    const body: Record<string, unknown> = { model: "m", messages: [] };
+    openaiCompletionsAdapter.prepareRequest?.(body);
+    expect("store" in body).toBe(false);
+    expect(refusedParam({ store: false })).toBeUndefined();
+  });
+
+  it("refuses OpenRouter's separately billed extras", () => {
+    expect(refusedParam({ plugins: [{ id: "web" }] })).toBe("plugins");
+    expect(refusedParam({ web_search_options: { search_context_size: "high" } })).toBe(
+      "web_search_options",
+    );
+    expect(refusedParam({ transforms: ["middle-out"] })).toBe("transforms");
+  });
+
+  // pi-ai emits `provider` only from `compat.openRouterRouting`, which no
+  // platform-built model sets: a raw caller is the only source.
+  it("refuses OpenRouter provider routing", () => {
+    expect(refusedParam({ provider: { order: ["anthropic"], allow_fallbacks: false } })).toBe(
+      "provider",
+    );
+  });
+
+  // OpenRouter honours Anthropic-format cache_control on this wire too.
+  it("refuses a non-5m cache_control TTL anywhere in the body", () => {
+    const hourly = { type: "ephemeral", ttl: "1h" };
+    const part = (cache_control: unknown) => ({ type: "text", text: "t", cache_control });
+    for (const extra of [
+      { messages: [{ role: "system", content: [part(hourly)] }] },
+      { messages: [{ role: "user", content: [part(hourly)] }] },
+      { tools: [{ type: "function", function: { name: "f" }, cache_control: hourly }] },
+      { cache_control: hourly },
+    ]) {
+      expect(refusedParam(extra)).toBe("cache_control");
+    }
+    for (const cache_control of [{ type: "ephemeral" }, { type: "ephemeral", ttl: "5m" }]) {
+      expect(refusedParam({ messages: [{ role: "user", content: [part(cache_control)] }] })).toBe(
+        undefined,
+      );
+    }
+  });
+
+  // What Pi puts on the wire for every record of this wire, platform-built.
+  it("lets a Pi-built request through unchanged", async () => {
+    let checked = 0;
+    for (const piProvider of ["openai", "openrouter", "deepseek", "xai", "groq"]) {
+      for (const record of listPiModels(piProvider, "openai-completions").slice(0, 3)) {
+        const model = buildPiModel({
+          id: "preset",
+          registryModelId: record.id,
+          apiShape: "openai-completions",
+          piProvider,
+          baseUrl: "http://127.0.0.1",
+        });
+        const { body } = await captureRequest(model, record.reasoning ? "medium" : undefined);
+        const prepared = structuredClone(body);
+        openaiCompletionsAdapter.prepareRequest!(prepared);
+        expect(prepared).toEqual(body);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  }, 30_000);
 });

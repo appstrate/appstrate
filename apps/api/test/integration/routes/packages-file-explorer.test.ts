@@ -12,6 +12,7 @@
  * serving something a browser will execute.
  */
 
+import { ifMatch } from "../../helpers/etag.ts";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
@@ -20,6 +21,7 @@ import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { zipArtifact, PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
+import { expectProblem } from "../../helpers/assertions.ts";
 import {
   addOrgMember,
   authHeaders,
@@ -41,7 +43,6 @@ import {
   SYSTEM_STORAGE_NAMESPACE,
 } from "../../../src/services/package-items/storage.ts";
 import { indexEtag, mutatePackageDraftFiles } from "../../../src/services/package-files.ts";
-import { ApiError } from "../../../src/lib/errors.ts";
 import { uploadPackageZip, buildMinimalZip } from "../../../src/services/package-storage.ts";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
 import { isPackageActiveHere } from "../../../src/services/space-packages.ts";
@@ -75,8 +76,8 @@ async function listFiles(
 ): Promise<{ res: Response; entries: FileEntry[] }> {
   const res = await app.request(`/api/packages/${id}/files${query}`, { headers: authHeaders(ctx) });
   if (res.status !== 200) return { res, entries: [] };
-  const body = (await res.clone().json()) as { entries: FileEntry[] };
-  return { res, entries: body.entries };
+  const body = (await res.clone().json()) as { data: FileEntry[] };
+  return { res, entries: body.data };
 }
 
 async function fetchContent(
@@ -124,6 +125,7 @@ describe("package file explorer", () => {
 
       const { res, entries } = await listFiles(ctx, id);
       expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ object: "list", hasMore: false });
       expect(entries.map((e) => e.path)).toEqual(["docs/notes.md", "manifest.json", "prompt.md"]);
 
       // The DB draft columns WIN over the stored ZIP — the editor writes the
@@ -519,6 +521,23 @@ describe("package file explorer", () => {
     );
 
     it(
+      "refuses the same artifact on the version-detail route, naming the ceiling",
+      async () => {
+        await seedVersionExpandingTo(6, 9);
+
+        // Version detail reads through `getVersionDetail`, not the explorer's
+        // snapshot. The ceiling refusal must survive that path as itself, not be
+        // flattened into "no readable archive".
+        const res = await app.request(`/api/packages/agents/${id}/versions/1.0.0`, {
+          headers: authHeaders(ctx),
+        });
+        const problem = await expectProblem(res, 422, { code: "package_archive_unreadable" });
+        expect(problem.detail).toContain("50 MB");
+      },
+      CEILING_TEST_TIMEOUT_MS,
+    );
+
+    it(
       "refuses a draft artifact that expands past the ceiling, on both read routes",
       async () => {
         // Drafts use a different storage helper from published versions. Keep
@@ -664,7 +683,7 @@ describe("package file explorer", () => {
    * the run, the schedule, the readiness endpoint and the bundle export all
    * refuse an explicit `draft` to a caller who cannot WRITE the package, while
    * `?version=draft` here was honoured for anyone holding `<type>:read` — one
-   * file at a time, which is the CLI's `packages sync --source draft`. The rule
+   * file at a time, which is the CLI's `code sync --source draft`. The rule
    * is now the one the detail page answers, from the same two functions:
    * omitted is `writable ? draft : latest ?? draft`, and naming the draft is an
    * author's act.
@@ -1060,7 +1079,8 @@ describe("package file explorer", () => {
       await seedPackageShare(ctx.defaultSpaceId, id);
       await seedSpacePackage(ctx.defaultSpaceId, id);
       // A version row WITHOUT its artifact in storage. Any code path that
-      // downloads the ZIP to answer the request must fail loudly.
+      // downloads the ZIP to answer the request fails loudly, with
+      // `422 version_artifact_unavailable`.
       await seedPackageVersion({
         packageId: id,
         version: "1.0.0",
@@ -1070,9 +1090,9 @@ describe("package file explorer", () => {
       });
     });
 
-    it("404s an unconditional read — proving the artifact really is absent", async () => {
+    it("422s an unconditional read — proving the artifact really is absent", async () => {
       const { res } = await listFiles(ctx, id, "?version=1.0.0");
-      expect(res.status).toBe(404);
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
     });
 
     it("304s a conditional index read WITHOUT downloading the artifact", async () => {
@@ -1098,23 +1118,23 @@ describe("package file explorer", () => {
     });
 
     it("does not short-circuit the content route on another file's tag", async () => {
-      // No per-file match ⇒ it must go read the artifact, which is absent ⇒ 404.
-      // The important part is that it is NOT a 304.
+      // No per-file match ⇒ it must go read the artifact, which is absent ⇒
+      // 422. That refusal is only reachable from storage, so it is NOT a 304.
       const res = await app.request(
         `/api/packages/${id}/files/content?path=prompt.md&version=1.0.0`,
         { headers: authHeaders(ctx, { "If-None-Match": fileTag(integrity, "other.md") }) },
       );
-      expect(res.status).toBe(404);
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
     });
 
     it("does not short-circuit the content route on a bare wildcard", async () => {
       // `*` says nothing about WHICH path, so it cannot stand in for "this file
-      // exists". It must fall through to the read (which 404s here).
+      // exists". It must fall through to the read (which 422s here).
       const res = await app.request(
         `/api/packages/${id}/files/content?path=prompt.md&version=1.0.0`,
         { headers: authHeaders(ctx, { "If-None-Match": "*" }) },
       );
-      expect(res.status).toBe(404);
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
     });
 
     it("does not short-circuit the content route on the INDEX tag", async () => {
@@ -1122,7 +1142,7 @@ describe("package file explorer", () => {
         `/api/packages/${id}/files/content?path=prompt.md&version=1.0.0`,
         { headers: authHeaders(ctx, { "If-None-Match": `"i-pv-${integrity}"` }) },
       );
-      expect(res.status).toBe(404);
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
     });
 
     it("still 404s an unknown version before any storage access", async () => {
@@ -1207,9 +1227,9 @@ describe("draft tree writes", () => {
 
   async function saveContent(content: string, lockVersion: number): Promise<Response> {
     return app.request(`/api/packages/skills/${id}`, {
-      method: "PUT",
-      headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-      body: JSON.stringify({ content, lock_version: lockVersion }),
+      method: "PATCH",
+      headers: authHeaders(ctx, { "Content-Type": "application/json", ...ifMatch(lockVersion) }),
+      body: JSON.stringify({ content }),
     });
   }
 
@@ -1251,13 +1271,12 @@ describe("draft tree writes", () => {
     ]);
   });
 
-  it("a stale lock_version is still a 409, and neither store moves", async () => {
+  it("a stale If-Match is a 412, and neither store moves", async () => {
     const stale = (await lockVersionOf()) + 7;
     const res = await saveContent(NEXT_MD, stale);
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { code?: string; detail?: string };
-    expect(body.code).toBe("conflict");
-    expect(body.detail).toBe("Skill was modified concurrently. Reload and try again.");
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe("precondition_failed");
 
     // Negative control: the refusal happens before either write.
     expect(decoder.decode((await storedTree())["SKILL.md"]!)).toBe(SKILL_MD);
@@ -1308,11 +1327,15 @@ describe("draft tree writes", () => {
     const etag = res.headers.get("ETag")!;
     const lockVersion = await lockVersionOf();
     expect(etag).toMatch(/^"i-pd-[0-9a-f]{64}"$/);
+    // What the route hands the service: its If-Match evaluation.
+    const expecting = (current: number) => {
+      if (current !== lockVersion) throw new Error("stale draft");
+    };
 
     const written = await mutatePackageDraftFiles(
       { id, type: "skill", orgId: ctx.orgId },
       {
-        precondition: { lockVersion },
+        precondition: { assertVersion: expecting },
         mutate: (files) => ({ ...files, "docs/note.md": encoder.encode("noted") }),
       },
     );
@@ -1332,15 +1355,13 @@ describe("draft tree writes", () => {
     await mutatePackageDraftFiles(
       { id, type: "skill", orgId: ctx.orgId },
       {
-        precondition: { lockVersion },
+        precondition: { assertVersion: expecting },
         mutate: (files) => ({ ...files, "docs/late.md": encoder.encode("late") }),
       },
     ).catch((err: unknown) => {
       refused = err;
     });
-    expect(refused).toBeInstanceOf(ApiError);
-    expect((refused as ApiError).status).toBe(409);
-    expect((refused as ApiError).code).toBe("conflict");
+    expect((refused as Error).message).toBe("stale draft");
 
     // Negative control: nothing of the refused write reached storage.
     expect(Object.keys(await storedTree())).not.toContain("docs/late.md");

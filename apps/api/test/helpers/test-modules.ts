@@ -9,7 +9,7 @@
  * mount each module's router.
  *
  * Tests never call registerTestModule directly — the preload handles it.
- * Consumers only use getDiscoveredModules().
+ * Consumers only use getDiscoveredModules() and getDeclinedModuleEntries().
  */
 import type { AppstrateModule } from "@appstrate/core/module";
 import { loadModulesFromInstances, resetModules } from "../../src/lib/modules/module-loader.ts";
@@ -24,6 +24,17 @@ export function registerTestModule(mod: AppstrateModule): void {
 
 export function getDiscoveredModules(): readonly AppstrateModule[] {
   return discovered;
+}
+
+const declined: string[] = [];
+
+/** Entry file of a module the preload found but did not load (its tier requirements). */
+export function registerDeclinedModule(entry: string): void {
+  declined.push(entry);
+}
+
+export function getDeclinedModuleEntries(): readonly string[] {
+  return declined;
 }
 
 /**

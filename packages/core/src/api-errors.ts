@@ -5,7 +5,7 @@
  *
  * All API errors use `application/problem+json` with standard fields
  * (type, title, status, detail, instance) plus Stripe-like extensions
- * (code, param, requestId, retryAfter, errors[]).
+ * (code, param, request_id, retry_after, errors[]).
  *
  * @see https://www.rfc-editor.org/rfc/rfc9457
  */
@@ -21,9 +21,9 @@ export interface ProblemDetail {
   detail: string;
   instance: string;
   code: string;
-  requestId: string;
+  request_id: string;
   param?: string;
-  retryAfter?: number;
+  retry_after?: number;
   errors?: ValidationFieldError[];
 }
 
@@ -43,7 +43,7 @@ export interface ValidationFieldError {
  * A `ValidationFieldError` carrying the connection-resolution "smuggle" fields
  * surfaced by the integration connection resolver
  * (`translateResolutionError`). These snake_case extras let the dashboard's
- * MissingConnections UI act on a 412 / readiness error without parsing the
+ * MissingConnections UI act on a 409 / readiness error without parsing the
  * `detail` string. Each field is populated only for the matching resolution
  * `code`; all are optional.
  */
@@ -89,17 +89,17 @@ export interface ResolutionFieldError extends ValidationFieldError {
   available_auth_keys?: string[];
   /**
    * Ready-to-open hosted-connect link for THIS item. Present only on a
-   * run-kickoff 412 whose caller opted in (`RUN_CONNECT_OFFERS_HEADER`, whose
+   * run-kickoff 409 whose caller opted in (`RUN_CONNECT_OFFERS_HEADER`, whose
    * docblock states who may), and only on the items an oauth2 connect flow can
-   * clear for the calling actor. Single-use and short-lived (`expires_at`):
+   * clear for the calling actor. Single-use and short-lived (`expiresAt`):
    * open it — never store it, and never call the connect kickoff as well,
    * which would mint a second link.
    */
   connect_url?: string;
-  /** Absolute expiry (epoch ms) of `connect_url`. */
-  expires_at?: number;
+  /** Absolute expiry (RFC 3339) of `connect_url`. */
+  expiresAt?: string;
   /** Integration package id `connect_url` connects (`@scope/name`). */
-  package_id?: string;
+  packageId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,9 +123,9 @@ const RESERVED_PROBLEM_KEYS: ReadonlySet<string> = new Set<string>([
   "detail",
   "instance",
   "code",
-  "requestId",
+  "request_id",
   "param",
-  "retryAfter",
+  "retry_after",
   "errors",
 ]);
 
@@ -198,10 +198,10 @@ export class ApiError extends Error {
       detail: this.message,
       instance: `urn:appstrate:request:${requestId}`,
       code: this.code,
-      requestId,
+      request_id: requestId,
     };
     if (this.param !== undefined) body.param = this.param;
-    if (this.retryAfter !== undefined) body.retryAfter = this.retryAfter;
+    if (this.retryAfter !== undefined) body.retry_after = this.retryAfter;
     if (this.fieldErrors?.length) body.errors = this.fieldErrors;
     // RFC 9457 §3.2 extension members, written last and only into keys the
     // standard fields do not own. The guard is the RESERVED SET, not
@@ -518,9 +518,9 @@ export function renderFieldPath(path: readonly PropertyKey[]): string {
  * `unrecognized_keys` is the one issue that does NOT name its field through
  * `path`: Zod reports the container's path (EMPTY for a top-level body) and
  * puts the offending names in `issue.keys`. Routing it through the generic
- * branch therefore blamed `fallbackField` — so `PUT /agents/{scope}/{name}/
- * skills` (`param: "skillIds"`) answered `field: "skillIds"` for a body whose
- * `skillIds` was perfectly valid, naming the one field the client got right.
+ * branch therefore blamed `fallbackField` — so `POST /packages/import-github`
+ * (`param: "url"`) answered `field: "url"` for a body whose `url` was
+ * perfectly valid, naming the one field the client got right.
  * Each unrecognized key gets its OWN entry, appended to the container path, so
  * `{ extra, other }` yields two actionable pointers instead of one ambiguous
  * combined message.

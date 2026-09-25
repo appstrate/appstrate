@@ -15,6 +15,8 @@
  *   - `no_published_version`  — 404 on an agent that exists but has never
  *                               been published.
  *   - `version_not_found`     — 404 with a payload mentioning version.
+ *   - `version_artifact_unavailable` — 422: the published version exists
+ *                               but its stored archive is missing.
  *   - `integrity_mismatch`    — server omitted the integrity header,
  *                               or the downloaded bytes failed to verify.
  *   - `bundle_fetch_failed`   — anything else (network, 5xx, …).
@@ -22,6 +24,7 @@
 
 import { CLI_USER_AGENT } from "../../lib/version.ts";
 import { normalizeInstance } from "../../lib/instance-url.ts";
+import { DRAFT_SELECTOR, PUBLISHED_SELECTOR } from "../../lib/package-spec.ts";
 import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 
 export class BundleFetchError extends Error {
@@ -31,6 +34,7 @@ export class BundleFetchError extends Error {
       | "package_not_active_in_space"
       | "no_published_version"
       | "version_not_found"
+      | "version_artifact_unavailable"
       | "integrity_mismatch"
       | "bundle_fetch_failed",
     message: string,
@@ -138,6 +142,16 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
   }
   if (!res.ok) {
     const detail = await safeText(res);
+    // A storage fault on the server, not a typo: the version is published but
+    // its archive is missing from storage. Any other 422 keeps the generic path below.
+    if (res.status === 422 && parseProblemCode(detail) === "version_artifact_unavailable") {
+      const target = input.spec ? `${input.packageId}@${input.spec}` : input.packageId;
+      throw new BundleFetchError(
+        "version_artifact_unavailable",
+        `The published version of ${target} cannot be run: its stored archive is unavailable`,
+        `The package author must publish a new version (or delete the broken one). If you own it, run the working copy meanwhile:\n  appstrate run ${input.packageId}@draft --local`,
+      );
+    }
     throw new BundleFetchError(
       "bundle_fetch_failed",
       `Failed to fetch ${input.packageId}: HTTP ${res.status} ${res.statusText}${
@@ -171,7 +185,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
   // explicit `@draft` sends it. We don't trust `versionHeader === "draft"`
   // alone for this — the request shape is the authoritative signal, and the
   // response is a sanity check.
-  const stage: "draft" | "published" = input.spec === "draft" ? "draft" : "published";
+  const stage: "draft" | "published" = input.spec === DRAFT_SELECTOR ? "draft" : "published";
 
   const bytes = new Uint8Array(await res.arrayBuffer());
   // The bytes we just downloaded must match the server-issued integrity.
@@ -223,7 +237,7 @@ function buildBundleUrl(
   // with a real tag.
   const base = `${instance}/api/agents/${scope}/${name}/bundle`;
   if (!spec) return base;
-  if (spec === "draft" || spec === "published") return `${base}?source=${spec}`;
+  if (spec === DRAFT_SELECTOR || spec === PUBLISHED_SELECTOR) return `${base}?source=${spec}`;
   return `${base}?version=${encodeURIComponent(spec)}`;
 }
 

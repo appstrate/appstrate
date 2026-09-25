@@ -374,6 +374,8 @@ const config: KnipConfig = {
         // package.json. Delete the `bun run` script and the file goes back to
         // being reported as unused — which is the claim we wanted anchored.
         "scripts/conformance/grab-token.ts",
+        // Operator data scripts, run by hand (`bun scripts/migration/…`); nothing imports them.
+        "scripts/migration/*.ts",
         // System-package sources: `build:system-packages` reads them off disk
         // and bundles them, so nothing imports them.
         "scripts/system-packages/**/server/index.ts",
@@ -423,11 +425,12 @@ const config: KnipConfig = {
        * compiles any ignore entry containing `(`, `|`, `*`, `+`, `{`, `^` or
        * `$` to a RegExp, and reports an entry that never suppressed anything
        * as a configuration hint. `@appstrate/module-claude-code` is in that
-       * position today: it is loaded exactly like its three siblings, but one
-       * unit test (`test/unit/services/model-selection.test.ts`) imports it
-       * statically to assert the claude-code model lists, so knip already
-       * sees a reader and would call a literal entry redundant. It is not —
-       * the day that assertion moves, the dependency reads as dead. The
+       * position today: it is loaded exactly like its three siblings, but
+       * unit tests (`test/unit/model-catalog.test.ts` and the model-offer /
+       * pi-parity suites) import it statically to read its model provider,
+       * so knip already sees a reader and would call a literal entry
+       * redundant. It is not — the day those imports go, the dependency
+       * reads as dead. The
        * alternation covers it without asserting anything untrue, and stays
        * exact: a new module dependency is not silently covered, it has to be
        * named here.
@@ -558,7 +561,7 @@ const config: KnipConfig = {
 
     // Docker entrypoints: the image CMD runs them directly. Neither manifest
     // declares `exports`, `bin` or `main`, so nothing is derived.
-    "runtime-pi": { entry: [...manifestEntries("runtime-pi"), "entrypoint.ts!"] },
+    "runtime-pi": { entry: [...manifestEntries("runtime-pi"), "entrypoint.ts!", "launcher.ts!"] },
     "runtime-pi/sidecar": {
       entry: [...manifestEntries("runtime-pi/sidecar"), "server.ts!", "test/fixtures/**/server.ts"],
     },

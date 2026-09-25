@@ -31,7 +31,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedAgent, seedSchedule, seedRun } from "../../helpers/seed.ts";
-import type { RunStatus } from "@appstrate/shared-types";
+import type { RunStatus } from "@appstrate/core/run-status";
 
 const app = getTestApp();
 

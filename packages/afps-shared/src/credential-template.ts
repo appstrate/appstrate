@@ -4,10 +4,7 @@
 /**
  * Canonical `{$credential.<field>}` value-template renderer — the SINGLE
  * source of truth. Consumers import this module directly; core no longer
- * publishes a `./credential-template` subpath (removed in core 6.0.0). The
- * only importer today is `apps/api/src/services/integration-manifest-helpers.ts`,
- * which re-exports it pre-bound to `emptyAs: "null"` for
- * `integration-spawn-resolver.ts`.
+ * publishes a `./credential-template` subpath (removed in core 6.0.0).
  *
  * AFPS `delivery.http` / `delivery.env` / `delivery.files` value templates
  * reference an auth's decrypted credential bag via the `{$credential.<field>}`
@@ -53,4 +50,31 @@ export function renderCredentialTemplate(
   const rendered = template.replace(CREDENTIAL_REF, (_m, field: string) => credential[field] ?? "");
   if (opts.emptyAs === "null") return rendered.length === 0 ? null : rendered;
   return rendered;
+}
+
+/** Field names referenced by `{$credential.<name>}` placeholders, in order, deduplicated. */
+export function credentialTemplateRefs(template: string): string[] {
+  return [...new Set(Array.from(template.matchAll(CREDENTIAL_REF), (m) => m[1]!))];
+}
+
+/** A rendered value may only be a literal host label run or port digits, never dots alone. */
+const AUTHORITY_VALUE = /^(?!\.+$)[A-Za-z0-9.-]+$/;
+
+/**
+ * Render `authorized_uris` for one connection (#1458). A templated pattern is DROPPED when a
+ * referenced field fails {@link AUTHORITY_VALUE}, so a value cannot add a wildcard, a separator
+ * or another host. Import validation confines placeholders to the host and port.
+ */
+export function renderAuthorizedUris(
+  patterns: readonly string[],
+  fields: Readonly<Record<string, string>>,
+): string[] {
+  return patterns.flatMap((pattern) => {
+    const refs = credentialTemplateRefs(pattern);
+    const renderable = refs.every((ref) => {
+      const value = fields[ref];
+      return typeof value === "string" && AUTHORITY_VALUE.test(value);
+    });
+    return renderable ? [renderCredentialTemplate(pattern, fields)] : [];
+  });
 }

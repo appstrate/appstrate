@@ -260,4 +260,20 @@ describe("formatError renders the cause chain", () => {
     expect(formatError(new Error("plain failure"))).toBe("plain failure");
     expect(formatError("not an error")).toBe("not an error");
   });
+  it("starts a cause as a new sentence after a wrapper that ends one", async () => {
+    // #1517: `": "` after a full stop printed "cannot be read.: ENOENT …".
+    const { formatError } = await import("../src/lib/ui.ts");
+    const err = new Error("/tmp/pkg: cannot be read.", { cause: new Error("EACCES") });
+    expect(formatError(err)).toBe("/tmp/pkg: cannot be read. EACCES");
+  });
+
+  it("prints an ExplainedError's message alone, the cause kept on the error", async () => {
+    // Delete-to-fail (#1517): without the branch, the server's own wording
+    // followed the CLI's translation of it.
+    const { ExplainedError, formatError } = await import("../src/lib/ui.ts");
+    const cause = new Error("Skill was modified concurrently. Reload and try again.");
+    const err = new ExplainedError("The draft moved: pull it again, or push --force.", { cause });
+    expect(formatError(err)).toBe("The draft moved: pull it again, or push --force.");
+    expect(err.cause).toBe(cause);
+  });
 });

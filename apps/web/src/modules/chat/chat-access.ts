@@ -10,6 +10,7 @@
  */
 
 import {
+  canAuthorAgents,
   reaches,
   turnCapabilities,
   type TurnCapabilities,
@@ -35,16 +36,6 @@ export interface ChatCapability {
   authoring?: true;
 }
 
-/** Shared by the composer's agent-authoring toggle and the `createAgents` row. */
-export function canAuthorAgents(ctx: Pick<ChatAccessContext, "can">): boolean {
-  return ctx.can("chat:write") && turnCapabilities(ctx.can).authors;
-}
-
-/** The skill picker writes the conversation (`chat:write`) and lists skills the turn can load. */
-export function canPinSkills(ctx: Pick<ChatAccessContext, "can">): boolean {
-  return ctx.can("chat:write") && turnCapabilities(ctx.can).readsSkills;
-}
-
 const CHAT_CAPABILITIES: readonly ChatCapability[] = [
   {
     id: "callApi",
@@ -63,7 +54,7 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     // which for a shared agent is not this one.
     id: "createAgents",
     labelKey: "access.capability.createAgents",
-    held: canAuthorAgents,
+    held: (ctx) => canAuthorAgents(ctx.can),
     authoring: true,
   },
   {

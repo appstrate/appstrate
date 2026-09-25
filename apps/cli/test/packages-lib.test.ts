@@ -22,9 +22,30 @@ import {
   writeOperation,
 } from "../src/lib/packages.ts";
 import { lineDiff } from "../src/commands/packages.ts";
+import { splitPackageSpec } from "../src/lib/package-spec.ts";
 import type { PackageHome } from "@appstrate/shared-types";
 
 const utf8 = (text: string) => new TextEncoder().encode(text);
+
+describe("splitPackageSpec", () => {
+  it("splits <package>@<spec> past a scope's leading @", () => {
+    expect(splitPackageSpec("@acme/pdf")).toEqual({ ref: "@acme/pdf" });
+    expect(splitPackageSpec("pdf")).toEqual({ ref: "pdf" });
+    expect(splitPackageSpec("@acme/pdf@1.2.0")).toEqual({ ref: "@acme/pdf", spec: "1.2.0" });
+    expect(splitPackageSpec("@acme/pdf@^1.2")).toEqual({ ref: "@acme/pdf", spec: "^1.2" });
+    expect(splitPackageSpec("pdf@latest")).toEqual({ ref: "pdf", spec: "latest" });
+    expect(splitPackageSpec("@acme/pdf@draft")).toEqual({ ref: "@acme/pdf", spec: "draft" });
+  });
+
+  it("keeps everything after the first @ as the spec, for the server to judge", () => {
+    expect(splitPackageSpec("@acme/pdf@1@2")).toEqual({ ref: "@acme/pdf", spec: "1@2" });
+  });
+
+  it("refuses an @ with nothing after it", () => {
+    expect(() => splitPackageSpec("@acme/pdf@")).toThrow('nothing after "@"');
+    expect(() => splitPackageSpec("pdf@")).toThrow('nothing after "@"');
+  });
+});
 
 describe("isIgnoredPath", () => {
   it("ignores dot-named segments, tooling folders and the root signature", () => {
@@ -274,26 +295,26 @@ describe("locks per working folder", () => {
   });
 
   it("keeps one lock per folder, so two folders of one package do not share it", async () => {
-    await recordLock("p", join(work, "a"), "@s/pkg", 2);
-    await recordLock("p", join(work, "b"), "@s/pkg", 3);
-    expect(await readLock("p", join(work, "a"), "@s/pkg")).toBe(2);
-    expect(await readLock("p", join(work, "b"), "@s/pkg")).toBe(3);
+    await recordLock("p", join(work, "a"), "@s/pkg", '"2"');
+    await recordLock("p", join(work, "b"), "@s/pkg", '"3"');
+    expect(await readLock("p", join(work, "a"), "@s/pkg")).toBe('"2"');
+    expect(await readLock("p", join(work, "b"), "@s/pkg")).toBe('"3"');
   });
 
   it("forgets a folder's lock when it now holds another package", async () => {
-    await recordLock("p", join(work, "a"), "@s/one", 2);
+    await recordLock("p", join(work, "a"), "@s/one", '"2"');
     expect(await readLock("p", join(work, "a"), "@s/two")).toBeUndefined();
   });
 
   it("keeps profiles apart", async () => {
-    await recordLock("prod", join(work, "a"), "@s/pkg", 5);
+    await recordLock("prod", join(work, "a"), "@s/pkg", '"5"');
     expect(await readLock("dev", join(work, "a"), "@s/pkg")).toBeUndefined();
   });
 
   it("finds a folder by its real path, whatever spelling reached it", async () => {
     await symlink(join(work, "a"), join(work, "link"));
-    await recordLock("p", join(work, "link"), "@s/pkg", 7);
-    expect(await readLock("p", join(work, "a", "..", "a"), "@s/pkg")).toBe(7);
+    await recordLock("p", join(work, "link"), "@s/pkg", '"7"');
+    expect(await readLock("p", join(work, "a", "..", "a"), "@s/pkg")).toBe('"7"');
   });
 
   it("refuses a lock table it cannot parse instead of starting over", async () => {
@@ -304,7 +325,7 @@ describe("locks per working folder", () => {
     await expect(readLock("p", join(work, "a"), "@s/pkg")).rejects.toThrow(
       /not a valid packages lock table/,
     );
-    await expect(recordLock("p", join(work, "a"), "@s/pkg", 1)).rejects.toThrow(
+    await expect(recordLock("p", join(work, "a"), "@s/pkg", '"1"')).rejects.toThrow(
       /not a valid packages lock table/,
     );
     expect(await readFile(path, "utf-8")).toBe("{ not json");
@@ -312,10 +333,10 @@ describe("locks per working folder", () => {
 
   it("loses no entry when two writers record at once", async () => {
     await Promise.all([
-      recordLock("p", join(work, "a"), "@s/one", 1),
-      recordLock("p", join(work, "b"), "@s/two", 2),
+      recordLock("p", join(work, "a"), "@s/one", '"1"'),
+      recordLock("p", join(work, "b"), "@s/two", '"2"'),
     ]);
-    expect(await readLock("p", join(work, "a"), "@s/one")).toBe(1);
-    expect(await readLock("p", join(work, "b"), "@s/two")).toBe(2);
+    expect(await readLock("p", join(work, "a"), "@s/one")).toBe('"1"');
+    expect(await readLock("p", join(work, "b"), "@s/two")).toBe('"2"');
   });
 });

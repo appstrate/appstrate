@@ -35,20 +35,20 @@ const RUN_ID = "run_1";
 const VIEWER_HEIGHT_CLASS = "h-[max(24rem,calc(100vh-28rem))]";
 
 function file(overrides: Partial<FileDto> & { name: string }): FileDto {
-  return fileFixture({ run_id: RUN_ID, ...overrides });
+  return fileFixture({ runId: RUN_ID, ...overrides });
 }
 
 /** One file the run consumed — never part of the outcome. */
-const UPLOAD = file({ name: "brief.pdf", purpose: "user_upload", run_id: null });
+const UPLOAD = file({ name: "brief.pdf", purpose: "user_upload", runId: null });
 
 /**
  * A file an EARLIER run produced and this one merely consumed, chained in with
- * `appfile://`. `GET /api/files?run_id=…` returns it because the run's file
+ * `appfile://`. `GET /api/files?runId=…` returns it because the run's file
  * query answers the whole container (`run_id = X` OR an id referenced by
  * `runs.input`), and it keeps `purpose: "agent_output"` — the producing run's
- * purpose. Only its `run_id` tells it apart.
+ * purpose. Only its `runId` tells it apart.
  */
-const CHAINED_IN = file({ name: "source.csv", run_id: "run_0" });
+const CHAINED_IN = file({ name: "source.csv", runId: "run_0" });
 
 function outcome(
   files: FileDto[],
@@ -61,6 +61,7 @@ function outcome(
     hasMore?: boolean;
     isLoading?: boolean;
     error?: unknown;
+    filesDenied?: boolean;
   } = {},
 ): string {
   return render(
@@ -71,12 +72,13 @@ function outcome(
       memoryCount={extra.memoryCount ?? 0}
       producedFileCount={
         extra.producedFileCount ??
-        files.filter((f) => f.purpose === "agent_output" && f.run_id === RUN_ID).length
+        files.filter((f) => f.purpose === "agent_output" && f.runId === RUN_ID).length
       }
       files={files}
       hasMore={extra.hasMore ?? false}
       isLoading={extra.isLoading ?? false}
       error={extra.error ?? null}
+      filesDenied={extra.filesDenied}
     />,
   );
 }
@@ -153,7 +155,7 @@ describe("Outcome shows what the run PRODUCED, and only that", () => {
     // the card claimed truncation under a complete list.
     const produced = [file({ name: "rapport.md" }), file({ name: "annexe.md" })];
     const inputs = Array.from({ length: 5 }, (_, i) =>
-      file({ name: `entree-${i}.csv`, purpose: "user_upload", run_id: null }),
+      file({ name: `entree-${i}.csv`, purpose: "user_upload", runId: null }),
     );
     const html = outcome([...produced, ...inputs], { hasMore: true, producedFileCount: 2 });
     expect(html).toContain("rapport.md");
@@ -330,5 +332,21 @@ describe("what the run produced LEADS the pane", () => {
     const html = outcome(three, { producedFileCount: 1 });
     expect(html).toContain(agentsFr["run.sectionProducedFiles"]);
     expect(html).not.toContain(`aria-label="${filesFr["run.featuredLabel"]}"`);
+  });
+});
+
+// A role without `files:read` never lists the files (#1556), yet the run's own
+// count says it produced some: the card stays and says why it is empty.
+describe("Outcome without `files:read`", () => {
+  it("names the missing access instead of claiming there is no file", () => {
+    const html = outcome([], { producedFileCount: 2, filesDenied: true });
+    expect(html).toContain(agentsFr["run.sectionProducedFiles"]);
+    expect(html).toContain(filesFr["run.noAccess"]);
+    expect(html).not.toContain(filesFr["run.empty"]);
+  });
+
+  it("does not hold the featured-file slot it can never fill", () => {
+    const html = outcome([], { producedFileCount: 1, filesDenied: true });
+    expect(html).not.toContain(VIEWER_HEIGHT_CLASS);
   });
 });

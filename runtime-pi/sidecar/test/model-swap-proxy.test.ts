@@ -3,8 +3,8 @@
 /**
  * The `/llm/*` route for an ALIASED run: the surface is narrowed to the one
  * inference call the container's protocol makes, and that call is TERMINATED
- * and re-originated rather than proxied. Non-aliased runs keep the verbatim
- * passthrough.
+ * and re-originated rather than proxied. Non-aliased runs are forwarded to the
+ * platform proxy's inference endpoint (`platform-llm.test.ts`).
  */
 
 import { describe, it, expect, mock } from "bun:test";
@@ -30,10 +30,9 @@ function makeDeps(fetchFn: typeof fetch): AppDeps {
       runToken: "tok",
       proxyUrl: "",
       llm: {
-        authMode: "api_key",
+        authMode: "platform",
+        apiShape: "openai-completions",
         baseUrl: "https://api.deepseek.com",
-        apiKey: "real-key",
-        placeholder: "sk-placeholder",
         modelSwap: SWAP,
       },
     },
@@ -44,7 +43,7 @@ function makeDeps(fetchFn: typeof fetch): AppDeps {
 }
 
 describe("/llm/* upstream failure (no alias)", () => {
-  it("keeps the upstream hostname in a fetch-level 502 when NO swap is configured", async () => {
+  it("keeps the platform host out of a fetch-level 502 when NO swap is configured", async () => {
     const fetchFn = mock(async () => {
       throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ConnectionRefused" });
     }) as unknown as typeof fetch;
@@ -52,24 +51,23 @@ describe("/llm/* upstream failure (no alias)", () => {
     const deps = makeDeps(fetchFn);
     delete (deps.config.llm as { modelSwap?: unknown }).modelSwap;
     const app = createTestApp(deps);
-    const res = await app.request("/llm/v1/chat/completions", {
+    const res = await app.request("/llm/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: "appstrate-medium", messages: [] }),
     });
     expect(res.status).toBe(502);
     const text = await res.text();
-    // No alias to protect — the hostname keeps its debugging value.
+    // The error code survives; the host dialed is the platform API's, which
+    // the agent must not learn.
     expect(text).toContain("ConnectionRefused");
-    expect(text).toContain("api.deepseek.com");
+    expect(text).not.toContain("mock");
   });
 });
 
 /**
- * `/llm/*` used to be a total passthrough — any method, any path, recomposed
- * onto the real upstream base URL with the real credential injected. For an
- * ALIASED run that hands an adversarial agent the vendor's own catalogue over
- * `GET /v1/models`. An aliased run now reaches exactly one endpoint.
+ * An ALIASED run reaches exactly one endpoint: anything wider hands an
+ * adversarial agent a probe of the backing (`GET /v1/models` alone names it).
  */
 describe("/llm/* alias surface restriction", () => {
   /** Upstream that fails the test if it is ever reached. */
@@ -132,29 +130,6 @@ describe("/llm/* alias surface restriction", () => {
     expect(res.status).toBe(404);
     expect(calls()).toBe(0);
   });
-
-  it("keeps the verbatim passthrough for a NON-aliased run", async () => {
-    // No alias means no opacity contract: the run's whole point is reaching the
-    // provider it was configured with, so the surface stays wide open.
-    let seenUrl = "";
-    const fetchFn = mock(async (url: string) => {
-      seenUrl = url;
-      return new Response('{"data":[{"id":"deepseek-chat"}]}', {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }) as unknown as typeof fetch;
-
-    const deps = makeDeps(fetchFn);
-    delete (deps.config.llm as { modelSwap?: unknown }).modelSwap;
-    const app = createTestApp(deps);
-
-    const res = await app.request("/llm/v1/models", { method: "GET" });
-
-    expect(res.status).toBe(200);
-    expect(seenUrl).toBe("https://api.deepseek.com/v1/models");
-    expect(await res.text()).toContain("deepseek-chat");
-  });
 });
 
 /**
@@ -167,13 +142,10 @@ describe("/llm/* alias surface restriction", () => {
 describe("/llm/* re-origination routing (aliased run)", () => {
   function reoriginatingDeps(fetchFn: typeof fetch): AppDeps {
     const deps = makeDeps(fetchFn);
-    if (deps.config.llm?.authMode !== "api_key") throw new Error("expected api_key llm");
     // pi-ai fetches through `globalThis.fetch`, not the injected `fetchFn`, so
-    // the backing URL must be unreachable or this suite would egress for real.
-    // `.invalid` is the reserved never-resolving TLD (RFC 2606) — a loopback
-    // address would instead be refused by the `/llm/*` SSRF floor (403) before
-    // the alias branch this test is about is ever reached.
-    deps.config.llm.baseUrl = "https://alias-backing.invalid";
+    // the platform proxy must be unreachable or this suite would egress for
+    // real. `.invalid` is the reserved never-resolving TLD (RFC 2606).
+    deps.config.platformApiUrl = "https://platform.invalid";
     return deps;
   }
 
@@ -245,7 +217,7 @@ describe("/llm/* re-origination routing (aliased run)", () => {
       async () => new Response("{}", { status: 200 }),
     ) as unknown as typeof fetch;
     const deps = reoriginatingDeps(fetchFn);
-    if (deps.config.llm?.authMode !== "api_key") throw new Error("expected api_key llm");
+    if (deps.config.llm?.authMode !== "platform") throw new Error("expected platform llm");
     deps.config.llm.modelSwap = parseModelSwapEnv(JSON.stringify(SWAP));
     const app = createTestApp(deps);
 

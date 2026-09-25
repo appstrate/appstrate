@@ -6,11 +6,11 @@
  *
  * Two layers:
  *   - {@link buildBaseSidecarEnv} — the common per-run block (PORT,
- *     RUN_TOKEN, PLATFORM_API_URL, WORKSPACE_HANDLE_JSON, then the
- *     spec-driven assignments). Topology-owned differences are explicit
- *     params: the starting env (`pickOperatorSidecarEnv()` for
+ *     FORWARD_PROXY_PORT, RUN_TOKEN, PLATFORM_API_URL, WORKSPACE_HANDLE_JSON,
+ *     then the spec-driven assignments). Topology-owned differences are
+ *     explicit params: the starting env (`pickOperatorSidecarEnv()` for
  *     containers/VMs vs `cleanProcessEnv()` for host subprocesses), the
- *     port, and whether `RUN_ID` is stamped.
+ *     ports, and whether `RUN_ID` is stamped.
  *   - {@link applySpecToSidecarEnv} — ONLY the env vars derived from the
  *     `SidecarLaunchSpec` whose semantics are identical across topologies.
  *
@@ -33,6 +33,12 @@ interface BaseSidecarEnvParams {
   baseEnv: Record<string, string>;
   /** Sidecar listen port, as the env string (`"8080"` in-container/in-guest, dynamic on the host). */
   port: string;
+  /**
+   * The agent's forward proxy listener (`"8081"` in-container/in-guest, dynamic
+   * on the host). Its own port, not `port + 1`: on the host two adjacent free
+   * ports are a gamble, two free ports are not.
+   */
+  forwardProxyPort: string;
   platformApiUrl: string;
   /**
    * Handed to the sidecar as WORKSPACE_HANDLE_JSON so its integration
@@ -58,6 +64,7 @@ export function buildBaseSidecarEnv(params: BaseSidecarEnvParams): Record<string
   const env: Record<string, string> = {
     ...params.baseEnv,
     PORT: params.port,
+    FORWARD_PROXY_PORT: params.forwardProxyPort,
     RUN_TOKEN: params.spec.runToken,
     ...(params.runId !== undefined ? { RUN_ID: params.runId } : {}),
     PLATFORM_API_URL: params.platformApiUrl,
@@ -100,18 +107,17 @@ export function applySpecToSidecarEnv(
   if (spec.llm) {
     if (spec.llm.authMode === "oauth") {
       // OAuth config (non-forging — the driver signs its own fingerprint): ship
-      // the full LlmProxyConfig as JSON so server.ts parses it into config.llm
-      // at boot. Without this, /llm/* returns 503 "LLM proxy not configured".
+      // the full LlmProxyOauthConfig as JSON so server.ts parses it into
+      // config.llm at boot. Without this, /llm/* returns 503 "LLM proxy not configured".
       target.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(spec.llm);
     } else {
+      // No provider credential: the sidecar reaches the proxy with RUN_TOKEN.
       target.PI_BASE_URL = spec.llm.baseUrl;
-      target.PI_API_KEY = spec.llm.apiKey;
-      target.PI_PLACEHOLDER = spec.llm.placeholder;
-      // Model-alias swap (api-key path ONLY) — the real backing id rides
-      // platform→sidecar only, never into the agent container. The OAuth
-      // config above carries NO modelSwap (`LlmProxyOauthConfig` has no such
-      // field): that mode is a pure bearer-swap and aliases are rejected for
-      // oauth-subscription providers.
+      target.PI_LLM_PLATFORM_API_SHAPE = spec.llm.apiShape;
+      // Model-alias swap — the real backing id rides platform→sidecar only,
+      // never into the agent container. The OAuth config above carries NO
+      // modelSwap (`LlmProxyOauthConfig` has no such field): that mode is a
+      // pure bearer-swap and aliases are rejected for oauth-subscription providers.
       if (spec.llm.modelSwap) {
         target.PI_MODEL_SWAP_JSON = JSON.stringify(spec.llm.modelSwap);
       }

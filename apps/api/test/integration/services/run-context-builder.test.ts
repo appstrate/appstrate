@@ -7,12 +7,34 @@
  * module graph (no mock.module needed — preload sets up DB/Redis/env).
  */
 
-import { describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { and, eq } from "drizzle-orm";
+import { runLogs } from "@appstrate/db/schema";
 import {
+  ModelGenerationError,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
+import {
+  buildRunContext,
+  GENERATION_SETTING_DROPPED_EVENT,
   ModelNotConfiguredError,
   ModelCredentialMissingError,
   modelCredentialIsPresent,
+  recordDroppedGenerationSettings,
+  type DroppedGenerationSetting,
 } from "../../../src/services/run-context-builder.ts";
+import { getPackage } from "../../../src/services/package-catalog.ts";
+import { logger } from "../../../src/lib/logger.ts";
+import { getTestApp } from "../../helpers/app.ts";
+import { db, truncateAll } from "../../helpers/db.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import {
+  seedOrgModel,
+  seedOrgModelProviderKey,
+  seedPackage,
+  seedRun,
+  seedSpacePackage,
+} from "../../helpers/seed.ts";
 import { signRunToken, parseSignedToken } from "../../../src/lib/run-token.ts";
 
 // ─── ModelNotConfiguredError ────────────────────────────────
@@ -147,5 +169,174 @@ describe("parseSignedToken", () => {
 
   it("rejects an empty string", () => {
     expect(parseSignedToken("")).toBeNull();
+  });
+});
+
+// ─── generation settings reaching the run ──────────────────
+//
+// Backing: Pi's deepseek-flash, which takes off/low/high/max — no `medium`.
+
+describe("buildRunContext generation settings", () => {
+  getTestApp(); // boots the model registry
+  let ctx: TestContext;
+  const agentId = "@genorg/agent";
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "genorg" });
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: agentId,
+      type: "agent",
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: {
+        name: agentId,
+        version: "0.1.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Agent",
+        description: "Generation settings",
+      },
+      draftContent: "Do the thing.",
+    });
+    await seedSpacePackage(ctx.defaultSpaceId, agentId);
+  });
+
+  async function flashModel(aliased: boolean): Promise<string> {
+    const cred = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      providerId: "deepseek",
+      apiShape: "openai-completions",
+      baseUrl: "https://api.deepseek.com/v1",
+      apiKey: "sk-test",
+    });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: cred.id,
+      modelId: "deepseek-flash",
+      aliased,
+    });
+    return model.id;
+  }
+
+  async function build(
+    modelId: string,
+    override: ModelGenerationSettings,
+    scheduleId?: string,
+    stored: ModelGenerationSettings = {},
+  ) {
+    return buildRunContext({
+      runId: `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+      agent: (await getPackage(agentId, ctx.orgId))!,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      input: {},
+      modelId,
+      generationConfig: stored,
+      generationConfigOverride: override,
+      ...(scheduleId ? { scheduleId } : {}),
+    });
+  }
+
+  it("sends an aliased run the backing's nearest level, and records the requested one", async () => {
+    const built = await build(await flashModel(true), { reasoning_level: "medium" });
+    expect(built.plan.generationConfig?.reasoning_level).toBe("high");
+    // The run row keeps the public level: the clamped one would name the backing's set.
+    expect(built.generationConfig.reasoning_level).toBe("medium");
+    expect(built.droppedGenerationSettings).toEqual([]);
+  });
+
+  it("still refuses a level the non-aliased model does not take", async () => {
+    await expect(build(await flashModel(false), { reasoning_level: "medium" })).rejects.toThrow(
+      ModelGenerationError,
+    );
+  });
+
+  it("drops a schedule's refused setting for that fire and logs it", async () => {
+    const warn = spyOn(logger, "warn");
+    try {
+      const built = await build(
+        await flashModel(false),
+        { temperature: 0.3, reasoning_level: "medium" },
+        "sched_1",
+      );
+      expect(built.generationConfig).toEqual({ temperature: 0.3 });
+      expect(built.plan.generationConfig).toEqual({ temperature: 0.3 });
+      expect(built.droppedGenerationSettings).toEqual([
+        { setting: "reasoning_level", value: "medium" },
+      ]);
+      const call = warn.mock.calls.find(([, data]) =>
+        JSON.stringify(data ?? {}).includes("sched_1"),
+      );
+      expect(call?.[1]).toMatchObject({ scheduleId: "sched_1", dropped: ["reasoning_level"] });
+      expect(JSON.stringify(call)).not.toContain("medium");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("drops a refused space default, unless the request sets that key itself", async () => {
+    const modelId = await flashModel(false);
+    const stored = { reasoning_level: "medium" } as const;
+
+    const fromDefault = await build(modelId, {}, undefined, stored);
+    expect(fromDefault.droppedGenerationSettings).toEqual([
+      { setting: "reasoning_level", value: "medium" },
+    ]);
+
+    const overridden = await build(modelId, { reasoning_level: "high" }, undefined, stored);
+    expect(overridden.droppedGenerationSettings).toEqual([]);
+    expect(overridden.generationConfig.reasoning_level).toBe("high");
+  });
+});
+
+describe("recordDroppedGenerationSettings — run_logs marker", () => {
+  let ctx: TestContext;
+  const agentId = "@droporg/agent";
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "droporg" });
+    await seedPackage({ id: agentId, orgId: ctx.orgId, type: "agent", source: "local" });
+  });
+
+  async function markerRows(dropped: DroppedGenerationSetting[]) {
+    const run = await seedRun({
+      packageId: agentId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
+    await recordDroppedGenerationSettings({ orgId: ctx.orgId }, run.id, "DeepSeek Flash", dropped);
+    return db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, run.id), eq(runLogs.event, GENERATION_SETTING_DROPPED_EVENT)));
+  }
+
+  it("writes ONE warn row per dropped setting, naming the setting, its value and the model", async () => {
+    const rows = await markerRows([
+      { setting: "reasoning_level", value: "high" },
+      { setting: "temperature", value: 0.3 },
+    ]);
+    expect(rows).toHaveLength(2);
+    const row = rows.find((r) => r.data?.setting === "reasoning_level");
+    expect(row).toMatchObject({ level: "warn", type: "system" });
+    expect(row!.data).toMatchObject({
+      platform: true,
+      value: "high",
+      model: "DeepSeek Flash",
+      reason: "refused_by_model",
+    });
+    expect(row!.message).toBe(
+      "generation setting 'reasoning_level' = 'high' is not accepted by model 'DeepSeek Flash' — ignored for this run",
+    );
+    const temperature = rows.find((r) => r.data?.setting === "temperature");
+    expect(temperature!.data).toMatchObject({ value: 0.3, reason: "refused_by_model" });
+    expect(temperature!.message).toContain("'temperature' = 0.3 ");
+  });
+
+  it("writes nothing when nothing was dropped", async () => {
+    expect(await markerRows([])).toHaveLength(0);
   });
 });

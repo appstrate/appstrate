@@ -17,7 +17,9 @@ import { isForeignKeyViolation, isUniqueViolation } from "../lib/db-helpers.ts";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import {
+  describeMissingRead,
   knownSpaceLevelPermissions,
+  missingReadGrants,
   partitionSpacePermissions,
   presetPermissions,
 } from "../lib/permissions.ts";
@@ -116,6 +118,9 @@ export async function listSpaceRoles(orgId: string): Promise<SpaceRoleWire[]> {
  * once per space in `GET /api/spaces`), so duplicates are collapsed here rather
  * than carried forever; a body longer than the whole vocabulary can hold
  * nothing but duplicates and is refused before it is walked.
+ *
+ * The set must read what it acts on (`missingReadGrants`). A missing read is
+ * named, never added: that would grant what the author did not pick.
  */
 function normalizePermissions(permissions: string[]): string[] {
   const known = knownSpaceLevelPermissions();
@@ -140,6 +145,13 @@ function normalizePermissions(permissions: string[]): string[] {
   }
   if (granted.size === 0) {
     throw invalidRequest("A role must grant at least one permission", "permissions");
+  }
+  const missing = missingReadGrants(granted, known);
+  if (missing.length > 0) {
+    throw invalidRequest(
+      `A role cannot act on what it cannot read: ${missing.map(describeMissingRead).join("; ")}.`,
+      "permissions",
+    );
   }
   return [...granted];
 }

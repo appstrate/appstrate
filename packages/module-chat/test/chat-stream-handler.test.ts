@@ -32,7 +32,12 @@ import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
 import { createUIMessageStreamResponse, type UIMessageChunk } from "ai";
-import { handleChatStream, type ChatEngine, type ChatEnv } from "../src/chat-stream.ts";
+import {
+  CHAT_MESSAGE_MAX_BYTES,
+  handleChatStream,
+  type ChatEngine,
+  type ChatEnv,
+} from "../src/chat-stream.ts";
 import { mintSessionId } from "../src/session-id.ts";
 import { acquirePiChatSlot, releaseOnClose } from "../src/pi-chat/concurrency.ts";
 import type { PiChatInput } from "../src/pi-chat/engine.ts";
@@ -45,6 +50,7 @@ import { initSystemModelProviderKeys } from "../../../apps/api/src/services/mode
 import { buildSystemPrompt } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
+import { _resetChatEnvForTests } from "../src/env.ts";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
 initSystemModelProviderKeys();
@@ -237,7 +243,7 @@ describe("handleChatStream", () => {
 
   async function postChat(
     sessionId: string,
-    generation?: { temperature?: number; reasoningLevel?: string },
+    generation?: { temperature?: number; reasoning_level?: string },
     engine?: ChatEngine,
     overrides?: {
       /** apiShape of the single scripted `/api/models` row. */
@@ -258,6 +264,8 @@ describe("handleChatStream", () => {
       principalKind?: PrincipalKind;
       /** The composer's agent-authoring switch for this turn; omitted = on. */
       agentAuthoring?: boolean;
+      /** Earlier turns replayed ahead of the new user message. */
+      history?: unknown[];
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
@@ -281,6 +289,7 @@ describe("handleChatStream", () => {
       body: JSON.stringify({
         id: sessionId,
         messages: [
+          ...(overrides?.history ?? []),
           {
             id: "u1",
             role: "user",
@@ -356,7 +365,7 @@ describe("handleChatStream", () => {
     expect(calls).toEqual([]);
   });
 
-  it("answers 401 reconnect for a dead oauth credential, before any persistence", async () => {
+  it("answers 409 reconnect for a dead oauth credential, before any persistence", async () => {
     const sessionId = mintSessionId();
     const { engine, calls } = scriptedEngine();
     const res = await postChat(sessionId, undefined, engine, {
@@ -366,7 +375,9 @@ describe("handleChatStream", () => {
       resolveChatModel: async () => ({ subscription: true, needsReconnection: true }),
     });
 
-    expect(res.status).toBe(401);
+    // 409, never 401: the caller's own token is valid, so no auth challenge.
+    expect(res.status).toBe(409);
+    expect(res.headers.get("WWW-Authenticate")).toBeNull();
     expect(res.headers.get("content-type") ?? "").toContain("application/problem+json");
     const body = (await res.json()) as { code?: string };
     // The problem `code` is the whole client contract: `refusalCode()`
@@ -377,6 +388,58 @@ describe("handleChatStream", () => {
     expect(calls).toEqual([]);
     const rows = await db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId));
     expect(rows).toEqual([]);
+  });
+
+  it("rejects a message that is not a UIMessage, before any persistence", async () => {
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    // A text part with no `text`: the old `z.unknown()` let it through and it
+    // was stored verbatim, then read back as a trusted `UIMessage`.
+    const res = await postChat(sessionId, undefined, engine, { parts: [{ type: "text" }] });
+
+    expect(res.status).toBe(400);
+    expect(res.headers.get("content-type") ?? "").toContain("application/problem+json");
+    expect(calls).toEqual([]);
+    const sessions = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+    expect(sessions).toEqual([]);
+  });
+
+  it("does not validate earlier turns: a row in an older AI SDK shape still lets the turn run", async () => {
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    // An AI SDK v4 `tool-invocation` part: `safeValidateUIMessages` rejects it.
+    const legacy = {
+      id: "a0",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-invocation",
+          toolInvocation: { state: "result", toolCallId: "c1", toolName: "x", args: {}, result: 1 },
+        },
+      ],
+    };
+    const res = await postChat(sessionId, undefined, engine, { history: [legacy] });
+
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.messages.map((m) => m.id)).toEqual(["a0", "u1"]);
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("rejects a last message over the persisted-content cap, before any persistence", async () => {
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      parts: [{ type: "text", text: "x".repeat(CHAT_MESSAGE_MAX_BYTES) }],
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { detail?: string };
+    expect(body.detail).toContain(`max is ${CHAT_MESSAGE_MAX_BYTES}`);
+    expect(calls).toEqual([]);
+    const sessions = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+    expect(sessions).toEqual([]);
   });
 
   it("rejects a model family the engine cannot bind, before any persistence", async () => {
@@ -416,6 +479,7 @@ describe("handleChatStream", () => {
   it("rejects a saturated turn before persisting its user message", async () => {
     const previousCap = process.env.CHAT_PI_MAX_CONCURRENCY;
     process.env.CHAT_PI_MAX_CONCURRENCY = "1";
+    _resetChatEnvForTests();
     const heldSlot = acquirePiChatSlot();
     expect(heldSlot).not.toBeNull();
 
@@ -428,6 +492,11 @@ describe("handleChatStream", () => {
       });
 
       expect(res.status).toBe(429);
+      expect(res.headers.get("Retry-After")).toBe("5");
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({ code: "chat_capacity", retry_after: 5 });
+      expect(body).not.toHaveProperty("retryAfter");
+      expect(body.instance).toStartWith("urn:appstrate:request:");
       expect(engineCalls).toBe(0);
 
       const rows = await db
@@ -439,6 +508,7 @@ describe("handleChatStream", () => {
       heldSlot?.release();
       if (previousCap === undefined) delete process.env.CHAT_PI_MAX_CONCURRENCY;
       else process.env.CHAT_PI_MAX_CONCURRENCY = previousCap;
+      _resetChatEnvForTests();
     }
   });
 
@@ -471,9 +541,9 @@ describe("handleChatStream", () => {
         connections: [],
         agents: [],
         // Non-empty on purpose: the catalogue switch is off, so it must not render.
-        skills: [{ package_id: "@acme/catalogued", display_name: "Catalogued" }],
+        skills: [{ packageId: "@acme/catalogued", display_name: "Catalogued" }],
         requested_skills: ids.map((id) => ({
-          package_id: id,
+          packageId: id,
           display_name: id,
           description: "fixture",
           version: null,
@@ -522,8 +592,8 @@ describe("handleChatStream", () => {
         org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
         connections: [],
         agents: [],
-        skills: [{ package_id: "@acme/catalogued", display_name: "Catalogued" }],
-        requested_skills: [{ package_id: PIN, display_name: "Pinned" }],
+        skills: [{ packageId: "@acme/catalogued", display_name: "Catalogued" }],
+        requested_skills: [{ packageId: PIN, display_name: "Pinned" }],
       });
     const dispatch = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
@@ -723,13 +793,13 @@ describe("handleChatStream", () => {
       context: () =>
         contextResponse([
           {
-            package_id: "@acme/report",
+            packageId: "@acme/report",
             status: "failed",
-            run_number: 41,
+            runNumber: 41,
             started_at: new Date().toISOString(),
             error: "provider timed out",
           },
-          { package_id: "@acme/triage", status: "success", run_number: 42 },
+          { packageId: "@acme/triage", status: "success", runNumber: 42 },
         ]),
     });
 
@@ -887,7 +957,7 @@ describe("handleChatStream", () => {
           org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
           connections: [],
           agents: [],
-          skills: [{ package_id: SKILL_ID, display_name: "Research", version: "1.2.0" }],
+          skills: [{ packageId: SKILL_ID, display_name: "Research", version: "1.2.0" }],
           recent_runs: [],
         });
       const { system } = await turn(

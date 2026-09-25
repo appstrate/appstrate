@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { turnCapabilities } from "../src/capabilities.ts";
+import { canAuthorAgents, canPinSkills, turnCapabilities } from "../src/capabilities.ts";
 
 describe("turnCapabilities", () => {
   it("puts `invokes` in every level: no MCP pair, no run level and no authoring", () => {
@@ -33,5 +33,31 @@ describe("turnCapabilities", () => {
       authors: true,
       readsSkills: true,
     });
+  });
+});
+
+describe("canAuthorAgents", () => {
+  const authoring = ["mcp:read", "mcp:invoke", "agents:write"];
+
+  it("needs the turn itself (`chat:write`) on top of authoring", () => {
+    const held = (extra: string[]) => {
+      const set = new Set([...authoring, ...extra]);
+      return (p: string) => set.has(p);
+    };
+    expect(canAuthorAgents(held(["chat:write"]))).toBe(true);
+    expect(canAuthorAgents(held([]))).toBe(false);
+  });
+});
+
+describe("canPinSkills", () => {
+  it("needs the turn to write the conversation, dispatch, and read skills", () => {
+    const pinner = ["chat:write", "mcp:read", "mcp:invoke", "skills:read"];
+    const held = (set: string[]) => (p: string) => set.includes(p);
+    expect(canPinSkills(held(pinner))).toBe(true);
+    // Each conjunct on its own: the selection is a `chat:write`, `getSkill`
+    // dispatches through `mcp:invoke`, and the picker lists `skills:read` rows.
+    for (const missing of ["chat:write", "mcp:invoke", "skills:read"]) {
+      expect(canPinSkills(held(pinner.filter((p) => p !== missing)))).toBe(false);
+    }
   });
 });

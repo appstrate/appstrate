@@ -38,10 +38,12 @@ import {
   type Transport,
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
+import { DEFAULT_CONTEXT_WINDOW } from "./pi-model.ts";
 import { ALIAS_PI_PROVIDER_KEY, PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "./provider-map.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import {
   anthropicThinkingBudgets,
+  DEFAULT_MODEL_REASONING_LEVEL,
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
@@ -62,8 +64,10 @@ import {
   type RunError,
   type RunOptions,
   type RunResult,
+  type TerminalRunResult,
   type TokenUsage,
 } from "@appstrate/afps-runtime/runner";
+import { formatLogLine } from "@appstrate/core/log-line";
 
 /**
  * Pi model configuration. Mirrors the Pi SDK's `Model<Api>` shape so
@@ -254,7 +258,7 @@ export interface PiRunnerOptions {
   extensionFactories?: ExtensionFactory[];
   /** Path where the credential store persists. Defaults to `/tmp/pi-auth/auth.json`. */
   authStoragePath?: string;
-  /** Pi SDK thinking level. Defaults to `"medium"`. */
+  /** Pi SDK thinking level. Defaults to `DEFAULT_MODEL_REASONING_LEVEL`. */
   thinkingLevel?: ModelReasoningLevel;
   /** Provider sampling temperature. Omitted to preserve provider/Pi defaults. */
   temperature?: number;
@@ -274,13 +278,14 @@ export interface PiRunnerOptions {
    * Default: none (external consumers keep the SDK's natural stop).
    */
   terminalTools?: string[];
+  /** Pi SDK retry on transient 429/5xx. Default `true`; off when an outer layer retries. */
+  modelRetry?: boolean;
+  /** Pi SDK context compaction. Default `true`; see {@link derivePiCompactionSettings}. */
+  modelCompaction?: boolean;
+  /** Per-tool-result byte cap on the event sink. Default `DEFAULT_TOOL_RESULT_BYTE_LIMIT`. */
+  toolResultByteLimit?: number;
 }
 
-/**
- * Fallback context window when the model omits it. Matches the Claude
- * family's standard 200 k window — the most common runtime target.
- */
-const DEFAULT_CONTEXT_WINDOW = 200_000;
 /**
  * Floor on `keepRecentTokens`. Below ~20k the agent loses meaningful
  * recent context (a few thousand tokens of recent tool calls + the last
@@ -302,15 +307,8 @@ const KEEP_RECENT_FRACTION = 0.1;
  * | `reserveTokens`    | `deriveResponseReserveTokens(ctx, max)`| Response budget. Honours `max_tokens` so the first call post-compaction does not underflow into the upstream 400 ("prompt is too long") — critical for Claude Sonnet thinking mode (`maxTokens: 64000`). An impossible `max_tokens >= contextWindow` (corrupt catalog data) is clamped to a derived default instead of pinning the threshold at ≤0. |
  * | `keepRecentTokens` | `max(20000, 10% × contextWindow)`      | Preserves the ratio across model sizes: 20k on Claude 200k, ~100k on GPT-4.1 1M, ~200k on Gemini 2M. The floor stops small windows from over-compacting away recent context.    |
  *
- * Operators can disable compaction entirely with
- * `MODEL_COMPACTION_ENABLED=false`, read from this process's env. Two things
- * put it there and nothing else does: for a platform-launched run,
- * `buildRuntimePiEnv` forwards the key from the API host's own `process.env`
- * (`packages/runner-pi/src/container-env.ts`, which carries why it is a
- * forward and not an option); an embedder driving `PiRunner` in its own
- * process sets the variable directly. `MODEL_RETRY_ENABLED` is the other key
- * on that same forward. Useful when stacking external compaction middleware.
- * See appstrate#445.
+ * `enabled: false` turns compaction off entirely — useful when stacking
+ * external compaction middleware (appstrate#445).
  *
  * Returns TWO members, and the split is load-bearing. `compaction` is exactly
  * the Pi SDK's `CompactionSettings` and is what gets handed to it. `contextWindow`
@@ -328,14 +326,14 @@ const KEEP_RECENT_FRACTION = 0.1;
  */
 export function derivePiCompactionSettings(
   model: { contextWindow?: number | null; maxTokens?: number | null },
-  env: Record<string, string | undefined> = process.env,
+  { enabled = true }: { enabled?: boolean } = {},
 ): {
   compaction:
     { enabled: false } | { enabled: true; reserveTokens: number; keepRecentTokens: number };
   contextWindow: number;
 } {
   const contextWindow = model.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
-  if (env["MODEL_COMPACTION_ENABLED"] === "false") {
+  if (!enabled) {
     return { compaction: { enabled: false }, contextWindow };
   }
   // Shared clamp (see `@appstrate/core/token-budget`): honours a usable
@@ -436,12 +434,10 @@ export class PiRunner {
       // having been ingested first. The metric event is now purely a
       // live-UI signal whose POST may be aborted by `process.exit(0)`
       // after `run()` returns — finalize body covers persistence and
-      // cost accounting on its own.
+      // cost accounting on its own; usage is always stamped (zero if no session).
       const bridge = bridgeRef.current;
-      if (bridge) {
-        result.usage = bridge.getUsage();
-        result.cost = bridge.getCost();
-      }
+      result.usage = bridge?.getUsage() ?? { input_tokens: 0, output_tokens: 0 };
+      if (bridge) result.cost = bridge.getCost();
     };
 
     // Hard timeout watchdog. An internal controller fires on EITHER the AFPS
@@ -556,11 +552,9 @@ export class PiRunner {
         return;
       }
       // Shared thrown-failure epilogue (abort-rethrow → emit appstrate.error →
-      // best-effort drain → reduce → stamp usage/cost → finalize). The Pi runner
-      // leaves `status` unset on this path (setFailedStatus: false, preserved
-      // verbatim) and sources usage + cost from the session bridge — both only
-      // when the bridge was captured; a very early throw stamps explicit zero
-      // usage. The "drain" here converges the bridge's pending fire-and-forget emits
+      // best-effort drain → reduce → stamp status/usage/cost → finalize). Usage
+      // + cost come from the session bridge when captured; a very early throw
+      // stamps explicit zero usage. The "drain" here converges the bridge's pending fire-and-forget emits
       // (`drainPending`) before finalize closes the sink, not a runtime-event
       // journal; it emits nothing new, so reducing before vs after it is
       // equivalent.
@@ -575,7 +569,6 @@ export class PiRunner {
         drainAndEmit: () => bridge?.drainPending() ?? Promise.resolve(),
         eventSink,
         usage: bridge?.getUsage() ?? { input_tokens: 0, output_tokens: 0 },
-        setFailedStatus: false,
         stamp: (result) => {
           if (bridge) result.cost = bridge.getCost();
         },
@@ -596,16 +589,12 @@ export class PiRunner {
     // makes the runner the single source of truth for the run's outcome
     // instead of having the platform reconstruct it from the `run_logs`
     // adapter-error trail post-hoc (issue: run_fd977eb6).
-    const result: RunResult = events.length === 0 ? emptyRunResult() : reduceEvents(events);
     const terminalError = bridgeRef.current?.getTerminalError();
-    if (terminalError) {
-      result.status = "failed";
-      result.error = terminalError;
-    } else {
-      // Set success explicitly (don't leave it for the ingestion layer to
-      // infer) so the runner is the single source of truth on BOTH branches.
-      result.status = "success";
-    }
+    const result: TerminalRunResult = {
+      ...(events.length === 0 ? emptyRunResult() : reduceEvents(events)),
+      status: terminalError ? "failed" : "success",
+      ...(terminalError ? { error: terminalError } : {}),
+    };
     attachAccumulators(result);
     // Drain pending bridge fires BEFORE finalize. Finalize closes the
     // server-side sink via CAS — any POST in flight after that lands
@@ -632,7 +621,7 @@ export class PiRunner {
     const { model, apiKey, systemPrompt, startMessage } = this.opts;
     const cwd = this.opts.cwd ?? process.cwd();
     const agentDir = this.opts.agentDir ?? "/tmp/pi-agent";
-    const requestedThinkingLevel = this.opts.thinkingLevel ?? "medium";
+    const requestedThinkingLevel = this.opts.thinkingLevel ?? DEFAULT_MODEL_REASONING_LEVEL;
     const {
       model: sessionModel,
       thinkingLevel,
@@ -666,20 +655,20 @@ export class PiRunner {
       // 401/retry silently (the platform's kickoff fail-fast should prevent
       // this, so reaching here means a run bypassed that guard). Surface a
       // line on the surprising path.
-      // runner-pi intentionally avoids a logger dep — same JSON-line-on-stderr
-      // convention as the compaction-wait + sink-heartbeat paths.
       process.stderr.write(
-        `${JSON.stringify({
-          level: "warn",
-          msg: "[pi-runner] no API key for model — provider calls will be unauthenticated",
-          provider: model.provider,
-        })}\n`,
+        formatLogLine(
+          "warn",
+          "[pi-runner] no API key for model — provider calls will be unauthenticated",
+          { provider: model.provider },
+        ),
       );
     }
 
     // ONE call, so the window stamped on every turn breadcrumb cannot drift
     // from the one that sized this session's compaction pass.
-    const budget = derivePiCompactionSettings(model, process.env);
+    const budget = derivePiCompactionSettings(model, {
+      enabled: this.opts.modelCompaction ?? true,
+    });
 
     const temperatureExtension: ExtensionFactory[] =
       this.opts.temperature === undefined
@@ -721,21 +710,9 @@ export class PiRunner {
         // `server_error`, which the Codex/Responses adapter surfaces as a
         // failed turn. 4 attempts (was 2) rides out the short upstream
         // blips that 2 retries occasionally exhausted, before the agent
-        // loop has to self-recover.
-        //
-        // The opt-out is `MODEL_RETRY_ENABLED=false` in THIS process's env.
-        // Two things put it there, and nothing else does: for a
-        // platform-launched run, `buildRuntimePiEnv`'s `disableModelRetry`
-        // option is the only writer of the key
-        // (`packages/runner-pi/src/container-env.ts`); an embedder driving
-        // `PiRunner` in its own process sets the variable directly. Worth
-        // reaching for when an outer layer already retries — the sidecar's
-        // aliased `/llm` path does, `ALIAS_UPSTREAM_MAX_RETRIES` attempts
-        // per call, which multiplies with this one rather than replacing it.
+        // loop has to self-recover. Opt-out: {@link PiRunnerOptions.modelRetry}.
         retry:
-          process.env.MODEL_RETRY_ENABLED === "false"
-            ? { enabled: false }
-            : { enabled: true, maxRetries: 4 },
+          this.opts.modelRetry === false ? { enabled: false } : { enabled: true, maxRetries: 4 },
       }),
     });
 
@@ -748,6 +725,9 @@ export class PiRunner {
       terminalTools,
       contextWindow: budget.contextWindow,
       ...(this.opts.unpriced ? { unpriced: true } : {}),
+      ...(this.opts.toolResultByteLimit !== undefined
+        ? { toolResultByteLimit: this.opts.toolResultByteLimit }
+        : {}),
       // Early-stop: abort the SDK loop as soon as a terminal tool has
       // executed successfully. `session.abort()` resolves once the agent
       // is idle; detached because the bridge callback is synchronous.
@@ -1109,15 +1089,9 @@ export async function waitForCompactionToSettle(
     if (signal?.aborted) return;
     if (Date.now() >= deadline) {
       // Only surface a line on the surprising path — happy-path
-      // compactions resolve silently. runner-pi intentionally avoids
-      // a logger dep, so the existing JSON-line-on-stderr convention
-      // from sink-heartbeat applies.
+      // compactions resolve silently.
       process.stderr.write(
-        `${JSON.stringify({
-          level: "warn",
-          msg: "[pi-runner] compaction wait timed out",
-          timeoutMs,
-        })}\n`,
+        formatLogLine("warn", "[pi-runner] compaction wait timed out", { timeoutMs }),
       );
       return;
     }
@@ -1355,8 +1329,7 @@ interface PiToolExecutionEndEvent {
 }
 type PiSubscribedEvent = { type: string } & Record<string, unknown>;
 
-// Tool-result truncation (byte-aware, env-tunable via `TOOL_RESULT_BYTE_LIMIT`)
-// lives in `@appstrate/afps-runtime/runner` (imported above for the bridge's
+// Tool-result truncation (byte-aware) lives in `@appstrate/afps-runtime/runner` (imported above for the bridge's
 // own use). Re-exported here for this package's existing test imports + public
 // surface.
 export { truncateToolResult };
@@ -1440,6 +1413,8 @@ interface SessionBridgeOptions {
   contextWindow?: number;
   /** No rates back this session's model — see {@link PiRunnerOptions.unpriced}. */
   unpriced?: boolean;
+  /** See {@link PiRunnerOptions.toolResultByteLimit}. */
+  toolResultByteLimit?: number;
 }
 
 export function installSessionBridge(
@@ -1682,9 +1657,8 @@ export function installSessionBridge(
       // dedicated `compaction` session entry (which is why its own
       // `getSessionStats()` counts it and a message-only accumulator does
       // not). Without this the tokens are invisible to `RunResult.usage` /
-      // `.cost`, and on a run with no llm-proxy rows to fall back on (a
-      // no-sidecar run against a static key) they are missing from
-      // `runs.cost` outright.
+      // `.cost`, and on a run with no llm-proxy rows to fall back on they
+      // are missing from `runs.cost` outright.
       case "compaction_end": {
         const e = event as unknown as PiCompactionEndEvent;
         const usage = e.result?.usage;
@@ -1760,7 +1734,7 @@ export function installSessionBridge(
             { runId, timestamp: Date.now() },
             {
               tool,
-              result: truncateToolResult(e.result),
+              result: truncateToolResult(e.result, options.toolResultByteLimit),
               isError: e.isError === true,
               ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
               ...(startedAt !== undefined ? { durationMs: Date.now() - startedAt } : {}),

@@ -23,13 +23,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { getEnv } from "@appstrate/env";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { splitSecretEnv } from "@appstrate/runner-pi/secret-env";
 import { logger } from "../../lib/logger.ts";
 import type {
   RunOrchestrator,
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
-  IsolationBoundaryOptions,
   SidecarLaunchSpec,
   CleanupReport,
   StopResult,
@@ -256,9 +256,16 @@ function systemBaselineEnv(): Record<string, string> {
   return env;
 }
 
+/** A run's two host ports: the sidecar's HTTP surface and the agent's forward proxy. */
+interface SidecarPorts {
+  sidecar: number;
+  forwardProxy: number;
+}
+
 export class ProcessOrchestrator implements RunOrchestrator {
+  readonly sidecarExitsIndependently = true;
   private processes = new Map<string, ProcessHandle>();
-  private sidecarPorts = new Map<string, number>();
+  private sidecarPorts = new Map<string, SidecarPorts>();
   private pendingSpecs = new Map<string, PendingSpec>();
 
   async initialize(): Promise<void> {
@@ -374,10 +381,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
     return { workloads, isolationBoundaries, workspaces };
   }
 
-  async createIsolationBoundary(
-    runId: string,
-    opts?: IsolationBoundaryOptions,
-  ): Promise<IsolationBoundary> {
+  async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
     const dir = join(dataDir, runId);
     // Create both the pidfile boundary dir and the shared workspace
     // dir in parallel — independent fs operations, no ordering
@@ -385,20 +389,15 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // dataDir so a host-side `rm -rf data/` doesn't accidentally
     // wipe the workspace for an active run.
     //
-    // The sidecar port pair is allocated HERE (not in createSidecar) so
+    // The sidecar's two ports are allocated HERE (not in createSidecar) so
     // the boundary can expose agent-visible sidecar endpoints before the
     // sidecar exists. This also removes the former createSidecar ↔
     // createWorkload ordering hazard: both are launched in a Promise.all
     // by pi.ts, and the old lazy allocation meant the agent env could be
-    // built before the port was known.
-    //
-    // skipSidecar runs never bind the port — don't probe one at all. The
-    // probe would only widen the probe→bind TOCTOU window for nothing;
-    // port 0 in the placeholder endpoints fails loudly if anything dials
-    // them by mistake.
+    // built before the ports were known.
     const workspacePath = workspaceDirFor(runId);
-    const [port] = await Promise.all([
-      opts?.skipSidecar ? Promise.resolve(0) : this.findAvailablePort(),
+    const [ports] = await Promise.all([
+      this.findAvailablePorts(),
       mkdir(dir, { recursive: true }),
       // 0o700: the workspace sits under the shared `os.tmpdir()` and
       // holds the agent's run inputs/outputs — keep it readable only by
@@ -411,15 +410,15 @@ export class ProcessOrchestrator implements RunOrchestrator {
         Bun.write(ownerMarkerPathFor(runId), String(process.pid)),
       ),
     ]);
-    if (!opts?.skipSidecar) this.sidecarPorts.set(runId, port);
+    this.sidecarPorts.set(runId, ports);
     return {
       id: dir,
       name: `process-${runId}`,
       workspace: { kind: "directory", path: workspacePath },
       sidecarEndpoints: {
-        sidecarUrl: `http://localhost:${port}`,
-        llmProxyUrl: `http://localhost:${port}/llm`,
-        forwardProxyUrl: `http://localhost:${port + 1}`,
+        sidecarUrl: `http://localhost:${ports.sidecar}`,
+        llmProxyUrl: `http://localhost:${ports.sidecar}/llm`,
+        forwardProxyUrl: `http://localhost:${ports.forwardProxy}`,
         noProxy: "localhost,127.0.0.1",
       },
     };
@@ -427,7 +426,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
 
   async removeIsolationBoundary(boundary: IsolationBoundary): Promise<void> {
     // Port allocation is boundary-scoped (see createIsolationBoundary) —
-    // release it here so a run that never spawned a sidecar (skipSidecar)
+    // release it here so a run whose sidecar never started (a failed launch)
     // doesn't leak one map entry per run.
     const runId = boundary.name.replace(/^process-/, "");
     this.sidecarPorts.delete(runId);
@@ -448,11 +447,11 @@ export class ProcessOrchestrator implements RunOrchestrator {
     spec: SidecarLaunchSpec,
   ): Promise<WorkloadHandle> {
     // Allocated by createIsolationBoundary — the boundary's
-    // sidecarEndpoints already advertise this port to the agent env.
-    const port = this.sidecarPorts.get(runId);
-    if (!port) {
+    // sidecarEndpoints already advertise these ports to the agent env.
+    const ports = this.sidecarPorts.get(runId);
+    if (!ports) {
       throw new Error(
-        `Process orchestrator: no sidecar port allocated for run ${runId} — ` +
+        `Process orchestrator: no sidecar ports allocated for run ${runId} — ` +
           `createIsolationBoundary must run before createSidecar`,
       );
     }
@@ -464,7 +463,8 @@ export class ProcessOrchestrator implements RunOrchestrator {
     const env = buildBaseSidecarEnv({
       spec,
       baseEnv: cleanProcessEnv(),
-      port: String(port),
+      port: String(ports.sidecar),
+      forwardProxyPort: String(ports.forwardProxy),
       platformApiUrl,
       workspace: boundary.workspace,
     });
@@ -499,7 +499,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // until the listener is up. Docker mode adopted the same contract in
     // issue #406; process mode now mirrors it. Removes the unconditional
     // ~200-500ms warm-path wait (5s on cold starts) from the run hot path.
-    logger.info("Sidecar spawned", { runId, port, pid: proc.pid });
+    logger.info("Sidecar spawned", { runId, ports, pid: proc.pid });
 
     return { id, runId, role: "sidecar" };
   }
@@ -570,12 +570,23 @@ export class ProcessOrchestrator implements RunOrchestrator {
 
     const stdoutPath = join(pending.workDir, ".stdout.jsonl");
 
+    // This orchestrator plays the runtime launcher's part (`runtime-pi/launcher.ts`)
+    // itself: the run-scoped secrets go over stdin, never into the environment.
+    // No launcher process in between, so every kill below reaches the agent.
+    const { env, payload } = splitSecretEnv(pending.env);
     const proc = Bun.spawn(["bun", "run", pending.entrypoint], {
       cwd: pending.workDir,
-      env: pending.env,
+      env,
+      stdin: "pipe",
       stdout: Bun.file(stdoutPath),
       stderr: "pipe",
     });
+    try {
+      await proc.stdin.write(payload);
+      await proc.stdin.end();
+    } catch {
+      // The agent died before reading; its exit is reported below like any other.
+    }
 
     const stderrTail: string[] = [];
     ph.stderrTail = stderrTail;
@@ -705,35 +716,47 @@ export class ProcessOrchestrator implements RunOrchestrator {
     await rm(join(dataDir, runId, `${role}.pid`), { force: true }).catch(() => {});
   }
 
-  private async findAvailablePort(retries = 5): Promise<number> {
+  private async findAvailablePorts(retries = 5): Promise<SidecarPorts> {
     // Ports already reserved by concurrent run starts (probed at boundary
     // creation but only bound when their sidecar boots): the OS can hand
     // the same ephemeral port out again in that window, so a candidate
-    // pair overlapping a reservation must be rejected here — the loser
-    // would otherwise die with EADDRINUSE at sidecar boot.
+    // overlapping a reservation must be rejected here — the loser would
+    // otherwise die with EADDRINUSE at sidecar boot.
     const reserved = new Set<number>();
     for (const p of this.sidecarPorts.values()) {
-      reserved.add(p);
-      reserved.add(p + 1);
+      reserved.add(p.sidecar);
+      reserved.add(p.forwardProxy);
     }
     for (let attempt = 0; attempt < retries; attempt++) {
-      const s1 = Bun.serve({ port: 0, fetch: () => new Response() });
-      const port = s1.port ?? 0;
-      // AWAITED: `Server.stop()` returns a promise that settles once the socket
-      // is actually released. Returning a port whose probe server is still
-      // bound is exactly the EADDRINUSE-at-sidecar-boot this function exists to
-      // avoid.
-      await s1.stop(true);
-      if (!port) continue;
-      if (reserved.has(port) || reserved.has(port + 1)) continue;
-      try {
-        const s2 = Bun.serve({ port: port + 1, fetch: () => new Response() });
-        await s2.stop(true);
-        return port;
-      } catch {
-        continue;
-      }
+      const ports = await probeTwoFreePorts();
+      if (!ports) continue;
+      if (reserved.has(ports.sidecar) || reserved.has(ports.forwardProxy)) continue;
+      return ports;
     }
-    throw new Error("Failed to find available port after retries");
+    throw new Error("Failed to find available ports after retries");
+  }
+}
+
+/**
+ * Two free ports, both probes held at once so the OS hands out distinct ones.
+ * They need not be adjacent: asking for `port + 1` failed whenever a busy host
+ * had it taken, which the finder used to throw on. `null` when a probe fails.
+ */
+async function probeTwoFreePorts(): Promise<SidecarPorts | null> {
+  // Raw TCP listeners, NOT `Bun.serve`: under `bun --hot` (the dev server) a
+  // second `Bun.serve()` hot-reloads the first one and returns the SAME
+  // server, so both probes reported one port and the sidecar refused to boot
+  // with PORT === FORWARD_PROXY_PORT.
+  const probes: Bun.TCPSocketListener[] = [];
+  try {
+    for (let i = 0; i < 2; i++) {
+      probes.push(Bun.listen({ hostname: "0.0.0.0", port: 0, socket: { data() {} } }));
+    }
+    const [sidecar = 0, forwardProxy = 0] = probes.map((p) => p.port);
+    return sidecar && forwardProxy && sidecar !== forwardProxy ? { sidecar, forwardProxy } : null;
+  } catch {
+    return null;
+  } finally {
+    for (const probe of probes) probe.stop(true);
   }
 }

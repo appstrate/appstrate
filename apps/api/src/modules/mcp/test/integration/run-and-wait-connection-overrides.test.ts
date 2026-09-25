@@ -4,7 +4,7 @@
  * MCP `run_and_wait` × `connection_overrides` — the joined seam.
  *
  * An org with two connections on one integration auth makes run readiness answer
- * `412 missing_integration_connection` / `must_choose_connection`, and the only
+ * `409 missing_integration_connection` / `must_choose_connection`, and the only
  * documented way out is retrying with a `connection_overrides` map. That remedy
  * crosses TWO layers, and it was broken in both at once:
  *
@@ -14,7 +14,7 @@
  *     `apps/api/test/unit/modules/mcp/run-and-wait.test.ts`);
  *   - `POST /api/runs/inline` stripped the field and never handed it to the
  *     readiness resolver (covered in
- *     `apps/api/test/integration/routes/inline-run-412-missing-connection.test.ts`).
+ *     `apps/api/test/integration/routes/inline-run-missing-connection.test.ts`).
  *
  * Each side is now pinned in isolation, and isolation is exactly what let the
  * bug ship: either half could regress — a dropped tool property, a renamed wire
@@ -22,8 +22,8 @@
  * whole chain runs: a real MCP `tools/call` over the real router, the real
  * in-process dispatch, the real inline route, the real DB.
  *
- * Both directions live here on purpose. The 412 is what makes the override
- * necessary and the override is what makes the 412 escapable; asserting them
+ * Both directions live here on purpose. The 409 is what makes the override
+ * necessary and the override is what makes the 409 escapable; asserting them
  * apart would let one drift into no longer describing the other.
  */
 
@@ -128,7 +128,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
   // red test would cascade into unrelated FK failures.
   afterEach(waitForRunPipelineSettled);
 
-  it("returns the 412 must_choose_connection payload through the tool when no pick is given", async () => {
+  it("returns the 409 must_choose_connection payload through the tool when no pick is given", async () => {
     await seedConnectionTestIntegration(ctx, INTEGRATION);
     const conn1 = await seedIntegrationConnection(ctx, INTEGRATION);
     const conn2 = await seedIntegrationConnection(ctx, INTEGRATION);
@@ -142,7 +142,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
     expect(result.isError).toBe(true);
     // The tool surfaces the route's own status + body — the model needs BOTH
     // the code and the candidates to build the retry.
-    expect(result.data.status).toBe(412);
+    expect(result.data.status).toBe(409);
     const body = result.data.body as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
     const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
@@ -176,7 +176,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
       connection_overrides: { [INTEGRATION]: picked },
     });
 
-    // No 412 this time: the tool waited on a real run instead of reporting a
+    // No 409 this time: the tool waited on a real run instead of reporting a
     // launch failure. A launch failure payload is `{ status: <number>, body }`;
     // a launched one is the run projection `{ id, packageId, status, done }`,
     // whose `status` is a run status string. (Which terminal status the fake

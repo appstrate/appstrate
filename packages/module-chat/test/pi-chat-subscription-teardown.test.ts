@@ -100,6 +100,7 @@ function orgModel(): OrgModel {
     modelId: "upstream-model-never-called",
     apiShape: "openai-completions",
     providerId: "openai",
+    pi_provider: "openai",
     label: "Teardown test model",
     enabled: true,
     input: ["text"],

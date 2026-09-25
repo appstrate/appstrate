@@ -31,6 +31,7 @@ import {
   updateBillingContact,
 } from "../billing/contact.ts";
 import { getOrgQueries } from "../platform-org-queries.ts";
+import { getPlatformServices } from "../platform.ts";
 import {
   problemJson,
   noBillingAccount,
@@ -39,6 +40,7 @@ import {
 } from "../http-errors.ts";
 import { ApiError, invalidRequest } from "@appstrate/core/api-errors";
 import { readJsonBody } from "@appstrate/core/request-body";
+import type { AuditPayload } from "@appstrate/core/module";
 import {
   ORG_ROLES_WITH_FULL_ACCESS,
   requireModulePermission,
@@ -163,7 +165,11 @@ const ROLES_WITH_BILLING_MANAGE: ReadonlySet<string> = new Set(ORG_ROLES_WITH_FU
 
 /** Wire projection — snake_case, per the platform casing policy. */
 function managerDetail(m: BillingManager) {
-  return { user_id: m.userId, added_by: m.addedBy, created_at: m.createdAt.toISOString() };
+  return { userId: m.userId, added_by: m.addedBy, createdAt: m.createdAt.toISOString() };
+}
+
+function managerList(managers: BillingManager[]) {
+  return { object: "list" as const, data: managers.map(managerDetail), hasMore: false };
 }
 
 /**
@@ -212,6 +218,15 @@ async function billingSnapshot(orgId: string) {
     plan_action: planAction(account),
     upgrades: upgradeOptions(allPlans, currentPlan?.tier ?? 0),
   };
+}
+
+function auditBilling(c: Context<EeEnv>, action: string, after: AuditPayload): Promise<void> {
+  return getPlatformServices().audit.record(c, {
+    action,
+    resourceType: "billing_account",
+    resourceId: c.get("orgId"),
+    after,
+  });
 }
 
 /**
@@ -268,6 +283,8 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
 
       try {
         const url = await createCheckoutSession(orgId, body.plan_id, appUrl, body.return_url);
+        // The session URL is a bearer link to a payment page: it stays out of the trail.
+        await auditBilling(c, "billing.checkout_created", { planId: body.plan_id });
         return c.json({ url });
       } catch (err) {
         return stripeCallFailure(c, err, { route: "checkout", orgId, planId: body.plan_id });
@@ -291,6 +308,7 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
       } catch (err) {
         return stripeCallFailure(c, err, { route: "plan", orgId, planId: body.plan_id });
       }
+      await auditBilling(c, "billing.plan_changed", { planId: body.plan_id });
 
       // The account is written by the `customer.subscription.updated` webhook Stripe sends
       // back, so this snapshot may still name the previous plan; everything else in it is
@@ -325,7 +343,7 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
   // GET /api/billing/managers — the org users granted billing:* outside RBAC
   router.get("/api/billing/managers", requireModulePermission("billing", "manage"), async (c) => {
     const managers = await listBillingManagers(c.get("orgId"));
-    return c.json({ managers: managers.map(managerDetail) });
+    return c.json(managerList(managers));
   });
 
   // PUT /api/billing/managers — replace the whole set (the dashboard saves a list)
@@ -366,7 +384,8 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
     }
 
     const managers = await replaceBillingManagers(orgId, wanted, c.get("user").id);
-    return c.json({ managers: managers.map(managerDetail) });
+    await auditBilling(c, "billing.managers_updated", { userIds: wanted });
+    return c.json(managerList(managers));
   });
 
   // GET /api/billing/contact — where invoices and payment alerts go
@@ -382,6 +401,10 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
 
     const contact = await updateBillingContact(c.get("orgId"), body);
     if (!contact) return problemJson(c, noBillingAccount());
+    await auditBilling(c, "billing.contact_updated", {
+      billingEmail: contact.billingEmail,
+      billingCc: contact.billingCc,
+    });
     return c.json({ billing_email: contact.billingEmail, billing_cc: contact.billingCc });
   });
 

@@ -19,9 +19,10 @@
  */
 
 import type { Context } from "hono";
-import type { UIMessage } from "ai";
+import { safeValidateUIMessages, type UIMessage } from "ai";
 import { z } from "zod";
-import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
+import { parseBody, invalidRequest, conflict } from "@appstrate/core/api-errors";
+import { withByteCap } from "@appstrate/core/safe-json";
 import { isAttachmentUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
 import { listModels, pickModel } from "./llm.ts";
@@ -31,7 +32,7 @@ import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments } from "./attachments.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
-import { acquirePiChatSlot, chatCapacityResponse } from "./pi-chat/concurrency.ts";
+import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
 import { turnPermissions } from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "./skills.ts";
@@ -49,24 +50,6 @@ import {
   modelGenerationSettingsSchema,
   resolveModelGenerationSettings,
 } from "@appstrate/core/model-generation";
-
-/**
- * RFC 9457 `401` returned when the chosen subscription model's oauth credential
- * is dead (revoked/expired-beyond-refresh). The client renders a reconnect
- * prompt rather than the engine launching a session that would 401 upstream.
- */
-function subscriptionReconnectResponse(): Response {
-  return new Response(
-    JSON.stringify({
-      type: "https://docs.appstrate.dev/errors/subscription-reconnect",
-      title: "Reconnection required",
-      status: 401,
-      detail: "The selected model's subscription credential expired or was revoked.",
-      code: "needs_reconnection",
-    }),
-    { status: 401, headers: { "content-type": "application/problem+json" } },
-  );
-}
 
 /**
  * RFC 9457 response for a turn blocked by the platform admission gate
@@ -111,10 +94,12 @@ export type ChatEngine = (input: PiChatInput) => Response;
  */
 const CHAT_MESSAGE_ROLES = new Set(["user", "assistant"]);
 
+/** Ceiling on the turn's last (persisted) message; attachments ride as references. */
+export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
+
 // The client (assistant-ui / useChat) posts the full thread plus optional
-// session/model/context extras. `messages` are UIMessages; the shape itself is
-// the AI SDK's and stays loose here, with two tightenings the engine cannot
-// make for us:
+// session/model/context extras. The last message's UIMessage shape is checked by
+// `safeValidateUIMessages` in the handler; this schema adds:
 //   - `role` MUST be one of {@link CHAT_MESSAGE_ROLES}. Nothing legitimate
 //     sends another: the composer only produces user turns, and a reload
 //     replays what the server persisted — user or assistant, a server-authored
@@ -122,43 +107,47 @@ const CHAT_MESSAGE_ROLES = new Set(["user", "assistant"]);
 //   - any `file` part MUST reference an `upload://` or `appfile://` URI. That
 //     rejects inline `data:` bytes and arbitrary URLs in the chat channel
 //     (attachments flow only through the file store, never inline).
-export const chatStreamSchema = z.object({
-  id: z.string().optional(),
-  messages: z
-    .array(z.unknown())
-    .min(1, "messages must not be empty")
-    .superRefine((messages, ctx) => {
-      messages.forEach((message, i) => {
-        const role = (message as { role?: unknown }).role;
-        if (typeof role !== "string" || !CHAT_MESSAGE_ROLES.has(role)) {
-          ctx.addIssue({
-            code: "custom",
-            message: "Message role must be 'user' or 'assistant'.",
-            path: [i, "role"],
-          });
-        }
-        const parts = (message as { parts?: unknown }).parts;
-        if (!Array.isArray(parts)) return;
-        parts.forEach((part, j) => {
-          if (!part || typeof part !== "object" || (part as { type?: unknown }).type !== "file") {
-            return;
-          }
-          const url = (part as { url?: unknown }).url;
-          if (!isAttachmentUri(url)) {
+//   - `.strict()`: an unknown field is a 400, never silently dropped.
+export const chatStreamSchema = z
+  .object({
+    id: z.string().optional(),
+    messages: z
+      .array(z.unknown())
+      .min(1, "messages must not be empty")
+      .superRefine((messages, ctx) => {
+        messages.forEach((message, i) => {
+          const role = (message as { role?: unknown }).role;
+          if (typeof role !== "string" || !CHAT_MESSAGE_ROLES.has(role)) {
             ctx.addIssue({
               code: "custom",
-              message: "File attachment URI must be an 'upload://' or 'appfile://' URI.",
-              path: [i, "parts", j, "url"],
+              message: "Message role must be 'user' or 'assistant'.",
+              path: [i, "role"],
             });
           }
+          const parts = (message as { parts?: unknown }).parts;
+          if (!Array.isArray(parts)) return;
+          parts.forEach((part, j) => {
+            if (!part || typeof part !== "object" || (part as { type?: unknown }).type !== "file") {
+              return;
+            }
+            const url = (part as { url?: unknown }).url;
+            if (!isAttachmentUri(url)) {
+              ctx.addIssue({
+                code: "custom",
+                message: "File attachment URI must be an 'upload://' or 'appfile://' URI.",
+                path: [i, "parts", j, "url"],
+              });
+            }
+          });
         });
-      });
-    }),
-  modelId: z.string().optional(),
-  generation: modelGenerationSettingsSchema.optional(),
-  /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
-  agent_authoring: z.boolean().optional(),
-});
+        withByteCap(CHAT_MESSAGE_MAX_BYTES)(messages.at(-1), ctx);
+      }),
+    modelId: z.string().optional(),
+    generation: modelGenerationSettingsSchema.optional(),
+    /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
+    agent_authoring: z.boolean().optional(),
+  })
+  .strict();
 
 function clientErrorMessage(error: unknown): string {
   return clientTurnErrorMarker(classifyClientTurnError(error));
@@ -234,7 +223,12 @@ export async function handleChatStream(
   const persona = c.get("viewAs");
   const orgRole = persona?.orgRole ?? c.get("orgRole") ?? "member";
   const body = parseBody(chatStreamSchema, await c.req.json().catch(() => null));
-  const messages = body.messages as UIMessage[];
+  // Only the new message is validated: earlier turns are the server's own rows.
+  const validated = await safeValidateUIMessages({ messages: body.messages.slice(-1) });
+  if (!validated.success) {
+    throw invalidRequest(`Invalid chat message: ${validated.error.message}`, "messages");
+  }
+  const messages = [...(body.messages.slice(0, -1) as UIMessage[]), ...validated.data];
   logger.info("chat turn", { turns: messages.length });
 
   const sessionId = body.id;
@@ -486,14 +480,17 @@ export async function handleChatStream(
   });
   if (resolution.status === "needs-reconnection") {
     // The oauth credential is dead → tell the client to reconnect rather than
-    // launching a session that would 401 upstream.
-    return subscriptionReconnectResponse();
+    // launching a session that would 401 upstream (409: the model's, not the caller's).
+    throw conflict(
+      "needs_reconnection",
+      "The selected model's subscription credential expired or was revoked.",
+    );
   }
   if (resolution.status !== "ready") {
     throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by the chat.`);
   }
   const slot = acquirePiChatSlot();
-  if (!slot) return chatCapacityResponse();
+  if (!slot) throw chatCapacityError();
   const modelBinding = resolution.binding;
 
   // ── Server-authoritative persistence + resumable streaming ───────────────

@@ -12,7 +12,18 @@ const row = (id: string, generating: boolean): SessionSummary => ({
   updatedAt: "2026-09-02T10:00:00.000Z",
 });
 
-const query = (data: SessionSummary[] | undefined) => ({ state: { data } });
+/** Rows split over two loaded pages, so a generating row on page 2 counts too. */
+const query = (rows: SessionSummary[] | undefined) => ({
+  state: {
+    data: rows && {
+      pages: [
+        { data: rows.slice(0, 1), hasMore: true },
+        { data: rows.slice(1), hasMore: false },
+      ],
+      pageParams: [null, rows[0]?.id ?? null],
+    },
+  },
+});
 
 describe("sessionsRefetchInterval", () => {
   it("uses the generating backstop while any row is generating", () => {

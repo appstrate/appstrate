@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ifMatch } from "../../helpers/etag.ts";
 import { beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { packages, spaceMembers, spacePackages } from "@appstrate/db/schema";
@@ -131,10 +132,9 @@ const saveFiles = async (h: Record<string, string>) => {
     .from(packages)
     .where(eq(packages.id, ID));
   return app.request(`/api/packages/skills/${ID}`, {
-    method: "PUT",
-    headers: { ...h, "Content-Type": "application/json" },
+    method: "PATCH",
+    headers: { ...h, "Content-Type": "application/json", ...ifMatch(row!.lockVersion) },
     body: JSON.stringify({
-      lock_version: row!.lockVersion,
       operations: [{ op: "write", path: "notes.md", text: "x" }],
     }),
   });
@@ -152,17 +152,16 @@ function routesUnderAuthority(): [
     ["GET", `/api/packages/skills/${ID}/versions/info`],
     ["GET", `/api/packages/skills/${ID}/versions/0.1.0`],
     ["DELETE", `/api/packages/skills/${ID}`],
-    ["PUT", `/api/packages/skills/${ID}`],
+    ["PATCH", `/api/packages/skills/${ID}`],
     ["POST", `/api/packages/skills/${ID}/versions`],
     ["POST", `/api/packages/skills/${ID}/versions/0.1.0/restore`],
     ["DELETE", `/api/packages/skills/${ID}/versions/0.1.0`],
     [
-      "PUT",
+      "PATCH",
       `/api/packages/skills/${ID}`,
       {
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...ifMatch(0) },
         body: JSON.stringify({
-          lock_version: 0,
           operations: [{ op: "write", path: "notes.md", text: "x" }],
         }),
       },
@@ -474,32 +473,48 @@ describe("shared package authority", () => {
     expect(overwritten.status).toBe(404);
   });
 
-  it("preserves unchanged dependency references for a write-only credential", async () => {
+  /** PATCH an agent draft that already references `seeded` so that it references `ID`, with an `agents:write`-only key. */
+  const patchSkillReferenceAsWriteOnly = async (seeded: Record<string, string>) => {
     await activateIn(privateId);
     const agentId = "@catalog/editable";
-    await seedPackage({
+    const manifest = {
+      name: agentId,
+      type: "agent",
+      version: "0.1.0",
+      schema_version: "0.1",
+      display_name: "Editable",
+      description: "An editable agent",
+    };
+    const agent = await seedPackage({
       id: agentId,
       orgId: ctx.orgId,
       homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
-      draftManifest: {
-        name: agentId,
-        type: "agent",
-        version: "0.1.0",
-        schema_version: "0.1",
-        display_name: "Editable",
-        description: "An editable agent",
-        dependencies: { skills: { [ID]: "^0.1.0" } },
-      },
+      draftManifest: { ...manifest, dependencies: { skills: seeded } },
       draftContent: "Prompt",
     });
     await seedSpacePackage(ctx.defaultSpaceId, agentId);
-    const response = await app.request(`/api/agents/${agentId}/skills`, {
-      method: "PUT",
-      headers: { ...(await keyHeaders(["agents:write"])), "Content-Type": "application/json" },
-      body: JSON.stringify({ skillIds: [ID] }),
+    return app.request(`/api/packages/agents/${agentId}`, {
+      method: "PATCH",
+      headers: {
+        ...(await keyHeaders(["agents:write"])),
+        "Content-Type": "application/json",
+        ...ifMatch(agent.lockVersion),
+      },
+      body: JSON.stringify({
+        manifest: { ...manifest, dependencies: { skills: { [ID]: "^0.1.0" } } },
+      }),
     });
+  };
+
+  it("preserves unchanged dependency references for a write-only credential", async () => {
+    const response = await patchSkillReferenceAsWriteOnly({ [ID]: "^0.1.0" });
     expect(response.status, await response.clone().text()).toBe(200);
+  });
+
+  it("refuses a newly added dependency to a write-only credential", async () => {
+    const response = await patchSkillReferenceAsWriteOnly({});
+    expect(response.status).toBe(403);
   });
 
   it("does not fork another organization's private package without source membership", async () => {
@@ -516,6 +531,7 @@ describe("shared package authority", () => {
     await db.update(packages).set({ type: "integration" }).where(eq(packages.id, ID));
     await placeIn(privateId);
     const role = await assignGuestCustomRole([
+      "skills:read",
       "skills:write",
       "integrations:write",
       "integrations:read",

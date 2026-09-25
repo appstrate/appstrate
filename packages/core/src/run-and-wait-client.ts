@@ -3,6 +3,8 @@
 import { isFileProducedByRun } from "./file-uri.ts";
 import { asRecordOrNull } from "./safe-json.ts";
 import { encodePackageIdPath, toSlug } from "./naming.ts";
+import { terminalRunStatusValues } from "./run-status.ts";
+import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "./validation.ts";
 
 /**
  * Fallback wait ceiling for a caller that has no deadline of its own.
@@ -46,12 +48,7 @@ const TEXT_ENCODER = new TextEncoder();
 /** Non-fatal: a head cut mid-codepoint yields U+FFFD rather than throwing. */
 const TEXT_DECODER = new TextDecoder();
 
-export const RUN_AND_WAIT_TERMINAL_STATUSES = new Set([
-  "success",
-  "failed",
-  "timeout",
-  "cancelled",
-]);
+export const RUN_AND_WAIT_TERMINAL_STATUSES = new Set<string>(terminalRunStatusValues);
 
 export interface RunAndWaitStep {
   payload: Record<string, unknown>;
@@ -78,7 +75,7 @@ export type RunAndWaitHeaders = Headers | Record<string, string> | Array<[string
 
 /**
  * Request header asking the run-kickoff routes to mint a hosted-connect session
- * for every actor-actionable item of a `missing_integration_connection` 412 and
+ * for every actor-actionable item of a `missing_integration_connection` 409 and
  * return it as `connect_url` on that item (RFC 6750 / Arcade.dev pattern: the
  * error carries the remedy, so nothing has to be called to obtain it).
  *
@@ -142,8 +139,6 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-const INLINE_MANIFEST_SCHEMA = "https://schemas.afps.dev/v0/agent.schema.json";
-
 /**
  * Turn the concise manifest accepted by `run_and_wait` into the one canonical
  * AFPS manifest sent to the inline-run route.
@@ -180,8 +175,8 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
   }
 
   const defaults: Record<string, unknown> = {};
-  if (!hasOwn("$schema")) defaults.$schema = INLINE_MANIFEST_SCHEMA;
-  if (!hasOwn("schema_version")) defaults.schema_version = "0.2";
+  if (!hasOwn("$schema")) defaults.$schema = AFPS_SCHEMA_URLS.agent;
+  if (!hasOwn("schema_version")) defaults.schema_version = AFPS_SCHEMA_VERSION;
   if (!hasOwn("name")) defaults.name = derivedName;
   if (!hasOwn("type")) defaults.type = "agent";
   if (!hasOwn("version")) defaults.version = "1.0.0";
@@ -209,9 +204,10 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
  * model reads a normal success and reports work it did on an input the run
  * never had. That failure mode has no other place to be caught.
  *
- * Kept in step with the descriptor's `inputSchema.properties` by
- * `run-and-wait-argument-parity.test.ts`, which reads both and compares them —
- * a name added to one side and not the other is a silent drop again.
+ * Must match the MCP descriptor's `inputSchema.properties` (apps/api
+ * `modules/mcp/tools.ts`). The MCP module refuses any argument its schema does
+ * not declare, so a name on only one side is refused on one path, never
+ * dropped.
  */
 const RUN_AND_WAIT_ARGUMENT_NAMES: ReadonlySet<string> = new Set([
   "kind",
@@ -317,13 +313,13 @@ function contextFilesArgument(args: Record<string, unknown>): {
 
 /**
  * The tool's `connection_overrides` argument — the documented remedy for a
- * `412 must_choose_connection`, where the model must name one connection per
+ * `409 must_choose_connection`, where the model must name one connection per
  * ambiguous integration and retry.
  *
  * Refused before dispatch whenever it is present but does not resolve to a
  * plain object. The MCP transport does not validate tool arguments, so a
  * wrong-typed value is otherwise dropped on the floor: the launch answers the
- * IDENTICAL 412, with nothing in it saying the argument was ignored, and the
+ * IDENTICAL 409, with nothing in it saying the argument was ignored, and the
  * retry loop has no exit. This is the only place that signal can exist. A
  * string gets its own message because it names the real mistake (a JSON-encoded
  * map); an array / number / boolean / `null` gets the generic one. Validating
@@ -530,7 +526,7 @@ export async function launchRunAndWait(
   const args = asRecordOrUndefined(rawArgs) ?? {};
   const kind = asString(args.kind);
   // Launch-only: `waitForRunAndWaitCompletion` polls with `opts.headers`, so the
-  // opt-in cannot leak onto a request that has no 412 to enrich.
+  // opt-in cannot leak onto a request that has no 409 to enrich.
   const headers = jsonHeaders(opts.headers);
   if (opts.connectOffers) headers.set(RUN_CONNECT_OFFERS_HEADER, "1");
 
@@ -820,10 +816,10 @@ const RUN_PRODUCED_FILES_PAGE_LIMIT = 100;
  *
  * `purpose=agent_output` narrows but does not decide: the route answers the
  * run's whole CONTAINER, so a file chained in from an earlier run arrives
- * carrying that purpose. Both callers filter on `run_id` themselves.
+ * carrying that purpose. Both callers filter on `runId` themselves.
  */
 export function runProducedFilesPath(runId: string): string {
-  return `/api/files?run_id=${encodeURIComponent(runId)}&purpose=agent_output&limit=${RUN_PRODUCED_FILES_PAGE_LIMIT}`;
+  return `/api/files?runId=${encodeURIComponent(runId)}&purpose=agent_output&limit=${RUN_PRODUCED_FILES_PAGE_LIMIT}`;
 }
 
 /**
@@ -832,7 +828,7 @@ export function runProducedFilesPath(runId: string): string {
  * (network, non-2xx, malformed body) yields an empty list — a missing file
  * list must never turn a successful run into a tool error.
  *
- * `GET /api/files?run_id=…` answers the run's whole file CONTAINER — the files
+ * `GET /api/files?runId=…` answers the run's whole file CONTAINER — the files
  * it produced PLUS the ones mounted as its input. Which rows are this run's
  * OUTPUT is {@link isFileProducedByRun}, the same predicate the run page and
  * the chat's run card read.

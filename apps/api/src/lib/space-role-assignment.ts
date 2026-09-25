@@ -7,7 +7,7 @@
 
 import { z } from "zod";
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
-import type { SpaceRolePreset } from "@appstrate/core/permissions";
+import type { SpaceAssignment, SpaceRolePreset } from "@appstrate/core/permissions";
 import type { SpaceRoleAssignment } from "../services/space-members.ts";
 import { isSpaceId, isSpaceRoleId } from "./ids.ts";
 
@@ -49,9 +49,21 @@ export const spaceAssignmentSchema = exactlyOneRole(
     // Shape-checked like the `custom_role_id` beside it: a retired `app_` id
     // resolves to no space, and without this it reports that as "space not
     // found" — the same silence `SPACE_ID_RE` exists to end.
-    space_id: z.string().refine(isSpaceId, {
+    spaceId: z.string().refine(isSpaceId, {
       message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
     }),
     ...spaceRoleAssignmentShape,
   }),
 );
+
+/** Audit payloads name a role with camelCase explicit keys (CASING_CONVENTIONS 4m), never the body. */
+export function auditSpaceRole(data: {
+  preset_role?: SpaceRolePreset | null;
+  custom_role_id?: string | null;
+}): { presetRole: SpaceRolePreset | null; customRoleId: string | null } {
+  return { presetRole: data.preset_role ?? null, customRoleId: data.custom_role_id ?? null };
+}
+
+export function auditSpaceAssignments(assignments: ReadonlyArray<SpaceAssignment>) {
+  return assignments.map((a) => ({ spaceId: a.spaceId, ...auditSpaceRole(a) }));
+}

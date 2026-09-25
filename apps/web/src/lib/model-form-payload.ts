@@ -7,7 +7,8 @@
  * always a registry `providerId`.
  */
 
-import type { ModelCost } from "@appstrate/core/module";
+import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
+import type { paths } from "../api/client";
 import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credentials";
 import type { ModelPickRow } from "./model-source";
 import { catalogValues, sameSet, type CatalogModelValues } from "./row-overrides-catalog";
@@ -31,10 +32,10 @@ export interface ModelFormFields {
 
 /**
  * Catalog-derivable overrides. Sent only when the operator answered for them,
- * so the server keeps resolving the rest from the vendored catalog.
+ * so the server keeps resolving the rest from the model catalog (Pi's registry).
  */
 interface ModelCapabilityOverrides {
-  input?: string[];
+  input?: ModelInputModality[];
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
@@ -48,20 +49,26 @@ export interface ModelFormModelEntry extends ModelCapabilityOverrides {
   cost?: ModelCost;
 }
 
+/** The `POST /api/model-provider-credentials` body minted for a typed key, sent verbatim. */
+export type NewCredentialBody = Omit<
+  paths["/api/model-provider-credentials"]["post"]["requestBody"]["content"]["application/json"],
+  "label"
+>;
+
 /** The credential the model(s) run on: an existing one, or one to create first. */
 interface ModelFormCredentialBinding {
   credentialId: string;
-  newCredential?: { apiKey: string; providerId: string; baseUrlOverride?: string };
+  newCredential?: NewCredentialBody;
 }
 
 /**
- * One model, ready to submit. The four overrides widen to `null`: `PUT` reads
+ * One model, ready to submit. The four overrides widen to `null`: `PATCH` reads
  * `null` as "drop the stored override", `POST` refuses it and goes through
  * {@link toCreateModelBody}.
  */
 export type ModelFormData = ModelFormCredentialBinding &
   Omit<ModelFormModelEntry, keyof ModelCapabilityOverrides> & {
-    input?: string[] | null;
+    input?: ModelInputModality[] | null;
     contextWindow?: number | null;
     maxTokens?: number | null;
     reasoning?: boolean | null;
@@ -123,7 +130,7 @@ export interface ModelFormPayloadInput {
   /**
    * The catalog's own values for the submitted id. An edit form opens on them,
    * so a field still equal to them is not an answer: shipping it would freeze it
-   * as an override and cut the row off from the catalog refresh.
+   * as an override and cut the row off from catalog updates.
    */
   catalogEntry?: CatalogModelValues;
   provider: ModelFormProvider | undefined;
@@ -168,10 +175,10 @@ function resolveCredentialBinding(input: {
     binding: {
       credentialId: "",
       newCredential: {
-        apiKey: inlineApiKey,
+        api_key: inlineApiKey,
         providerId: newCredentialProvider.providerId,
         ...(newCredentialProvider.baseUrlOverridable && baseUrl.trim()
-          ? { baseUrlOverride: baseUrl.trim() }
+          ? { base_url_override: baseUrl.trim() }
           : {}),
       },
     },
@@ -187,9 +194,10 @@ function capabilityOverrides(
     return { input: null, contextWindow: null, maxTokens: null, reasoning: null };
   }
   const catalog = input.catalogEntry ? catalogValues(input.catalogEntry) : null;
-  const modalities = [fields.inputText && "text", fields.inputImage && "image"].filter(
-    Boolean,
-  ) as string[];
+  const modalities: ModelInputModality[] = [
+    ...(fields.inputText ? (["text"] as const) : []),
+    ...(fields.inputImage ? (["image"] as const) : []),
+  ];
   const contextWindow = parseInt(fields.contextWindow.trim(), 10);
   const maxTokens = parseInt(fields.maxTokens.trim(), 10);
   // A blank limit, no box ticked (the server refuses an empty array), or a

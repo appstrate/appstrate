@@ -2,7 +2,12 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
+import {
+  makePermissionGuard,
+  PACKAGE_WRITE_PERMISSIONS,
+  packagePermission,
+  reportPermissionDenial,
+} from "@appstrate/core/permissions";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
@@ -43,15 +48,21 @@ import {
   CONFIG_BY_TYPE,
   assertContentConforms,
   assertArchiveContentConforms,
+  assertManifestConforms,
   type PackageTypeConfig,
 } from "../services/package-items/config.ts";
 import { validateManifest, type PackageType } from "@appstrate/core/validation";
 import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { SLUG_REGEX, attachmentDisposition } from "@appstrate/core/naming";
-import { ifNoneMatchSatisfied } from "../lib/if-none-match.ts";
+import { assertIfMatch, ifNoneMatchSatisfied, setEtag } from "../lib/conditional-request.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import {
   getVersionDetail,
+  getVersionRow,
+  readVersionArchive,
+  requirePublishedArchive,
+  versionArtifactUnavailable,
+  type VersionDetail,
   getVersionCount,
   getMatchingDistTags,
   listPackageVersions,
@@ -78,7 +89,6 @@ import {
   authorizeBundlePackages,
   assertExistingPackageActivationAccess,
   defaultDefinitionSelector,
-  PACKAGE_WRITE_PERMISSIONS,
   assertPackageMutationAccess,
   assertPackageShareAccess,
   holdsPackageShareAuthority,
@@ -86,16 +96,11 @@ import {
   isPackageReadableInSpace,
   packageAccessSpaces,
   holdsHomeAuthority,
-  packagePermission,
   requireAgentRead,
   resolvePackageHome,
 } from "../lib/package-access.ts";
 import { requirePackageInOrg } from "../middleware/guards.ts";
-import {
-  requireAnyPermission,
-  requirePermission,
-  rowAuthority,
-} from "../middleware/require-permission.ts";
+import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
@@ -190,7 +195,7 @@ async function assertAgentIntegrationScopesValid(
  *
  * `direction` says where the manifest came from, and both policies key off it:
  *
- * - `"author"` — the manifest is in THIS request (create; a PUT supplying
+ * - `"author"` — the manifest is in THIS request (create; a PATCH supplying
  *   `manifest`). The `type` gate applies: the route family fixes the package
  *   type while `validateManifest` dispatches purely on the manifest's own root
  *   `type`, so without it a wrong-type manifest validates against ITS OWN
@@ -198,7 +203,7 @@ async function assertAgentIntegrationScopesValid(
  *   persisting a manifest no schema ever accepted (issue #987). Retired
  *   `runtime_tools` ids reject, so a typo or a removed id is reported instead
  *   of silently stripped.
- * - `"stored"` — the manifest is already persisted (PUT content-only
+ * - `"stored"` — the manifest is already persisted (PATCH content-only
  *   carry-forward; publishing an existing draft). NO `type` gate: stored
  *   artifacts are tolerated on read (#983), and gating here would make a
  *   legacy drifted draft permanently un-publishable. Retired ids drop so such
@@ -206,7 +211,7 @@ async function assertAgentIntegrationScopesValid(
  *
  * `direction` is orthogonal to `opts.requireCallableTools`: it says where the
  * bytes came from, not whether they are being frozen. Publishing a draft is
- * `"stored"` yet must run the declared-but-empty gate; a PUT carrying a
+ * `"stored"` yet must run the declared-but-empty gate; a PATCH carrying a
  * manifest is `"author"` yet must not.
  */
 async function validateManifestForRoute(
@@ -240,8 +245,11 @@ async function validateManifestForRoute(
     ]);
   }
 
-  if (direction === "author")
+  if (direction === "author") {
+    // A `"stored"` manifest meets the same policy at its write, via `assertArchiveContentConforms`.
+    assertManifestConforms(expectedType, validated);
     await assertPackageDependenciesAccessible(c, validated, opts.previous);
+  }
   await assertAgentIntegrationScopesValid(validated, c.get("orgId"), opts.requireCallableTools);
   return validated;
 }
@@ -341,20 +349,10 @@ export const packageJsonUpdateSchema = z
     manifest: z.record(z.string(), z.unknown()).optional(),
     content: z.string().optional(),
     operations: packageFileOperationsSchema.optional(),
-    /**
-     * Optimistic-lock token. Mandatory and integral — the value is a row version,
-     * never a fraction. This used to be `z.number().optional()` with a hand-rolled
-     * `null / typeof !== "number"` check in the handler restating both rules; the
-     * schema now carries them, so the spec's `required: ["lock_version"]` and
-     * `type: "integer"` have exactly one runtime counterpart.
-     */
-    lock_version: z.number().int(),
   })
   .strict();
 
-export const createVersionBodySchema = z
-  .object({ version: z.string().min(1).optional(), lock_version: z.number().int().optional() })
-  .strict();
+export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() }).strict();
 
 /**
  * Body of `PUT /api/packages/{scope}/{name}/home` — the package's home space,
@@ -363,8 +361,8 @@ export const createVersionBodySchema = z
  * of its spaces (`packages_org_package_has_home`), so there is no "move it
  * nowhere" to express — a package that belongs to no team is homed in the
  * organization's DEFAULT space like any other. `.strict()` so this route can
- * never be mistaken for the draft editor: the draft is `PUT`, with its
- * optimistic lock.
+ * never be mistaken for the draft editor: the draft is `PATCH`, under its
+ * `If-Match`.
  *
  * The id is SHAPE-CHECKED, like every other space id arriving in a body
  * (`lib/space-role-assignment.ts`): a retired `app_` spelling resolves to no
@@ -421,11 +419,11 @@ export const packageHomeSpaceSchema = z
 export const shareTargetSchema = z
   .object({
     target: z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("user"), user_id: z.string().min(1) }).strict(),
+      z.object({ kind: z.literal("user"), userId: z.string().min(1) }).strict(),
       z
         .object({
           kind: z.literal("space"),
-          space_id: z.string().refine(isSpaceId, {
+          spaceId: z.string().refine(isSpaceId, {
             message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
           }),
         })
@@ -587,11 +585,7 @@ interface PackageRouteConfig<T extends PackageType = PackageType> {
    * (agents return the richer Agent detail via `buildAgentDetailDto`).
    * Returns `null` when the package cannot be resolved.
    */
-  detailDto?: (
-    c: Context<AppEnv>,
-    itemId: string,
-    orgId: string,
-  ) => Promise<Record<string, unknown> | null>;
+  detailDto?: (c: Context<AppEnv>, itemId: string, orgId: string) => Promise<PackageDetail | null>;
 }
 
 // Three types have JSON creation forms; MCP server creation accepts an archive.
@@ -847,7 +841,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       logger.error("Created package could not be re-read", { packageId, orgId });
       throw internalError();
     }
-    return c.json(detail, 201);
+    return sendPackageDetail(c, detail, 201);
   };
 }
 
@@ -894,11 +888,9 @@ async function loadOrgItemOr404(rcfg: PackageRouteConfig, orgId: string, itemId:
  * reproduces that rather than handing back a `null` the editor would render as
  * an empty file.
  *
- * That fallback stands for an entry MISSING FROM AN ARCHIVE THAT OPENED, and
- * for nothing else. An archive the storage cannot produce at all is a broken
- * artifact for every type, and gets the same `422 version_artifact_unavailable`
- * the run path answers for a published agent with no readable prompt — as does
- * an archive that opened without a REQUIRED entry (`prompt.md`, `SKILL.md`).
+ * That fallback stands only for an entry missing from an archive that opened:
+ * an unreadable archive, or one without a REQUIRED entry, is refused by
+ * {@link requirePublishedArchive} — the same 422 the run and restore paths answer.
  */
 async function loadPublishedDefinition(
   type: PackageType,
@@ -908,38 +900,7 @@ async function loadPublishedDefinition(
   const detail = await getVersionDetail(packageId, spec);
   if (!detail) throw notFound(`Version '${spec}' not found`);
   const m = asRecord(detail.manifest);
-  const entry = PACKAGE_CONTENT_ENTRY[type];
-  // TWO different failures, and only the first is a failure at all.
-  //
-  // `getVersionDetail` CATCHES a storage or unzip failure and answers
-  // `content: null` rather than throwing, so that null is the ONLY evidence
-  // that the published bytes could not be read — and it is type-independent.
-  // Asking the per-type entry FIRST made this 422 unreachable for the two types
-  // that have no REQUIRED entry — `integration` (`INTEGRATION.md` is optional)
-  // and `mcp-server` (no entry at all): an archive nothing could open answered
-  // 200 with the manifest text as `content` and `definition: "published"`, i.e.
-  // other bytes than the published ones, presented as the published ones.
-  if (detail.content === null) {
-    throw new ApiError({
-      status: 422,
-      code: "version_artifact_unavailable",
-      title: "Version Artifact Unavailable",
-      detail: `Published '${packageId}@${detail.version}' has no readable archive`,
-    });
-  }
-  const bytes = entry ? detail.content[entry.path] : undefined;
-  // The archive OPENED and the entry is not in it. For a REQUIRED entry that is
-  // a broken artifact and gets the same 422; for an optional one — or a type
-  // with no content entry — it is the normal published shape, and the manifest
-  // text below is the definition, exactly as `applyDraftOverlay` stores it.
-  if (entry?.required && !bytes) {
-    throw new ApiError({
-      status: 422,
-      code: "version_artifact_unavailable",
-      title: "Version Artifact Unavailable",
-      detail: `Published '${packageId}@${detail.version}' has no readable '${entry.path}' in its archive`,
-    });
-  }
+  const { entry } = requirePublishedArchive(type, packageId, detail);
   return {
     // Same projection `getOrgItem` runs over the draft manifest, field for
     // field: a reader must not be able to tell which definition answered by
@@ -949,7 +910,7 @@ async function loadPublishedDefinition(
     version: typeof m.version === "string" ? m.version : null,
     manifest_name: typeof m.name === "string" ? m.name : null,
     manifest: m,
-    content: bytes ? decodeSkillMarkdown(bytes) : JSON.stringify(m, null, 2),
+    content: entry ? decodeSkillMarkdown(entry) : JSON.stringify(m, null, 2),
   };
 }
 
@@ -979,7 +940,7 @@ async function buildPackageDetailDto(
   itemId: string,
   orgId: string,
   opts: { version?: string } = {},
-): Promise<Record<string, unknown> | null> {
+): Promise<PackageDetail | null> {
   const [item, versionCount, latestVersionDate, accessible] = await Promise.all([
     getOrgItem(orgId, itemId, rcfg.cfg),
     getVersionCount(itemId),
@@ -1010,8 +971,8 @@ async function buildPackageDetailDto(
     ? null
     : await loadPublishedDefinition(rcfg.cfg.type, item.id, spec);
 
-  const { homeSpaceId, ...rest } = item;
-  return {
+  const { homeSpaceId, lockVersion, ...rest } = item;
+  const body = {
     ...rest,
     ...published,
     definition,
@@ -1027,6 +988,24 @@ async function buildPackageDetailDto(
       latestVersionDate,
     ),
   };
+  // Only a draft body carries the draft's ETag, or a later `If-Match` would pass on it.
+  return { body, lockVersion: definition === "draft" ? lockVersion : null };
+}
+
+/** A package detail and the draft version it was read at (its `ETag`; `null` when not the draft). */
+export interface PackageDetail {
+  body: Record<string, unknown>;
+  lockVersion: number | null;
+}
+
+/** Answer a package detail: the body, and its version as the `ETag`. */
+export function sendPackageDetail(
+  c: Context<AppEnv>,
+  detail: PackageDetail,
+  status: 200 | 201 = 200,
+) {
+  if (detail.lockVersion !== null) setEtag(c, detail.lockVersion);
+  return c.json(detail.body, status);
 }
 
 /**
@@ -1047,7 +1026,7 @@ function loadPackageDetailDto(
   rcfg: PackageRouteConfig,
   itemId: string,
   orgId: string,
-): Promise<Record<string, unknown> | null> {
+): Promise<PackageDetail | null> {
   return rcfg.detailDto
     ? rcfg.detailDto(c, itemId, orgId)
     : buildPackageDetailDto(c, rcfg, itemId, orgId, { version: VERSION_SELECTOR_DRAFT });
@@ -1064,14 +1043,14 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
 
-    const dto = await buildPackageDetailDto(c, rcfg, itemId, orgId, {
+    const detail = await buildPackageDetailDto(c, rcfg, itemId, orgId, {
       version: c.req.query("version"),
     });
-    if (!dto) {
+    if (!detail) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
 
-    return c.json(dto);
+    return sendPackageDetail(c, detail);
   };
 }
 
@@ -1090,7 +1069,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 
     const body = await readJsonBody(c, packageJsonUpdateSchema);
 
-    // A PUT that omits `manifest` is a content-only edit: the stored draft is
+    // A PATCH that omits `manifest` is a content-only edit: the stored draft is
     // carried forward untouched. That makes this handler directional per
     // request — `manifest` SUPPLIED is author input, `manifest` OMITTED is the
     // already-stored draft — and the direction decides both the `type` gate and
@@ -1133,7 +1112,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // carried forward.
     if (!body.operations && content) assertContentConforms(rcfg.cfg.type, content, "content");
 
-    // A manifest-only integration PUT has no authored `content`. When the
+    // A manifest-only integration PATCH has no authored `content`. When the
     // overloaded column contains the manifest fallback (rather than a real
     // INTEGRATION.md), refresh it from the validated manifest instead of
     // carrying the old fallback forward. A real companion remains protected.
@@ -1148,7 +1127,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // Bytes for `rcfg.storageFileName`. When that file is NOT the type's
     // content entry it is the manifest (integration, mcp-server), and it is
     // rebuilt from the VALIDATED manifest rather than echoing `content`: this
-    // route accepts a manifest-only PUT, and the `existing.content`
+    // route accepts a manifest-only PATCH, and the `existing.content`
     // carried forward above is `packages.draft_content` — which for an
     // integration is its INTEGRATION.md. Echoing it would overwrite the
     // package's `manifest.json` with its documentation.
@@ -1158,17 +1137,20 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // advisory lock — the same helper the file-tree writes take, so two writers
     // of one package queue instead of overwriting each other's merge. The tree
     // it hands `mutate` is the draft as the explorer shows it, so every file
-    // this PUT does not name is carried through untouched.
+    // this PATCH does not name is carried through untouched.
     //
     // `content` feeds TWO sinks that are the same file for `agent`/`skill` and
     // different files for the manifest-backed types — see `storageFileName`.
     // `resolveDraftContent` guards the column; the storage entry is resolved on
     // its own terms.
+    let written: number;
     try {
-      await mutatePackageDraftFiles(
+      ({ lockVersion: written } = await mutatePackageDraftFiles(
         { id: itemId, type: rcfg.cfg.type, orgId },
         {
-          precondition: { lockVersion: body.lock_version },
+          precondition: {
+            assertVersion: (current) => assertIfMatch(c, current, { required: true }),
+          },
           manifest: validatedManifest,
           validateBundle: body.operations !== undefined,
           // File operations own the content column when they are supplied.
@@ -1184,7 +1166,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
             });
           },
         },
-      );
+      ));
     } catch (error) {
       if (error instanceof PackageFileWriteError) throw draftFileWriteApiError(error);
       throw error;
@@ -1202,15 +1184,14 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       },
     });
 
-    // Return the updated package resource bare — same serializer as the GET
-    // detail (issue #657). The resource carries `lock_version`, the NEW
-    // optimistic-lock token consumers must read back for the next edit.
+    // Same serializer as the GET detail (issue #657). The `ETag` is the version
+    // THIS write produced, so a write landing in between refuses the caller's next.
     const detail = await loadPackageDetailDto(c, rcfg, itemId, orgId);
     if (!detail) {
       logger.error("Updated package could not be re-read", { packageId: itemId, orgId });
       throw internalError();
     }
-    return c.json(detail);
+    return sendPackageDetail(c, { ...detail, lockVersion: written });
   };
 }
 
@@ -1278,34 +1259,26 @@ function makeListVersionsHandler(rcfg: PackageRouteConfig) {
     await loadOrgItemOr404(rcfg, orgId, itemId);
     await assertCatalogPackageAccess(c, itemId);
     const versions = await listPackageVersions(itemId);
-    return c.json({ versions });
+    return c.json(listResponse(versions));
   };
 }
 
 /**
  * Build the canonical version detail DTO — the exact object the `GET` version
- * detail endpoint serializes. Reused by the version create / restore endpoints
- * so they echo the resulting version resource instead of an id/message stub
- * (issue #646). Returns `null` when the version query resolves nothing.
+ * detail endpoint serializes. Reused by the version create endpoint so it
+ * echoes the resulting version resource instead of an id/message stub (issue
+ * #646). Refuses nothing: `content` is null when `detail.content` is (the GET
+ * handler refuses an unreadable archive before calling this; the create echo
+ * does not).
  */
 async function buildVersionDetailDto(
   rcfg: PackageRouteConfig,
   itemId: string,
-  versionSpec: string,
-): Promise<Record<string, unknown> | null> {
-  const detail = await getVersionDetail(itemId, versionSpec);
-  if (!detail) return null;
-
+  detail: VersionDetail,
+): Promise<Record<string, unknown>> {
   const matchingTags = await getMatchingDistTags(itemId, detail.version);
-
-  // Extract primary content file from the ZIP
-  let content: string | null = null;
-  if (detail.content) {
-    const fileData = detail.content[rcfg.storageFileName];
-    if (fileData) {
-      content = new TextDecoder().decode(fileData);
-    }
-  }
+  const fileData = detail.content?.[rcfg.storageFileName];
+  const content = fileData ? new TextDecoder().decode(fileData) : null;
 
   return {
     id: detail.id,
@@ -1330,12 +1303,13 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
     await loadOrgItemOr404(rcfg, orgId, itemId);
     await assertCatalogPackageAccess(c, itemId);
 
-    const dto = await buildVersionDetailDto(rcfg, itemId, versionSpec);
-    if (!dto) {
+    const detail = await getVersionDetail(itemId, versionSpec);
+    if (!detail) {
       throw notFound(`Version '${versionSpec}' not found`);
     }
+    requirePublishedArchive(rcfg.cfg.type, itemId, detail);
 
-    return c.json(dto);
+    return c.json(await buildVersionDetailDto(rcfg, itemId, detail));
   };
 }
 
@@ -1369,11 +1343,9 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // entirely when no override is chosen), so only read it when present;
     // a present-but-malformed body is a 400, not a silent no-override.
     let versionOverride: string | undefined;
-    let expectedLock: number | undefined;
     if (c.req.raw.body !== null) {
       const body = await readJsonBody(c, createVersionBodySchema);
       versionOverride = body.version;
-      expectedLock = body.lock_version;
     }
 
     const result = await createVersionFromDraft({
@@ -1381,7 +1353,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       orgId,
       userId: user.id,
       version: versionOverride,
-      lockVersion: expectedLock,
+      assertVersion: (current) => assertIfMatch(c, current),
       // Validate the exact snapshot that will be published, including its
       // version override. The route's earlier read is not a coherent snapshot.
       // Stored manifests may carry retired tools; empty callable selections
@@ -1393,12 +1365,6 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     });
 
     if ("error" in result) {
-      if (result.error === "conflict") {
-        throw conflict(
-          "conflict",
-          "The draft changed since you read it. Reload it before publishing.",
-        );
-      }
       if (result.error === "no_changes") {
         throw conflict("no_changes", "No changes since the last version");
       }
@@ -1426,14 +1392,24 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
 
     // Return the created version resource bare — same DTO/serializer as the
     // GET version detail — so callers see the snapshot (manifest, integrity,
-    // dist_tags, …) without a follow-up GET (issue #657). `id` (version row
-    // id) and `version` are part of the resource.
-    const detail = await buildVersionDetailDto(rcfg, itemId, result.version);
-    if (!detail) {
+    // dist_tags, …) without a follow-up GET (issue #657). The version is
+    // committed: a row that cannot be re-read is a 500, but bytes that cannot be
+    // read back (storage, signature policy) only null `content` — never an error
+    // answer to a successful write.
+    const row = await getVersionRow(itemId, result.version);
+    if (!row) {
       logger.error("Created version could not be re-read", { packageId: itemId, orgId });
       throw internalError();
     }
-    return c.json(detail, 201);
+    const content = await readVersionArchive(itemId, row.version).catch((err: unknown) => {
+      logger.warn("Created version archive could not be read back", {
+        packageId: itemId,
+        version: row.version,
+        error: getErrorMessage(err),
+      });
+      return null;
+    });
+    return c.json(await buildVersionDetailDto(rcfg, itemId, { ...row, content }), 201);
   };
 }
 
@@ -1455,33 +1431,21 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     const existing = await loadOrgItemOr404(rcfg, orgId, itemId);
-    if (!existing.lock_version) {
+    if (!existing.lockVersion) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
 
-    // Extract `packages.draft_content` from the version ZIP.
-    //
-    // The column mirrors the archive's CONTENT ENTRY (`PACKAGE_CONTENT_ENTRY`),
-    // NOT the file this type's editor `content` is stored under
-    // (`rcfg.storageFileName`). The two names agree for `agent`/`skill` and
-    // DIVERGE for `integration`, whose column holds the optional
-    // `INTEGRATION.md` while its editor content is `manifest.json` — reading
-    // the storage name restored a manifest copy over the docs, the exact
-    // overload `parsePackageZip` avoids. Falling back to the storage name
-    // reproduces that parser's own manifest-text fallback for a bundle that
-    // ships no companion, and is a no-op for the three types whose two names
-    // already coincide.
-    const contentEntryPath = PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path;
-    let content = detail.prompt ?? "";
-    if (detail.content) {
-      const fileData =
-        (contentEntryPath ? detail.content[contentEntryPath] : undefined) ??
-        detail.content[rcfg.storageFileName];
-      if (fileData) {
-        // BOM-preserving: gated below AND written back as the draft.
-        content = decodeSkillMarkdown(fileData);
-      }
-    }
+    // Before any write: a published version is an integrity-checked archive by
+    // construction, so one that cannot be read is refused, never restored as an
+    // empty draft.
+    const { files, entry } = requirePublishedArchive(rcfg.cfg.type, itemId, detail);
+    // `packages.draft_content` mirrors the archive's CONTENT ENTRY, not the file
+    // the editor's `content` is stored under (`rcfg.storageFileName`): the two
+    // diverge for `integration`, whose column holds the optional `INTEGRATION.md`.
+    // Without that entry the column holds the manifest text, as `parsePackageZip`
+    // stores it. BOM-preserving: gated below AND written back as the draft.
+    const fileData = entry ?? files[rcfg.storageFileName];
+    const content = fileData ? decodeSkillMarkdown(fileData) : "";
 
     // A restore WRITES authored content. Before the write below, so a
     // violation leaves both stores untouched.
@@ -1492,17 +1456,14 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       asRecord(detail.manifest),
       asRecord(existing.manifest),
     );
-    // Restores share the writer lock and replace the complete tree when the
-    // version has one. Legacy metadata-only versions leave existing files alone.
+    // Restores share the writer lock and replace the complete tree.
     await mutatePackageDraftFiles(
       { id: itemId, type: rcfg.cfg.type, orgId },
       {
-        precondition: { lockVersion: existing.lock_version },
+        precondition: { assertVersion: (current) => assertIfMatch(c, current) },
         manifest: asRecord(detail.manifest),
         draftContent: content,
-        ...(detail.content
-          ? { replace: detail.content }
-          : { mutate: (files: Record<string, Uint8Array>) => files }),
+        replace: files,
       },
     );
 
@@ -1530,14 +1491,13 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     // Restore mutates the package draft — return the updated PACKAGE resource
     // bare, same DTO/serializer as the package GET detail (issue #657). The
     // restored version info is reflected in the resource itself (`version`,
-    // `manifest`, `content`), and the resource carries `lock_version`, the
-    // package's NEW optimistic-lock token to read back before the next edit.
+    // `manifest`, `content`), and the response carries the draft's NEW `ETag`.
     const packageDto = await loadPackageDetailDto(c, rcfg, itemId, orgId);
     if (!packageDto) {
       logger.error("Restored package could not be re-read", { packageId: itemId, orgId });
       throw internalError();
     }
-    return c.json(packageDto);
+    return sendPackageDetail(c, packageDto);
   };
 }
 
@@ -1959,11 +1919,10 @@ export function createPackagesRouter() {
     // credential scoped without `<type>:read` still gets the manifest and, on
     // the detail route, the full `content` (SKILL.md / prompt.md).
     router.get(`/${path}`, readGuard, makeListHandler(rcfg));
-    // `rowAuthority()` on create: past `<type>:write` the handler judges every
-    // package the submitted manifest declares as a dependency, one by one
-    // (`assertPackageDependenciesAccessible`). The mutation routes below carry
-    // `requirePackageInOrg()`, which already says the row decides.
-    router.post(`/${path}`, writeGuard, rowAuthority(), makeCreateHandler(rcfg));
+    // Past `<type>:write` the handler judges every package the submitted
+    // manifest declares as a dependency, one by one
+    // (`assertPackageDependenciesAccessible`).
+    router.post(`/${path}`, writeGuard, makeCreateHandler(rcfg));
     // Version routes — must be registered before generic get to avoid conflict
     router.get(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions`,
@@ -2005,7 +1964,11 @@ export function createPackagesRouter() {
       rcfg.cfg.type === "agent" ? requireAgentRead : readGuard,
       rcfg.getHandler ?? makeGetHandler(rcfg),
     );
-    router.put(`/${path}/${SCOPED_PACKAGE_ROUTE}`, requirePackageInOrg(), makeUpdateHandler(rcfg));
+    router.patch(
+      `/${path}/${SCOPED_PACKAGE_ROUTE}`,
+      requirePackageInOrg(),
+      makeUpdateHandler(rcfg),
+    );
     router.delete(
       `/${path}/${SCOPED_PACKAGE_ROUTE}`,
       requirePackageInOrg("delete"),
@@ -2054,9 +2017,7 @@ export function createPackagesRouter() {
   // package, the authority is the home space, which `assertPackageMutationAccess`
   // is the one reader of. It runs before the body is parsed so a caller who may
   // not touch this package learns nothing about the body's shape.
-  // `rowAuthority()` here and on every route below whose refusal comes from the
-  // package's own row: the mounts alone would read as "granted to anyone".
-  router.put(`/${SCOPED_PACKAGE_ROUTE}/home`, rowAuthority(), async (c) => {
+  router.put(`/${SCOPED_PACKAGE_ROUTE}/home`, async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
 
@@ -2222,11 +2183,11 @@ export function createPackagesRouter() {
       logger.error("Moved package could not be re-read", { packageId, orgId });
       throw internalError();
     }
-    return c.json(detail);
+    return sendPackageDetail(c, detail);
   });
 
   // --- Where a package lives: the read of the move above (`resolvePackageHome`) ---
-  router.get(`/${SCOPED_PACKAGE_ROUTE}/home`, rowAuthority(), async (c) => {
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/home`, async (c) => {
     const packageId = getItemId(c);
     const home = await resolvePackageHome(c, packageId);
     // A code of its own, so a client tells "no such package" from a route this
@@ -2243,97 +2204,92 @@ export function createPackagesRouter() {
   });
 
   // --- Fork route ---
-  // `rowAuthority()`: the mounted disjunction says the caller may write SOME
+  // The mounted disjunction says the caller may write SOME
   // package type; the source row decides which one (`packagePermission(
   // source.type, "write")`) and whether the org lets it be copied out at all.
-  router.post(
-    `/${SCOPED_PACKAGE_ROUTE}/fork`,
-    requireAnyPackageWrite,
-    rowAuthority(),
-    async (c) => {
-      const packageId = getItemId(c);
-      const orgId = c.get("orgId");
-      const orgSlug = c.get("orgSlug");
-      const user = c.get("user");
+  router.post(`/${SCOPED_PACKAGE_ROUTE}/fork`, requireAnyPackageWrite, async (c) => {
+    const packageId = getItemId(c);
+    const orgId = c.get("orgId");
+    const orgSlug = c.get("orgSlug");
+    const user = c.get("user");
 
-      // A missing/empty body is fine (auto-name), but a present-and-invalid
-      // `name` must surface as a 400 — `allowEmpty` maps an empty body to `{}`
-      // while still 400ing on malformed JSON or a bad-shape `name`.
-      const parsed = await readJsonBody(c, forkSchema, { allowEmpty: true });
-      const customName = parsed.name;
-      const source = await assertForkSourceAccess(c, packageId);
-      await makePermissionGuard(packagePermission(source.type, "write"))(c, async () => {});
+    // A missing/empty body is fine (auto-name), but a present-and-invalid
+    // `name` must surface as a 400 — `allowEmpty` maps an empty body to `{}`
+    // while still 400ing on malformed JSON or a bad-shape `name`.
+    const parsed = await readJsonBody(c, forkSchema, { allowEmpty: true });
+    const customName = parsed.name;
+    const source = await assertForkSourceAccess(c, packageId);
+    await makePermissionGuard(packagePermission(source.type, "write"))(c, async () => {});
 
-      const result = await forkPackage(
-        orgId,
-        orgSlug,
-        packageId,
-        // The fork is a NEW package in the space the caller forked from; the
-        // source's home says nothing about who may edit the copy.
-        c.get("spaceId"),
-        user.id,
-        customName,
-      );
+    const result = await forkPackage(
+      orgId,
+      orgSlug,
+      packageId,
+      // The fork is a NEW package in the space the caller forked from; the
+      // source's home says nothing about who may edit the copy.
+      c.get("spaceId"),
+      user.id,
+      customName,
+    );
 
-      if ("code" in result) {
-        switch (result.code) {
-          case "ALREADY_OWNED":
-            throw invalidRequest("You already own this package");
-          case "NOT_FOUND":
-            throw notFound("Package not found");
-          case "NAME_COLLISION":
-            throw new ApiError({
-              status: 400,
-              code: "name_collision",
-              title: "Name Collision",
-              detail: "A package with this name already exists in your organization",
-            });
-          case "UNKNOWN_TYPE":
-            throw invalidRequest(`Unsupported package type: ${result.type}`);
-          case "NO_PUBLISHED_VERSION":
-            throw invalidRequest("Source package has no published version");
-        }
+    if ("code" in result) {
+      switch (result.code) {
+        case "ALREADY_OWNED":
+          throw invalidRequest("You already own this package");
+        case "NOT_FOUND":
+          throw notFound("Package not found");
+        case "NAME_COLLISION":
+          throw new ApiError({
+            status: 400,
+            code: "name_collision",
+            title: "Name Collision",
+            detail: "A package with this name already exists in your organization",
+          });
+        case "UNKNOWN_TYPE":
+          throw invalidRequest(`Unsupported package type: ${result.type}`);
+        case "NO_PUBLISHED_VERSION":
+          throw invalidRequest("Source package has no published version");
       }
+    }
 
-      // The fork is homed in the current space, so its placement is this space's
-      // by construction and the activation is an upsert that cannot conflict.
-      // WARN, not debug: a fork the caller cannot find afterwards is a bug report.
-      const spaceId = c.get("spaceId");
-      if (spaceId) {
-        await activatePackage({ orgId, spaceId }, result.packageId).catch((e: unknown) =>
-          logger.warn("auto-activation skipped", {
-            packageId: result.packageId,
-            spaceId,
-            err: getErrorMessage(e),
-          }),
-        );
-      }
-
-      await recordAuditFromContext(c, {
-        action: "package.forked",
-        resourceType: "package",
-        resourceId: result.packageId,
-        after: { type: result.type, forkedFrom: packageId },
-      });
-
-      // Return the forked package resource bare — same DTO/serializer as the new
-      // package's GET detail, selected by its type (issue #657). The fork
-      // provenance is resource state: `forked_from` is part of the detail DTO.
-      const forkedRcfg = ROUTE_CONFIGS[result.type as PackageType];
-      const detail = forkedRcfg
-        ? await loadPackageDetailDto(c, forkedRcfg, result.packageId, orgId)
-        : null;
-      if (!detail) {
-        logger.error("Forked package could not be re-read", {
+    // The fork is homed in the current space, so its placement is this space's
+    // by construction and the activation is an upsert that cannot conflict.
+    // WARN, not debug: a fork the caller cannot find afterwards is a bug report.
+    const spaceId = c.get("spaceId");
+    if (spaceId) {
+      await activatePackage({ orgId, spaceId }, result.packageId).catch((e: unknown) =>
+        logger.warn("auto-activation skipped", {
           packageId: result.packageId,
-          type: result.type,
-          orgId,
-        });
-        throw internalError();
-      }
-      return c.json(detail, 201);
-    },
-  );
+          spaceId,
+          err: getErrorMessage(e),
+        }),
+      );
+    }
+
+    await recordAuditFromContext(c, {
+      action: "package.forked",
+      resourceType: "package",
+      resourceId: result.packageId,
+      after: { type: result.type, forkedFrom: packageId },
+    });
+
+    // Return the forked package resource bare — same DTO/serializer as the new
+    // package's GET detail, selected by its type (issue #657). The fork
+    // provenance is resource state: `forked_from` is part of the detail DTO.
+    const forkedRcfg = ROUTE_CONFIGS[result.type as PackageType];
+    const detail = forkedRcfg
+      ? await loadPackageDetailDto(c, forkedRcfg, result.packageId, orgId)
+      : null;
+    if (!detail) {
+      logger.error("Forked package could not be re-read", {
+        packageId: result.packageId,
+        type: result.type,
+        orgId,
+      });
+      throw internalError();
+    }
+    return sendPackageDetail(c, detail, 201);
+  });
 
   // --- Sharing: a package's AUDIENCE (RBAC spec §6.10) ---
   //
@@ -2349,7 +2305,7 @@ export function createPackagesRouter() {
   // there (§3.6).
   //
 
-  router.post(`/${SCOPED_PACKAGE_ROUTE}/shares`, rowAuthority(), async (c) => {
+  router.post(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
     const accessible = await packageAccessSpaces(c);
@@ -2386,17 +2342,17 @@ export function createPackagesRouter() {
       // the member picker needs. A `guest` does not hold it, which is why a
       // guest shares to a space they reach and not to a colleague.
       await makePermissionGuard("members:read")(c, async () => {});
-      const membership = await getOrgMember(orgId, target.user_id);
-      if (!membership) throw notFound(`User '${target.user_id}' not found in this organization`);
-      const space = await ensurePersonalSpaceFor(orgId, target.user_id);
+      const membership = await getOrgMember(orgId, target.userId);
+      if (!membership) throw notFound(`User '${target.userId}' not found in this organization`);
+      const space = await ensurePersonalSpaceFor(orgId, target.userId);
       spaceId = space.id;
-      recipientUserId = target.user_id;
+      recipientUserId = target.userId;
     } else {
       // A space the caller cannot reach must not be confirmed to exist. Since
       // `packageAccessSpaces` never loads somebody else's personal space, this
       // is also what makes such a space untargetable by a guessed id.
-      const destination = accessible.find((space) => space.id === target.space_id);
-      if (!destination) throw notFound(`Space '${target.space_id}' not found`);
+      const destination = accessible.find((space) => space.id === target.spaceId);
+      if (!destination) throw notFound(`Space '${target.spaceId}' not found`);
       spaceId = destination.id;
     }
 
@@ -2464,7 +2420,7 @@ export function createPackagesRouter() {
     return c.json({ object: "package_share", ...view });
   });
 
-  router.get(`/${SCOPED_PACKAGE_ROUTE}/shares`, rowAuthority(), async (c) => {
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
     await assertPackageShareAccess(c, packageId);
@@ -2476,7 +2432,7 @@ export function createPackagesRouter() {
   // a space share, a member's user id for a share made to a person. There is
   // deliberately no third spelling — the id of somebody else's personal space
   // is never on the wire (plan decision 5b), so it cannot be the handle here.
-  router.delete(`/${SCOPED_PACKAGE_ROUTE}/shares/:target`, rowAuthority(), async (c) => {
+  router.delete(`/${SCOPED_PACKAGE_ROUTE}/shares/:target`, async (c) => {
     const packageId = getItemId(c);
     const target = c.req.param("target")!;
     const orgId = c.get("orgId");
@@ -2821,73 +2777,67 @@ export function createPackagesRouter() {
 
   // POST /api/packages/import-bundle — import a multi-package .afps-bundle
   // (or a raw .afps, promoted to a bundle-of-one via the catalog).
-  router.post(
-    "/import-bundle",
-    rateLimit(10),
-    requireAnyPackageWrite,
-    rowAuthority(),
-    async (c) => {
-      let formData: FormData;
-      try {
-        formData = await c.req.formData();
-      } catch {
-        throw invalidRequest("Request must be multipart/form-data with a file field", "file");
-      }
-      const file = formData.get("file");
-      if (!file || !(file instanceof File)) {
-        throw invalidRequest("File is required", "file");
-      }
-      const ext = file.name.toLowerCase();
-      if (!ext.endsWith(".afps-bundle") && !ext.endsWith(".afps") && !ext.endsWith(".zip")) {
-        throw invalidRequest("Only .afps-bundle, .afps, and .zip files are accepted", "file");
-      }
+  router.post("/import-bundle", rateLimit(10), requireAnyPackageWrite, async (c) => {
+    let formData: FormData;
+    try {
+      formData = await c.req.formData();
+    } catch {
+      throw invalidRequest("Request must be multipart/form-data with a file field", "file");
+    }
+    const file = formData.get("file");
+    if (!file || !(file instanceof File)) {
+      throw invalidRequest("File is required", "file");
+    }
+    const ext = file.name.toLowerCase();
+    if (!ext.endsWith(".afps-bundle") && !ext.endsWith(".afps") && !ext.endsWith(".zip")) {
+      throw invalidRequest("Only .afps-bundle, .afps, and .zip files are accepted", "file");
+    }
 
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const orgId = c.get("orgId");
-      const spaceId = c.get("spaceId");
-      const userId = c.get("user").id;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const orgId = c.get("orgId");
+    const spaceId = c.get("spaceId");
+    const userId = c.get("user").id;
 
-      let result: Awaited<ReturnType<typeof handleImportBundle>>;
-      try {
-        result = await handleImportBundle(
-          bytes,
-          { orgId, spaceId },
-          userId,
-          (bundle) => authorizeBundlePackages(c, bundle),
-          // A root that already lives in another space is placed here by the same
-          // rule as any activation: the offer, when this caller may make one.
-          (packageId) => holdsPackageShareAuthority(c, packageId),
-        );
-      } catch (err) {
-        // Typed errors (ApiError — conflicts, invalid request) propagate as-is.
-        // A raw post-install/version-creation failure becomes the same clean 4xx
-        // as the single-import route rather than a 500.
-        if (err instanceof ApiError) throw err;
-        const message = getErrorMessage(err);
-        logger.error("Bundle import post-install failed", { orgId, error: message });
-        throw new ApiError({
-          status: 400,
-          code: "post_install_failed",
-          title: "Post-Install Failed",
-          detail: message,
-        });
-      }
-      // One audit event per package version actually written — "reused"
-      // entries changed no state. `recordAudit*` never throws.
-      for (const audit of bundleImportAuditRecords(result, { via: "import:bundle" })) {
-        await recordAuditFromContext(c, {
-          action: "package.version_created",
-          resourceType: "package",
-          resourceId: audit.resourceId,
-          after: audit.after,
-        });
-      }
-      return c.json(result, 201);
-    },
-  );
+    let result: Awaited<ReturnType<typeof handleImportBundle>>;
+    try {
+      result = await handleImportBundle(
+        bytes,
+        { orgId, spaceId },
+        userId,
+        (bundle) => authorizeBundlePackages(c, bundle),
+        // A root that already lives in another space is placed here by the same
+        // rule as any activation: the offer, when this caller may make one.
+        (packageId) => holdsPackageShareAuthority(c, packageId),
+      );
+    } catch (err) {
+      // Typed errors (ApiError — conflicts, invalid request) propagate as-is.
+      // A raw post-install/version-creation failure becomes the same clean 4xx
+      // as the single-import route rather than a 500.
+      if (err instanceof ApiError) throw err;
+      const message = getErrorMessage(err);
+      logger.error("Bundle import post-install failed", { orgId, error: message });
+      throw new ApiError({
+        status: 400,
+        code: "post_install_failed",
+        title: "Post-Install Failed",
+        detail: message,
+      });
+    }
+    // One audit event per package version actually written — "reused"
+    // entries changed no state. `recordAudit*` never throws.
+    for (const audit of bundleImportAuditRecords(result, { via: "import:bundle" })) {
+      await recordAuditFromContext(c, {
+        action: "package.version_created",
+        resourceType: "package",
+        resourceId: audit.resourceId,
+        after: audit.after,
+      });
+    }
+    return c.json(result, 201);
+  });
 
   // POST /api/packages/import — import any package type from ZIP
-  router.post("/import", rateLimit(10), requireAnyPackageWrite, rowAuthority(), async (c) => {
+  router.post("/import", rateLimit(10), requireAnyPackageWrite, async (c) => {
     let formData: FormData;
     try {
       formData = await c.req.formData();
@@ -2910,37 +2860,31 @@ export function createPackagesRouter() {
   });
 
   // POST /api/packages/import-github — import a package from a GitHub URL
-  router.post(
-    "/import-github",
-    rateLimit(10),
-    requireAnyPackageWrite,
-    rowAuthority(),
-    async (c) => {
-      const data = await readJsonBody(c, githubImportSchema, { param: "url" });
+  router.post("/import-github", rateLimit(10), requireAnyPackageWrite, async (c) => {
+    const data = await readJsonBody(c, githubImportSchema, { param: "url" });
 
-      let zipBytes: Uint8Array;
-      try {
-        zipBytes = await fetchGithubDirectory(data.url);
-      } catch (err) {
-        if (err instanceof GithubImportError) {
-          throw new ApiError({
-            status: 400,
-            code: err.code,
-            title: "Import Failed",
-            detail: err.message,
-          });
-        }
-        throw err;
+    let zipBytes: Uint8Array;
+    try {
+      zipBytes = await fetchGithubDirectory(data.url);
+    } catch (err) {
+      if (err instanceof GithubImportError) {
+        throw new ApiError({
+          status: 400,
+          code: err.code,
+          title: "Import Failed",
+          detail: err.message,
+        });
       }
+      throw err;
+    }
 
-      const { parsed, artifact } = await parseZipWithSkillFallback(
-        Buffer.from(zipBytes),
-        c.get("orgSlug"),
-      );
+    const { parsed, artifact } = await parseZipWithSkillFallback(
+      Buffer.from(zipBytes),
+      c.get("orgSlug"),
+    );
 
-      return handleImport(c, parsed, artifact, false, "github");
-    },
-  );
+    return handleImport(c, parsed, artifact, false, "github");
+  });
 
   // --- File explorer (read-only) ---
   // (see the ordering note at the head of this family)
@@ -2948,7 +2892,7 @@ export function createPackagesRouter() {
   // never be captured as a version spec.
 
   // GET /api/packages/:scope/:name/files — flat index of the artifact's files
-  router.get(`/${SCOPED_PACKAGE_ROUTE}/files`, rateLimit(50), rowAuthority(), async (c) => {
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/files`, rateLimit(50), async (c) => {
     const { version: requested } = parseFileQuery(c, fileIndexQuerySchema);
     // Visibility + `<type>:read` are both settled inside this call, BEFORE any
     // validator is resolved — nothing below can answer an unauthorized caller.
@@ -2980,13 +2924,13 @@ export function createPackagesRouter() {
     if (ifNoneMatchSatisfied(inm, etag)) {
       return new Response(null, { status: 304, headers });
     }
-    return c.json({ entries: buildFileIndex(snapshot) }, 200, headers);
+    return c.json(listResponse(buildFileIndex(snapshot)), 200, headers);
   });
 
   // GET /api/packages/:scope/:name/files/content — raw bytes of ONE file.
   // Serves preview AND download: a small text file that fell past the index's
   // inline budget stays previewable through here.
-  router.get(`/${SCOPED_PACKAGE_ROUTE}/files/content`, rateLimit(50), rowAuthority(), async (c) => {
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/files/content`, rateLimit(50), async (c) => {
     const { version: requested, path } = parseFileQuery(c, fileContentQuerySchema);
     // Must stay ABOVE the validator: the 304 short-circuit below answers
     // without reading the artifact, so a permission check placed after it
@@ -3050,90 +2994,83 @@ export function createPackagesRouter() {
 
   // GET /api/packages/:scope/:name/:version/download — download a package ZIP:
   // a published version, or the DRAFT when `:version` is `draft`.
-  router.get(
-    `/${SCOPED_PACKAGE_ROUTE}/:version/download`,
-    rateLimit(50),
-    rowAuthority(),
-    async (c) => {
-      const packageId = getItemId(c);
-      const orgId = c.get("orgId");
-      const spaceId = c.get("spaceId");
-      const versionSpec = c.req.param("version")!;
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/:version/download`, rateLimit(50), async (c) => {
+    const packageId = getItemId(c);
+    const orgId = c.get("orgId");
+    const spaceId = c.get("spaceId");
+    const versionSpec = c.req.param("version")!;
 
-      // Visibility first — "system package, offered to THIS space, or homed
-      // here", the same gate the rest of the package read surface applies.
-      // Without it this route served the artifact bytes of packages that are
-      // merely owned by the org and placed nowhere the caller can reach.
-      if (!(await isPackageReadableInSpace(spaceId, packageId))) {
-        throw notFound("Package not found");
-      }
+    // Visibility first — "system package, offered to THIS space, or homed
+    // here", the same gate the rest of the package read surface applies.
+    // Without it this route served the artifact bytes of packages that are
+    // merely owned by the org and placed nowhere the caller can reach.
+    if (!(await isPackageReadableInSpace(spaceId, packageId))) {
+      throw notFound("Package not found");
+    }
 
-      // Verify org ownership (or system package). Ephemeral shadows are hidden.
-      // The draft columns ride along for the `draft` branch below, which reads
-      // them through the file explorer's own snapshot reader.
-      const [pkg] = await db
-        .select({
-          id: packages.id,
-          type: packages.type,
-          source: packages.source,
-          homeSpaceId: packages.homeSpaceId,
-          orgId: packages.orgId,
-          draftManifest: packages.draftManifest,
-          draftContent: packages.draftContent,
-        })
-        .from(packages)
-        .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
-        .limit(1);
-      if (!pkg) {
-        throw notFound("Package not found");
-      }
+    // Verify org ownership (or system package). Ephemeral shadows are hidden.
+    // The draft columns ride along for the `draft` branch below, which reads
+    // them through the file explorer's own snapshot reader.
+    const [pkg] = await db
+      .select({
+        id: packages.id,
+        type: packages.type,
+        source: packages.source,
+        homeSpaceId: packages.homeSpaceId,
+        orgId: packages.orgId,
+        draftManifest: packages.draftManifest,
+        draftContent: packages.draftContent,
+      })
+      .from(packages)
+      .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
+      .limit(1);
+    if (!pkg) {
+      throw notFound("Package not found");
+    }
 
-      // The ZIP carries the manifest and every authored file, so it is at least
-      // as sensitive as the detail route — it needs the same `<type>:read`.
-      await requirePackageReadPermission(c, pkg.type);
+    // The ZIP carries the manifest and every authored file, so it is at least
+    // as sensitive as the detail route — it needs the same `<type>:read`.
+    await requirePackageReadPermission(c, pkg.type);
 
-      // Before the copy restriction: see `downloadDraftArchive`.
-      if (versionSpec === VERSION_SELECTOR_DRAFT) {
-        return downloadDraftArchive(c, pkg);
-      }
+    // Before the copy restriction: see `downloadDraftArchive`.
+    if (versionSpec === VERSION_SELECTOR_DRAFT) {
+      return downloadDraftArchive(c, pkg);
+    }
 
-      // …and, when the organization restricts copying (plan decision 12), the
-      // source's `<type>:share`. This is the route the archive leaves through,
-      // so reading it and taking it away are two different permissions there.
-      // Skills and system packages are exempt inside the helper: the CLI's
-      // `packages sync` is this route's other consumer and its copies are local by
-      // design, and a shipped system package has no owning space to protect.
-      await assertPackageCopyAllowed(
-        c,
-        { ...pkg, type: pkg.type as PackageType },
-        { orgId, accessible: await packageAccessSpaces(c) },
-      );
+    // …and, when the organization restricts copying (plan decision 12), the
+    // source's `<type>:share`. This is the route the archive leaves through,
+    // so reading it and taking it away are two different permissions there.
+    // Skills and system packages are exempt inside the helper: the CLI's
+    // `code sync` is this route's other consumer and its copies are local by
+    // design, and a shipped system package has no owning space to protect.
+    await assertPackageCopyAllowed(
+      c,
+      { ...pkg, type: pkg.type as PackageType },
+      { orgId, accessible: await packageAccessSpaces(c) },
+    );
 
-      const ver = await getVersionForDownload(packageId, versionSpec);
-      if (!ver) {
-        throw notFound("Version not found");
-      }
+    const ver = await getVersionForDownload(packageId, versionSpec);
+    if (!ver) {
+      throw notFound("Version not found");
+    }
 
-      let data: Buffer | null;
-      try {
-        data = await downloadVersionZip(packageId, ver.version, ver.integrity);
-      } catch {
-        throw internalError();
-      }
-      if (!data) {
-        throw notFound("Artifact not found in storage");
-      }
+    let data: Buffer | null;
+    try {
+      data = await downloadVersionZip(packageId, ver.version, ver.integrity);
+    } catch {
+      throw internalError();
+    }
+    if (!data) throw versionArtifactUnavailable(packageId, ver.version);
 
-      const downloadHeaders = buildDownloadHeaders({
-        integrity: ver.integrity,
-        yanked: ver.yanked,
-        scope: c.req.param("scope")!,
-        name: c.req.param("name")!,
-        version: ver.version,
-      });
-      return new Response(new Uint8Array(data), { status: 200, headers: downloadHeaders });
-    },
-  );
+    const downloadHeaders = buildDownloadHeaders({
+      integrity: ver.integrity,
+      yanked: ver.yanked,
+      scope: c.req.param("scope")!,
+      name: c.req.param("name")!,
+      version: ver.version,
+    });
+    return new Response(new Uint8Array(data), { status: 200, headers: downloadHeaders });
+  });
 
   return router;
 }

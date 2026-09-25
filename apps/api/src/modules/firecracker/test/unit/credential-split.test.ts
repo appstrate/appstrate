@@ -21,7 +21,6 @@ describe("splitCredentials — secret routing", () => {
   it("moves every known-secret key to MMDS and leaves non-secret keys on the drive", () => {
     const sidecarEnv = {
       RUN_TOKEN: "tok",
-      PI_API_KEY: "key",
       PI_LLM_OAUTH_CONFIG_JSON: "{}",
       CONNECT_LOGIN_JSON: "{}",
       INTEGRATIONS_TO_SPAWN_JSON: "[]",
@@ -66,12 +65,11 @@ describe("splitCredentials — secret routing", () => {
     expect(split.mmdsPayload.sidecar_env.PROXY_URL).toBe("http://u:p@h:1");
   });
 
-  it("brokers MODEL_API_KEY off the agent drive env (skipSidecar real key) — B-3 regression", () => {
-    // skipSidecar/direct-provider runs put the REAL provider key in the
-    // agent env; it must never be materialised on the config drive.
-    const split = splitCredentials(undefined, { MODEL_API_KEY: "sk-real" });
+  it("brokers MODEL_API_KEY off the agent drive env — B-3 regression", () => {
+    // A credential-named key never lands on the config drive, whatever its value.
+    const split = splitCredentials({}, { MODEL_API_KEY: "sk-placeholder" });
     expect(split.driveAgentEnv.MODEL_API_KEY).toBeUndefined();
-    expect(split.mmdsPayload.agent_env.MODEL_API_KEY).toBe("sk-real");
+    expect(split.mmdsPayload.agent_env.MODEL_API_KEY).toBe("sk-placeholder");
   });
 
   it("does not mutate the input maps", () => {
@@ -83,15 +81,7 @@ describe("splitCredentials — secret routing", () => {
   });
 });
 
-describe("splitCredentials — empty / skipSidecar", () => {
-  it("handles an undefined sidecar env (skipSidecar) without inventing a drive map", () => {
-    const split = splitCredentials(undefined, { APPSTRATE_SINK_SECRET: "hmac" });
-    expect(split.driveSidecarEnv).toBeUndefined();
-    expect(split.mmdsPayload.sidecar_env).toEqual({});
-    expect(split.mmdsPayload.agent_env).toEqual({ APPSTRATE_SINK_SECRET: "hmac" });
-    expect(split.driveAgentEnv).toEqual({});
-  });
-
+describe("splitCredentials — empty", () => {
   it("handles empty maps — empty payload, empty drive", () => {
     const split = splitCredentials({}, {});
     expect(split.mmdsPayload).toEqual({ sidecar_env: {}, agent_env: {} });

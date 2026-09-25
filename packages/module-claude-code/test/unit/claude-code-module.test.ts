@@ -33,19 +33,23 @@ describe("claude-code module", () => {
     expect(cc?.oauth?.tokenUrl).toBe("https://platform.claude.com/v1/oauth/token");
     expect(cc?.oauth?.refreshUrl).toBe("https://platform.claude.com/v1/oauth/token");
     expect(cc?.oauth?.pkce).toBe("S256");
-    expect(cc?.oauth?.scopes).toEqual(["org:create_api_key", "user:profile", "user:inference"]);
   });
 
-  it("derives its featured list from the anthropic catalog", () => {
-    // The literal ids are NOT asserted here: they are resolved platform-side
-    // from the vendored anthropic catalog (see the API suite), which is the
-    // whole point — a literal assertion here would be the same rotting
-    // snapshot the selector replaced.
+  it("features one current model per family as a pinned array", () => {
+    // Checked against Pi's anthropic records in the API suite.
     const cc = claudeCodeModule.modelProviders?.()[0];
-    expect(cc?.featuredModels).toEqual({
-      catalogFamilies: ["claude-opus", "claude-sonnet", "claude-haiku", "claude-fable"],
-      generations: 1,
-    });
+    expect(cc?.featuredModels).toEqual([
+      "claude-opus-5",
+      "claude-sonnet-5",
+      "claude-haiku-4-5",
+      "claude-fable-5-1",
+    ]);
+  });
+
+  it("offers Pi's anthropic records, discovered statically", () => {
+    const cc = claudeCodeModule.modelProviders?.()[0];
+    expect(cc?.catalogProviderId).toBe("anthropic");
+    expect(cc?.modelDiscovery).toEqual({ mode: "static" });
   });
 
   it("declares no identity hook — Anthropic OAuth tokens are not JWTs", () => {

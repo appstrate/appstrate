@@ -88,11 +88,13 @@ COPY runtime-pi/*.ts              runtime-pi/
 # COPY below and SECURITY.md: the bundle is readable platform code either way.
 # `--minify` (identifier mangling) is worse still: it renames functions and
 # breaks name-dependent runtime lookups (`fn.name`, class-name dispatch).
-RUN bun build runtime-pi/entrypoint.ts \
+#
+# `launcher.ts` is the container's first process (see ENTRYPOINT below).
+RUN bun build runtime-pi/entrypoint.ts runtime-pi/launcher.ts \
         --target=bun \
         --external='@earendil-works/pi-ai' \
         --external='@earendil-works/pi-coding-agent' \
-        --outfile=runtime-pi/dist/entrypoint.js
+        --outdir=runtime-pi/dist
 
 # ── Stage 2 — runtime ─────────────────────────────────────────────
 FROM ${BUN_IMAGE} AS runtime
@@ -152,8 +154,7 @@ ENV NODE_ENV=production
 # maintain. All four ship pure-python or musllinux wheels — no build
 # toolchain (gcc, musl-dev) is needed in the image.
 #
-# Create the unprivileged `pi` user in the same layer so subsequent
-# `COPY --chown=pi:pi` resolves without a separate chown pass.
+# Create the unprivileged `pi` user in the same layer.
 RUN apk add --no-cache \
         bash \
         ca-certificates \
@@ -179,12 +180,12 @@ WORKDIR /runtime
 
 # Workspace node_modules. Bun stores shared deps at the root and links
 # per-package trees into it — both levels are required at import time.
-COPY --from=deps --chown=pi:pi /build/node_modules                       ./node_modules
-COPY --from=deps --chown=pi:pi /build/packages/afps-runtime/node_modules  ./packages/afps-runtime/node_modules
-COPY --from=deps --chown=pi:pi /build/packages/core/node_modules          ./packages/core/node_modules
-COPY --from=deps --chown=pi:pi /build/packages/mcp-transport/node_modules ./packages/mcp-transport/node_modules
-COPY --from=deps --chown=pi:pi /build/packages/runner-pi/node_modules     ./packages/runner-pi/node_modules
-COPY --from=deps --chown=pi:pi /build/runtime-pi/node_modules             ./runtime-pi/node_modules
+COPY --from=deps /build/node_modules                       ./node_modules
+COPY --from=deps /build/packages/afps-runtime/node_modules  ./packages/afps-runtime/node_modules
+COPY --from=deps /build/packages/core/node_modules          ./packages/core/node_modules
+COPY --from=deps /build/packages/mcp-transport/node_modules ./packages/mcp-transport/node_modules
+COPY --from=deps /build/packages/runner-pi/node_modules     ./packages/runner-pi/node_modules
+COPY --from=deps /build/runtime-pi/node_modules             ./runtime-pi/node_modules
 
 # No `@appstrate/*` workspace sources are copied here, and no `@appstrate`
 # symlinks are restored: `bun build` inlined every workspace module into
@@ -209,11 +210,7 @@ COPY --from=deps --chown=pi:pi /build/runtime-pi/node_modules             ./runt
 # to /runtime/node_modules, so symlink the pair there.
 RUN mkdir -p node_modules/@earendil-works \
  && ln -s /runtime/runtime-pi/node_modules/@earendil-works/pi-ai           node_modules/@earendil-works/pi-ai \
- && ln -s /runtime/runtime-pi/node_modules/@earendil-works/pi-coding-agent node_modules/@earendil-works/pi-coding-agent \
- && chown -h pi:pi \
-        node_modules/@earendil-works \
-        node_modules/@earendil-works/pi-ai \
-        node_modules/@earendil-works/pi-coding-agent
+ && ln -s /runtime/runtime-pi/node_modules/@earendil-works/pi-coding-agent node_modules/@earendil-works/pi-coding-agent
 
 # The pre-bundled entrypoint, and nothing else. The `.ts` sources it was
 # built from (`runtime-pi/*.ts`, `runtime-pi/mcp/`) are deliberately NOT
@@ -235,7 +232,7 @@ RUN mkdir -p node_modules/@earendil-works \
 # no longer sitting in the sandbox, and the sandbox has no egress to go
 # read it. Defence in depth against agent confusion and low-effort
 # injection; nothing more, and nothing should be built on top of it.
-COPY --from=deps --chown=pi:pi /build/runtime-pi/dist/entrypoint.js ./dist/entrypoint.js
+COPY --from=deps /build/runtime-pi/dist/entrypoint.js /build/runtime-pi/dist/launcher.js ./dist/
 
 # Pre-warmed Bun transpiler cache (issue #835). Bun re-parses every JS file
 # >50 KB on each process start — for the ~1.6 MB bundled entrypoint plus the
@@ -249,13 +246,18 @@ COPY --from=deps --chown=pi:pi /build/runtime-pi/dist/entrypoint.js ./dist/entry
 # so a stale cache is ignored, never wrong.
 ENV BUN_RUNTIME_TRANSPILER_CACHE_PATH=/runtime/.transpiler-cache
 RUN mkdir -p /runtime/.transpiler-cache \
- && (bun /runtime/dist/entrypoint.js > /dev/null 2>&1 || true) \
+ && (bun /runtime/dist/entrypoint.js < /dev/null > /dev/null 2>&1 || true) \
  && bun -e 'await import("@earendil-works/pi-ai"); await import("@earendil-works/pi-coding-agent");' \
  # Fail the build if priming produced nothing — an empty cache would be a
  # silent cold-start regression (the entrypoint run above swallows its exit
  # code by design, so this is the only guard that the graph actually loaded).
- && [ -n "$(ls -A /runtime/.transpiler-cache)" ] \
- && chown -R pi:pi /runtime/.transpiler-cache
+ && [ -n "$(ls -A /runtime/.transpiler-cache)" ]
+
+# Everything under /runtime (bundle, node_modules, transpiler cache) stays
+# root-owned and read-only to the agent uid: it is the only code the runtime
+# process loads, including lazily after boot (e.g. a Pi SDK dynamic import),
+# and a cache entry is loaded in place of its source. Nothing writes there at
+# run time; Bun skips writing a cache entry it cannot store.
 
 # Agent workspace. Nothing under `/workspace` resolves against npm
 # packages: `/runtime/node_modules` is not on the resolution path from
@@ -272,4 +274,7 @@ USER pi:pi
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD test -f /runtime/dist/entrypoint.js || exit 1
 
-ENTRYPOINT ["bun", "run", "/runtime/dist/entrypoint.js"]
+# The launcher holds the run-scoped secrets and hands them to the entrypoint
+# over stdin, so they are never in the environment of the process running the
+# agent (`runtime-pi/launcher.ts`).
+ENTRYPOINT ["bun", "run", "/runtime/dist/launcher.js", "/runtime/dist/entrypoint.js"]

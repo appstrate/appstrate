@@ -27,11 +27,12 @@
 
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
-import { notFound, parseBody } from "@appstrate/core/api-errors";
+import { invalidRequest, notFound, parseBody } from "@appstrate/core/api-errors";
+import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
 import { packageIdSchema } from "@appstrate/core/validation";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
@@ -44,8 +45,15 @@ import { ensureSession } from "./persistence.ts";
 import { MAX_PINNED_SKILLS } from "./skills.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
-/** Page size for the session list — one row past this is fetched to derive `hasMore`. */
 const SESSIONS_PAGE_SIZE = 100;
+
+/** Lenient `?limit=`: out-of-range or unparseable → the full page. */
+const sessionsLimit = z.coerce
+  .number()
+  .int()
+  .min(1)
+  .max(SESSIONS_PAGE_SIZE)
+  .catch(SESSIONS_PAGE_SIZE);
 
 export const createSessionSchema = z.object({
   title: z.string().min(1).max(200).optional(),
@@ -166,26 +174,37 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // traffic). The platform always supplies it via deps — no unlimited fallback.
   const rateLimited = (limitPerMinute: number): MiddlewareHandler => deps.rateLimit(limitPerMinute);
 
-  // GET /api/chat/sessions — list the caller's sessions in the current org
+  // GET /api/chat/sessions — most recent activity first, keyset on `(updatedAt, id)`;
+  // the bound is the cursor ROW, compared in SQL at full precision.
   router.get("/api/chat/sessions", requireModulePermission("chat", "read"), async (c) => {
-    // Fetch one past the page so `hasMore` reflects reality: previously it was
-    // hardcoded `false`, so a caller with more than a page of sessions had no
-    // signal that older conversations existed beyond the window.
     const scope = sessionScope(c);
+    const limit = sessionsLimit.parse(c.req.query("limit") ?? SESSIONS_PAGE_SIZE);
+    const conditions: SQL[] = [
+      eq(chatSessions.orgId, scope.orgId),
+      eq(chatSessions.userId, scope.userId),
+      eq(chatSessions.spaceId, scope.spaceId),
+    ];
+    const startingAfter = c.req.query("startingAfter");
+    if (startingAfter) {
+      if (!(await findOwnedSession(startingAfter, scope))) {
+        throw invalidRequest(
+          "startingAfter must be the id of one of your sessions in this space",
+          "startingAfter",
+        );
+      }
+      conditions.push(
+        sql`(${chatSessions.updatedAt}, ${chatSessions.id}) < (select cur.updated_at, cur.id from ${chatSessions} cur where cur.id = ${startingAfter})`,
+      );
+    }
     const rows = await db
       .select()
       .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.orgId, scope.orgId),
-          eq(chatSessions.userId, scope.userId),
-          eq(chatSessions.spaceId, scope.spaceId),
-        ),
-      )
-      .orderBy(desc(chatSessions.updatedAt))
-      .limit(SESSIONS_PAGE_SIZE + 1);
-    const hasMore = rows.length > SESSIONS_PAGE_SIZE;
-    const page = hasMore ? rows.slice(0, SESSIONS_PAGE_SIZE) : rows;
+      .where(and(...conditions))
+      .orderBy(desc(chatSessions.updatedAt), desc(chatSessions.id))
+      .limit(limit + 1);
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    setCursorLinkHeader({ c, publicOrigin: deps.publicOrigin, hasMore, lastId: page.at(-1)?.id });
     return c.json({ object: "list", data: page.map(toSessionDto), hasMore });
   });
 

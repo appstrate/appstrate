@@ -51,7 +51,12 @@ import { isActiveHere } from "./package-activation.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 import { mergeSystemAndDb, setExactlyOneDefault, isUuid } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
-import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
+import { ApiError, notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
+import {
+  evaluateJsonPath,
+  JsonPathSyntaxError,
+  parseJsonPath,
+} from "@appstrate/afps-shared/jsonpath";
 import type { ActorScope, SpaceScope } from "../lib/scope.ts";
 import { actorInsert, actorFilter, actorOrSharedFilter } from "../lib/actor.ts";
 import {
@@ -171,7 +176,7 @@ export interface ResolvedConnectionRow extends ActorConnectionRow {
 /**
  * Lookup the actor's `integration_connections` row for `(packageId, authKey)`
  * scoped to `spaceId`. Returns `null` when no accessible connection
- * exists — callers decide whether that is a 404, a silent skip, or a 412
+ * exists — callers decide whether that is a 404, a silent skip, or a 409
  * envelope.
  *
  * "Accessible" = own connection first, then any `shared_with_org=true`
@@ -179,7 +184,7 @@ export interface ResolvedConnectionRow extends ActorConnectionRow {
  * unlocks the admin-shared workflow: when `block_user_connections` is on
  * and the admin has marked their connection `shared_with_org`, members
  * who run agents on this integration land on the admin's row instead of
- * 412-ing with "not connected".
+ * 409-ing with "not connected".
  *
  * Ordering rationale (own first): a user with their own connection
  * deliberately prefers their identity over the org pool — sharing is a
@@ -1862,15 +1867,12 @@ export async function deleteIntegrationOAuthClient(
 // ─────────────────────────────────────────────
 
 /**
- * Apply `extractTokenIdentity` JSONPath-like accessors against a token
- * response (or a credentials bag for non-OAuth auths). The mapping is
- * intentionally simple — `"$.field"` or `"field"` selects a top-level
- * key, `"$.a.b"` walks nested objects, missing values become `""`.
+ * Apply the AFPS `identity_claims` JSONPaths to a token response (or a
+ * credentials bag). A path selecting nothing is omitted; an unsupported path
+ * fails the connect with `invalid_config`.
  *
- * Always produces a stable `accountId` — falls back to:
- *   1. The declared `extractTokenIdentity.accountId` mapping
- *   2. `email` / `account_email` / `sub` claims if present
- *   3. The literal string `"default"` when nothing matches (single-account)
+ * `accountId` is the declared `account_id` claim, else the source's `email` /
+ * `account_email` / `sub`, else `"default"` (single-account).
  */
 export function extractIdentity(
   manifest: IntegrationManifest,
@@ -1878,20 +1880,39 @@ export function extractIdentity(
   source: Record<string, unknown>,
 ): { accountId: string; identityClaims: Record<string, unknown> } {
   const auth = lookupAuth(manifest, authKey) as AfpsManifestAuth;
-  // AFPS: the token identity mapping is `identity_claims`.
   const mapping = auth.identity_claims ?? {};
   const claims: Record<string, unknown> = {};
-  for (const [outKey, accessor] of Object.entries(mapping)) {
-    claims[outKey] = readPath(source, accessor);
+  for (const [outKey, path] of Object.entries(mapping)) {
+    const value = evaluateIdentityPath(source, path, authKey, outKey);
+    if (value !== undefined) claims[outKey] = value;
   }
   const accountId =
-    (typeof claims.accountId === "string" && claims.accountId) ||
     (typeof claims.account_id === "string" && claims.account_id) ||
     (typeof source.email === "string" && source.email) ||
     (typeof source.account_email === "string" && source.account_email) ||
     (typeof source.sub === "string" && source.sub) ||
     "default";
   return { accountId, identityClaims: claims };
+}
+
+function evaluateIdentityPath(
+  source: Record<string, unknown>,
+  path: string,
+  authKey: string,
+  claim: string,
+): unknown {
+  try {
+    return evaluateJsonPath(source, path);
+  } catch (err) {
+    if (!(err instanceof JsonPathSyntaxError)) throw err;
+    throw new ApiError({
+      status: 400,
+      code: "invalid_config",
+      title: "Invalid Integration Manifest",
+      detail: `auths.${authKey}.identity_claims.${claim}: ${err.message}`,
+      cause: err,
+    });
+  }
 }
 
 /**
@@ -1934,19 +1955,15 @@ export function assertRequiredIdentityClaims(
 
   const mapping = auth.identity_claims ?? {};
   // Build a reverse index OIDC-claim-name → AFPS keys that reference it.
-  // The mapping value is either a bare claim name (`"sub"`) or a JSONPath
-  // (`"$.sub"`, `"$.user.email"`). For the OIDC keyspace check we only
-  // care about leaf single-segment names — that's the canonical form of
-  // an OIDC claim. A deeper path like `"$.user.email"` is by definition
-  // not an OIDC claim, so we don't index it (the spec example in §7.4
-  // line 931 shows OIDC standard claims only).
+  // Only a single-member path (`"$.sub"`) names an OIDC claim.
   const oidcToAfpsKeys = new Map<string, string[]>();
-  for (const [afpsKey, accessor] of Object.entries(mapping)) {
-    const path = accessor.startsWith("$.") ? accessor.slice(2) : accessor;
-    if (path.length === 0 || path.includes(".")) continue;
-    const list = oidcToAfpsKeys.get(path);
+  for (const [afpsKey, path] of Object.entries(mapping)) {
+    const segments = parseJsonPath(path);
+    const claim = segments[0];
+    if (segments.length !== 1 || typeof claim !== "string") continue;
+    const list = oidcToAfpsKeys.get(claim);
     if (list) list.push(afpsKey);
-    else oidcToAfpsKeys.set(path, [afpsKey]);
+    else oidcToAfpsKeys.set(claim, [afpsKey]);
   }
 
   const isPresent = (value: unknown): boolean =>
@@ -1976,20 +1993,6 @@ export function assertRequiredIdentityClaims(
   throw invalidRequest(
     `Integration auth requires identity ${plural} ${list} but the IdP did not return ${missing.length === 1 ? "it" : "them"}.`,
   );
-}
-
-function readPath(source: Record<string, unknown>, accessor: string): unknown {
-  const path = accessor.startsWith("$.") ? accessor.slice(2) : accessor;
-  const parts = path.split(".");
-  let cur: unknown = source;
-  for (const part of parts) {
-    if (cur && typeof cur === "object" && part in (cur as Record<string, unknown>)) {
-      cur = (cur as Record<string, unknown>)[part];
-    } else {
-      return "";
-    }
-  }
-  return cur;
 }
 
 // ─────────────────────────────────────────────
@@ -2214,8 +2217,8 @@ export async function persistCredentialBundle(
     credentialsEncrypted: ciphertext,
     expiresAt: input.expiresAt ?? null,
     needsReconnection: input.needsReconnection ?? false,
-    // Any successful credential write clears the transient-refresh streak — a
-    // working refresh (or a user reconnect) proves the connection is healthy
+    // Any successful credential write clears the failure count — a working
+    // refresh (or a user reconnect) proves the connection is healthy
     // again, so the escalation counter must not carry over. See
     // `recordIntegrationRefreshFailure`.
     refreshFailureCount: 0,
@@ -2345,38 +2348,40 @@ export async function markIntegrationConnectionNeedsReconnection(
 }
 
 /**
- * Record a *transient* token-refresh failure (network / 5xx / parse — NOT
- * `invalid_grant`, which flips `needsReconnection` immediately via
- * {@link markIntegrationConnectionNeedsReconnection}). Atomic, race-safe:
- * the increment and the escalation decision happen in one SQL statement so
- * concurrent refreshes on the same row (overlapping runs) cannot lose a count.
+ * Record a failure on a connection's credential: a transient OAuth refresh
+ * failure (with `graceSeconds`; `invalid_grant` goes through
+ * {@link markIntegrationConnectionNeedsReconnection}) or an upstream rejection
+ * of an unrefreshable credential (`graceSeconds: null`). Increment and
+ * escalation are one statement, so concurrent failures cannot lose a count.
  *
- * Escalation gate — `needsReconnection` is set to `true` only when BOTH:
- *   1. this failure brings the streak to `>= maxFailures`, AND
- *   2. the token is genuinely dead: `expires_at` is set AND already older than
- *      `graceSeconds` ago.
- *
- * The expiry gate is what makes this safe: a transient upstream outage while
- * the cached token is still valid (future `expires_at`) increments the counter
- * but never escalates — the connection keeps working and a later refresh
- * recovers (clearing the streak via `persistCredentialBundle`). Only a token
- * that is expired-past-grace AND repeatedly unrefreshable — the silent-death
- * case — gets flipped. `needsReconnection` is OR'd so a concurrently-set `true`
- * (revoke / scope-shrink) is never cleared here.
+ * Escalates once the count reaches `maxFailures` AND, with `graceSeconds`,
+ * the token expired more than `graceSeconds` ago — so an outage on a valid
+ * token never bricks the connection. `needsReconnection` is OR'd, never cleared.
+ * Only a credential write resets the count, so for an unrefreshable auth it is
+ * cumulative since the last reconnect, not a streak.
  */
 export async function recordIntegrationRefreshFailure(
   connectionId: string,
   maxFailures: number,
-  graceSeconds: number,
-): Promise<void> {
-  await db
+  graceSeconds: number | null,
+): Promise<{ failures: number; needsReconnection: boolean }> {
+  const expired =
+    graceSeconds === null
+      ? sql`TRUE`
+      : sql`${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${graceSeconds})`;
+  const [row] = await db
     .update(integrationConnections)
     .set({
       refreshFailureCount: sql`${integrationConnections.refreshFailureCount} + 1`,
-      needsReconnection: sql`${integrationConnections.needsReconnection} OR (${integrationConnections.refreshFailureCount} + 1 >= ${maxFailures} AND ${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${graceSeconds}))`,
+      needsReconnection: sql`${integrationConnections.needsReconnection} OR (${integrationConnections.refreshFailureCount} + 1 >= ${maxFailures} AND ${expired})`,
       updatedAt: sql`now()`,
     })
-    .where(eq(integrationConnections.id, connectionId));
+    .where(eq(integrationConnections.id, connectionId))
+    .returning({
+      failures: integrationConnections.refreshFailureCount,
+      needsReconnection: integrationConnections.needsReconnection,
+    });
+  return row ?? { failures: 0, needsReconnection: false };
 }
 
 /**

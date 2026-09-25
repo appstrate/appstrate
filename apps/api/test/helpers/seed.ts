@@ -37,6 +37,7 @@ import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "../../src/services/package-storage-keys.ts";
+import { extractKeyPrefix, generateApiKey, hashApiKey } from "../../src/services/api-keys.ts";
 
 // ─── Packages / Agents ───────────────────────────────────
 
@@ -458,15 +459,15 @@ type ApiKeyInsert = Partial<InferInsertModel<typeof apiKeys>> & {
 export async function seedApiKey(
   overrides: ApiKeyInsert,
 ): Promise<InferSelectModel<typeof apiKeys> & { rawKey: string }> {
-  const rawKey = `ask_${crypto.randomUUID().replace(/-/g, "")}`;
-  const keyHash = new Bun.CryptoHasher("sha256").update(rawKey).digest("hex");
+  const rawKey = generateApiKey();
+  const keyHash = await hashApiKey(rawKey);
 
   const [key] = await db
     .insert(apiKeys)
     .values({
       name: "Test API Key",
       keyHash,
-      keyPrefix: rawKey.slice(0, 12),
+      keyPrefix: extractKeyPrefix(rawKey),
       ...overrides,
     })
     .returning();
@@ -504,9 +505,9 @@ interface ModelProviderCredentialSeed {
  * honored — pointing any provider at a mock endpoint is trivial.
  */
 function defaultProviderId(apiShape: string | undefined, baseUrl: string | undefined): string {
-  // baseUrl host wins over apiShape when both are supplied — pricing-catalog
-  // tests pin against the canonical provider (`openai` for gpt-4o cost
-  // lookup) regardless of which wire format the harness happens to use.
+  // baseUrl host wins over apiShape when both are supplied — catalog tests
+  // pin against the canonical provider (`openai` for gpt-4o cost lookup)
+  // regardless of which wire format the harness happens to use.
   if (baseUrl && /openai\.com/i.test(baseUrl)) return "openai";
   if (baseUrl && /anthropic\.com/i.test(baseUrl)) return "anthropic";
   if (baseUrl && /mistral\.ai/i.test(baseUrl)) return "mistral";
@@ -525,8 +526,6 @@ function defaultProviderId(apiShape: string | undefined, baseUrl: string | undef
       return "cerebras";
     case "mistral-conversations":
       return "mistral";
-    case "google-generative-ai":
-      return "google-ai";
   }
   return "openai-compatible";
 }
@@ -569,6 +568,7 @@ interface OAuthCredentialSeed {
   /** Epoch ms. `null` means "no upstream expiry" — passes through to the resolver as-is. */
   expiresAt?: number | null;
   needsReconnection?: boolean;
+  accountId?: string;
   createdBy?: string | null;
 }
 
@@ -595,6 +595,7 @@ export async function seedOrgModelProviderOAuth(
         refreshToken: overrides.refreshToken ?? "test-refresh-token",
         expiresAt: overrides.expiresAt === undefined ? Date.now() + 3600_000 : overrides.expiresAt,
         needsReconnection: overrides.needsReconnection ?? false,
+        ...(overrides.accountId !== undefined ? { accountId: overrides.accountId } : {}),
       }),
       createdBy: overrides.createdBy ?? null,
     })

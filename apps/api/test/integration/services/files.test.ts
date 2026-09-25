@@ -404,7 +404,7 @@ describe("files service + routes", () => {
     expect(missing.status).toBe(404);
   });
 
-  it("lists files with run_id filter and hides other end-users' rows", async () => {
+  it("lists files with the runId filter and hides other end-users' rows", async () => {
     const runA = await seedRunRow(scope);
     const runB = await seedRunRow(scope);
     const upA = await stageUpload(scope, ctx.user.id, "a.txt", new TextEncoder().encode("aaa"));
@@ -417,11 +417,22 @@ describe("files service + routes", () => {
     const list = (await all.json()) as { data: { id: string }[] };
     expect(list.data.length).toBe(2);
 
-    const filtered = await app.request(`/api/files?run_id=${runA}`, {
+    const filtered = await app.request(`/api/files?runId=${runA}`, {
       headers: authHeaders(ctx),
     });
-    const flist = (await filtered.json()) as { data: { id: string }[] };
+    const flist = (await filtered.json()) as { data: Record<string, unknown>[] };
     expect(flist.data.map((d) => d.id)).toEqual([docA.id]);
+    expect(flist.data[0]!.runId).toBe(runA);
+    expect(flist.data[0]).not.toHaveProperty("run_id");
+
+    // An undeclared filter name is a 400 naming it — never a silently
+    // unfiltered listing of every run's files.
+    const undeclared = await app.request(`/api/files?run_id=${runA}`, {
+      headers: authHeaders(ctx),
+    });
+    expect(undeclared.status).toBe(400);
+    const problem = (await undeclared.json()) as { errors: { field: string }[] };
+    expect(problem.errors.map((e) => e.field)).toEqual(["run_id"]);
   });
 
   it("run_id filter returns produced outputs AND input files referenced in runs.input", async () => {
@@ -1513,7 +1524,7 @@ describe("files service + routes", () => {
     expect(cd2).toContain("filename*=UTF-8''h%C3%A9llo%F0%9F%93%84.txt");
   });
 
-  it("DELETE unknown id → 404; list ignores a garbage purpose and clamps limit to the catch default", async () => {
+  it("DELETE unknown id → 404; list rejects a garbage purpose and clamps limit to the catch default", async () => {
     const runId = await seedRunRow(scope);
     const up = await stageUpload(scope, ctx.user.id, "x.txt", new TextEncoder().encode("x"));
     await createFileFromUpload(scope, userActor, up, { runId });
@@ -1524,12 +1535,13 @@ describe("files service + routes", () => {
     });
     expect(del.status).toBe(404);
 
-    // Unknown purpose → safeParse fails → filter dropped → full (unfiltered) list.
+    // Unknown purpose → 400 naming it, not a dropped filter widening the list.
     const garbage = await app.request(`/api/files?purpose=not_a_purpose`, {
       headers: authHeaders(ctx),
     });
-    expect(garbage.status).toBe(200);
-    expect(((await garbage.json()) as { data: unknown[] }).data.length).toBe(1);
+    expect(garbage.status).toBe(400);
+    const problem = (await garbage.json()) as { errors: { field: string }[] };
+    expect(problem.errors.map((e) => e.field)).toEqual(["purpose"]);
 
     // limit out of range → route's `.max(100).catch(20)` yields the 20 default;
     // an in-range value is honored.
@@ -1866,6 +1878,8 @@ describe("files service + routes", () => {
       packageId: pkg.id,
       actor: userActor,
       input: { source: `appfile://${doc.id}` },
+      modelId: null,
+      inferenceRoute: null,
       consumedFileIds: [doc.id, doc.id],
     });
 
@@ -1885,6 +1899,8 @@ describe("files service + routes", () => {
         packageId: pkg.id,
         actor: userActor,
         input: { source: `appfile://${missingFileId}` },
+        modelId: null,
+        inferenceRoute: null,
         consumedFileIds: [missingFileId],
       });
       throw new Error("expected createRunState to reject");

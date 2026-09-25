@@ -10,7 +10,6 @@
  */
 
 import type { IntegrationManifest } from "./integration.ts";
-import type { ModelNativeReasoningLevel, ModelReasoningLevel } from "./model-generation.ts";
 
 /**
  * Manifest `auths.{key}.delivery.http` block — the header-render config the
@@ -28,8 +27,8 @@ export type ManifestDeliveryHttp = NonNullable<
  * carrying {@link SidecarConfig.sidecarAuthToken}.
  *
  * A dedicated header rather than `Authorization`: on `/llm/*` that slot already
- * carries the vendor credential placeholder the sidecar swaps for the real key,
- * so reusing it would collide with the one thing that surface exists to do.
+ * carries the placeholder credential the sidecar replaces with its own upstream
+ * auth, so reusing it would collide with the one thing that surface exists to do.
  *
  * Container → sidecar only: the `/llm/*` passthrough strips it (and the
  * `x-appstrate-pi-sdk` sibling) from the forwarded header set, so the sidecar's
@@ -205,8 +204,8 @@ export interface HttpDeliveryAuthSpec {
   /** When `false` (default), the MITM proxy strips any caller-supplied header of the same name. */
   allowServerOverride: boolean;
   /**
-   * URI patterns this auth is authorised for — glob-style strings copied verbatim
-   * from `manifest.auths.{key}.authorized_uris`. The sidecar's planner uses these
+   * URI patterns this auth is authorised for — glob-style strings rendered per
+   * connection from `manifest.auths.{key}.authorized_uris`. The sidecar's planner uses these
    * to decide which auth (if any) applies to each upstream request.
    */
   authorizedUris: readonly string[];
@@ -411,27 +410,11 @@ export interface IntegrationSpawnSpec {
    */
   httpDeliveryAuths?: Record<string, HttpDeliveryAuthSpec>;
   /**
-   * Explicit egress signal — `true` when this local-source runner needs a
-   * controlled outbound route but NO header injection. A local runner sits on
-   * the per-run network (`internal: true` in docker mode) with no direct
-   * egress; its only way out is a per-integration listener the sidecar mounts
-   * and hands the runner as `HTTPS_PROXY`.
-   *
-   * Egress is orthogonal to credential injection (issue #543). A
-   * `delivery.http` integration gets its egress route from the MITM listener
-   * its injection plan already mounts ({@link httpDeliveryAuths}). A
-   * `delivery.env` integration (the server authenticates itself, e.g. a
-   * form/session login) resolves NO injection plan — this flag tells the
-   * sidecar to mount a plain CONNECT egress listener (tunnel + SSRF floor, no
-   * TLS termination, no cert mint) so the runner can reach upstream.
-   *
-   * Never set for `mtls` (the runner must reach upstream directly so the
-   * client-cert handshake is not terminated) nor for non-local sources
-   * (remote MCP / serverless have no runner). When both this and a non-empty
-   * {@link httpDeliveryAuths} are present, the MITM listener wins and provides
-   * egress — the sidecar picks ONE listener per integration, MITM-first.
+   * Local runner egress policy (#1458), enforced by the one listener (MITM or
+   * CONNECT) the sidecar hands the runner as `HTTPS_PROXY`, its only way out.
+   * Absent = no egress route; empty with `allowAllUris: false` = deny-all.
    */
-  needsEgress?: boolean;
+  egress?: { authorizedUris: string[]; allowAllUris: boolean };
   /**
    * R8a defensive filter — names from `manifest.hidden_tools` (AFPS
    * §3.4 / `integration.schema.json`). Install-time validation already
@@ -541,8 +524,6 @@ export interface IntegrationSpawnSpec {
 /**
  * Discriminated union covering the two LLM auth modes the sidecar can serve:
  *
- *   - `api_key`: the agent SDK builds the auth header with a placeholder and
- *     the sidecar swaps the placeholder for the real key.
  *   - `oauth`: the no-forging OAuth path for subscription runs. The in-container
  *     Pi engine (`pi-ai`) emits the provider's own subscription request shape
  *     from its OAuth-shaped placeholder token; the sidecar fetches a fresh
@@ -550,12 +531,14 @@ export interface IntegrationSpawnSpec {
  *     and swaps the request bearer for it verbatim — no identity headers, no
  *     body transforms. There is deliberately no fingerprint-forging mode: the
  *     platform itself never synthesises a provider fingerprint.
+ *   - `platform`: the upstream is the platform's metered LLM proxy, which holds
+ *     the credential; the sidecar's run token authorises the run's inference.
  *
- * The model-alias swap ({@link ModelSwap}) exists only on the `api_key` mode.
+ * The model-alias swap ({@link ModelSwap}) exists on the `platform` mode only.
  * Aliases are rejected for oauth-subscription providers (at alias creation and
  * again at run launch) so the oauth path stays a pure bearer-swap.
  */
-export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
+export type LlmProxyConfig = LlmProxyOauthConfig | LlmProxyPlatformConfig;
 
 /**
  * Canonical wire-format identifier for every LLM model provider Appstrate
@@ -575,10 +558,6 @@ export const MODEL_API_SHAPES = [
   "openai-responses",
   "openai-codex-responses",
   "mistral-conversations",
-  "google-generative-ai",
-  "google-vertex",
-  "azure-openai-responses",
-  "bedrock-converse-stream",
 ] as const;
 
 /**
@@ -606,8 +585,6 @@ export type ModelApiShape = (typeof MODEL_API_SHAPES)[number];
  * Matching is by exact value at the known JSON locations (top-level `model`,
  * and `message.model` for Anthropic `message_start`), never a blind string
  * replace — so a model id mentioned inside generated content is never clobbered.
- * For an adaptive Anthropic backing, the private descriptor can also restore
- * the adaptive `thinking` shape that Pi cannot infer from the public alias.
  */
 export interface ModelSwap {
   /** Public alias id the agent sends (its `MODEL_ID`). */
@@ -631,15 +608,6 @@ export interface ModelSwap {
    * exactly when `clientApiShape !== backingApiShape`; enforced at sidecar boot.
    */
   backing?: ModelSwapBacking;
-  /**
-   * Request-scoped Anthropic transport correction for an adaptive backing.
-   * Pi cannot infer adaptive support from a hidden alias id, so the sidecar
-   * restores the catalogued request shape without exposing this fact to the
-   * agent container.
-   */
-  anthropicAdaptiveReasoning?: {
-    effort: Exclude<ModelNativeReasoningLevel, "none">;
-  };
 }
 
 /**
@@ -648,24 +616,24 @@ export interface ModelSwap {
  */
 export interface ModelSwapBacking {
   /**
-   * pi provider key of the real vendor. Drives pi-ai's per-vendor request
-   * shaping, which on an aliased run happens here, not in the container.
+   * Pi provider key of the real vendor, or `null` for a gateway Pi keeps no
+   * record of. Selects the Pi registry record — dialect, thinking levels —
+   * the sidecar re-originates with; the container never sees it.
    */
-  providerId: string;
-  /** Whether the backing supports extended thinking at all. */
-  reasoning: boolean;
-  /** Native thinking-level mapping; the container receives only the portable level. */
-  reasoningLevelMap?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
+  providerId: string | null;
+  /** Whether the backing supports extended thinking; absent = unknown, Pi's record decides. */
+  reasoning?: boolean;
   /** Input modalities the backing accepts — pi-ai gates image content on them. */
   input: ReadonlyArray<string>;
 }
 
-export interface LlmProxyApiKeyConfig {
-  authMode: "api_key";
-  /** Upstream provider base URL the sidecar forwards to. */
+/** Platform mode — see {@link LlmProxyConfig}. No provider credential. */
+export interface LlmProxyPlatformConfig {
+  authMode: "platform";
+  /** Protocol of the run's model — selects the proxy route. */
+  apiShape: ModelApiShape;
+  /** The model's own endpoint, never dialed: pi-ai derives vendor dialect from it. */
   baseUrl: string;
-  apiKey: string;
-  placeholder: string;
   /** Set for model aliases — rewrite `model` alias↔real in req/resp. See {@link ModelSwap}. */
   modelSwap?: ModelSwap;
 }
@@ -696,18 +664,20 @@ export interface LlmProxyOauthConfig {
  * (and `POST .../refresh`) endpoint. Carries only the fields that change per
  * refresh — provider invariants (baseUrl, providerId) live in
  * {@link LlmProxyOauthConfig}, which the sidecar already received at boot.
+ * Snake_case at the JSON boundary (RFC 6749 `access_token`); `expiresAt` is a
+ * universal-carve-out name. Both sides map it to their own camelCase TS type.
  */
 export interface OAuthTokenResponse {
-  accessToken: string;
+  access_token: string;
   /** Epoch milliseconds. `null` when expiry is unknown — sidecar treats this as "always refresh". */
   expiresAt: number | null;
   /**
    * Abstract account/tenant identifier surfaced by the integration's
    * `extractTokenIdentity` hook (used at connect time for required-claim
-   * validation). This generic OAuth `accountId` metadata is NOT forwarded as an
-   * upstream header by the platform.
+   * validation). Omitted — never `null` — when the provider surfaced none.
+   * Not forwarded as an upstream header by the platform.
    */
-  accountId?: string;
+  account_id?: string;
 }
 
 /**

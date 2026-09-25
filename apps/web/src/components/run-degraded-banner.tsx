@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { useIntegrationDetail } from "../hooks/use-integrations";
+import { useCanReach } from "../hooks/use-can-reach";
 
 /**
  * Safe-narrow `runs.metadata.degraded_integrations` (a `string[]` of
@@ -23,12 +24,16 @@ function DegradedIntegrationRow({ integrationId }: { integrationId: string }) {
   const { t } = useTranslation("common");
   const { data } = useIntegrationDetail(integrationId);
   const name = data?.manifest.display_name ?? integrationId;
+  const canReach = useCanReach();
+  const integrationPath = `/integrations/${integrationId}`;
   return (
     <li className="flex items-center justify-between gap-3">
       <span className="font-medium">{name}</span>
-      <Button asChild size="sm" variant="outline">
-        <Link to={`/integrations/${integrationId}`}>{t("btn.reconnect")}</Link>
-      </Button>
+      {canReach(integrationPath) && (
+        <Button asChild size="sm" variant="outline">
+          <Link to={integrationPath}>{t("btn.reconnect")}</Link>
+        </Button>
+      )}
     </li>
   );
 }

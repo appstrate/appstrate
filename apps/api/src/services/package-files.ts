@@ -15,7 +15,7 @@ import { conflict, notFound } from "../lib/errors.ts";
 import { downloadPackageFiles, uploadPackageFiles } from "./package-items/storage.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { unzipPackageArchive } from "./package-archive.ts";
-import { getVersionForDownload } from "./package-versions.ts";
+import { getVersionForDownload, versionArtifactUnavailable } from "./package-versions.ts";
 import { withPackageDraftLock } from "./package-draft-lock.ts";
 import {
   CONFIG_BY_TYPE,
@@ -375,9 +375,9 @@ export async function resolvePackageFileValidator(
  * package bytes for the explorer, and the only emitter of the
  * `"Package file snapshot read"` log line.
  *
- * @throws 404 when a version's artifact is missing from storage. A missing
- *   DRAFT artifact is not an error — a freshly created package has no ZIP yet
- *   and must still list its DB-backed files.
+ * @throws 422 `version_artifact_unavailable` when a version's artifact is
+ *   missing from storage. A missing DRAFT artifact is not an error — a freshly
+ *   created package has no ZIP yet and must still list its DB-backed files.
  */
 export async function readPackageSnapshot(
   pkg: PackageFileSource,
@@ -408,7 +408,7 @@ export async function readPackageSnapshot(
     // route applies. Reading a version through a path that skips it would make
     // the explorer the one place tampering goes unnoticed.
     const zip = await downloadVersionZip(pkg.id, validator.version, validator.integrity);
-    if (!zip) throw notFound("Artifact not found in storage");
+    if (!zip) throw versionArtifactUnavailable(pkg.id, validator.version);
     files = unzipPackageArchive(zip);
     snapshotId = validator.snapshotId;
   }
@@ -573,8 +573,12 @@ export function createPackageDraft(
 }
 
 export type MutateDraftFilesInput = {
-  /** Authoring requires a token; imports may deliberately replace a draft. */
-  precondition: { lockVersion: number } | { imported: true; lockVersion?: number };
+  /**
+   * The draft-version assertion (the route's `If-Match`), evaluated under the
+   * draft lock so check and write are one step. Imports may omit it.
+   */
+  precondition:
+    { assertVersion: (current: number) => void } | { imported: true; lockVersion?: number };
   /** Manifest to persist with this write. Defaults to the row's current draft. */
   manifest?: Record<string, unknown>;
   /**
@@ -626,7 +630,9 @@ export async function mutatePackageDraftFiles(
       draftContent: row.draftContent,
     };
 
-    if (
+    if ("assertVersion" in input.precondition) {
+      input.precondition.assertVersion(row.lockVersion);
+    } else if (
       input.precondition.lockVersion !== undefined &&
       input.precondition.lockVersion !== row.lockVersion
     ) {

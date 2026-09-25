@@ -45,7 +45,7 @@ round trip.
 
 ## Per-conversation choice
 
-Migration `0069` adds two columns to `chat_sessions`:
+Migration `0074` adds two columns to `chat_sessions`:
 
 - `skill_catalogue boolean NOT NULL DEFAULT true` — whether the space
   catalogue is indexed;

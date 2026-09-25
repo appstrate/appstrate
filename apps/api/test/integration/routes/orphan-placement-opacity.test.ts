@@ -38,6 +38,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { and, asc, eq } from "drizzle-orm";
+import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { auditEvents, packageShares, spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -101,11 +102,11 @@ describe("the caller context handed to the model", () => {
     expect(res.status).toBe(200);
     const text = await res.clone().text();
     const body = (await res.json()) as {
-      agents: { package_id: string }[];
-      skills: { package_id: string }[];
+      agents: { packageId: string }[];
+      skills: { packageId: string }[];
     };
-    expect(body.agents.map((a) => a.package_id)).not.toContain(AGENT);
-    expect(body.skills.map((s) => s.package_id)).not.toContain(SKILL);
+    expect(body.agents.map((a) => a.packageId)).not.toContain(AGENT);
+    expect(body.skills.map((s) => s.packageId)).not.toContain(SKILL);
     // The hints carry `display_name` and `description` straight off the draft
     // manifest, so the id check alone would miss the actual disclosure.
     expect(text).not.toContain(SECRET);
@@ -230,7 +231,7 @@ describe("`POST /api/runs/remote` — the fourth execution door", () => {
         type: "agent",
         display_name: "Live",
         description: "d",
-        schemaVersion: "1.0",
+        schema_version: AFPS_SCHEMA_VERSION,
         dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
       },
       draftContent: "prompt",
@@ -256,11 +257,11 @@ describe("`POST /api/spaces/{id}/packages` — the activation door", () => {
 
   /**
    * The refusal, minus the two members that are per-request by construction
-   * (`instance` and `requestId` echo the request id). Everything else has to
+   * (`instance` and `request_id` echo the request id). Everything else has to
    * match byte for byte between the two calls, so it is all compared.
    */
   const problem = async (res: Response): Promise<Record<string, unknown>> => {
-    const { instance: _i, requestId: _r, ...body } = (await res.json()) as Record<string, unknown>;
+    const { instance: _i, request_id: _r, ...body } = (await res.json()) as Record<string, unknown>;
     return { status: res.status, ...body };
   };
 

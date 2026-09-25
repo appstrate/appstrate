@@ -4,11 +4,12 @@ import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 import { loadSystemRegistry } from "../lib/system-registry.ts";
-import { modelCostSchema } from "@appstrate/core/module";
+import { modelCostSchema, modelInputModalitySchema } from "@appstrate/core/module";
 import { checkAliasInvariants } from "@appstrate/core/model-swap";
 import type { ModelMetadata } from "@appstrate/shared-types";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { getModelProvider } from "./model-providers/registry.ts";
+import { lookupCatalogModel, restrictsToOffer } from "./model-catalog.ts";
 
 // --- Types ---
 
@@ -33,10 +34,9 @@ interface SystemModelProviderCredentialDefinition {
 export interface ModelDefinition extends ModelMetadata {
   id: string;
   /**
-   * Optional. The resolver in `org-models.ts` falls back to the vendored
-   * pricing catalog (`<catalogProviderId ?? providerId>.label`) at read time
-   * when this is unset — keeps env entries minimal and lets catalog refreshes
-   * propagate.
+   * Optional. The resolver in `org-models.ts` falls back to the catalog
+   * label at read time when this is unset — keeps env entries minimal and
+   * lets a Pi registry bump propagate.
    */
   label?: string;
   /** Registered ModelProviderDefinition id — propagated from the parent system key. */
@@ -75,9 +75,9 @@ let systemModels: Map<string, ModelDefinition> | null = null;
 const rawModelSchema = z.object({
   id: z.string().optional(),
   modelId: z.string().min(1),
-  /** Optional — falls back to the vendored catalog label at resolve time. */
+  /** Optional — falls back to the catalog label at resolve time. */
   label: z.string().min(1).optional(),
-  input: z.array(z.string()).nullable().optional(),
+  input: z.array(modelInputModalitySchema).nullable().optional(),
   contextWindow: z.number().positive().nullable().optional(),
   maxTokens: z.number().positive().nullable().optional(),
   reasoning: z.boolean().nullable().optional(),
@@ -187,18 +187,19 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
       }
 
       // ENFORCED INVARIANT: SYSTEM_PROVIDER_KEYS entries are static API keys.
-      // An OAuth provider's token must never be configured here — a system
-      // model carries no `credentialId`, so the raw subscription token would
-      // bypass the sidecar bearer-swap and land in MODEL_API_KEY inside the
-      // agent container. Declared-but-invalid = boot crash (throw, not skip):
+      // A system key is shared by every organization on the instance, while a
+      // subscription token is per-user/org and never pooled across tenants
+      // (docs/architecture/SUBSCRIPTION_COMPLIANCE.md). It also has no stored
+      // credential row, which the sidecar's OAuth delivery refreshes the token
+      // from. Declared-but-invalid = boot crash (throw, not skip):
       // silently dropping the entry would leave the operator believing the
       // model exists while runs mysteriously fall through the cascade.
       if (provider.authMode === "oauth2") {
         throw new Error(
           `[model-registry] SYSTEM_PROVIDER_KEYS entry "${validCredential.id}" binds providerId ` +
             `"${validCredential.providerId}", which declares authMode "oauth2". OAuth ` +
-            `subscription tokens cannot be configured as static system API keys — the token ` +
-            `would leak into agent containers. Store it as an org model provider credential ` +
+            `subscription tokens cannot be configured as static system API keys — a system key ` +
+            `is shared by every organization, a subscription is not. Store it as an org model provider credential ` +
             `instead and remove this entry from SYSTEM_PROVIDER_KEYS.`,
         );
       }
@@ -231,6 +232,14 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
             continue;
           }
           const validM = mResult.data;
+          if (restrictsToOffer(provider) && !lookupCatalogModel(provider, validM.modelId)) {
+            throw new Error(
+              `[model-registry] SYSTEM_PROVIDER_KEYS entry "${validCredential.id}" declares model ` +
+                `${JSON.stringify(validM.modelId)}, which provider ` +
+                `${JSON.stringify(validCredential.providerId)} does not offer. Remove it or ` +
+                `pick an offered model id.`,
+            );
+          }
 
           // Model-alias guards (issue #727, Threat A) — same invariants the
           // POST /api/models route enforces for DB models. A misconfigured
@@ -238,11 +247,10 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
           // (loud) instead of registering a half-working alias.
           if (validM.aliased === true) {
             // SYSTEM_PROVIDER_KEYS entries are static API keys — ENFORCED by
-            // the authMode !== "oauth2" boot check above, so the
-            // oauth_provider violation is unreachable here.
+            // the authMode boot check above — so only `missing_label` is
+            // reachable here.
             const violation = checkAliasInvariants({
               label: validM.label,
-              apiShape,
               authMode: "api_key",
             });
             if (violation === "missing_label") {
@@ -252,20 +260,13 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
               );
               continue;
             }
-            if (violation === "non_aliasable_shape") {
-              logger.error(
-                "[model-registry] SYSTEM_PROVIDER_KEYS: skipping aliased model — protocol carries the model id in the URL, not the body, so the swap can't hide it",
-                { modelProviderCredentialId: validCredential.id, apiShape, model: m },
-              );
-              continue;
-            }
           }
 
           const modelId = validM.id ?? `${validCredential.id}:${validM.modelId}`;
           mdlMap.set(modelId, {
             id: modelId,
             // Pass through env-supplied label; read path falls back to the
-            // vendored catalog (`<catalogProviderId ?? providerId>.label`).
+            // catalog label.
             ...(validM.label ? { label: validM.label } : {}),
             providerId: validCredential.providerId,
             apiShape,

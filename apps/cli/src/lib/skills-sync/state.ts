@@ -6,6 +6,7 @@
  * of its contents. A file that does not validate claims nothing, never throws.
  */
 
+import { isValidSkillName } from "@appstrate/afps-shared/companion-files";
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
@@ -23,7 +24,10 @@ export interface ManagedSkill {
   packageId: string;
   /** Resolved version label — semver for `published`, `"draft"` for `draft`. */
   version: string;
-  /** SRI digest, or for a draft the files-index ETag folded with `lock_version`. */
+  /**
+   * SRI digest — of the artifact, or of an agent command's generated tree —
+   * or for a draft skill its ETag folded with the files-index ETag.
+   */
   integrity: string;
 }
 
@@ -127,7 +131,10 @@ function isTargetState(value: unknown): value is TargetState {
   if (!isNonEmptyString(value.root)) return false;
   if (!isContext(value.context)) return false;
   if (!isRecord(value.managed)) return false;
-  return Object.values(value.managed).every(isManagedSkill);
+  // A key becomes a directory name, a removal path and a frontmatter `name`.
+  return Object.entries(value.managed).every(
+    ([slug, skill]) => isValidSkillName(slug) && isManagedSkill(skill),
+  );
 }
 
 function isSyncState(value: unknown): value is SyncState {

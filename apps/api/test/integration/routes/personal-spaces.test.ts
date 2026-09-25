@@ -488,7 +488,7 @@ describe("personal spaces — nobody else reaches one", () => {
       body: JSON.stringify({
         email: "outsider@test.com",
         role: "guest",
-        space_assignments: [{ space_id: personalId, preset_role: "operator" }],
+        space_assignments: [{ spaceId: personalId, preset_role: "operator" }],
       }),
     });
     await expectProblem(res, 400, { param: "space_assignments" });
@@ -1338,7 +1338,7 @@ describe("personal spaces — offboarding", () => {
     expect(res.status, await res.clone().text()).toBe(200);
     expect(await res.json()).toEqual({
       object: "space_sweep",
-      space_id: personalId,
+      spaceId: personalId,
       rehomed_packages: 0,
       deleted_packages: 0,
     });

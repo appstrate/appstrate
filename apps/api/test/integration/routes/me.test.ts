@@ -35,6 +35,7 @@ async function seedConnectionFor(opts: {
   userId: string;
   label?: string;
   sharedWithOrg?: boolean;
+  identityClaims?: Record<string, unknown>;
 }): Promise<string> {
   await seedPackage({
     id: opts.integrationId,
@@ -54,6 +55,7 @@ async function seedConnectionFor(opts: {
       scopesGranted: ["openid", "email"],
       label: opts.label ?? null,
       sharedWithOrg: opts.sharedWithOrg ?? false,
+      ...(opts.identityClaims ? { identityClaims: opts.identityClaims } : {}),
     })
     .returning({ id: integrationConnections.id });
   return row!.id;
@@ -231,7 +233,7 @@ describe("Me API (/api/me)", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
         agents: {
-          package_id: string;
+          packageId: string;
           display_name: string;
           takes_input: boolean;
           published: boolean;
@@ -240,11 +242,11 @@ describe("Me API (/api/me)", () => {
         agents_total: number;
       };
 
-      const ids = new Set(body.agents.map((a) => a.package_id));
+      const ids = new Set(body.agents.map((a) => a.packageId));
       expect(ids.has("@ctx/triage")).toBe(true);
       expect(ids.has("@ctx/disabled")).toBe(false);
       expect(ids.has("@ctx/uninstalled")).toBe(false);
-      const triage = body.agents.find((a) => a.package_id === "@ctx/triage");
+      const triage = body.agents.find((a) => a.packageId === "@ctx/triage");
       expect(triage?.display_name).toBe("Triage");
       expect(triage?.takes_input).toBe(true);
       // No `latest` dist-tag was seeded → draft-only agent → must run with version=draft.
@@ -289,16 +291,16 @@ describe("Me API (/api/me)", () => {
       const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        skills: { package_id: string; display_name: string; version: string | null }[];
+        skills: { packageId: string; display_name: string; version: string | null }[];
         skills_truncated: boolean;
         skills_total: number;
       };
 
-      const ids = new Set(body.skills.map((s) => s.package_id));
+      const ids = new Set(body.skills.map((s) => s.packageId));
       expect(ids.has("@ctx/web-research")).toBe(true);
       expect(ids.has("@ctx/skill-disabled")).toBe(false);
       expect(ids.has("@ctx/skill-uninstalled")).toBe(false);
-      const skill = body.skills.find((s) => s.package_id === "@ctx/web-research");
+      const skill = body.skills.find((s) => s.packageId === "@ctx/web-research");
       expect(skill?.display_name).toBe("Web Research");
       expect(skill?.version).toBe("1.2.0");
       expect(body.skills_truncated).toBe(false);
@@ -340,6 +342,36 @@ describe("Me API (/api/me)", () => {
       expect(group?.kind).toBe("integration");
       expect(group?.total_connections).toBe(1);
       expect(group?.connections[0]?.kind).toBe("integration");
+    });
+
+    // Claim keys are snake_case (AFPS identity keys): `account_email` wins
+    // over `email`, and a camelCase `accountEmail` is not an identity key.
+    it("derives identity from the snake_case account_email claim only", async () => {
+      const ctx = await createTestContext({ orgSlug: "ident-org" });
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@conn/snake",
+        userId: ctx.user.id,
+        identityClaims: { account_email: "ada@example.com", email: "other@example.com" },
+      });
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@conn/camel",
+        userId: ctx.user.id,
+        identityClaims: { accountEmail: "ada@example.com", email: "other@example.com" },
+      });
+
+      const res = await app.request("/api/me/connections", { headers: { Cookie: ctx.cookie } });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ source_id: string; connections: Array<{ identity: string }> }>;
+      };
+      const identityOf = (id: string) =>
+        body.data.find((g) => g.source_id === id)?.connections[0]?.identity;
+      expect(identityOf("@conn/snake")).toBe("ada@example.com");
+      expect(identityOf("@conn/camel")).toBe("other@example.com");
     });
 
     it("aggregates connections across multiple orgs the caller belongs to", async () => {
@@ -577,12 +609,13 @@ describe("Me API (/api/me)", () => {
         integrationId: "@crit03/conn-b",
         userId: user.id,
       });
-      // Key bound to org A's default space, created by the same user.
+      // Key bound to org A's default space, created by the same user, holding
+      // the scopes these routes are capped by: the binding is under test here.
       const apiKey = await seedApiKey({
         orgId: orgA.id,
         spaceId: spaceA,
         createdBy: user.id,
-        scopes: [],
+        scopes: ["integrations:read", "integrations:disconnect"],
       });
       return { user, orgA, orgB, connA, connB, bearer: `Bearer ${apiKey.rawKey}` };
     }
@@ -650,6 +683,108 @@ describe("Me API (/api/me)", () => {
         .from(integrationConnections)
         .where(eq(integrationConnections.id, connA));
       expect(after).toHaveLength(0);
+    });
+  });
+  describe("/api/me/connections under the credential ceiling", () => {
+    // Ownership authorizes these routes, so a role grant is never asked; a
+    // delegated credential is still held to its own scopes (RBAC spec §7.1).
+    async function setup(scopes: string[]) {
+      const ctx = await createTestContext({ orgSlug: "ceiling-org" });
+      const connectionId = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@ceiling/conn",
+        userId: ctx.user.id,
+      });
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes,
+      });
+      return { ctx, connectionId, bearer: `Bearer ${apiKey.rawKey}` };
+    }
+
+    function deleteConnection(connectionId: string, headers: Record<string, string>) {
+      return app.request(`/api/me/connections/${connectionId}`, { method: "DELETE", headers });
+    }
+
+    async function listedIds(headers: Record<string, string>): Promise<string[]> {
+      const res = await app.request("/api/me/connections", { headers });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ connections: Array<{ connection_id: string }> }>;
+      };
+      return body.data.flatMap((g) => g.connections.map((c) => c.connection_id));
+    }
+
+    async function connectionExists(connectionId: string): Promise<boolean> {
+      const rows = await db
+        .select({ id: integrationConnections.id })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connectionId));
+      return rows.length === 1;
+    }
+
+    it("DELETE: a key without integrations:disconnect is refused, the row kept", async () => {
+      const { connectionId, bearer } = await setup(["integrations:read", "integrations:connect"]);
+      const res = await deleteConnection(connectionId, { Authorization: bearer });
+      expect(res.status).toBe(403);
+      expect(await connectionExists(connectionId)).toBe(true);
+    });
+
+    it("DELETE: a key with integrations:disconnect deletes the row", async () => {
+      const { connectionId, bearer } = await setup(["integrations:disconnect"]);
+      const res = await deleteConnection(connectionId, { Authorization: bearer });
+      expect(res.status).toBe(204);
+      expect(await connectionExists(connectionId)).toBe(false);
+    });
+
+    it("DELETE: a cookie session, which carries no ceiling, deletes the row", async () => {
+      const { ctx, connectionId } = await setup([]);
+      const res = await deleteConnection(connectionId, { Cookie: ctx.cookie });
+      expect(res.status).toBe(204);
+      expect(await connectionExists(connectionId)).toBe(false);
+    });
+
+    it("GET: a key without integrations:read is refused", async () => {
+      const { bearer } = await setup(["integrations:connect", "integrations:disconnect"]);
+      const res = await app.request("/api/me/connections", { headers: { Authorization: bearer } });
+      expect(res.status).toBe(403);
+    });
+
+    it("GET: a key with integrations:read lists the connection", async () => {
+      const { connectionId, bearer } = await setup(["integrations:read"]);
+      expect(await listedIds({ Authorization: bearer })).toEqual([connectionId]);
+    });
+
+    it("GET: a cookie session, which carries no ceiling, lists the connection", async () => {
+      const { ctx, connectionId } = await setup([]);
+      expect(await listedIds({ Cookie: ctx.cookie })).toEqual([connectionId]);
+    });
+
+    // The handoff decrypts the credential to derive removal steps, and serves
+    // only the DELETE above, so it carries the DELETE's cap.
+    async function handoffStatus(connectionId: string, headers: Record<string, string>) {
+      const res = await app.request(`/api/me/connections/${connectionId}/handoff`, { headers });
+      return res.status;
+    }
+
+    it("handoff: a key without integrations:disconnect is refused", async () => {
+      const { connectionId, bearer } = await setup(["integrations:read", "integrations:connect"]);
+      expect(await handoffStatus(connectionId, { Authorization: bearer })).toBe(403);
+    });
+
+    it("handoff: a key with integrations:disconnect is served", async () => {
+      const { connectionId, bearer } = await setup(["integrations:disconnect"]);
+      expect(await handoffStatus(connectionId, { Authorization: bearer })).toBe(200);
+    });
+
+    it("handoff: a cookie session, which carries no ceiling, is served", async () => {
+      const { ctx, connectionId } = await setup([]);
+      // Unlike the list and the DELETE, this route runs under org context.
+      const headers = { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId };
+      expect(await handoffStatus(connectionId, headers)).toBe(200);
     });
   });
 });

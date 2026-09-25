@@ -137,7 +137,7 @@ appstrate api GET /api/runs/run_xyz/events \
 
 ```sh
 appstrate openapi show rotateApiKey --json     # confirm the endpoint shape
-appstrate api POST /api/api-keys/ask_xyz/rotate
+appstrate api POST /api/api-keys/<key-id>/rotate
 ```
 
 ## Escalation

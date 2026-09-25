@@ -38,7 +38,6 @@ import * as path from "node:path";
 import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
   prepareBundleForPi,
-  buildRuntimeToolExtensions,
   buildPublishFileExtension,
   emitRuntimeReady,
   emitBootProgress,
@@ -58,11 +57,12 @@ import {
   buildPiModelFromEnv,
   parseRuntimeEnv,
   RuntimeEnvError,
-  scrubSinkEnv,
   HEARTBEAT_INTERVAL_MS,
   MCP_CONNECT_DEADLINE_MS,
 } from "./env.ts";
 import { createRuntimePiRunner } from "./pi-runner.ts";
+import { makeProcessNonDumpable } from "./non-dumpable.ts";
+import { receiveSecrets } from "@appstrate/runner-pi/secret-env";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 import {
   createRuntimeEventDrainer,
@@ -72,21 +72,18 @@ import {
 import { provisionWorkspace, provisionFiles, type ProvisionDeps } from "./provision.ts";
 import { createRunFileUploader, sweepOutputs, summarizeArtifacts } from "./publish.ts";
 import type { SweepResult } from "./publish.ts";
+import { formatLogLine } from "@appstrate/core/log-line";
 
 /**
- * One pino-shaped JSON line on stdout — the shape every structured diagnostic
- * in this file already uses (`{"level":…,"event":…,…}`). Factored out so a new
- * caller cannot invent a second shape.
+ * The entrypoint's structured diagnostics, on stdout in the shared pino shape.
  *
  * Reach: the platform ring-buffers container stdout but only emits it when the
  * container exits NON-ZERO (`run-launcher/pi.ts`), so on a successful run this
- * line lives in the docker/Firecracker log only — same as the pre-existing
- * `mcp_connect_retry` line. Enough for an operator reading container logs; it
- * is NOT the run's audit trail. The queryable record of a pricing gap is
- * `llm_usage.pricing_status`, written server-side.
+ * line lives in the docker/Firecracker log only: not an audit trail (a pricing
+ * gap's record is `llm_usage.pricing_status`).
  */
-function logLine(level: "warn" | "error", event: string, data?: Record<string, unknown>): void {
-  process.stdout.write(`${JSON.stringify({ level, event, ...(data ?? {}) })}\n`);
+function logLine(level: "warn" | "error", msg: string, data?: Record<string, unknown>): void {
+  process.stdout.write(formatLogLine(level, msg, data));
 }
 
 /**
@@ -113,16 +110,31 @@ function lastResortStderr(exitCode: number | null, reason: string, cause?: unkno
   }
 }
 
+// --- Process hardening (before anything else) ---
+// Before the secrets are read from stdin: this process holds them in memory,
+// and the agent's tools run as its uid. See `non-dumpable.ts`. No agent without it.
+// Its working directory is the read-only code directory, never the workspace:
+// the Pi SDK resolves some module paths against it (its image-resize worker).
+// Pi and its tools get the workspace explicitly (`cwd: WORKSPACE`).
+process.chdir(import.meta.dir);
+try {
+  makeProcessNonDumpable();
+} catch (err) {
+  lastResortStderr(1, "could not make the runtime process non-dumpable", err);
+  process.exit(1);
+}
+
 // --- 0. Env validation + sink bootstrap ---
 // Every runtime-pi invocation MUST come from a platform run that has
 // already minted sink credentials + inserted a pending run row. We
 // validate the full env contract once, fail-fast with a structured
 // list of issues (better DX than first-failure), and bail out before
-// touching any heavy module.
+// touching any heavy module. The run-scoped secrets are not in this
+// process's environment: its starter hands them over on stdin (`launcher.ts`).
 
 let env: ReturnType<typeof parseRuntimeEnv>;
 try {
-  env = parseRuntimeEnv(process.env);
+  env = parseRuntimeEnv(receiveSecrets(await Bun.stdin.text(), process.env));
 } catch (err) {
   // Before the sink is live, stderr is the only channel — the platform's
   // container monitor will synthesise a `failed` finalize from the exit
@@ -145,11 +157,6 @@ try {
 for (const warning of env.warnings) {
   logLine("warn", "runtime_env_warning", { warning });
 }
-
-// Zero-knowledge, part 1 (part 2 is `delete process.env.SIDECAR_URL` below):
-// the sink URL/secret are now captured in `env.sink`, so drop them from the
-// environment before any agent-controlled code can run. See `scrubSinkEnv`.
-scrubSinkEnv();
 
 const AGENT_RUN_ID = env.runId;
 
@@ -235,10 +242,7 @@ async function emitError(message: string, data?: Record<string, unknown>): Promi
 async function die(message: string, data?: Record<string, unknown>): Promise<never> {
   await emitError(message, data);
   try {
-    const failureResult = emptyRunResult();
-    failureResult.error = { message };
-    failureResult.status = "failed";
-    await sink.finalize(failureResult);
+    await sink.finalize({ ...emptyRunResult(), status: "failed", error: { message } });
   } catch (finalizeErr) {
     // fall through — server-side synthesis covers us, but leave a trace.
     lastResortStderr(1, `failed-finalize POST failed — dying on: ${message}`, finalizeErr);
@@ -477,8 +481,8 @@ phaseTimings.bundlePrepareMs = Math.round(performance.now() - bundlePrepareStart
 await progress("bundle loaded", { bundlePrepareMs: phaseTimings.bundlePrepareMs });
 
 // The agent's selected runtime tools (`manifest.runtime_tools`), read once from
-// the root package manifest. Reused by the no-sidecar extension registration,
-// the `publish_file` gate, and the PiRunner's terminal-tool decision.
+// the root package manifest. Reused by the `publish_file` gate and the
+// PiRunner's terminal-tool decision.
 //
 // Canonicalized here too. The platform already strips ids it cannot build
 // from the bundle (`buildAgentPackage`), so this is a second line of defence
@@ -506,188 +510,135 @@ const declaredRuntimeTools: string[] = canonicalizeRuntimeToolIds(
 // in 2d below.
 
 const sidecarUrl = env.sidecarUrl;
-// Non-null wherever `sidecarUrl` is: `parseRuntimeEnv` makes a sidecar-backed
-// run without it a FATAL env issue, so the branches below that use both are
-// reached only when both were supplied.
-const sidecarAuthToken = env.sidecarAuthToken ?? "";
+const sidecarAuthToken = env.sidecarAuthToken;
 
 // Shared runtime-event drainer (one per run, in-memory cursor). The sidecar
 // executes each runtime tool ONCE and journals its canonical events; the Pi
 // runner drains this on its single sink after each forwarded tool call, plus
 // a retrying final drain. One instance so the cursor stays consistent across
-// intermediate + final drains. Undefined when no sidecar is attached (no
-// journal to drain — the in-process Pi extension path emits its own events).
-const runtimeDrainer: RuntimeEventDrainer | undefined = sidecarUrl
-  ? createRuntimeEventDrainer({
-      url: `${sidecarUrl.replace(/\/$/, "")}/runtime-events`,
-      headers: { Host: "sidecar", [SIDECAR_AUTH_HEADER]: sidecarAuthToken },
-      logger: {
-        warn: (msg, data) => logLine("warn", msg, data),
-        error: (msg, data) => logLine("error", msg, data),
+// intermediate + final drains.
+const runtimeDrainer: RuntimeEventDrainer = createRuntimeEventDrainer({
+  url: `${sidecarUrl.replace(/\/$/, "")}/runtime-events`,
+  headers: { Host: "sidecar", [SIDECAR_AUTH_HEADER]: sidecarAuthToken },
+  logger: {
+    warn: (msg, data) => logLine("warn", msg, data),
+    error: (msg, data) => logLine("error", msg, data),
+  },
+});
+
+let mcpClient: AppstrateMcpClient;
+await progress("connecting to sidecar");
+const mcpConnectStart = performance.now();
+try {
+  // Retry the initial MCP handshake — the platform now starts the agent
+  // in parallel with sidecar boot (issue #406), so the sidecar's /mcp
+  // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
+  // still wiring its listener and the Docker DNS alias is propagating.
+  // AWS-style full jitter (50ms → 1s) absorbs the race without
+  // pessimising the warm-path; the fixed 60s deadline covers worst-case
+  // cold container pulls (#406 acceptance criteria: 20–45s boots are
+  // routine). It is not operator-tunable — see `MCP_CONNECT_DEADLINE_MS`.
+  // The sidecar's /mcp endpoint gates inbound requests on the run's
+  // `SIDECAR_AUTH_HEADER` token (denied by default) plus the Host-header
+  // DNS-rebinding check (`validateMcpHostHeader`). The token is NOT the run
+  // token — that one never enters this container.
+  mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
+    clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
+    extraHeaders: { [SIDECAR_AUTH_HEADER]: sidecarAuthToken },
+    // #779 annex — operator-tunable per-call tool timeout (absent →
+    // SDK default). The same `APPSTRATE_MCP_TOOL_TIMEOUT_MS` knob is
+    // honoured sidecar-side, so both legs of an integration tool call
+    // share one budget.
+    ...(env.mcpToolTimeoutMs !== undefined ? { defaultTimeoutMs: env.mcpToolTimeoutMs } : {}),
+    retry: {
+      deadlineMs: MCP_CONNECT_DEADLINE_MS,
+      baseMs: 50,
+      capMs: 1_000,
+      onRetry: ({ url, attempt, delayMs, errorCode, error }) => {
+        logLine("warn", "mcp_connect_retry", {
+          url,
+          attempt,
+          delayMs,
+          errorCode: errorCode ?? null,
+          error: error instanceof Error ? error.message : String(error),
+        });
       },
-    })
-  : undefined;
-
-// When no sidecar is attached (no integrations + static API
-// key), the agent runs without MCP-backed tools. The platform wires
-// MODEL_BASE_URL directly to the upstream provider; the LLM only sees
-// the agent's bundle tools + runtime extensions.
-let mcpClient: AppstrateMcpClient | undefined;
-if (sidecarUrl) {
-  {
-    await progress("connecting to sidecar");
-    const mcpConnectStart = performance.now();
-    try {
-      // Retry the initial MCP handshake — the platform now starts the agent
-      // in parallel with sidecar boot (issue #406), so the sidecar's /mcp
-      // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
-      // still wiring its listener and the Docker DNS alias is propagating.
-      // AWS-style full jitter (50ms → 1s) absorbs the race without
-      // pessimising the warm-path; the fixed 60s deadline covers worst-case
-      // cold container pulls (#406 acceptance criteria: 20–45s boots are
-      // routine). It is not operator-tunable — see `MCP_CONNECT_DEADLINE_MS`.
-      // The sidecar's /mcp endpoint gates inbound requests on the run's
-      // `SIDECAR_AUTH_HEADER` token (denied by default) plus the Host-header
-      // DNS-rebinding check (`validateMcpHostHeader`). The token is NOT the run
-      // token — that one never enters this container.
-      mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
-        clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
-        extraHeaders: { [SIDECAR_AUTH_HEADER]: sidecarAuthToken },
-        // #779 annex — operator-tunable per-call tool timeout (absent →
-        // SDK default). The same `APPSTRATE_MCP_TOOL_TIMEOUT_MS` knob is
-        // honoured sidecar-side, so both legs of an integration tool call
-        // share one budget.
-        ...(env.mcpToolTimeoutMs !== undefined ? { defaultTimeoutMs: env.mcpToolTimeoutMs } : {}),
-        retry: {
-          deadlineMs: MCP_CONNECT_DEADLINE_MS,
-          baseMs: 50,
-          capMs: 1_000,
-          onRetry: ({ url, attempt, delayMs, errorCode, error }) => {
-            logLine("warn", "mcp_connect_retry", {
-              url,
-              attempt,
-              delayMs,
-              errorCode: errorCode ?? null,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          },
-        },
-      });
-    } catch (err) {
-      await emitError(`Failed to connect MCP client to sidecar: ${getErrorMessage(err)}`);
-      process.exit(1);
-    }
-
-    phaseTimings.mcpConnectMs = Math.round(performance.now() - mcpConnectStart);
-    await progress("MCP connected", { mcpConnectMs: phaseTimings.mcpConnectMs });
-
-    try {
-      // `buildMcpDirectFactories` registers `run_history` and
-      // `recall_memory`, plus one forwarding factory per namespaced
-      // integration tool (including the generic `{ns}__api_call`). Runtime
-      // tools (log/note/pin/output) are executed once by the sidecar and
-      // journaled; the drainer pulls them on the run sink after each forwarded
-      // call — never trusted from `_meta`.
-      //
-      // Pi drains each tool call inline in `execute()` right after `callTool`
-      // resolves — the sidecar appends the events synchronously inside the
-      // wrapped handler BEFORE responding, so the per-call drain always captures
-      // them in time (no "events land after the stream ends" gap to
-      // backstop). What the per-call drain CANNOT cover is a
-      // transient localhost failure of the LAST call's single best-effort drain
-      // (no subsequent call retries it). The retrying final drain for that case
-      // is injected via `piEventSink` (below): PiRunner owns its finalize, so a
-      // drain placed after `runner.run()` would be too late — wrapping the sink
-      // runs it BEFORE the stdout-bridge merges its aggregate into the POST.
-      const factories = await buildMcpDirectFactories({
-        mcp: mcpClient,
-        runId: AGENT_RUN_ID,
-        workspace: WORKSPACE,
-        ...(runtimeDrainer ? { drainer: runtimeDrainer } : {}),
-        emit: (event) => {
-          void bridgedSink.handle(event as RunEvent);
-        },
-      });
-      extensionFactories.push(...factories);
-    } catch (err) {
-      await emitError(`Failed to wire MCP-backed tools: ${getErrorMessage(err)}`);
-      process.exit(1);
-    }
-  } // end sidecar tool wiring
-
-  // --- 2c-bis. Integration boot gate + per-phase observability ---
-  // The sidecar booted each declared integration in parallel with this
-  // container. Fetch its authoritative boot report (uses the captured
-  // `sidecarUrl` const — the env var is deleted just below), relay every
-  // per-phase breadcrumb into the run log, and ABORT the run if any declared
-  // integration failed to start OR came up with nothing callable — the
-  // platform contract, every tier. A run that can't even confirm integration
-  // health aborts too.
-  const bootResult = await fetchIntegrationBootReport(sidecarUrl, sidecarAuthToken);
-  if ("error" in bootResult) {
-    await die(`Could not verify integration boot status: ${bootResult.error}`);
-  } else {
-    const bootReport = bootResult.report;
-    for (const crumb of bootReport.breadcrumbs) {
-      await emitBootProgress(bridgedSink, AGENT_RUN_ID!, crumb.message, {
-        level: crumb.level,
-        ...(crumb.data ? { data: crumb.data } : {}),
-      }).catch(() => {});
-    }
-    if (!bootReport.ok) {
-      const summary = bootReport.failed.map((f) => `${f.integrationId} (${f.error})`).join("; ");
-      await die(
-        `Integration boot failed — ${bootReport.failed.length} of ${bootReport.declared} ` +
-          `integration(s) did not start: ${summary}`,
-        { failed: bootReport.failed },
-      );
-    }
-  }
-
-  // --- 2d. Zero-knowledge enforcement ---
-  // The sidecar URL and the token that opens it are runtime implementation
-  // details. Now that the MCP client, the runtime-event drainer and the Pi
-  // model record each hold their own copy, remove BOTH env vars so the Pi bash
-  // extension cannot leak them via `echo $SIDECAR_URL` / `env | grep SIDECAR`.
-  //
-  // The token goes with the URL rather than surviving it, and that is the whole
-  // point: together they are the capability to spend the org's provider
-  // credential through `/llm/*`, and the agent loop runs model-chosen shell
-  // commands over attacker-influenced input. Nothing downstream in this process
-  // re-reads either from the environment — pi-ai reads `Model.headers` off the
-  // model object built above, not `process.env`.
-  delete process.env.SIDECAR_URL;
-  delete process.env.SIDECAR_AUTH_TOKEN;
-} else {
-  // No sidecar attached (skip-sidecar: no integrations + static API key).
-  // The platform runtime tools (output/log/note/pin) the agent
-  // selected are normally served by the sidecar over MCP; with no sidecar
-  // we register the SAME tool definitions (`@appstrate/core/runtime-tool-defs`)
-  // as Pi extensions in-process. Their canonical events are re-emitted into
-  // the run sink by the wrapper (default stdout-JSONL → the stdout bridge).
-  let outputSchema: Record<string, unknown> | null = null;
-  if (process.env.OUTPUT_SCHEMA) {
-    try {
-      outputSchema = JSON.parse(process.env.OUTPUT_SCHEMA) as Record<string, unknown>;
-    } catch {
-      outputSchema = null;
-    }
-  }
-  extensionFactories.push(
-    ...buildRuntimeToolExtensions({
-      ...(declaredRuntimeTools.length > 0 ? { runtimeTools: declaredRuntimeTools } : {}),
-      outputSchema,
-      emit: (event) => {
-        void bridgedSink.handle(event as RunEvent);
-      },
-    }),
-  );
+    },
+  });
+} catch (err) {
+  await emitError(`Failed to connect MCP client to sidecar: ${getErrorMessage(err)}`);
+  process.exit(1);
 }
 
-// --- 2e. publish_file runtime tool (opt-in via manifest.runtime_tools) ---
+phaseTimings.mcpConnectMs = Math.round(performance.now() - mcpConnectStart);
+await progress("MCP connected", { mcpConnectMs: phaseTimings.mcpConnectMs });
+
+try {
+  // `buildMcpDirectFactories` registers `run_history` and
+  // `recall_memory`, plus one forwarding factory per namespaced
+  // integration tool (including the generic `{ns}__api_call`). Runtime
+  // tools (log/note/pin/output) are executed once by the sidecar and
+  // journaled; the drainer pulls them on the run sink after each forwarded
+  // call — never trusted from `_meta`.
+  //
+  // Pi drains each tool call inline in `execute()` right after `callTool`
+  // resolves — the sidecar appends the events synchronously inside the
+  // wrapped handler BEFORE responding, so the per-call drain always captures
+  // them in time (no "events land after the stream ends" gap to
+  // backstop). What the per-call drain CANNOT cover is a
+  // transient localhost failure of the LAST call's single best-effort drain
+  // (no subsequent call retries it). The retrying final drain for that case
+  // is injected via `piEventSink` (below): PiRunner owns its finalize, so a
+  // drain placed after `runner.run()` would be too late — wrapping the sink
+  // runs it BEFORE the stdout-bridge merges its aggregate into the POST.
+  const factories = await buildMcpDirectFactories({
+    mcp: mcpClient,
+    runId: AGENT_RUN_ID,
+    workspace: WORKSPACE,
+    drainer: runtimeDrainer,
+    emit: (event) => {
+      void bridgedSink.handle(event as RunEvent);
+    },
+  });
+  extensionFactories.push(...factories);
+} catch (err) {
+  await emitError(`Failed to wire MCP-backed tools: ${getErrorMessage(err)}`);
+  process.exit(1);
+}
+
+// --- 2c-bis. Integration boot gate + per-phase observability ---
+// The sidecar booted each declared integration in parallel with this
+// container. Fetch its authoritative boot report (uses the captured
+// `sidecarUrl` const — never in this process's environment), relay every
+// per-phase breadcrumb into the run log, and ABORT the run if any declared
+// integration failed to start OR came up with nothing callable — the
+// platform contract, every tier. A run that can't even confirm integration
+// health aborts too.
+const bootResult = await fetchIntegrationBootReport(sidecarUrl, sidecarAuthToken);
+if ("error" in bootResult) {
+  await die(`Could not verify integration boot status: ${bootResult.error}`);
+} else {
+  const bootReport = bootResult.report;
+  for (const crumb of bootReport.breadcrumbs) {
+    await emitBootProgress(bridgedSink, AGENT_RUN_ID!, crumb.message, {
+      level: crumb.level,
+      ...(crumb.data ? { data: crumb.data } : {}),
+    }).catch(() => {});
+  }
+  if (!bootReport.ok) {
+    const summary = bootReport.failed.map((f) => `${f.integrationId} (${f.error})`).join("; ");
+    await die(
+      `Integration boot failed — ${bootReport.failed.length} of ${bootReport.declared} ` +
+        `integration(s) did not start: ${summary}`,
+      { failed: bootReport.failed },
+    );
+  }
+}
+
+// --- 2d. publish_file runtime tool (opt-in via manifest.runtime_tools) ---
 // Unlike the four pure event-emitter runtime tools (served by the sidecar over
-// MCP, or registered in-process on the no-sidecar path), `publish_file`
-// performs an HTTP upload back to the platform — so it is ALWAYS registered
+// MCP), `publish_file` performs an HTTP upload back to the platform — so it is
+// ALWAYS registered
 // in-process here (the sidecar has no path to the files route), gated on
 // the agent selecting it. It carries the run's HMAC signer via the injected
 // `uploadRunFile`; its `file.published` event rides the bridged sink.
@@ -800,7 +751,6 @@ function buildPiRunner(): PiRunner {
   // so a bundle-defined tool that happens to be named `output` (no
   // `runtime_tools` opt-in) keeps the SDK's natural stop.
   return createRuntimePiRunner({
-    sidecarUrl,
     model,
     // No rates reached this container (unpriced model, or a withheld alias
     // rate card). Report no cost rather than a placeholder $0.
@@ -814,6 +764,11 @@ function buildPiRunner(): PiRunner {
     extensionFactories,
     authStoragePath: "/tmp/pi-auth/auth.json",
     ...(declaredRuntimeTools.includes("output") ? { terminalTools: ["output"] } : {}),
+    modelRetry: env.modelRetry,
+    modelCompaction: env.modelCompaction,
+    ...(env.toolResultByteLimit !== undefined
+      ? { toolResultByteLimit: env.toolResultByteLimit }
+      : {}),
   });
 }
 
@@ -870,7 +825,7 @@ async function runOutputsSweep(): Promise<SweepResult | null> {
 }
 
 // Pi-path finalize wrapper. Two things must happen before the finalize POST:
-//   1. Final runtime-event drain (sidecar path only) — Pi drains each tool call
+//   1. Final runtime-event drain — Pi drains each tool call
 //      inline (see the factories block above), but the LAST call's single
 //      best-effort drain has no subsequent call to retry a transient localhost
 //      failure, so we drain-until-empty + bounded retry through the SAME bridged
@@ -882,15 +837,13 @@ async function runOutputsSweep(): Promise<SweepResult | null> {
 const piEventSink: typeof bridgedSink = {
   handle: (event) => bridgedSink.handle(event),
   finalize: async (result) => {
-    if (runtimeDrainer) {
-      await drainAndEmitInto({
-        drainer: runtimeDrainer,
-        emit: (e) => bridgedSink.handle(e as RunEvent),
-        now: Date.now,
-        runId: AGENT_RUN_ID!,
-        final: true,
-      });
-    }
+    await drainAndEmitInto({
+      drainer: runtimeDrainer,
+      emit: (e) => bridgedSink.handle(e as RunEvent),
+      now: Date.now,
+      runId: AGENT_RUN_ID!,
+      final: true,
+    });
     const sweep = await runOutputsSweep();
     // Stamp the terminal artifacts summary onto the finalize payload so the
     // platform persists it on the run row and can surface a "partial
@@ -924,11 +877,11 @@ try {
     signal: runAbort.signal,
   });
   heartbeat.stop();
-  await mcpClient?.close().catch(() => {});
+  await mcpClient.close().catch(() => {});
   process.exit(0);
 } catch (err) {
   heartbeat.stop();
-  await mcpClient?.close().catch(() => {});
+  await mcpClient.close().catch(() => {});
 
   // External abort (SIGTERM/SIGINT = platform timeout safety-net or a user
   // cancel). The runner already honours this by rethrowing WITHOUT finalizing
@@ -946,11 +899,12 @@ try {
   const message = getErrorMessage(err);
   await emitError(message);
   try {
-    const failureResult = emptyRunResult();
-    failureResult.error = { message, stack: err instanceof Error ? err.stack : undefined };
-    failureResult.status = "failed";
-    failureResult.durationMs = Date.now() - startTime;
-    await sink.finalize(failureResult);
+    await sink.finalize({
+      ...emptyRunResult(),
+      status: "failed",
+      error: { message, stack: err instanceof Error ? err.stack : undefined },
+      durationMs: Date.now() - startTime,
+    });
   } catch (finalizeErr) {
     // swallow — container exit code + server-side synthesis cover us,
     // but leave a last-resort trace for the serial console.

@@ -10,9 +10,8 @@
  * `@appstrate/core/runtime-tool-defs` so the credential-isolating sidecar
  * can serve the SAME definitions as MCP tools without pulling the Pi SDK.
  * This wrapper is the second consumer: it registers each definition as a Pi
- * tool for the **no-sidecar execution path** — the platform skip-sidecar
- * branch (`runtime-pi/entrypoint.ts`) and the public `appstrate run` CLI,
- * neither of which has a sidecar to host the MCP surface.
+ * tool for the public `appstrate run` CLI, which has no sidecar to host the
+ * MCP surface.
  *
  * Event delivery mirrors the MCP path: the tool handler returns its
  * canonical events under the `_meta` key; this wrapper re-emits them into
@@ -42,7 +41,7 @@ export interface BuildRuntimeToolExtensionsOptions {
   /**
    * Sink for the canonical events each tool call produces. Defaults to the
    * stdout-JSONL emitter (`{...event, timestamp, runId}\n`) harvested by
-   * `attachStdoutBridge`, so no-sidecar callers need no extra wiring.
+   * `attachStdoutBridge`, so CLI callers need no extra wiring.
    */
   emit?: (event: RuntimeToolEvent) => void;
 }

@@ -22,14 +22,14 @@ describe("togglePinned", () => {
 
 describe("skillPickerRows", () => {
   const tone = {
-    package_id: "@acme/tone",
+    packageId: "@acme/tone",
     display_name: "Tone",
     description: null,
     version: "1.0.0",
   };
 
   it("lists the catalogue as available rows, in its order", () => {
-    const pdf = { ...tone, package_id: "@acme/pdf" };
+    const pdf = { ...tone, packageId: "@acme/pdf" };
     expect(skillPickerRows([tone, pdf], ["@acme/pdf"])).toEqual([
       { skill: tone, available: true },
       { skill: pdf, available: true },
@@ -39,14 +39,14 @@ describe("skillPickerRows", () => {
   it("appends every pin the catalogue no longer lists, so it can be unpinned", () => {
     expect(skillPickerRows([tone], ["@acme/gone", "@acme/tone", "@z/deleted"])).toEqual([
       { skill: tone, available: true },
-      { skill: { package_id: "@acme/gone" }, available: false },
-      { skill: { package_id: "@z/deleted" }, available: false },
+      { skill: { packageId: "@acme/gone" }, available: false },
+      { skill: { packageId: "@z/deleted" }, available: false },
     ]);
   });
 
   it("still lists dead pins when the catalogue is empty", () => {
     expect(skillPickerRows([], ["@acme/gone"])).toEqual([
-      { skill: { package_id: "@acme/gone" }, available: false },
+      { skill: { packageId: "@acme/gone" }, available: false },
     ]);
   });
 

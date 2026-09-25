@@ -14,7 +14,13 @@
 
 import { z } from "zod";
 import type { OpenApiSchemaEntry } from "@appstrate/core/module";
-import { LLM_PROXY_ROUTES, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
+import {
+  LLM_PROXY_MOUNT,
+  LLM_PROXY_ROUTES,
+  RUN_LLM_PROXY_MOUNT,
+  llmProxyUrlPath,
+  type ProxiedApiShape,
+} from "@appstrate/runner-pi";
 
 // --- End-User schemas (routes/end-users.ts) ---
 import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts";
@@ -42,9 +48,6 @@ import {
 
 // --- Org settings schema (services/organizations.ts) ---
 import { orgSettingsPatchSchema } from "../services/organizations.ts";
-
-// --- User-agent schemas (routes/user-agents.ts) ---
-import { updateSkillsSchema } from "../routes/user-agents.ts";
 
 // --- Welcome schemas (routes/welcome.ts) ---
 import { welcomeSetupSchema } from "../routes/welcome.ts";
@@ -175,7 +178,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Create model",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/models/{id}",
     jsonSchema: toJsonSchema(updateModelSchema),
     description: "Update model",
@@ -243,7 +246,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Create an agent schedule",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/schedules/{id}",
     jsonSchema: toJsonSchema(updateScheduleSchema),
     description: "Update a schedule",
@@ -273,7 +276,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Create organization",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/orgs/{orgId}",
     jsonSchema: toJsonSchema(updateOrgSchema),
     description: "Update organization",
@@ -291,24 +294,16 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Update member role",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/orgs/{orgId}/invitations/{invitationId}",
     jsonSchema: toJsonSchema(updateInvitationSchema),
     description: "Update invitation role and space assignments",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/orgs/{orgId}/settings",
     jsonSchema: toJsonSchema(orgSettingsPatchSchema),
     description: "Update org settings",
-  },
-
-  // ─── User-Agent config (skills/tools) ───────────────────────────────────
-  {
-    method: "PUT",
-    path: "/api/agents/{scope}/{name}/skills",
-    jsonSchema: toJsonSchema(updateSkillsSchema),
-    description: "Update agent skills",
   },
 
   // ─── Welcome ────────────────────────────────────────────────────────────
@@ -327,7 +322,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Create proxy",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/proxies/{id}",
     jsonSchema: toJsonSchema(updateProxySchema),
     description: "Update proxy",
@@ -347,7 +342,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Set agent proxy",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/agents/{scope}/{name}/model",
     jsonSchema: toJsonSchema(modelIdSchema),
     description: "Set agent model",
@@ -367,7 +362,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Create model provider credential",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/model-provider-credentials/{id}",
     jsonSchema: toJsonSchema(updateModelProviderCredentialSchema),
     description: "Update model provider credential",
@@ -454,7 +449,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Activate a package in a space",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/spaces/{spaceId}/packages/{scope}/{name}",
     jsonSchema: toJsonSchema(updatePackageSchema),
     description: "Configure a space package",
@@ -490,25 +485,25 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Create a draft skill package",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/packages/agents/{scope}/{name}",
     jsonSchema: toJsonSchema(packageJsonUpdateSchema),
     description: "Update a draft agent package",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/packages/integrations/{scope}/{name}",
     jsonSchema: toJsonSchema(packageJsonUpdateSchema),
     description: "Update a draft integration package",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/packages/mcp-servers/{scope}/{name}",
     jsonSchema: toJsonSchema(packageJsonUpdateSchema),
     description: "Update a draft mcp-server package",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/packages/skills/{scope}/{name}",
     jsonSchema: toJsonSchema(packageJsonUpdateSchema),
     description: "Update a draft skill package",
@@ -693,11 +688,10 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
     "wire-shape guard only; manifest/prompt are z.unknown() and validated by the run preflight",
   "POST /api/runs/inline/validate":
     "wire-shape guard only; manifest/prompt are z.unknown() and validated by the run preflight",
-  // The finalize body is deliberately permissive: it reports the outcome of an
-  // already-completed run, so a malformed field must degrade to absent rather
-  // than 400 a run that has no way to retry. See routes/runs-events.ts.
+  // The finalize body (conditional `usage`, `.catch`-degrading fields) is not a
+  // comparable Zod object. See routes/runs-events.ts.
   "POST /api/runs/{runId}/events/finalize":
-    "tolerance-by-design body: fields degrade to absent instead of rejecting an already-finished run",
+    "strict outcome fields (status; usage required on success) plus cosmetic fields that degrade to absent — conditional requirement, not field-comparable",
 
   // ─── Empty bodies (documented for shape, never parsed) ──────────────────
   "POST /api/runs/{runId}/events/heartbeat":
@@ -723,10 +717,12 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
   // both of which already read the table. A fourth shape gets its mount, its
   // path entry and this exemption in one edit.
   ...Object.fromEntries(
-    (Object.keys(LLM_PROXY_ROUTES) as ProxiedApiShape[]).map((shape) => [
-      `POST /api/llm-proxy${llmProxyUrlPath(shape)}`,
-      "verbatim provider passthrough; the body schema is the upstream provider's, not ours",
-    ]),
+    (Object.keys(LLM_PROXY_ROUTES) as ProxiedApiShape[]).flatMap((shape) =>
+      [LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT].map((mount) => [
+        `POST ${mount}${llmProxyUrlPath(shape)}`,
+        "verbatim provider passthrough; the body schema is the upstream provider's, not ours",
+      ]),
+    ),
   ),
   // JSON-RPC 2.0 envelope dispatched by the MCP server; the method-level
   // params are validated per tool, not by one body schema.

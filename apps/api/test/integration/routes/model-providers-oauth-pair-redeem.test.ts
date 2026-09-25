@@ -8,8 +8,8 @@
  * the canonical-path-specific contract:
  *   - The canonical path successfully redeems a fresh pairing token.
  *   - The canonical path does NOT emit any deprecation header.
- *   - The redeem response reports the SAME model list a GET of the created
- *     credential reports (the helper's terminal summary vs the dashboard).
+ *   - The redeem response reports the provider's whole offer (the helper's
+ *     terminal summary).
  */
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
@@ -22,6 +22,8 @@ import {
   markCredentialNeedsReconnection,
 } from "../../../src/services/model-providers/credentials.ts";
 import { createOrgModel } from "../../../src/services/org-models.ts";
+import { getModelProvider } from "../../../src/services/model-providers/registry.ts";
+import { listCatalogModels } from "../../../src/services/model-catalog.ts";
 
 const app = getTestApp();
 
@@ -29,7 +31,10 @@ async function mintPairing(ctx: TestContext, providerId = "test-oauth", credenti
   const res = await app.request("/api/model-providers-oauth/pairing", {
     method: "POST",
     headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-    body: JSON.stringify({ providerId, ...(credentialId ? { credentialId } : {}) }),
+    body: JSON.stringify({
+      providerId,
+      ...(credentialId ? { credentialId } : {}),
+    }),
   });
   expect(res.status).toBe(200);
   return (await res.json()) as {
@@ -50,10 +55,10 @@ function bearerHeaders(token: string): Record<string, string> {
 const VALID_BODY = (providerId = "test-oauth") => ({
   providerId,
   label: "Test connection",
-  accessToken: "fake-access-token",
-  refreshToken: "fake-refresh-token",
+  access_token: "fake-access-token",
+  refresh_token: "fake-refresh-token",
   expiresAt: Date.now() + 3600_000,
-  accountId: "11111111-2222-4333-8444-555555555555",
+  account_id: "11111111-2222-4333-8444-555555555555",
 });
 
 describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () => {
@@ -72,9 +77,13 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
       body: JSON.stringify(VALID_BODY("test-oauth")),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { providerId: string; credentialId: string };
+    const body = (await res.json()) as Record<string, unknown>;
     expect(body.providerId).toBe("test-oauth");
     expect(body.credentialId).toBeTruthy();
+    expect(Array.isArray(body.available_model_ids)).toBe(true);
+    for (const other of ["provider_id", "credential_id", "availableModelIds"]) {
+      expect(body).not.toHaveProperty(other);
+    }
   });
 
   it("reconnects the targeted credential in place", async () => {
@@ -104,8 +113,8 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
       body: JSON.stringify({
         ...VALID_BODY("test-oauth"),
         label: "Ignored replacement label",
-        accessToken: "fresh-access-token",
-        refreshToken: "fresh-refresh-token",
+        access_token: "fresh-access-token",
+        refresh_token: "fresh-refresh-token",
         email: "same-account@example.test",
       }),
     });
@@ -182,17 +191,10 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
 });
 
 /**
- * The two surfaces that report a connection's models must agree.
- *
- * `@appstrate/connect-helper` prints `availableModelIds` from this response
- * ("✓ Connected. Models available: …") and can print nothing else — its
- * pairing bearer is single-use and already consumed. The dashboard then shows
- * `available_model_ids` from `GET /api/model-provider-credentials`. When the
- * redeem echoed `featuredModels` (a deliberately narrow 3-id subset) instead
- * of the credential's servable set, the two disagreed on EVERY connection,
- * with both lists perfectly up to date — a reporting bug no data fix could
- * close. The assertions below therefore compare the two surfaces to each
- * other, never to a hardcoded list: the invariant is the equality itself.
+ * `@appstrate/connect-helper` prints `available_model_ids` from this response
+ * and can print nothing else — its pairing bearer is single-use and already
+ * consumed. It must be the provider's whole offer, not the narrow
+ * `featuredModels` subset.
  *
  * Runs against the REAL `claude-code` definition (a `modelDiscovery: { mode:
  * "static" }` provider, like every OAuth provider shipped today) — a synthetic
@@ -226,40 +228,24 @@ describe("POST /api/model-providers-oauth/pair/redeem — reported model list", 
     ctx = await createTestContext();
   });
 
-  it("reports exactly what a GET of the created credential reports", async () => {
+  it("reports the provider's whole offer, in offer order", async () => {
     const pairing = await mintPairing(ctx, "claude-code");
     const redeem = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",
       headers: bearerHeaders(pairing.token),
       body: JSON.stringify({
         providerId: "claude-code",
-        accessToken: "sk-ant-oat-fake",
-        refreshToken: "sk-ant-ort-fake",
+        access_token: "sk-ant-oat-fake",
+        refresh_token: "sk-ant-ort-fake",
         expiresAt: Date.now() + 3600_000,
       }),
     });
     expect(redeem.status).toBe(200);
-    const redeemed = (await redeem.json()) as {
-      credentialId: string;
-      availableModelIds: string[];
-    };
+    const { available_model_ids } = (await redeem.json()) as { available_model_ids: string[] };
 
-    const list = await app.request("/api/model-provider-credentials", {
-      headers: authHeaders(ctx),
-    });
-    expect(list.status).toBe(200);
-    const { data } = (await list.json()) as {
-      data: { id: string; available_model_ids?: string[] | null }[];
-    };
-    const credential = data.find((c) => c.id === redeemed.credentialId);
-    expect(credential).toBeDefined();
-
-    // The invariant: one connection, one answer. Order included — the head of
-    // the list is the current generation and both surfaces must agree on it.
-    expect(redeemed.availableModelIds).toEqual(credential!.available_model_ids ?? []);
-    // …and it is a real list, so the equality above cannot pass vacuously by
-    // both surfaces resolving to nothing.
-    expect(redeemed.availableModelIds.length).toBeGreaterThan(0);
+    const offer = listCatalogModels(getModelProvider("claude-code")!).map((m) => m.id);
+    expect(offer.length).toBeGreaterThan(0);
+    expect(available_model_ids).toEqual(offer);
   });
 
   it("pins the regression: the list carries the current Anthropic generation", async () => {
@@ -272,13 +258,13 @@ describe("POST /api/model-providers-oauth/pair/redeem — reported model list", 
       headers: bearerHeaders(pairing.token),
       body: JSON.stringify({
         providerId: "claude-code",
-        accessToken: "sk-ant-oat-fake",
-        refreshToken: "sk-ant-ort-fake",
+        access_token: "sk-ant-oat-fake",
+        refresh_token: "sk-ant-ort-fake",
         expiresAt: Date.now() + 3600_000,
       }),
     });
     expect(redeem.status).toBe(200);
-    const { availableModelIds } = (await redeem.json()) as { availableModelIds: string[] };
-    expect(availableModelIds).toContain("claude-opus-5");
+    const { available_model_ids } = (await redeem.json()) as { available_model_ids: string[] };
+    expect(available_model_ids).toContain("claude-opus-5");
   });
 });

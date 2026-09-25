@@ -138,16 +138,16 @@ export const schedulesPaths = {
                 actor: {
                   type: "object",
                   description:
-                    "Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this space). Omit to default to the calling identity. Requires `schedules:write`.",
+                    "Execution identity for runs this schedule fires (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to default to the calling identity. Requires `schedules:write`.",
                   properties: {
-                    user_id: { type: "string" },
-                    end_user_id: { type: "string" },
+                    userId: { type: "string" },
+                    endUserId: { type: "string" },
                   },
                   // Closed like the body around it: a typo here is stripped by
                   // an open object, the `oneOf` still counts one key, and the
                   // schedule freezes onto the wrong identity on every fire.
                   additionalProperties: false,
-                  oneOf: [{ required: ["user_id"] }, { required: ["end_user_id"] }],
+                  oneOf: [{ required: ["userId"] }, { required: ["endUserId"] }],
                 },
               },
               // An unknown field is a 400, never a silent drop — the same rule
@@ -212,7 +212,7 @@ export const schedulesPaths = {
           description:
             "Insufficient permissions — including `draft_not_writable` when `version_override` is `draft` and the caller cannot WRITE the agent, or a `dependency_overrides` entry is `draft` on a dependency they cannot WRITE (the message names it). Authority is checked at this write; the scheduler does not re-check at fire time.",
         },
-        // Shared with `PUT /api/schedules/{id}`: both writes resolve the
+        // Shared with `PATCH /api/schedules/{id}`: both writes resolve the
         // manifest the schedule will FIRE, so both refuse a never-published
         // agent with `no_published_version`. Arming a schedule is an execution
         // decision, so this door also carries the activation refusal — LISTING
@@ -222,6 +222,7 @@ export const schedulesPaths = {
           description:
             "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`).",
         },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -280,11 +281,12 @@ export const schedulesPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
-    put: {
+    patch: {
       operationId: "updateSchedule",
       tags: ["Schedules"],
       summary: "Update a schedule",
-      description: "Update a cron schedule (expression, timezone, enabled state, or input).",
+      description:
+        "Update a cron schedule (expression, timezone, enabled state, or input). Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -332,16 +334,16 @@ export const schedulesPaths = {
                 actor: {
                   type: "object",
                   description:
-                    "Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`.",
+                    "Re-point the schedule's execution identity (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`.",
                   properties: {
-                    user_id: { type: "string" },
-                    end_user_id: { type: "string" },
+                    userId: { type: "string" },
+                    endUserId: { type: "string" },
                   },
                   // Closed like the body around it: a typo here is stripped by
                   // an open object, the `oneOf` still counts one key, and the
                   // schedule freezes onto the wrong identity on every fire.
                   additionalProperties: false,
-                  oneOf: [{ required: ["user_id"] }, { required: ["end_user_id"] }],
+                  oneOf: [{ required: ["userId"] }, { required: ["endUserId"] }],
                 },
               },
               // An unknown field is a 400, never a silent drop — the same rule
@@ -385,6 +387,7 @@ export const schedulesPaths = {
         // revalidating onto a never-published agent gets `no_published_version`
         // here too. The shared component's description names both.
         "404": { $ref: "#/components/responses/NoPublishedVersion" },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
     delete: {

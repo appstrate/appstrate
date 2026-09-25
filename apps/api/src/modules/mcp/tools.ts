@@ -52,6 +52,7 @@ import {
   type CatalogOperation,
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
+import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
   getFileForActor,
@@ -62,6 +63,7 @@ import {
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
+import { filePurposeValues } from "@appstrate/db/schema";
 import { asString, textResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 
@@ -119,6 +121,8 @@ export interface McpToolContext {
   authHeaders: Headers;
   /** Effective permissions of the caller (from the session/token). */
   permissions: ReadonlySet<string>;
+  /** A delegated credential's scopes (`scopeCeiling`); `undefined` for a session. Caps ceiling guards. */
+  ceiling: ReadonlySet<string> | undefined;
   /**
    * The resolved caller identity (from the same forwarded auth the dispatched
    * requests carry). Lets the file resource provider call the files
@@ -205,6 +209,17 @@ const PROTECTED_HEADERS = new Set<string>([
 // Cap the buffered response body so a large list endpoint can't dump
 // unbounded text into the model context. Truncation is flagged in the result.
 const MAX_RESPONSE_CHARS = 100_000;
+
+/** `Headers.set`, answering `false` where it would throw on an invalid name/value. */
+function trySetHeader(headers: Headers, name: string, value: string): boolean {
+  try {
+    headers.set(name, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -289,7 +304,7 @@ function scoreOperation(op: CatalogOperation, tokens: string[]): number {
 function describePayload(
   op: CatalogOperation,
   componentSchemas: Record<string, unknown>,
-  permissions: ReadonlySet<string>,
+  ctx: Pick<McpToolContext, "permissions" | "ceiling">,
 ): Record<string, unknown> {
   return {
     operation_id: op.operationId,
@@ -299,16 +314,27 @@ function describePayload(
     summary: op.summary,
     description: op.description,
     // Only caller-space requirements decide `granted` — merging target-space ones
-    // would pre-refuse an allowed cross-space call. `conditional`: a lower bound.
+    // would pre-refuse an allowed cross-space call.
     required_permissions: op.requirement.requirements,
     target_space_permissions: op.requirement.targetSpaceRequirements,
-    conditional: op.requirement.conditional,
-    granted: operationGranted(op, permissions),
+    // Asked of a delegated credential's scopes only, never of the role.
+    ceiling_permissions: op.requirement.ceilingRequirements,
+    granted: operationGranted(op, ctx.permissions, ctx.ceiling),
     parameters: op.operation.parameters ?? [],
     request_body: op.operation.requestBody ?? null,
     responses: op.operation.responses ?? {},
     referenced_schemas: collectReferencedSchemas(op.operation, componentSchemas),
   };
+}
+
+/** A denial's ceiling half: named only when a delegated credential's scopes miss one. */
+function deniedCeiling(
+  op: CatalogOperation,
+  ctx: Pick<McpToolContext, "ceiling">,
+): { ceiling_permissions?: readonly string[] } {
+  return ctx.ceiling !== undefined && !ceilingHolds(op.requirement.ceilingRequirements, ctx.ceiling)
+    ? { ceiling_permissions: op.requirement.ceilingRequirements }
+    : {};
 }
 
 function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDefinition {
@@ -335,6 +361,7 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
         query: {
           type: "string",
@@ -372,7 +399,7 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
     const granted: CatalogOperation[] = [];
     const denied: CatalogOperation[] = [];
     for (const { op } of scored) {
-      (operationGranted(op, ctx.permissions) ? granted : denied).push(op);
+      (operationGranted(op, ctx.permissions, ctx.ceiling) ? granted : denied).push(op);
     }
     const shown = granted.slice(0, limit);
 
@@ -386,9 +413,7 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
     // Only the top granted hit carries its schema: one describe saved, response bounded.
     const top = shown[0];
     const bestMatch =
-      tokens.length > 0 && top
-        ? describePayload(top, componentSchemas, ctx.permissions)
-        : undefined;
+      tokens.length > 0 && top ? describePayload(top, componentSchemas, ctx) : undefined;
 
     return textResult({
       total: granted.length,
@@ -403,6 +428,7 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
       denied: denied.slice(0, limit).map((op) => ({
         operation_id: op.operationId,
         required_permissions: op.requirement.requirements,
+        ...deniedCeiling(op, ctx),
       })),
       best_match: bestMatch,
     });
@@ -423,7 +449,11 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
       "It also reports whether your role clears the route's guards (`granted`) and which " +
       "permissions the route requires in YOUR space (`required_permissions`). " +
       "`target_space_permissions` is separate on purpose: those are decided in the space the " +
-      "path names, not here, so they never make an operation unavailable to you.",
+      "path names, not here, so they never make an operation unavailable to you. " +
+      "`ceiling_permissions` apply only when you act through a delegated credential (API key, " +
+      "OAuth token): its scopes must include each, so they make an operation unavailable when " +
+      "your credential's scopes omit one, whatever your role holds. A granted " +
+      "operation can still be refused on the record it acts on; that refusal names its reason.",
     annotations: {
       title: "Describe API operation",
       readOnlyHint: true,
@@ -432,6 +462,7 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
         operation_id: {
           type: "string",
@@ -468,7 +499,7 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
       operationId,
     });
 
-    return textResult(describePayload(op, componentSchemas, ctx.permissions));
+    return textResult(describePayload(op, componentSchemas, ctx));
   };
 
   return { descriptor, handler };
@@ -596,8 +627,16 @@ export async function readResponse(
     }
   }
 
+  // The version to send back as `if_match` on the next write to this resource.
+  const etag = response.headers.get("etag");
   return textResult(
-    { status: response.status, ...(truncated ? { truncated: true } : {}), body, ...extra },
+    {
+      status: response.status,
+      ...(etag ? { etag } : {}),
+      ...(truncated ? { truncated: true } : {}),
+      body,
+      ...extra,
+    },
     isError,
   );
 }
@@ -619,7 +658,11 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     description:
       "Execute an Appstrate API operation. Call describe_operation first to learn its " +
       "path_params, query, and body shapes. Runs with your own credentials and permissions; " +
-      "the request is validated and authorized exactly as the equivalent REST call.",
+      "the request is validated and authorized exactly as the equivalent REST call. " +
+      "Optimistic concurrency: a result carries `etag` when the resource is versioned — " +
+      "pass it back as `if_match` on the next write to that resource. A write refused with " +
+      "412 means it changed since you read it: re-read, reapply your change, retry; 428 means " +
+      "the write requires `if_match` (package draft updates do — read the package first).",
     annotations: {
       title: "Invoke API operation",
       // Dispatches any of ~222 operations, including POST/PUT/DELETE — declare
@@ -632,6 +675,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
         operation_id: { type: "string", description: "The operationId to invoke." },
         path_params: {
@@ -648,6 +692,12 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
           type: "object",
           description: "JSON request body (for POST/PUT/PATCH).",
           additionalProperties: true,
+        },
+        if_match: {
+          type: "string",
+          description:
+            "The `etag` of the representation this write is based on, sent as the If-Match " +
+            "header (copy it verbatim from the result that returned it, quotes included).",
         },
         headers: {
           type: "object",
@@ -712,27 +762,26 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
     const query = asRecord(args.query) ?? {};
 
+    // An invalid model-supplied header is a tool error, not a 500.
+    const rejectHeader = (name: string): CallToolResult => {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        operationId,
+        method: op.method,
+        outcome: "rejected",
+      });
+      return textResult({ error: `Invalid header name or value: ${name}` }, true);
+    };
     const headers = new Headers(ctx.authHeaders);
+    const ifMatch = asString(args.if_match);
+    if (ifMatch && !trySetHeader(headers, "If-Match", ifMatch)) return rejectHeader("If-Match");
     const extraHeaders = asRecord(args.headers);
     if (extraHeaders) {
       for (const [name, value] of Object.entries(extraHeaders)) {
         if (PROTECTED_HEADERS.has(name.toLowerCase())) continue;
         if (typeof value !== "string") continue;
-        // A model-supplied header name/value may be syntactically invalid
-        // (`Headers.set` throws a TypeError). Surface a graceful tool error
-        // instead of a 500 so the model can self-correct.
-        try {
-          headers.set(name, value);
-        } catch {
-          emit(ctx, {
-            tool: "invoke_operation",
-            durationMs: performance.now() - start,
-            operationId,
-            method: op.method,
-            outcome: "rejected",
-          });
-          return textResult({ error: `Invalid header name or value: ${name}` }, true);
-        }
+        if (!trySetHeader(headers, name, value)) return rejectHeader(name);
       }
     }
     // Auto-map OpenAPI `in: header` parameters: a model often supplies a
@@ -747,7 +796,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       if (queryKey === undefined) continue;
       const value = query[queryKey];
       if (typeof value === "string" || typeof value === "number") {
-        headers.set(headerName, String(value));
+        if (!trySetHeader(headers, headerName, String(value))) return rejectHeader(headerName);
         delete query[queryKey];
       }
     }
@@ -801,12 +850,16 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     // Only a 403 the permission set explains gets the permission answer; one the
     // ROW decided (a file ACL, `draft_not_writable`) already names its reason.
     const denial =
-      response.status === 403 && !operationGranted(op, ctx.permissions)
+      response.status === 403 && !operationGranted(op, ctx.permissions, ctx.ceiling)
         ? {
             required_permissions: op.requirement.requirements,
+            ...deniedCeiling(op, ctx),
             hint:
-              "Your role does not hold this permission. Report it to the user; do not retry " +
-              "and do not look for another operation that does the same thing.",
+              (ctx.ceiling === undefined
+                ? "Your role does not hold this permission."
+                : "Your role, or your credential's scopes, do not hold this permission.") +
+              " Report it to the user; do not retry and do not look for another operation " +
+              "that does the same thing.",
           }
         : undefined;
     return readResponse(response, denial);
@@ -824,10 +877,9 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
- * to a caller whose surface `composes`. The launch allowlist
- * (`RUN_AND_WAIT_ARGUMENT_NAMES`) still knows them either way: an agent-only
- * caller that sends `kind:"inline"` anyway reaches the route and takes its 403,
- * the one refusal that owns the rule.
+ * to a caller whose surface `composes`; another caller sending one gets the
+ * undeclared-argument refusal (`refuseUndeclaredArguments`), and the route's
+ * 403 still owns the rule behind it.
  */
 const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
   manifest: {
@@ -998,7 +1050,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
             (inline ? " (either kind)" : "") +
             ': `{ "@scope/integration": ' +
             '"<connection_id>" }`, exactly one connection id per integration. This is the retry ' +
-            "path for a `412 must_choose_connection` launch error — that error lists the " +
+            "path for a `409 must_choose_connection` launch error — that error lists the " +
             "ambiguous integration and its `candidate_connections`, each with a `label`, an " +
             "`account_id` and `owned_by_actor`; pick one candidate's `id` and retry the SAME " +
             "call with it here. Those fields are what tells the candidates apart, so read them " +
@@ -1011,6 +1063,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
         },
       },
       required: ["kind"],
+      additionalProperties: false,
     },
   };
 
@@ -1167,9 +1220,9 @@ function projectFileRow(raw: unknown): Record<string, unknown> | null {
     name,
     mime: asString(r?.mime) ?? "application/octet-stream",
     size: typeof r?.size === "number" ? r.size : 0,
-    // Casing mirrors FileDto (CASING_CONVENTIONS.md 4b): `packageId`/`createdAt`
-    // camelCase carve-outs; `run_id` a snake_case domain field.
-    run_id: asString(r?.run_id) ?? null,
+    // Casing mirrors FileDto (CASING_CONVENTIONS.md 4b): `runId`/`packageId`/
+    // `createdAt` are camelCase carve-outs.
+    runId: asString(r?.runId) ?? null,
     packageId: asString(r?.packageId) ?? null,
     createdAt: asString(r?.createdAt) ?? null,
     // Surface the same access capabilities the REST DTO carries (computed by the
@@ -1187,9 +1240,9 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
     description:
       "List the files visible to you — files you attached to this conversation " +
       "(`user_upload`) and deliverables agents published from runs (`agent_output`). Filter by " +
-      "`run_id`, `chat_session_id`, or `purpose`. Each row carries an `appfile://` URI you can " +
+      "`runId`, `chat_session_id`, or `purpose`. Each row carries an `appfile://` URI you can " +
       "pass verbatim into a run_and_wait input file field (to feed a file to another agent) " +
-      "or read with read_file. Returns `{ files: [...], has_more }`.",
+      "or read with read_file. Returns `{ files: [...], hasMore }`.",
     annotations: {
       title: "List files",
       readOnlyHint: true,
@@ -1198,8 +1251,9 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
-        run_id: {
+        runId: {
           type: "string",
           description: "Only files produced by / attached to this run.",
         },
@@ -1209,7 +1263,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
         },
         purpose: {
           type: "string",
-          enum: ["user_upload", "agent_output"],
+          enum: [...filePurposeValues],
           description: "`user_upload` = files you attached; `agent_output` = agent deliverables.",
         },
         limit: {
@@ -1225,8 +1279,8 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
     const query: Record<string, unknown> = {};
-    const runId = asString(args.run_id);
-    if (runId) query.run_id = runId;
+    const runId = asString(args.runId);
+    if (runId) query.runId = runId;
     const chatSessionId = asString(args.chat_session_id);
     if (chatSessionId) query.chat_session_id = chatSessionId;
     const purpose = asString(args.purpose);
@@ -1253,7 +1307,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
       durationMs: performance.now() - start,
       shownCount: files.length,
     });
-    return textResult({ files, has_more: body?.hasMore === true });
+    return textResult({ files, hasMore: body?.hasMore === true });
   };
 
   return { descriptor, handler };
@@ -1430,7 +1484,7 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
       idempotentHint: true,
       openWorldHint: false,
     },
-    inputSchema: { type: "object", properties: {} },
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
   };
 
   const handler = async (): Promise<CallToolResult> => {
@@ -1478,8 +1532,13 @@ export interface McpSurface {
   importsPackages: boolean;
 }
 
-export function deriveMcpSurface(permissions: ReadonlySet<string>, actor: Actor): McpSurface {
-  const granted = (operationId: string): boolean => operationIdGranted(operationId, permissions);
+export function deriveMcpSurface(
+  permissions: ReadonlySet<string>,
+  ceiling: ReadonlySet<string> | undefined,
+  actor: Actor,
+): McpSurface {
+  const granted = (operationId: string): boolean =>
+    operationIdGranted(operationId, permissions, ceiling);
   const invokes = permissions.has("mcp:invoke");
   const runs = invokes && granted("runAgent") && granted("getRun");
   return {
@@ -1492,6 +1551,34 @@ export function deriveMcpSurface(permissions: ReadonlySet<string>, actor: Actor)
     // each package's `write`, but `mcp:invoke` and the user actor (the import
     // is recorded under a user id) are checked here and nowhere else.
     importsPackages: invokes && actor.type === "user" && granted("importBundle"),
+  };
+}
+
+/**
+ * The SDK does not validate `tools/call` arguments against `inputSchema`, so an
+ * argument a tool does not read is dropped in silence — a misspelled filter
+ * widens a listing, a misspelled field is simply not applied. A tool declaring
+ * `additionalProperties: false` therefore gets its undeclared top-level keys
+ * refused here, as -32602 naming the accepted ones, before its handler runs.
+ */
+function refuseUndeclaredArguments(tool: AppstrateToolDefinition): AppstrateToolDefinition {
+  const schema = tool.descriptor.inputSchema;
+  if (schema.additionalProperties !== false) return tool;
+  const declared = new Set(Object.keys(schema.properties ?? {}));
+  return {
+    descriptor: tool.descriptor,
+    handler: async (args, extra) => {
+      const unknown = Object.keys(args).filter((k) => !declared.has(k));
+      if (unknown.length > 0) {
+        const accepted =
+          declared.size > 0 ? `Accepted: ${[...declared].join(", ")}.` : "No arguments.";
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `Unknown argument(s): ${unknown.join(", ")}. ${accepted}`,
+        );
+      }
+      return tool.handler(args, extra);
+    },
   };
 }
 
@@ -1513,5 +1600,5 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     ...buildPackageFileTools(ctx, surface.importsPackages),
     // Redundant for a context-injecting caller; search_operations stays for `best_match`.
     ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
-  ];
+  ].map(refuseUndeclaredArguments);
 }

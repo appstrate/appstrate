@@ -7,6 +7,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
+import { packageSightPermissions } from "@appstrate/core/permissions";
 import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
@@ -94,7 +95,7 @@ function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
 type CreateScheduleBody =
   paths["/api/agents/{scope}/{name}/schedules"]["post"]["requestBody"]["content"]["application/json"];
 type UpdateScheduleBody =
-  paths["/api/schedules/{id}"]["put"]["requestBody"]["content"]["application/json"];
+  paths["/api/schedules/{id}"]["patch"]["requestBody"]["content"]["application/json"];
 
 export function useCreateSchedule(packageId: string) {
   const qc = useQueryClient();
@@ -109,7 +110,7 @@ export function useCreateSchedule(packageId: string) {
       proxy_id_override?: string | null;
       version_override?: string | null;
       connection_overrides?: Record<string, string> | null;
-      actor?: { user_id?: string; end_user_id?: string };
+      actor?: { userId?: string; endUserId?: string };
     }): Promise<ScheduleWireDto> => {
       const { scope, name } = splitPackageRef(packageId);
       const { data: created } = await client.POST("/api/agents/{scope}/{name}/schedules", {
@@ -142,9 +143,9 @@ export function useUpdateSchedule() {
       proxy_id_override?: string | null;
       version_override?: string | null;
       connection_overrides?: Record<string, string> | null;
-      actor?: { user_id?: string; end_user_id?: string };
+      actor?: { userId?: string; endUserId?: string };
     }): Promise<ScheduleWireDto> => {
-      const { data: updated } = await client.PUT("/api/schedules/{id}", {
+      const { data: updated } = await client.PATCH("/api/schedules/{id}", {
         params: { path: { id } },
         // Spec body types `input` as a bare object.
         body: data as UpdateScheduleBody,
@@ -224,10 +225,14 @@ interface ScheduleFormDeps {
 export function useScheduleFormDeps(
   packageId: string | undefined,
   version?: string,
-): { deps: ScheduleFormDeps | null; error: Error | null } {
+): { deps: ScheduleFormDeps | null; error: Error | null; denied: boolean } {
   const { data: agentDetail, error } = usePackageDetail("agent", packageId, { version });
   const { data: agentModel } = useAgentModel(packageId);
   const { data: agentProxy } = useAgentProxy(packageId);
+  // The detail read gates itself, so a caller who may not see the agent gets
+  // neither data nor error: without this the page would wait forever.
+  const { can, ready } = usePermissions();
+  const denied = !!packageId && ready && !packageSightPermissions("agent").some(can);
 
   // `deps` stays null until the AGENT DETAIL itself lands, not merely until an
   // agent is picked: `ScheduleForm` seeds its input state once, in a `useState`
@@ -235,7 +240,7 @@ export function useScheduleFormDeps(
   // has since been locked — unremovable through the UI and refused on save
   // (400 `locked_input_field`). `key={schedule.id}` means no remount when the
   // detail arrives, so the only safe answer while it is in flight is "not yet".
-  if (!packageId || !agentDetail) return { deps: null, error };
+  if (!packageId || !agentDetail) return { deps: null, error, denied };
 
   const integrationDeps = agentDetail.dependencies.integrations.map((d) => ({
     id: d.id,
@@ -263,5 +268,6 @@ export function useScheduleFormDeps(
       skills: skillDeps,
     },
     error,
+    denied,
   };
 }

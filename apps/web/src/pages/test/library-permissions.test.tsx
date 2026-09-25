@@ -22,9 +22,12 @@ import type {
   LibraryResponse,
 } from "../../hooks/use-library.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
+import { installFakeStorage } from "../../test/fake-storage.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
+// The breadcrumbs ask `useCanReach`, which reads the app config off `window`.
+installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 type Space = components["schemas"]["SpaceObject"];
 

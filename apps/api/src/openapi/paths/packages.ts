@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import {
+  ETAG_RESPONSE_HEADERS,
+  STD_RESPONSE_HEADERS,
+  REQUEST_ID_ONLY_HEADERS,
+} from "../headers.ts";
 
 /**
  * Shared tail of the four per-type list descriptions (skills / agents /
@@ -38,7 +42,7 @@ const PACKAGE_DETAIL_VERSION_PARAM = {
  * it: the `403` gains `draft_not_writable`, the `404` covers a version spec
  * that resolves to nothing, and the `422` a published archive that cannot be
  * read — either at all, or without the entry the type REQUIRES — the same
- * answer the run path gives for a published agent with no readable prompt.
+ * answer every run door and version restore give for that archive.
  */
 const PACKAGE_DETAIL_DEFINITION_RESPONSES = {
   "403": {
@@ -55,8 +59,8 @@ const PACKAGE_DETAIL_DEFINITION_RESPONSES = {
 //
 // Mutating package endpoints return the affected resource BARE — the exact
 // shape of the corresponding GET detail, `$ref`'d directly. No operation
-// envelope: the optimistic-lock token (`lock_version`) and fork provenance
-// (`forked_from`) are resource state and live INSIDE the detail DTOs.
+// envelope: fork provenance (`forked_from`) is resource state and lives INSIDE the
+// detail DTOs; the draft version is the response's `ETag` header.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** `POST /packages/{type}` → the created package resource, bare. */
@@ -64,16 +68,29 @@ function packageCreateResponseSchema(detailRef: string) {
   return {
     $ref: detailRef,
     description:
-      "The created package resource — same shape as its GET detail. The resource carries `lock_version`, the optimistic-lock token to send with the next update. No follow-up GET needed.",
+      "The created package resource — same shape as its GET detail. Its `ETag` header is the draft version to send in `If-Match` on the next update. No follow-up GET needed.",
   };
 }
 
-/** `PUT /packages/{type}/...` → the updated package resource, bare. */
+/** `PATCH /packages/{type}/...` → the updated package resource, bare. */
 function packageUpdateResponseSchema(detailRef: string) {
   return {
     $ref: detailRef,
     description:
-      "The updated package resource — same shape as its GET detail. The resource carries the NEW `lock_version` — read it back before the next edit. No follow-up GET needed.",
+      "The updated package resource — same shape as its GET detail. Its `ETag` header is the draft's NEW version — send it in `If-Match` on the next edit. No follow-up GET needed.",
+  };
+}
+
+/** `GET /packages/{type}/.../versions` → the standard list envelope of versions. */
+function versionListResponseSchema() {
+  return {
+    type: "object",
+    required: ["object", "data", "hasMore"],
+    properties: {
+      object: { type: "string", enum: ["list"] },
+      data: { type: "array", items: { $ref: "#/components/schemas/AgentVersion" } },
+      hasMore: { type: "boolean" },
+    },
   };
 }
 
@@ -90,14 +107,14 @@ function versionCreateResponseSchema() {
  * `POST /packages/.../versions/{v}/restore` → the updated PACKAGE resource,
  * bare. A restore mutates the package draft, so the response is the package
  * detail (not the version detail): the restored version is reflected in the
- * resource's `version` / `manifest` / `content`, and the resource carries the
- * package's NEW `lock_version`.
+ * resource's `version` / `manifest` / `content`, and its `ETag` is the draft's
+ * NEW version.
  */
 function versionRestoreResponseSchema(detailRef: string) {
   return {
     $ref: detailRef,
     description:
-      "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and the resource carries the package's NEW `lock_version` — read it back before the next draft edit.",
+      "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and its `ETag` header is the draft's NEW version — send it in `If-Match` on the next draft edit.",
   };
 }
 
@@ -119,7 +136,7 @@ const fileOperationsProperty = {
   minItems: 1,
   items: { $ref: "#/components/schemas/PackageFileWriteOperation" },
   description:
-    "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations.",
+    "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations.",
 } as const;
 
 export const packagesPaths = {
@@ -876,7 +893,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Skill created",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageCreateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -963,16 +980,7 @@ export const packagesPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["versions"],
-                properties: {
-                  versions: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/AgentVersion" },
-                  },
-                },
-              },
+              schema: versionListResponseSchema(),
             },
           },
         },
@@ -993,6 +1001,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        { $ref: "#/components/parameters/IfMatch" },
       ],
       requestBody: {
         required: false,
@@ -1005,11 +1014,6 @@ export const packagesPaths = {
                   type: "string",
                   minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
-                },
-                lock_version: {
-                  type: "integer",
-                  description:
-                    "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at.",
                 },
               },
               additionalProperties: false,
@@ -1032,11 +1036,12 @@ export const packagesPaths = {
           description:
             "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`.",
         },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`, or `conflict`.",
+            "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1059,6 +1064,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        { $ref: "#/components/parameters/IfMatch" },
         {
           name: "version",
           in: "path",
@@ -1070,7 +1076,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionRestoreResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -1082,17 +1088,11 @@ export const packagesPaths = {
           description:
             "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`.",
         },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description: "Concurrent modification. RFC 9457 problem+json with `code` of `conflict`.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
   },
@@ -1129,6 +1129,7 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
     delete: {
@@ -1172,7 +1173,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Skill detail",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
@@ -1183,7 +1184,7 @@ export const packagesPaths = {
         ...PACKAGE_DETAIL_DEFINITION_RESPONSES,
       },
     },
-    put: {
+    patch: {
       operationId: "updateSkill",
       tags: ["Packages"],
       summary: "Update a skill",
@@ -1195,6 +1196,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        { $ref: "#/components/parameters/IfMatchRequired" },
       ],
       requestBody: {
         required: true,
@@ -1202,7 +1204,6 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["lock_version"],
               properties: {
                 manifest: {
                   type: "object",
@@ -1211,7 +1212,6 @@ export const packagesPaths = {
                 },
                 content: { type: "string" },
                 operations: fileOperationsProperty,
-                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
             },
@@ -1221,7 +1221,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Skill updated",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -1236,12 +1236,8 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description: "Draft was changed concurrently; reload before retrying",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
+        "428": { $ref: "#/components/responses/PreconditionRequired" },
         "413": {
           description: "Written file or resulting tree exceeds its byte/count limit",
           content: {
@@ -1353,7 +1349,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Agent created",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageCreateResponseSchema("#/components/schemas/AgentDetail"),
@@ -1388,7 +1384,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Get agent detail",
       description:
-        "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
+        "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, the `ETag`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1406,7 +1402,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Agent detail",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/AgentDetail" },
@@ -1423,18 +1419,19 @@ export const packagesPaths = {
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
-    put: {
+    patch: {
       operationId: "updateAgent",
       tags: ["Packages"],
       summary: "Update a user agent",
       description:
-        "Update manifest and content of a user agent with optimistic locking." +
+        "Update manifest and content of a user agent, under its `If-Match`." +
         PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        { $ref: "#/components/parameters/IfMatchRequired" },
       ],
       requestBody: {
         required: true,
@@ -1442,12 +1439,10 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["lock_version"],
               properties: {
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
                 content: { type: "string" },
                 operations: fileOperationsProperty,
-                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
             },
@@ -1457,7 +1452,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Agent updated",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageUpdateResponseSchema("#/components/schemas/AgentDetail"),
@@ -1474,15 +1469,8 @@ export const packagesPaths = {
             "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
           },
         },
-        "409": {
-          description:
-            "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
+        "428": { $ref: "#/components/responses/PreconditionRequired" },
       },
     },
     delete: {
@@ -1568,16 +1556,7 @@ export const packagesPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["versions"],
-                properties: {
-                  versions: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/AgentVersion" },
-                  },
-                },
-              },
+              schema: versionListResponseSchema(),
             },
           },
         },
@@ -1598,6 +1577,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        { $ref: "#/components/parameters/IfMatch" },
       ],
       requestBody: {
         required: false,
@@ -1610,11 +1590,6 @@ export const packagesPaths = {
                   type: "string",
                   minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
-                },
-                lock_version: {
-                  type: "integer",
-                  description:
-                    "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at.",
                 },
               },
               additionalProperties: false,
@@ -1633,11 +1608,12 @@ export const packagesPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "Agent in use (runs in progress), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`, or `conflict`.",
+            "Agent in use (runs in progress), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1660,30 +1636,32 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        { $ref: "#/components/parameters/IfMatch" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
           description: "Version restored",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionRestoreResponseSchema("#/components/schemas/AgentDetail"),
             },
           },
         },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description:
-            "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
+          description: "Agent in use. RFC 9457 problem+json with `code` `agent_in_use`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
   },
@@ -1713,6 +1691,7 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
     delete: {
@@ -1785,7 +1764,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Move a package to another home space",
       description:
-        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.",
+        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1820,7 +1799,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "The package resource, with its new `home_space_id`.",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1867,7 +1846,7 @@ export const packagesPaths = {
                 status: 422,
                 detail: "MCP-server package '@myorg/tools' has no activatable published version.",
                 code: "bundle_invalid",
-                requestId: "req_abc123",
+                request_id: "req_abc123",
               },
             },
           },
@@ -2032,7 +2011,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Package forked successfully",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -2054,7 +2033,7 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "400": {
           description:
-            "Already owned, name collision, unsupported type, or no published version. RFC 9457 problem+json with `code` one of `invalid_request` (already owned / no published version / unsupported type) or `name_collision`.",
+            "Already owned, name collision, unsupported type, no published version, or a source manifest the type's write policy refuses (an integration's non-snake_case identity claim key). RFC 9457 problem+json with `code` one of `invalid_request` (already owned / no published version / unsupported type), `name_collision` or `validation_failed` (`errors[].field` names the manifest key).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -2067,14 +2046,14 @@ export const packagesPaths = {
             "Insufficient permissions — the source package type's read in its organization and its write in the destination space, or `package_copy_restricted` when the SOURCE organization sets `restrict_package_copy`, which narrows forking to callers holding the source package type's `share` in its HOME space. That is what the setting means — a fork is a COPY leaving the space that owns it, exactly as on `download` and on the agent `bundle` route. The setting read is the SOURCE organization's, since it is the source's content being protected. Skills and system packages are exempt.",
         },
         "404": { $ref: "#/components/responses/NotFound" },
-        // Same CONDITION as `#/components/responses/PackageArchiveUnreadable`,
+        // Same CONDITIONS as `#/components/responses/PackageArchiveUnreadable`,
         // deliberately NOT `$ref`-ed: the shared component tells the caller to
         // republish the package, which is impossible here (a fork's source is
         // always a package the calling org does not own), and it cannot state
         // that nothing was written. Both facts are specific to this boundary.
         "422": {
           description:
-            "The SOURCE package's published artifact expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json.",
+            "The SOURCE package's published artifact cannot be read: it expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`), or the source's latest published version exists but its archive is gone from storage (`version_artifact_unavailable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json.",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
@@ -2163,7 +2142,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Integration package created",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageCreateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -2246,16 +2225,7 @@ export const packagesPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["versions"],
-                properties: {
-                  versions: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/AgentVersion" },
-                  },
-                },
-              },
+              schema: versionListResponseSchema(),
             },
           },
         },
@@ -2276,6 +2246,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        { $ref: "#/components/parameters/IfMatch" },
       ],
       requestBody: {
         required: false,
@@ -2288,11 +2259,6 @@ export const packagesPaths = {
                   type: "string",
                   minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
-                },
-                lock_version: {
-                  type: "integer",
-                  description:
-                    "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at.",
                 },
               },
               additionalProperties: false,
@@ -2311,11 +2277,12 @@ export const packagesPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`, or `conflict`.",
+            "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -2338,6 +2305,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        { $ref: "#/components/parameters/IfMatch" },
         {
           name: "version",
           in: "path",
@@ -2349,24 +2317,18 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionRestoreResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description: "Concurrent modification. RFC 9457 problem+json with `code` of `conflict`.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
   },
@@ -2403,6 +2365,7 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
     delete: {
@@ -2446,7 +2409,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Integration package detail",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
@@ -2457,7 +2420,7 @@ export const packagesPaths = {
         ...PACKAGE_DETAIL_DEFINITION_RESPONSES,
       },
     },
-    put: {
+    patch: {
       operationId: "updateIntegrationPackage",
       tags: ["Packages"],
       summary: "Update an integration package",
@@ -2469,6 +2432,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        { $ref: "#/components/parameters/IfMatchRequired" },
       ],
       requestBody: {
         required: true,
@@ -2476,7 +2440,6 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["lock_version"],
               properties: {
                 manifest: {
                   type: "object",
@@ -2485,7 +2448,6 @@ export const packagesPaths = {
                 },
                 content: { type: "string" },
                 operations: fileOperationsProperty,
-                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
             },
@@ -2495,7 +2457,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Integration package updated",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -2506,12 +2468,8 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description: "Draft was changed concurrently; reload before retrying",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
+        "428": { $ref: "#/components/responses/PreconditionRequired" },
         "413": {
           description: "Written file or resulting tree exceeds its byte/count limit",
           content: {
@@ -2624,7 +2582,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "MCP-server package created",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageCreateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -2692,16 +2650,7 @@ export const packagesPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["versions"],
-                properties: {
-                  versions: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/AgentVersion" },
-                  },
-                },
-              },
+              schema: versionListResponseSchema(),
             },
           },
         },
@@ -2722,6 +2671,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        { $ref: "#/components/parameters/IfMatch" },
       ],
       requestBody: {
         required: false,
@@ -2734,11 +2684,6 @@ export const packagesPaths = {
                   type: "string",
                   minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
-                },
-                lock_version: {
-                  type: "integer",
-                  description:
-                    "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at.",
                 },
               },
               additionalProperties: false,
@@ -2757,11 +2702,12 @@ export const packagesPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`, or `conflict`.",
+            "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -2784,6 +2730,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        { $ref: "#/components/parameters/IfMatch" },
         {
           name: "version",
           in: "path",
@@ -2795,24 +2742,18 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionRestoreResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description: "Concurrent modification. RFC 9457 problem+json with `code` of `conflict`.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
   },
@@ -2849,6 +2790,7 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
     delete: {
@@ -2892,7 +2834,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "MCP-server package detail",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
@@ -2903,7 +2845,7 @@ export const packagesPaths = {
         ...PACKAGE_DETAIL_DEFINITION_RESPONSES,
       },
     },
-    put: {
+    patch: {
       operationId: "updateMcpServerPackage",
       tags: ["Packages"],
       summary: "Update an MCP-server package",
@@ -2915,6 +2857,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        { $ref: "#/components/parameters/IfMatchRequired" },
       ],
       requestBody: {
         required: true,
@@ -2922,7 +2865,6 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["lock_version"],
               properties: {
                 manifest: {
                   type: "object",
@@ -2931,7 +2873,6 @@ export const packagesPaths = {
                 },
                 content: { type: "string" },
                 operations: fileOperationsProperty,
-                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
             },
@@ -2941,7 +2882,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "MCP-server package updated",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -2952,12 +2893,8 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description: "Draft was changed concurrently; reload before retrying",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
+        "428": { $ref: "#/components/responses/PreconditionRequired" },
         "413": {
           description: "Written file or resulting tree exceeds its byte/count limit",
           content: {

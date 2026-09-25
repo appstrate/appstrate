@@ -44,6 +44,7 @@
     "./ajv": "./src/ajv.ts",
     "./api-errors": "./src/api-errors.ts",
     "./request-body": "./src/request-body.ts",
+    "./pagination-link": "./src/pagination-link.ts",
     "./safe-json": "./src/safe-json.ts",
     "./storage": "./src/storage.ts",
     "./storage-s3": "./src/storage-s3.ts",
@@ -100,11 +101,13 @@
     "./oauth-bearer-swap": "./src/oauth-bearer-swap.ts",
     "./url": "./src/url.ts",
     "./run-and-wait-client": "./src/run-and-wait-client.ts",
+    "./run-status": "./src/run-status.ts",
+    "./log-line": "./src/log-line.ts",
     "./connect-handshake": "./src/connect-handshake.ts"
   },
   "dependencies": {
     "@afps-spec/schema": "^0.7.0",
-    "@appstrate/afps-shared": "^0.8.0",
+    "@appstrate/afps-shared": "^0.9.1",
     "@types/json-schema": "7.0.15",
     "@types/semver": "^7.8.0",
     "ajv": "^8.20.0",

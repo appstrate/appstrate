@@ -43,7 +43,7 @@ export function OrgInvitationsList({
   const [cancelingId, setCancelingId] = useState<string | null>(null);
   const visibleInvitations = spaceId
     ? invitations.filter((invitation) =>
-        invitation.space_assignments.some((assignment) => assignment.space_id === spaceId),
+        invitation.space_assignments.some((assignment) => assignment.spaceId === spaceId),
       )
     : invitations;
   const editing = visibleInvitations.find((invitation) => invitation.id === editingId);
@@ -92,8 +92,8 @@ export function OrgInvitationsList({
                 <dd>
                   <ul className="flex flex-col gap-1">
                     {invitation.space_assignments.map((assignment) => (
-                      <li key={assignment.space_id} className="break-words">
-                        {spaceName(assignment.space_id)} —{" "}
+                      <li key={assignment.spaceId} className="break-words">
+                        {spaceName(assignment.spaceId)} —{" "}
                         {roles.find((role) => role.value === spaceRoleValue(assignment))?.label ??
                           t("orgSettings.assignmentUnavailableRole")}
                       </li>
@@ -155,7 +155,7 @@ export function OrgInvitationsList({
                 {
                   email: canceling.email,
                   spaces: canceling.space_assignments
-                    .map((assignment) => spaceName(assignment.space_id))
+                    .map((assignment) => spaceName(assignment.spaceId))
                     .join(", "),
                 },
               )

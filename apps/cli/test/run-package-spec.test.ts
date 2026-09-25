@@ -8,7 +8,8 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { parseRunTarget, PackageSpecError } from "../src/commands/run/package-spec.ts";
+import { PackageSpecError } from "../src/lib/package-spec.ts";
+import { parseRunTarget } from "../src/commands/run/package-spec.ts";
 
 describe("parseRunTarget — package id", () => {
   it("parses @scope/name with no spec", () => {
@@ -90,6 +91,10 @@ describe("parseRunTarget — invalid id", () => {
 
   it("rejects @scope/ (empty name)", () => {
     expect(() => parseRunTarget("@scope/")).toThrow(PackageSpecError);
+  });
+
+  it("rejects an @ with no spec after it", () => {
+    expect(() => parseRunTarget("@scope/agent@")).toThrow(PackageSpecError);
   });
 
   it("rejects empty input", () => {

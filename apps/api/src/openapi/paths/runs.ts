@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import { runStatusValues, terminalRunStatusValues } from "@appstrate/core/run-status";
 
 const inlineDependencyAuthorization =
   " Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.";
@@ -120,7 +121,7 @@ const canonicalRunsPaths = {
                 connection_overrides: {
                   type: "object",
                   description:
-                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
+                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 409 `missing_integration_connection` if the chosen id is not accessible to the actor.',
                   additionalProperties: { type: "string", minLength: 1 },
                 },
                 dependency_overrides: {
@@ -172,8 +173,8 @@ const canonicalRunsPaths = {
                 checkpoint: {},
                 error: null,
                 metadata: null,
-                generation: { temperature: 0.2, reasoningLevel: "high" },
-                generation_override: { temperature: 0.2, reasoningLevel: "high" },
+                generation: { temperature: 0.2, reasoning_level: "high" },
+                generation_override: { temperature: 0.2, reasoning_level: "high" },
                 started_at: "2026-01-15T10:30:00Z",
                 completed_at: null,
                 duration: null,
@@ -238,7 +239,7 @@ const canonicalRunsPaths = {
         },
         "409": {
           description:
-            "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference)",
+            "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration has no usable connection for the caller (`missing_integration_connection` — one `errors[]` item per integration, `must_choose_connection` items carrying `candidate_connections`)",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
@@ -271,17 +272,9 @@ const canonicalRunsPaths = {
             },
           },
         },
-        "412": {
-          description: "Missing integration connection (`missing_integration_connection`)",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
         "422": {
           description:
-            "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
+            "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a published version is selected whose archive is missing, corrupt or without `prompt.md` (`version_artifact_unavailable`; the working copy is never substituted) or expands past the decompression ceiling (`package_archive_unreadable`), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
@@ -404,7 +397,7 @@ const canonicalRunsPaths = {
                 status: 409,
                 detail: "Cannot delete runs while agent has active runs",
                 code: "conflict",
-                requestId: "req_abc123",
+                request_id: "req_abc123",
               },
             },
           },
@@ -473,7 +466,7 @@ const canonicalRunsPaths = {
                 connection_overrides: {
                   type: "object",
                   description:
-                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
+                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 409 `missing_integration_connection` if the chosen id is not accessible to the actor.',
                   additionalProperties: { type: "string", minLength: 1 },
                 },
                 modelId: { type: ["string", "null"] },
@@ -507,7 +500,7 @@ const canonicalRunsPaths = {
                 display_name: "Summarize attached file",
                 version: "0.0.0",
                 type: "agent",
-                schema_version: "0.1",
+                schema_version: "0.3",
                 dependencies: {},
               },
               prompt: "Summarize the attached file in three bullet points.",
@@ -586,7 +579,7 @@ const canonicalRunsPaths = {
                   display_name: "Summarize attached file",
                   version: "0.0.0",
                   type: "agent",
-                  schema_version: "0.1",
+                  schema_version: "0.3",
                   dependencies: {},
                 },
                 inline_prompt: "Summarize the attached file in three bullet points.",
@@ -626,14 +619,6 @@ const canonicalRunsPaths = {
             'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
             'many files".',
           headers: REQUEST_ID_ONLY_HEADERS,
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-        "412": {
-          description: "Missing integration connection (`missing_integration_connection`)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -803,7 +788,7 @@ const canonicalRunsPaths = {
           in: "query",
           schema: {
             type: "string",
-            enum: ["pending", "running", "success", "failed", "timeout", "cancelled"],
+            enum: [...runStatusValues],
           },
           description:
             "Filter runs by lifecycle status. Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
@@ -907,7 +892,7 @@ const canonicalRunsPaths = {
                 checkpoint: { lastProcessedId: "msg_99f2a" },
                 error: null,
                 metadata: null,
-                generation: { reasoningLevel: "medium" },
+                generation: { reasoning_level: "medium" },
                 generation_override: null,
                 started_at: "2026-01-15T10:30:00Z",
                 completed_at: "2026-01-15T10:31:12Z",
@@ -960,7 +945,7 @@ const canonicalRunsPaths = {
                 detail:
                   "Invalid 'wait' value: expected true, false, or a non-negative integer number of seconds (max 55)",
                 code: "invalid_request",
-                requestId: "req_abc123",
+                request_id: "req_abc123",
               },
             },
           },
@@ -977,7 +962,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Get run logs",
       description:
-        'Get persisted log entries for a run, wrapped in the standard list envelope `{ object: "list", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI\'s polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel="next"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.',
+        'Get persisted log entries for a run, wrapped in the standard list envelope `{ object: "list", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI\'s polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel="next"` response header points at the next page. `id` is a monotonic int64 (one sequence across all runs, so consecutive entries of a run are not contiguous); invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1128,7 +1113,7 @@ const canonicalRunsPaths = {
                 status: 409,
                 detail: "Run has already completed and cannot be cancelled",
                 code: "conflict",
-                requestId: "req_def456",
+                request_id: "req_def456",
               },
             },
           },
@@ -1315,15 +1300,16 @@ const canonicalRunsPaths = {
         },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": { $ref: "#/components/responses/RunAdmissionConflict" },
-        "412": {
-          description: "Missing integration connection (`missing_integration_connection`)",
+        "422": {
+          description:
+            'Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a dependency pin or `dependency_overrides` entry resolves to no published version (`dependency_unresolved`), or — `registry` source with `stage: "published"` (the default) only — the archive of the selected version is missing, corrupt or without `prompt.md` (`version_artifact_unavailable`); the working copy is never substituted. When `AFPS_SIGNATURE_POLICY` is `required`, a corrupt archive answers `bundle_invalid` instead and an unsigned or untrusted one `bundle_signature_invalid`. An archive past the decompression ceiling answers `package_archive_unreadable`',
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
-        "422": { $ref: "#/components/responses/IdempotencyConflict" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
@@ -1435,7 +1421,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Terminal RunResult — close the sink (HMAC, idempotent)",
       description:
-        "Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.",
+        'Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.\n\nThe runner declares the outcome; the platform infers none of it. `status` is required, and `usage` is required when `status` is `success` — either missing is a 400. Two rules can still turn a reported `success` into `failed`: an output that violates the agent\'s declared output schema, and a `usage` with zero `input_tokens` and zero `output_tokens`, which means the LLM was never reached (the run is failed with a "could not reach the LLM API" error). On any other status, a missing `usage` keeps the last cumulative usage the run reported through `appstrate.metric` events.',
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
@@ -1449,7 +1435,8 @@ const canonicalRunsPaths = {
             schema: {
               type: "object",
               description:
-                "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs` and authoritative `usage`/`cost`. Unknown keys are ignored, so a runner older than the platform still finalizes cleanly.",
+                "AFPS runtime `TerminalRunResult` — `memories`, `pinned`, `output`, `logs`, the required terminal `status`, optional `error`/`durationMs`, and authoritative `usage`/`cost`. Unknown keys are ignored.",
+              required: ["status"],
               properties: {
                 memories: { type: "array" },
                 pinned: { type: "object" },
@@ -1464,12 +1451,14 @@ const canonicalRunsPaths = {
                 },
                 status: {
                   type: "string",
-                  enum: ["success", "failed", "timeout", "cancelled"],
+                  enum: [...terminalRunStatusValues],
+                  description: "Terminal outcome as the runner saw it.",
                 },
                 durationMs: { type: "integer", minimum: 0 },
                 usage: {
                   type: "object",
-                  description: "Authoritative terminal token usage written to the `runs` row.",
+                  description:
+                    "Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached).",
                   properties: {
                     input_tokens: { type: "integer", minimum: 0 },
                     output_tokens: { type: "integer", minimum: 0 },

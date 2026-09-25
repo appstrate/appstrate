@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -19,7 +20,8 @@ import {
   persistenceKeys,
   invalidatePackageFiles,
 } from "../lib/query-keys";
-import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import { retryLaunch, type RunLaunch } from "../lib/run-launch";
+import type { MissingIntegrationFieldError } from "../components/missing-connections-modal";
 
 // NOTE on query keys: run-cache keys (["runs"], ["paginated-runs"], ["run"])
 // are PINNED legacy keys — use-global-run-sync.ts patches them from SSE
@@ -54,10 +56,9 @@ function refusalMessage(err: ApiError): string | null {
 }
 
 export function onMutationError(err: Error) {
-  // Skip the generic toast for missing_integration_connection (412) —
-  // the RunAgentButton renders MissingConnectionsModal off `runAgent.error`
-  // for that case. Showing both a toast AND the modal is noisy and the
-  // toast carries strictly less info than the modal.
+  // Skip the generic toast for missing_integration_connection (409): only a
+  // run launch raises it, and `useRunLauncher` — the one way to launch —
+  // answers it with the recovery modal, which says strictly more.
   if (err instanceof ApiError && err.code === "missing_integration_connection") {
     return;
   }
@@ -94,46 +95,11 @@ export function useSaveInputSettings(packageId: string) {
   });
 }
 
-interface RunAgentParams {
-  input?: Record<string, unknown>;
-  /** Replay a prior run's persisted input instead of supplying `input`. */
-  rerun_from?: string;
-  /**
-   * Version selector forwarded as `?version=`: `"draft"`, `"published"`, or
-   * a version spec. Omitted selectors use the API's published-when-exists
-   * default; callers testing a working copy explicitly pass `"draft"`, which
-   * the API grants only to a caller who can write the package in its home
-   * space (`403 draft_not_writable`). Launch surfaces derive it from
-   * `home_writable` via `defaultRunVersion`.
-   */
-  version?: string;
-  /**
-   * Per-integration connection picks for THIS run (#199 mechanism #2).
-   * Flat map: `{ "@scope/integration": "<connectionId>" }` — one pick per
-   * integration; the chosen connection carries its own `auth_key`. Wire
-   * format validated by `input-parser.ts`. Surfaced from the must_choose
-   * modal picker.
-   */
-  connectionOverrides?: Record<string, string>;
-  /** Per-run model id override (wire `modelId`). From the run-with-options modal. */
-  modelId?: string;
-  /** Per-run proxy id override (wire `proxyId`). From the run-with-options modal. */
-  proxyId?: string;
-  /** Per-run temperature/reasoning override (wire `generation`). */
-  generation?: ModelGenerationSettings;
-  /**
-   * Per-run dependency version overrides (#666) — `{ "@scope/skill": "draft"
-   * | "<semver|dist-tag>" }`. From the run-with-options modal. "draft" runs a
-   * dependency's working copy; any other value replaces the manifest pin.
-   */
-  dependencyOverrides?: Record<string, string>;
-}
-
-export function useRunAgent(packageId: string) {
+function useRunAgent(packageId: string) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
-    mutationFn: async (params?: RunAgentParams) => {
+    mutationFn: async (params?: RunLaunch) => {
       const {
         input,
         rerun_from,
@@ -183,6 +149,52 @@ export function useRunAgent(packageId: string) {
     onError: onMutationError,
   });
 }
+
+/**
+ * The one way the SPA launches a run. A `409 missing_integration_connection`
+ * is a question, not a failure: the launcher keeps the refused launch and the
+ * server's errors, `RunLaunchRecovery` renders them as the recovery modal, and
+ * `retry` replays that launch with the user's picks.
+ */
+export function useRunLauncher(packageId: string) {
+  const runAgent = useRunAgent(packageId);
+  const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
+  const lastLaunch = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
+
+  const onError = (err: Error) => {
+    if (err instanceof ApiError && err.code === "missing_integration_connection") {
+      setMissingErrors(
+        Array.isArray(err.details) ? (err.details as MissingIntegrationFieldError[]) : [],
+      );
+    }
+  };
+
+  return {
+    isPending: runAgent.isPending,
+    missingErrors,
+    /** `onSuccess` also fires when the recovery retry of this launch succeeds. */
+    launch: (launch: RunLaunch, onSuccess?: () => void) => {
+      lastLaunch.current = { launch, onSuccess };
+      runAgent.mutate(launch, { onSuccess, onError });
+    },
+    retry: (picks: Record<string, string>) => {
+      const { launch, onSuccess } = lastLaunch.current;
+      runAgent.mutate(retryLaunch(launch, picks), {
+        onSuccess: () => {
+          setMissingErrors(null);
+          onSuccess?.();
+        },
+        onError,
+      });
+    },
+    dismiss: () => {
+      setMissingErrors(null);
+      runAgent.reset();
+    },
+  };
+}
+
+export type RunLauncher = ReturnType<typeof useRunLauncher>;
 
 export function useImportPackage() {
   const qc = useQueryClient();
@@ -407,24 +419,25 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
-    mutationFn: async (body: {
-      manifest: Record<string, unknown>;
-      /** Legacy API content field; the editor sends ordered file operations. */
-      content?: string;
-      operations?: import("../lib/package-file-tree").PackageFileWriteOperation[];
-      lock_version: number;
-    }): Promise<{ id: string; lock_version: number }> => {
-      const { data } = await client.PUT(`/api/packages/${segment}/{scope}/{name}`, {
-        params: { path: splitPackageRef(packageId) },
-        // No cast needed: the body's explicit `{manifest, content,
-        // lock_version}` keys satisfy the skill/integration/mcp-server update
-        // operations (generic-object manifest) in the dynamic-path union, so
-        // the assignment typechecks directly.
+    mutationFn: async ({
+      etag,
+      body,
+    }: {
+      /** The draft version the edit is based on: sent as `If-Match`. */
+      etag: string;
+      body: {
+        manifest: Record<string, unknown>;
+        /** Legacy API content field; the editor sends ordered file operations. */
+        content?: string;
+        operations?: import("../lib/package-file-tree").PackageFileWriteOperation[];
+      };
+    }): Promise<{ id: string; etag: string | null }> => {
+      const { data, response } = await client.PATCH(`/api/packages/${segment}/{scope}/{name}`, {
+        params: { path: splitPackageRef(packageId), header: { "If-Match": etag } },
         body,
       });
-      // 200 → the updated package resource, bare (issue #657). The resource
-      // carries the NEW `lock_version` optimistic-lock token.
-      return { id: data!.id, lock_version: data!.lock_version ?? 0 };
+      // 200 → the updated package resource, bare (issue #657); its `ETag` bases the next save.
+      return { id: data!.id, etag: response.headers.get("ETag") };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.all });

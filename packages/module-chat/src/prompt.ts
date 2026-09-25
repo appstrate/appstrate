@@ -213,7 +213,7 @@ interface CallerContext {
     | null;
   agents?:
     | {
-        package_id: string;
+        packageId: string;
         display_name?: string | null;
         description?: string | null;
         takes_input?: boolean | null;
@@ -261,12 +261,12 @@ export function normalizeChatLocale(raw: string | undefined): string {
 /** `` - `@scope/name` (v1.2.0) (pinned) — Label: desc ``, minus the parts that say nothing. */
 function skillLine(skill: SkillHint, pinned = false): string {
   const description = skill.description?.trim();
-  const label = skill.display_name?.trim() || skill.package_id;
+  const label = skill.display_name?.trim() || skill.packageId;
   const head =
-    `- \`${skill.package_id}\`` +
+    `- \`${skill.packageId}\`` +
     (skill.version ? ` (v${skill.version})` : "") +
     (pinned ? " (pinned)" : "");
-  if (label === skill.package_id) return description ? `${head} — ${description}` : head;
+  if (label === skill.packageId) return description ? `${head} — ${description}` : head;
   return `${head} — ${label}${description ? `: ${description}` : ""}`;
 }
 
@@ -413,9 +413,9 @@ export function formatCallerContext(
     lines.push("", "## Existing agents you can run");
     for (const a of ctx.agents) {
       const desc = a.description?.trim();
-      const label = a.display_name?.trim() || a.package_id;
+      const label = a.display_name?.trim() || a.packageId;
       lines.push(
-        `- \`${a.package_id}\` — ${label}${desc ? `: ${desc}` : ""}` +
+        `- \`${a.packageId}\` — ${label}${desc ? `: ${desc}` : ""}` +
           ` (takes input: ${a.takes_input ? "yes" : "no"}` +
           `${
             a.published === false

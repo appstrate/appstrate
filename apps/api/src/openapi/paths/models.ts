@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
 export const modelsPaths = {
@@ -36,9 +37,10 @@ export const modelsPaths = {
                     id: "gpt-4o",
                     label: "GPT-4o",
                     providerId: "openai",
-                    providerName: "OpenAI",
+                    provider_name: "OpenAI",
+                    pi_provider: "openai",
                     apiShape: "openai-responses",
-                    baseUrl: "https://api.openai.com/v1",
+                    base_url: "https://api.openai.com/v1",
                     modelId: "gpt-4o",
                     generation: {
                       temperature: "supported",
@@ -101,7 +103,7 @@ export const modelsPaths = {
                 },
                 input: {
                   type: "array",
-                  items: { type: "string" },
+                  items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
                   description: "Supported input types",
                 },
                 contextWindow: { type: "integer", description: "Context window size in tokens" },
@@ -109,12 +111,17 @@ export const modelsPaths = {
                 reasoning: { type: "boolean", description: "Whether the model supports reasoning" },
                 cost: {
                   type: "object",
-                  description: "Cost per million tokens (input/output/cacheRead/cacheWrite)",
+                  description:
+                    "Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
                   properties: {
                     input: { type: "number" },
                     output: { type: "number" },
                     cacheRead: { type: "number" },
                     cacheWrite: { type: "number" },
+                    tiers: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/ModelCostTier" },
+                    },
                   },
                   // Closed like the body around it: a stripped `cache_read`
                   // would store a row that bills cache tokens at no rate.
@@ -123,7 +130,7 @@ export const modelsPaths = {
                 aliased: {
                   type: "boolean",
                   description:
-                    "Managed-model flag. When true, this model's binding (modelId, provider, baseUrl, capabilities/cost) is not exposed on user-facing surfaces and these fields are null; inference is routed by the platform.",
+                    "Managed-model flag. When true, this model's binding (modelId, provider, base_url, capabilities/cost) is not exposed on user-facing surfaces and these fields are null; inference is routed by the platform.",
                 },
               },
               additionalProperties: false,
@@ -224,10 +231,10 @@ export const modelsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["credentialId", "modelIds"],
+              required: ["credentialId", "model_ids"],
               properties: {
                 credentialId: { type: "string", minLength: 1 },
-                modelIds: {
+                model_ids: {
                   type: "array",
                   minItems: 1,
                   maxItems: 50,
@@ -248,11 +255,11 @@ export const modelsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["created", "ids", "promotedDefault"],
+                required: ["created", "ids", "promoted_default"],
                 properties: {
                   created: { type: "integer", minimum: 0 },
                   ids: { type: "array", items: { type: "string" } },
-                  promotedDefault: { type: "boolean" },
+                  promoted_default: { type: "boolean" },
                 },
               },
             },
@@ -310,7 +317,7 @@ export const modelsPaths = {
                         maxTokens: { type: ["integer", "null"], description: "Max output tokens" },
                         input: {
                           type: "array",
-                          items: { type: "string" },
+                          items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
                           description: "Supported input types",
                         },
                         reasoning: {
@@ -366,7 +373,7 @@ export const modelsPaths = {
                 status: 502,
                 detail: "OpenRouter API returned an unexpected error",
                 code: "provider_error",
-                requestId: "req_abc123",
+                request_id: "req_abc123",
               },
             },
           },
@@ -382,7 +389,7 @@ export const modelsPaths = {
                 status: 504,
                 detail: "OpenRouter did not respond within the allowed time",
                 code: "timeout",
-                requestId: "req_def456",
+                request_id: "req_def456",
               },
             },
           },
@@ -396,7 +403,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Test model configuration inline",
       description:
-        "Test a model configuration without saving it first. If editing an existing model, pass existingModelId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
+        "Test a model configuration without saving it first. The probe uses `api_key` when given, the credential's stored key otherwise. A built-in credential is refused (403). Rate limited to 5 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -413,14 +420,10 @@ export const modelsPaths = {
                     "Provider credential ID. apiShape and baseUrl are resolved from the credential's providerId.",
                 },
                 modelId: { type: "string", minLength: 1, description: "Model identifier" },
-                apiKey: {
+                api_key: {
                   type: "string",
                   description:
-                    "Override API key for the probe. Falls back to existingModelId's key, then the credential's stored key.",
-                },
-                existingModelId: {
-                  type: "string",
-                  description: "Existing model ID to fall back to for stored API key",
+                    "Override API key for the probe. Falls back to the credential's stored key.",
                 },
               },
               additionalProperties: false,
@@ -447,11 +450,12 @@ export const modelsPaths = {
     },
   },
   "/api/models/{id}": {
-    put: {
+    patch: {
       operationId: "updateModel",
       tags: ["Models"],
       summary: "Update a custom model",
-      description: "Update a custom model configuration. Built-in models cannot be modified.",
+      description:
+        "Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -470,18 +474,26 @@ export const modelsPaths = {
                   description: "Provider key ID to change which key is used",
                 },
                 enabled: { type: "boolean" },
-                input: { type: ["array", "null"], items: { type: "string" } },
+                input: {
+                  type: ["array", "null"],
+                  items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
+                },
                 contextWindow: { type: ["integer", "null"] },
                 maxTokens: { type: ["integer", "null"] },
                 reasoning: { type: ["boolean", "null"] },
                 cost: {
                   type: ["object", "null"],
-                  description: "Cost per million tokens (input/output/cacheRead/cacheWrite)",
+                  description:
+                    "Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
                   properties: {
                     input: { type: "number" },
                     output: { type: "number" },
                     cacheRead: { type: "number" },
                     cacheWrite: { type: "number" },
+                    tiers: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/ModelCostTier" },
+                    },
                   },
                   // Closed like the body around it: a stripped `cache_read`
                   // would store a row that bills cache tokens at no rate.

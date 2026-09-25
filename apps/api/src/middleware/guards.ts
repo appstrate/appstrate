@@ -8,10 +8,9 @@ import {
   assertPackageMutationAccess,
   isPackageReadableInSpace,
 } from "../lib/package-access.ts";
-import { getRunningRunsForPackage } from "../services/state/runs.ts";
-import { ApiError, forbidden, conflict, invalidRequest } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest } from "../lib/errors.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
-import { markRowAuthority, PERMISSION_GUARD } from "./require-permission.ts";
+import { PERMISSION_GUARD } from "./require-permission.ts";
 
 /** Stamped on middleware that resolves an agent and 404s on an unreachable one.
  *  Mounting it ahead of the permission guard turns 403-vs-404 into a catalog
@@ -23,8 +22,8 @@ const AGENT_LOOKUP = Symbol.for("appstrate.agentLookup");
  *  contract, and it is three. */
 const ACTIVE_AGENT_GATE = Symbol.for("appstrate.activeAgentGate");
 
-/** True when `handler` is a middleware produced by {@link requireAgent} or
- *  {@link requireOrgAgent} — i.e. it can 404 on an unreachable agent. */
+/** True when `handler` is a middleware produced by {@link requireAgent} — i.e.
+ *  it can 404 on an unreachable agent. */
 export function isAgentLookup(handler: unknown): boolean {
   return hasHandlerMarker(handler, AGENT_LOOKUP);
 }
@@ -128,30 +127,6 @@ function agentNotFound(packageId: string) {
   });
 }
 
-/** Middleware: load an agent by route param and set it on context, or 404.
- *  Checks org ownership only — does NOT check space-level access.
- *  Use for org-level operations (editing manifest, skills, tools). */
-export function requireOrgAgent() {
-  return markHandler(async (c: Context<AppEnv>, next: Next) => {
-    const scope = c.req.param("scope");
-    const name = c.req.param("name");
-    const packageId = `${scope}/${name}`;
-    const orgId = c.get("orgId");
-
-    const agent = await getPackage(packageId, orgId);
-    if (!agent) {
-      throw new ApiError({
-        status: 404,
-        code: "agent_not_found",
-        title: "Agent Not Found",
-        detail: `Agent '${packageId}' not found`,
-      });
-    }
-    c.set("package", agent);
-    return next();
-  }, AGENT_LOOKUP);
-}
-
 /** Extract the package ID from route params (scoped `@scope/name` or unscoped `id`). */
 function extractPackageId(c: Context<AppEnv>): string {
   const scope = c.req.param("scope");
@@ -177,12 +152,11 @@ function extractPackageId(c: Context<AppEnv>): string {
  * deliberately have no second permission guard against the current space.
  */
 export function requirePackageInOrg(action: "write" | "delete" = "write") {
-  const guard = markHandler(async (c: Context<AppEnv>, next: Next) => {
+  return markHandler(async (c: Context<AppEnv>, next: Next) => {
     const packageId = extractPackageId(c);
     await assertPackageMutationAccess(c, packageId, action);
     return next();
   }, PERMISSION_GUARD);
-  return markRowAuthority(guard);
 }
 
 /** Middleware: for API key callers, reject with 403 when the `:orgId` route
@@ -225,22 +199,4 @@ export async function pinnedSpaceScopeGuard(c: Context<AppEnv>, next: Next) {
     throw forbidden("Credential scope does not include this space");
   }
   return next();
-}
-
-/** Middleware: reject if agent is system (403) or has running runs (409). */
-export function requireMutableAgent() {
-  return async (c: Context<AppEnv>, next: Next) => {
-    const agent = c.get("package");
-    if (agent.source === "system") {
-      throw forbidden("Cannot modify a system agent");
-    }
-    const running = await getRunningRunsForPackage(
-      { orgId: c.get("orgId"), spaceId: c.get("spaceId") },
-      agent.id,
-    );
-    if (running > 0) {
-      throw conflict("agent_in_use", `${running} run(s) running for this agent`);
-    }
-    return next();
-  };
 }

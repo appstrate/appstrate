@@ -247,12 +247,12 @@ describe("Webhooks API", () => {
     });
   });
 
-  describe("PUT /api/webhooks/:id", () => {
+  describe("PATCH /api/webhooks/:id", () => {
     it("updates webhook URL", async () => {
       const created = await createWebhook();
 
       const res = await app.request(`/api/webhooks/${created.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ url: "https://example.com/updated" }),
       });
@@ -496,10 +496,10 @@ describe("Webhooks API", () => {
       expect(res.status).toBe(404);
     });
 
-    it("PUT /api/webhooks/:otherSpaceWebhookId returns 404", async () => {
+    it("PATCH /api/webhooks/:otherSpaceWebhookId returns 404", async () => {
       const { otherWebhookId, bearer } = await setupCrossSpaceFixture();
       const res = await app.request(`/api/webhooks/${otherWebhookId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...bearer, "Content-Type": "application/json" },
         body: JSON.stringify({ url: "https://attacker.example.com/" }),
       });
@@ -672,7 +672,7 @@ describe("webhooks vs org-webhooks (level-dependent guard)", () => {
       expect(read.status).toBe(200);
 
       const updated = await app.request(`/api/webhooks/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: false }),
       });
@@ -720,7 +720,7 @@ describe("GET /api/webhooks?spaceId= is not a space existence oracle", () => {
 
   /**
    * The problem body with everything REQUEST-specific neutralised: the two
-   * per-request members (`requestId`, `instance`), and the id the caller itself
+   * per-request members (`request_id`, `instance`), and the id the caller itself
    * put in the query, which the uniform 404 echoes back — echoing the caller's
    * own input tells it nothing it did not already know. Everything else —
    * `status`, `code`, `type`, `title` and the sentence around the id — has to
@@ -728,7 +728,7 @@ describe("GET /api/webhooks?spaceId= is not a space existence oracle", () => {
    */
   async function normalisedProblem(res: Response, spaceId: string) {
     const body = (await res.json()) as Record<string, unknown>;
-    delete body.requestId;
+    delete body.request_id;
     delete body.instance;
     if (typeof body.detail === "string") {
       body.detail = body.detail.replaceAll(spaceId, "<spaceId>");

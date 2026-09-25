@@ -43,7 +43,7 @@ inachevé.
   via `readConnectOffers` (`src/connect-offer.ts`, exposé à l'UI par
   `extractAuthOffers` dans `src/ui/auth-offer.ts`) — jamais en scrapant le
   payload, qui ne contient plus que le placeholder (issue #906). Un payload peut
-  porter plusieurs liens — un 412 de lancement en liste un par intégration à
+  porter plusieurs liens — un 409 de lancement en liste un par intégration à
   connecter (issue #1207) — et l'UI monte une carte par offre. La redaction s'applique
   aussi au replay de l'historique persisté
   (`src/pi-chat/structured-session.ts`).
@@ -54,8 +54,9 @@ inachevé.
 
 ## Configuration (variables d'environnement)
 
-Ces variables sont lues directement par le module (pas via le schéma Zod
-`@appstrate/env`), toutes optionnelles :
+Ces variables sont validées par le schéma Zod du module
+(`src/env.ts`, pas par `@appstrate/env`) au démarrage — une valeur invalide
+bloque le boot. Toutes optionnelles :
 
 | Variable                  | Défaut                   | Rôle                                                                                                                                                                                                                             |
 | ------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

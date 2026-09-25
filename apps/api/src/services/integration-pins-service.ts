@@ -654,6 +654,7 @@ async function resolveAgentIntegrationPick(args: {
   agentPackageId: string;
   integrationId: string;
   actor: Actor;
+  canConnect: boolean;
   canConfigureIntegrations: boolean;
   /** The manifest of the version under inspection — never re-read from the package. */
   agentManifest: Record<string, unknown>;
@@ -669,6 +670,7 @@ async function resolveAgentIntegrationPick(args: {
     agentPackageId,
     integrationId,
     actor,
+    canConnect,
     canConfigureIntegrations,
     agentManifest,
     resolution,
@@ -776,7 +778,7 @@ async function resolveAgentIntegrationPick(args: {
     member_pinned_connection_id: memberPinnedConnectionId,
     org_default_connection_id: orgDefaultConnectionId,
     org_default_enforced: orgDefaultEnforced,
-    can_add_connection: canConfigureIntegrations || !blocked,
+    can_add_connection: canConnect && (canConfigureIntegrations || !blocked),
     candidates,
   };
 }
@@ -786,7 +788,7 @@ interface AgentConnectionReadiness {
   /** True iff the run would be refused — an inactive agent, or a connection the resolver rejects. */
   blocks_run: boolean;
   /**
-   * What blocks the run. The integration portion of the 412 envelope (same
+   * What blocks the run. The integration portion of the 409 envelope (same
    * `field: integrations.<id>` shape), plus `agent_not_active` when the SPACE
    * has switched the agent off: the three execution doors answer that with a
    * 404, and this read reports it instead, because a panel that 404s cannot
@@ -808,7 +810,7 @@ interface AgentConnectionReadiness {
  *
  * `blocks_run` / `errors` come from `resolveConnectionsForRun` with the RUN
  * semantics (`includeInert: false` + the required-auth carve-out) — the exact
- * resolver call the run-kickoff 412 uses — so the UI's pre-run signal can never
+ * resolver call the run-kickoff 409 uses — so the UI's pre-run signal can never
  * disagree with the actual gate. The per-integration `resolution` DTOs come
  * from a second `includeInert: true` cascade over the same manifest, so every
  * declared integration, even an inert one, stays manageable in the Connexions
@@ -818,6 +820,8 @@ export async function resolveAgentConnectionReadiness(args: {
   scope: SpaceScope;
   agentPackageId: string;
   actor: Actor;
+  /** `integrations:connect` and `integrations:configure`: together they drive `can_add_connection`. */
+  canConnect: boolean;
   canConfigureIntegrations: boolean;
   /**
    * Version selector (`draft` | `published` | concrete semver | dist-tag) —
@@ -830,7 +834,7 @@ export async function resolveAgentConnectionReadiness(args: {
    */
   version: string;
 }): Promise<AgentConnectionReadiness> {
-  const { scope, agentPackageId, actor, canConfigureIntegrations, version } = args;
+  const { scope, agentPackageId, actor, canConnect, canConfigureIntegrations, version } = args;
   const loaded = await getPackage(agentPackageId, scope.orgId);
   if (!loaded) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
   // The SPACE's own switch, asked here and reported rather than thrown. The run
@@ -856,7 +860,7 @@ export async function resolveAgentConnectionReadiness(args: {
   // `buildRequirement` falls through to `fetchIntegrationManifest`, which reads
   // `packages.draft_manifest`: the readiness verdict would then judge auth keys
   // and required scopes against the integration author's LIVE DRAFT while the
-  // run-kickoff 412 judges them against the pinned published version — exactly
+  // run-kickoff 409 judges them against the pinned published version — exactly
   // the disagreement this function's contract above forbids. (#1178 closed the
   // agent-manifest half of it; this is the integration-manifest half.)
   //
@@ -912,6 +916,7 @@ export async function resolveAgentConnectionReadiness(args: {
         agentPackageId: agent.id,
         integrationId: e.id,
         actor,
+        canConnect,
         canConfigureIntegrations,
         agentManifest,
         resolution: pickResolution,

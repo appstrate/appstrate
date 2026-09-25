@@ -6,6 +6,7 @@
  * no client message-write helper — only session list/CRUD + history load.
  */
 
+import type { InfiniteData } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection, type SkillHint } from "../skills.ts";
 import type { GetHeaders } from "./runtime-context.ts";
@@ -60,15 +61,41 @@ function headers(getHeaders: GetHeaders | null | undefined, json = false): Recor
   return { ...(json ? { "Content-Type": "application/json" } : {}), ...getHeaders?.() };
 }
 
-export async function fetchSessions(
+export interface SessionsPage {
+  data: SessionSummary[];
+  hasMore: boolean;
+}
+
+export type SessionsCache = InfiniteData<SessionsPage, string | null>;
+
+export async function fetchSessionsPage(
   getHeaders: GetHeaders | null | undefined,
-): Promise<SessionSummary[]> {
-  const res = await fetch("/api/chat/sessions", {
+  startingAfter: string | null,
+): Promise<SessionsPage> {
+  const query = startingAfter ? `?startingAfter=${encodeURIComponent(startingAfter)}` : "";
+  const res = await fetch(`/api/chat/sessions${query}`, {
     credentials: "include",
     headers: headers(getHeaders),
   });
   if (!res.ok) throw new Error(`Failed to load sessions (HTTP ${res.status})`);
-  return ((await res.json()) as { data?: SessionSummary[] }).data ?? [];
+  const body = (await res.json()) as Partial<SessionsPage>;
+  return { data: body.data ?? [], hasMore: body.hasMore ?? false };
+}
+
+/** Patch every loaded page (`first` = head page); an absent cache stays absent unless seeded. */
+export function patchSessionsCache(
+  prev: SessionsCache | undefined,
+  fn: (rows: SessionSummary[], first: boolean) => SessionSummary[],
+  seed?: SessionSummary,
+): SessionsCache | undefined {
+  if (!prev) return seed ? { pages: [{ data: [seed], hasMore: false }], pageParams: [null] } : prev;
+  return { ...prev, pages: prev.pages.map((p, i) => ({ ...p, data: fn(p.data, i === 0) })) };
+}
+
+/** Flatten the loaded pages; a row seen twice (bumped mid-walk) keeps its first occurrence. */
+export function flattenSessions(cache: SessionsCache): SessionSummary[] {
+  const seen = new Set<string>();
+  return cache.pages.flatMap((p) => p.data.filter((s) => !seen.has(s.id) && seen.add(s.id)));
 }
 
 export async function renameSession(
@@ -180,7 +207,7 @@ export async function fetchSkills(getHeaders: GetHeaders | null | undefined): Pr
   if (!res.ok) throw new Error(`Failed to load skills (HTTP ${res.status})`);
   const body = (await res.json()) as { data: SkillListRow[] };
   return body.data.map((row) => ({
-    package_id: row.id,
+    packageId: row.id,
     display_name: row.name,
     description: row.description,
     version: row.version,
