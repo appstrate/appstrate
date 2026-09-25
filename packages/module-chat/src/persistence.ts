@@ -48,8 +48,8 @@ function toContent(message: UIMessage): ChatMessageContent {
 /**
  * Create the session row if it does not exist yet (idempotent). The client
  * mints the id; the stream route and `PUT …/skills` (a pin before the first
- * message, so zero messages) both create the row — the latter writing
- * `selection` in the same statement. Returns the row's skill selection.
+ * message) create the row through here, the latter writing `selection` in the
+ * same statement. Returns the row's skill selection.
  */
 export async function ensureSession(
   id: string,

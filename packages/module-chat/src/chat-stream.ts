@@ -319,9 +319,10 @@ export async function handleChatStream(
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
   // Only the caller-context block. It depends on the space id and the caller's
-  // headers — never on the chosen model or the admission gate — so it is chained
-  // on the session row (it renders the pins) and starts the moment that resolves,
-  // overlapping the model list, the attachment materialization, the
+  // headers — never on the chosen model or the admission gate. A turn that
+  // reads skills chains it on the session row (it renders the pins); any other
+  // turn starts it at once. Either way it overlaps the model list, the attachment
+  // materialization, the
   // credential resolution and the gate rather than waiting behind them. It is a
   // READ (`/api/me/context`); a turn the gate rejects has dispatched it for
   // nothing, which is acceptable — what a rejected turn must not do is persist
@@ -341,8 +342,12 @@ export async function handleChatStream(
   // handler. The error is rethrown where the block is consumed.
   const phaseBStart = Date.now();
   let phaseBMs = 0;
+  // Not chained on `sessionSkills` otherwise: its rejection is joined below.
+  const contextSkills = capabilities.readsSkills
+    ? sessionSkills
+    : Promise.resolve(DEFAULT_SKILL_SELECTION);
   const contextBlockPromise: Promise<{ ok: true; block: string } | { ok: false; error: unknown }> =
-    sessionSkills
+    contextSkills
       .then((skills) =>
         buildCallerContextBlock(c, {
           origin,
@@ -605,7 +610,6 @@ export async function handleChatStream(
     "x-org-id": orgId,
   };
   mcpHeaders["x-space-id"] = spaceId;
-
   try {
     const response = await finalize(
       runEngine({
