@@ -72,8 +72,12 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
       <AuiIf condition={(s) => !s.thread.isEmpty}>
         {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
             instant — smoothing turns every content append into a visible glide
-            and amplifies any residual layout shift. */}
-        <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
+            and amplifies any residual layout shift. `relative` makes the
+            viewport the containing block of its absolutely positioned
+            descendants (the `sr-only` labels): placed against an ancestor
+            outside this scroller, they overflow the page into a second
+            scrollbar. */}
+        <ThreadPrimitive.Viewport className="relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
           <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
           <div className="min-h-6 flex-grow" />
