@@ -4,9 +4,12 @@ import { useEffect, useRef } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
+import { usePermissions } from "./use-permissions";
+import { useAppConfig } from "./use-app-config";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateNotificationQueries } from "./use-notifications";
 import { parseSseFrames } from "@appstrate/core/sse";
+import { canReadRuns } from "@appstrate/core/permissions";
 import { SESSIONS_QUERY_KEY as CHAT_SESSIONS_QUERY_KEY } from "@appstrate/module-chat/unread";
 import { chatSessionUpdateEventSchema } from "@appstrate/shared-types";
 import { withViewAsParam } from "../lib/scoping-headers";
@@ -303,6 +306,33 @@ function handleSSEMessage(
 }
 
 /**
+ * The channels this hook dispatches on that the caller can receive, in the
+ * `?channels=` spelling. The server drops the rest anyway; asking only for
+ * these is what makes a change of the set (a role, a preview, a space) a
+ * change of the effect's deps, so the stream reopens under the new grants.
+ * `run_log` is never asked for: it is the per-log firehose this hook would
+ * discard. Exported for its test.
+ */
+export function globalStreamChannels(caller: { readsRuns: boolean; chat: boolean }): string {
+  return [
+    ...(caller.readsRuns ? ["run_update"] : []),
+    // The caller's own connection rows: a session needs no permission for them.
+    "connection_update",
+    ...(caller.chat ? ["chat_session_update"] : []),
+  ].join(",");
+}
+
+/**
+ * Is a refused stream worth reopening? A 4xx other than 429 answers the
+ * request itself — session, grants, space, persona — so the same request gets
+ * the same answer; the effect reopens when one of those changes instead.
+ * Exported for its test.
+ */
+export function isRetryableStreamStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+/**
  * Global SSE subscription on run changes.
  * Uses fetch + ReadableStream instead of EventSource to avoid
  * Safari's aggressive auto-reconnect behavior on connection failure.
@@ -314,11 +344,19 @@ export function useGlobalRunSync() {
   // Same reason as the org/space ids beside it: this stream is opened once and
   // would otherwise keep filling the cache with the other authority's rows.
   const viewAs = useViewAsHeader();
+  const { can, ready } = usePermissions();
+  const { features } = useAppConfig();
+  // Null until the grants load: `can` answers false meanwhile, so opening at
+  // once would drop `run_update` and reopen a moment later — two connections
+  // per page load.
+  const channels = ready
+    ? globalStreamChannels({ readsRuns: canReadRuns(can), chat: !!features.chat })
+    : null;
   const qcRef = useRef(qc);
   qcRef.current = qc;
 
   useEffect(() => {
-    if (!orgId || !spaceId) return;
+    if (!orgId || !spaceId || !channels) return;
 
     const controller = new AbortController();
     const broad = createBroadInvalidator(() => qcRef.current);
@@ -351,23 +389,18 @@ export function useGlobalRunSync() {
         controller.signal.addEventListener("abort", onAbort, { once: true });
       });
 
-    // A persona this route refuses is not a transient outage: retrying it would
-    // loop an idle tab forever against a preview the server has already
-    // rejected, while the banner still claimed one.
-    let previewRefused = false;
+    // A refusal is not a transient outage: retrying it would loop an idle tab
+    // forever against an answer the server has already given.
+    let refused = false;
 
     // One connection attempt. Returns when the stream ends or errors; throws
     // only for a non-OK response (handled by the reconnect loop).
     const connectOnce = async () => {
       const res = await fetch(
-        // Declare the three channels this hook actually dispatches on. Without
-        // it the server fans the whole `run_log` firehose (every log line of
-        // every run in the space) into this stream just for the reader
-        // loop to drop it — and admins/owners got the `debug` level too.
         // `verbose` is deliberately absent: it only affects `run_log`, which
-        // we no longer subscribe to.
+        // `globalStreamChannels` never asks for.
         withViewAsParam(
-          `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=run_update,connection_update,chat_session_update`,
+          `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=${channels}`,
           viewAs,
         ),
         {
@@ -376,7 +409,9 @@ export function useGlobalRunSync() {
         },
       );
       if (!res.ok || !res.body) {
-        previewRefused = await endPreviewIfRefused(res);
+        // A refused persona also ends the preview the banner still claims.
+        await endPreviewIfRefused(res);
+        refused = !res.ok && !isRetryableStreamStatus(res.status);
         throw new Error(`realtime stream unavailable (${res.status})`);
       }
 
@@ -442,7 +477,7 @@ export function useGlobalRunSync() {
         } catch {
           // Failed to connect — fall through to the backoff below.
         }
-        if (controller.signal.aborted || previewRefused) break;
+        if (controller.signal.aborted || refused) break;
         // Jitter — de-synchronize reconnect stampedes (every tab reconnects
         // at once after a redeploy).
         const delay =
@@ -456,5 +491,5 @@ export function useGlobalRunSync() {
       controller.abort();
       broad.dispose();
     };
-  }, [orgId, spaceId, viewAs]);
+  }, [orgId, spaceId, viewAs, channels]);
 }

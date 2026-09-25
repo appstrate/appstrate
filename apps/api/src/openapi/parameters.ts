@@ -58,7 +58,7 @@ export const parameters = {
     required: false,
     description:
       "Comma-separated list of SSE channels to subscribe to (`run_update`, `run_log`, `run_metric`, `connection_update`, `chat_session_update`). " +
-      "Omit to receive every channel (default, unchanged behaviour). Unknown names are ignored; if nothing is recognised the stream falls back to every channel. " +
+      "Omit to receive every channel the caller may receive (default). Unknown names are ignored; if nothing is recognised the stream falls back to that same default. " +
       "Declaring only the channels you consume avoids fanning the `run_log` firehose out to a stream that discards it.",
     schema: { type: "string", example: "run_update,connection_update" },
   },

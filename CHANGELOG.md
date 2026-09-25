@@ -631,6 +631,17 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
 
 ### Fixed
 
+- **A custom space role without a run read gets its chat and connection
+  updates live again** (#1556). `GET /api/realtime/runs` refused with `403` any
+  caller holding neither `runs:read` nor `runs:read-all`, although it also
+  carries `connection_update` and `chat_session_update`, which hold only the
+  caller's own rows. It now drops the run channels for such a caller and
+  refuses the stream only when none of the requested channels remains (an API
+  key keeps its ceilings on the other two, so a key's view does not widen). The
+  single-run and per-agent streams still require a run read. The dashboard
+  subscribes to the channels its caller can receive, reopens the stream when
+  that set changes, and stops reconnecting on a `4xx` other than `429` instead
+  of retrying a refusal every 30 seconds.
 - **A schedule whose stored generation settings its model no longer takes
   still fires** (#1549). Like a space's defaults, a refused temperature or
   reasoning level is dropped for that run, with a warning naming the schedule

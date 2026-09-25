@@ -25,7 +25,7 @@ const SSE_ID_FIELD_DESCRIPTION =
 const SSE_CHANNELS_DESCRIPTION =
   "\n\nChannel selection: pass `channels=` with a comma-separated subset " +
   "(e.g. `channels=run_update,connection_update`) to receive only those frames. " +
-  "The filter is applied server-side before serialization. Omit it to receive every channel. " +
+  "The filter is applied server-side before serialization. Omit it to receive every channel the caller may receive. " +
   "Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.";
 
 /**
@@ -39,6 +39,18 @@ const SSE_RUN_VISIBILITY_DESCRIPTION =
   "The single-run stream refuses a run the caller may not read with 404, the same answer as " +
   "`GET /api/runs/{id}`.";
 
+/**
+ * Who receives which channel on the multiplexed stream: the run channels need
+ * a run read, the per-actor ones only the credential's ceiling (RBAC spec §7.1).
+ */
+const SSE_CHANNEL_ACCESS_DESCRIPTION =
+  "\n\nChannel access: `run_update`, `run_log` and `run_metric` need `runs:read` or `runs:read-all` " +
+  "in the space (for an API key, among its scopes). `connection_update` and `chat_session_update` carry " +
+  "only the caller's own rows and need nothing more for a session; an API key needs `integrations:read` " +
+  "for `connection_update` and never receives `chat_session_update`. A channel the caller may not " +
+  "receive is dropped from the subscription; the stream is refused with 403 only when none of the " +
+  "requested channels (every channel, when `channels` is omitted) remains.";
+
 export const realtimePaths = {
   "/api/realtime/runs": {
     get: {
@@ -46,9 +58,10 @@ export const realtimePaths = {
       tags: ["Realtime"],
       summary: "SSE: all run status changes",
       description:
-        'Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent format: `event: run_update\\ndata: {"id":"run_...","status":"running","packageId":"@scope/name",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller\'s own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\n' +
+        'Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=apst_... query parameter. Each channel reaches only a caller who may receive it; see Channel access below.\n\nEvent format: `event: run_update\\ndata: {"id":"run_...","status":"running","packageId":"@scope/name",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller\'s own rows), `chat_session_update` (a change signal on one of the caller\'s own chat sessions, emitted when the chat module is enabled). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\n' +
         SSE_ID_FIELD_DESCRIPTION +
         SSE_CHANNELS_DESCRIPTION +
+        SSE_CHANNEL_ACCESS_DESCRIPTION +
         SSE_RUN_VISIBILITY_DESCRIPTION,
       parameters: [
         { $ref: "#/components/parameters/SseOrgId" },
@@ -76,7 +89,7 @@ export const realtimePaths = {
       tags: ["Realtime"],
       summary: "SSE: single run events",
       description:
-        "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\n" +
+        "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=apst_... query parameter. The caller must hold `runs:read` or `runs:read-all` in the space (for an API key, among its scopes); without either the stream is refused with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\n" +
         SSE_ID_FIELD_DESCRIPTION +
         SSE_CHANNELS_DESCRIPTION +
         SSE_RUN_VISIBILITY_DESCRIPTION,
@@ -107,7 +120,7 @@ export const realtimePaths = {
       tags: ["Realtime"],
       summary: "SSE: agent run changes",
       description:
-        "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\n" +
+        "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=apst_... query parameter. The caller must hold `runs:read` or `runs:read-all` in the space (for an API key, among its scopes); without either the stream is refused with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\n" +
         SSE_ID_FIELD_DESCRIPTION +
         SSE_CHANNELS_DESCRIPTION +
         SSE_RUN_VISIBILITY_DESCRIPTION,
