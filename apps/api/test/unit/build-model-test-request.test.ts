@@ -42,39 +42,6 @@ describe("buildModelTestRequest", () => {
     expect(headers["Authorization"]).toBe("Bearer mistral-key");
   });
 
-  it("google-generative-ai: passes key as query param, no auth header", () => {
-    const { url, headers } = buildModelTestRequest({
-      apiShape: "google-generative-ai",
-      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-      apiKey: "google key/with+special",
-    });
-    expect(url).toBe(
-      "https://generativelanguage.googleapis.com/v1beta/models?key=google%20key%2Fwith%2Bspecial",
-    );
-    expect(headers).toEqual({});
-  });
-
-  it("google-vertex: appends /models with Bearer auth", () => {
-    const { url, headers } = buildModelTestRequest({
-      apiShape: "google-vertex",
-      baseUrl: "https://vertex.example.com/v1",
-      apiKey: "vertex-token",
-    });
-    expect(url).toBe("https://vertex.example.com/v1/models");
-    expect(headers["Authorization"]).toBe("Bearer vertex-token");
-  });
-
-  it("azure-openai-responses: appends /models with api-key header", () => {
-    const { url, headers } = buildModelTestRequest({
-      apiShape: "azure-openai-responses",
-      baseUrl: "https://acme.openai.azure.com/openai",
-      apiKey: "azure-key",
-    });
-    expect(url).toBe("https://acme.openai.azure.com/openai/models");
-    expect(headers["api-key"]).toBe("azure-key");
-    expect(headers["Authorization"]).toBeUndefined();
-  });
-
   it("openai-completions: appends /models with Bearer auth", () => {
     const { url, headers } = buildModelTestRequest({
       apiShape: "openai-completions",
@@ -93,16 +60,6 @@ describe("buildModelTestRequest", () => {
     });
     expect(url).toBe("https://api.openai.com/v1/models");
     expect(headers["Authorization"]).toBe("Bearer openai-key");
-  });
-
-  it("bedrock-converse-stream: appends /models with Bearer auth", () => {
-    const { url, headers } = buildModelTestRequest({
-      apiShape: "bedrock-converse-stream",
-      baseUrl: "https://bedrock.example.com",
-      apiKey: "bedrock-key",
-    });
-    expect(url).toBe("https://bedrock.example.com/models");
-    expect(headers["Authorization"]).toBe("Bearer bedrock-key");
   });
 
   it("unknown api: falls back to default branch (/models + Bearer)", () => {

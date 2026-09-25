@@ -30,28 +30,6 @@ fireworks-ai accounts/fireworks/routers/glm-fast-latest openai-completions ctx=1
 fireworks-ai accounts/fireworks/routers/glm-flash-latest openai-completions ctx=1048573 max=131072 $=0.15/0.5/0.03/0 caps=text,image,reasoning levels=low,high,max temp=supported temp+reasoning=supported
 fireworks-ai accounts/fireworks/routers/glm-latest openai-completions ctx=1048573 max=262144 $=1.4/4.4/0.26/0 caps=text,reasoning levels=low,high,max temp=supported temp+reasoning=supported
 fireworks-ai accounts/fireworks/routers/kimi-k3-fast openai-completions ctx=1048576 max=131072 $=4.5/22.5/0.45/0 caps=text,image,reasoning levels=low,high,max temp=supported temp+reasoning=supported
-google-ai deep-research-max-preview-04-2026 google-generative-ai ctx=131072 max=65536 $=2/12/0.2/0 caps=text,image,reasoning levels=off,minimal,low,medium,high temp=supported temp+reasoning=supported
-google-ai deep-research-preview-04-2026 google-generative-ai ctx=131072 max=65536 $=2/12/0.2/0 caps=text,image,reasoning levels=off,minimal,low,medium,high temp=supported temp+reasoning=supported
-google-ai gemini-2.5-computer-use-preview-10-2025 google-generative-ai ctx=131072 max=65536 $=1.25/10/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high temp=supported temp+reasoning=supported
-google-ai gemini-2.5-flash google-generative-ai ctx=1048576 max=65536 $=0.3/2.5/0.03/0 caps=text,image,reasoning levels=off,minimal,low,medium,high temp=supported temp+reasoning=supported
-google-ai gemini-2.5-flash-lite google-generative-ai ctx=1048576 max=65536 $=0.1/0.4/0.01/0 caps=text,image,reasoning levels=off,minimal,low,medium,high temp=supported temp+reasoning=supported
-google-ai gemini-2.5-pro google-generative-ai ctx=1048576 max=65536 $=1.25/10/0.125/0 caps=text,image,reasoning levels=off,minimal,low,medium,high temp=supported temp+reasoning=supported
-google-ai gemini-3-flash-preview google-generative-ai ctx=1048576 max=65536 $=0.5/3/0.05/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
-google-ai gemini-3.1-flash-lite google-generative-ai ctx=1048576 max=65536 $=0.25/1.5/0.025/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
-google-ai gemini-3.1-flash-lite-image google-generative-ai ctx=65536 max=- $=0.25/30/0/0 caps=text,image,reasoning levels=minimal,high temp=supported temp+reasoning=supported
-google-ai gemini-3.1-flash-lite-preview google-generative-ai ctx=1048576 max=65536 $=0.25/1.5/0.025/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
-google-ai gemini-3.1-flash-live-preview google-generative-ai ctx=131072 max=65536 $=0.75/4.5/0/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
-google-ai gemini-3.1-pro-preview google-generative-ai ctx=1048576 max=65536 $=2/12/0.2/0 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
-google-ai gemini-3.1-pro-preview-customtools google-generative-ai ctx=1048576 max=65536 $=2/12/0.2/0 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
-google-ai gemini-3.5-flash google-generative-ai ctx=1048576 max=65536 $=1.5/9/0.15/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
-google-ai gemini-3.5-flash-lite google-generative-ai ctx=1048576 max=65536 $=0.3/2.5/0.03/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
-google-ai gemini-3.6-flash google-generative-ai ctx=1048576 max=65536 $=0.75/3.75/0.075/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
-google-ai gemini-3.7-flash google-generative-ai ctx=1048576 max=65536 $=0.75/3.75/0.075/0 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported featured
-google-ai gemini-3.8-flash google-generative-ai ctx=1048576 max=65536 $=0.75/3.75/0.075/0 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported featured
-google-ai gemini-flash-latest google-generative-ai ctx=1048576 max=65536 $=1.5/9/0.15/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported featured
-google-ai gemini-flash-lite-latest google-generative-ai ctx=1048576 max=65536 $=0.25/1.5/0.025/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
-google-ai gemma-4-26b-a4b-it google-generative-ai ctx=262144 max=32768 $=unpriced caps=text,image,reasoning levels=minimal,high temp=supported temp+reasoning=supported
-google-ai gemma-4-31b-it google-generative-ai ctx=262144 max=32768 $=unpriced caps=text,image,reasoning levels=minimal,high temp=supported temp+reasoning=supported
 groq llama-3.1-8b-instant openai-completions ctx=131072 max=- $=0.05/0.08/0/0 caps=text levels=off temp=supported
 groq llama-3.3-70b-versatile openai-completions ctx=131072 max=32768 $=0.59/0.79/0/0 caps=text levels=off temp=supported
 groq openai/gpt-oss-120b openai-completions ctx=131072 max=65536 $=0.15/0.6/0.075/0 caps=text,reasoning levels=low,medium,high temp=supported temp+reasoning=supported

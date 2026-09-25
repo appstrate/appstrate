@@ -170,13 +170,12 @@ function throwOnAliasViolation(violation: AliasInvariantViolation | null, apiSha
       "label",
     );
   }
-  // 2. The swap only rewrites the body `model` field, which exists for
-  //    openai/anthropic/mistral shapes; google/azure/bedrock carry the
-  //    model id in the URL path, so an alias there forwards verbatim and
-  //    404s upstream (and never gets swapped). Reject up front.
+  // 2. An alias is backed by a vendor protocol whose body `model` field the
+  //    swap rewrites; `pi-messages` is the client dialect an aliased run
+  //    speaks, never a backing. Reject up front.
   if (violation === "non_aliasable_shape") {
     throw invalidRequest(
-      `Model aliases are not supported for the "${apiShape}" protocol (the model id is carried in the URL, not the request body).`,
+      `Model aliases are not supported for the "${apiShape}" protocol — it is a client dialect, not a vendor protocol an alias can be backed by.`,
       "aliased",
     );
   }
@@ -566,7 +565,7 @@ export function createModelsRouter() {
 
     // Model-alias guards on the EFFECTIVE post-update state (issue #727) —
     // without this, PATCH is a bypass of every invariant POST enforces: flip
-    // `aliased` on an oauth-subscription or url-model row, or re-point an
+    // `aliased` on an oauth-subscription or non-backing row, or re-point an
     // aliased row to such a credential, and the row becomes a state creation
     // rejects (runs then fail-close late at launch; chat would diverge).
     const current = await getOrgModelRow(orgId, modelId);

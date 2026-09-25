@@ -100,21 +100,6 @@ const stub = Bun.serve({
     if (pathname === "/bad/models") {
       return Response.json({ nope: true });
     }
-    // Gemini's listing: keyed by query parameter, paged by `nextPageToken`.
-    if (pathname === "/gemini/models") {
-      countRequest("gemini");
-      const token = searchParams.get("pageToken");
-      if (token === null) {
-        return Response.json({
-          models: [{ name: "models/gemini-page1" }],
-          nextPageToken: "tok-2",
-        });
-      }
-      if (token === "tok-2") {
-        return Response.json({ models: [{ name: "models/gemini-page2" }] });
-      }
-      return Response.json({ models: [] });
-    }
     if (pathname === "/v1/models") {
       const anthropicKey = req.headers.get("x-api-key");
       if (anthropicKey !== null) {
@@ -215,7 +200,6 @@ const BAD_BASE_URL = `http://127.0.0.1:${stub.port}/bad`;
 // `anthropic-messages` appends `/v1/models` itself, so its base URL stops at
 // the host.
 const ANTHROPIC_BASE_URL = `http://127.0.0.1:${stub.port}`;
-const GEMINI_BASE_URL = `http://127.0.0.1:${stub.port}/gemini`;
 
 interface DiscoverModel {
   id: string;
@@ -498,21 +482,6 @@ describe("POST /api/model-provider-credentials/discover", () => {
     // Two pages, two requests: the last page declares `has_more: false`, so
     // nothing is spent asking for a third.
     expect(listingRequests.get("paged")).toBe(2);
-  });
-
-  it("follows the Google listing's nextPageToken", async () => {
-    const res = await discover(ctx, {
-      providerId: "google-ai",
-      api_key: "good-key",
-      base_url_override: GEMINI_BASE_URL,
-    });
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as DiscoverBody;
-    expect(body.outcome).toBe("ok");
-    expect(body.models.map((m) => m.id)).toEqual(["gemini-page1", "gemini-page2"]);
-    expect(body.truncated).toBe(false);
-    expect(listingRequests.get("gemini")).toBe(2);
   });
 
   it("reports truncated when a cursor that never ends hits the page cap", async () => {

@@ -95,21 +95,6 @@ const fireworksAi: ModelProviderDefinition = {
   ],
 };
 
-const googleAi: ModelProviderDefinition = {
-  providerId: "google-ai",
-  catalogProviderId: "google",
-  displayName: "Google AI",
-  iconUrl: "google-ai",
-  description: "Bring your own Google AI Studio API key.",
-  docsUrl: "https://ai.google.dev/gemini-api/docs",
-  apiShape: "google-generative-ai",
-  defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
-  baseUrlOverridable: false,
-  authMode: "api_key",
-  featured: true,
-  featuredModels: ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-flash-latest"],
-};
-
 const groq: ModelProviderDefinition = {
   providerId: "groq",
   displayName: "Groq",
@@ -305,7 +290,6 @@ const coreProvidersModule: AppstrateModule = {
       cerebras,
       deepseek,
       fireworksAi,
-      googleAi,
       groq,
       mistral,
       moonshot,

@@ -212,7 +212,7 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
           `[model-registry] SYSTEM_PROVIDER_KEYS entry "${validCredential.id}" binds providerId ` +
             `"${validCredential.providerId}", whose api shape "${provider.apiShape}" the platform ` +
             `LLM proxy does not serve (served: ${Object.keys(LLM_PROXY_ROUTES).join(", ")}). ` +
-            `Remove this entry, or configure the model as an org model provider credential.`,
+            `Remove this entry.`,
         );
       }
 
@@ -258,9 +258,9 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
           // alias would leak its backing rather than hide it, so skip it
           // (loud) instead of registering a half-working alias.
           if (validM.aliased === true) {
-            // SYSTEM_PROVIDER_KEYS entries are static API keys — ENFORCED by
-            // the authMode !== "oauth2" boot check above, so the
-            // oauth_provider violation is unreachable here.
+            // SYSTEM_PROVIDER_KEYS entries are static API keys on a proxied
+            // shape — ENFORCED by the authMode and proxied-shape boot checks
+            // above, so only `missing_label` is reachable here.
             const violation = checkAliasInvariants({
               label: validM.label,
               apiShape,
@@ -270,13 +270,6 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
               logger.error(
                 "[model-registry] SYSTEM_PROVIDER_KEYS: skipping aliased model without an explicit label (the derived label would name the backing)",
                 { modelProviderCredentialId: validCredential.id, model: m },
-              );
-              continue;
-            }
-            if (violation === "non_aliasable_shape") {
-              logger.error(
-                "[model-registry] SYSTEM_PROVIDER_KEYS: skipping aliased model — protocol carries the model id in the URL, not the body, so the swap can't hide it",
-                { modelProviderCredentialId: validCredential.id, apiShape, model: m },
               );
               continue;
             }

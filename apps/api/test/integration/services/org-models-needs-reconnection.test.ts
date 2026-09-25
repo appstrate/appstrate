@@ -161,6 +161,22 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     expect(await modelNeedsReconnection(ctx.orgId, model.id)).toBe(false);
   });
 
+  it("refuses to resolve a model whose credential names an unregistered provider", async () => {
+    const { cred, model } = await seedApiKeyModel();
+    await db
+      .update(modelProviderCredentials)
+      .set({ providerId: "google-ai" })
+      .where(eq(modelProviderCredentials.id, cred.id));
+
+    // `null` would let `resolveModel` fall through to another model, so the
+    // stored provider id surfaces instead.
+    const err = await loadModel(ctx.orgId, model.id).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(409);
+    expect((err as ApiError).code).toBe("model_provider_unregistered");
+    expect((err as ApiError).message).toContain("'google-ai'");
+  });
+
   it("refuses to make a dead model the org default (409 model_needs_reconnection)", async () => {
     const { model } = await seedOAuthModel(true);
     expect(await modelNeedsReconnection(ctx.orgId, model.id)).toBe(true);
