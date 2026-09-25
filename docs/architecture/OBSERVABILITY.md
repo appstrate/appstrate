@@ -187,7 +187,7 @@ sub-second-aware boundaries via the OTel `advice.explicitBucketBoundaries` hint
 | --------------------------------- | ---------------- | ---------------------------------------------------------------- | ------------------------------------------ |
 | `appstrate.run.duration`          | histogram (s)    | `status`                                                         | `finalizeRun` (CAS winner, exactly once)   |
 | `appstrate.run.terminal`          | counter          | `status`, `error_code`                                           | `finalizeRun` — failure-rate source        |
-| `appstrate.run.container_spawn`   | histogram (s)    | `sidecar`, `error.type` (failure)                                | `runPlatformContainer` provisioning time   |
+| `appstrate.run.container_spawn`   | histogram (s)    | `error.type` (failure)                                           | `runPlatformContainer` provisioning time   |
 | `appstrate.scheduler.queue_depth` | observable gauge | —                                                                | BullMQ / local queue `count()`             |
 | `appstrate.llm.latency`           | histogram (s)    | `api_shape`, `http.response.status_code`, `error.type` (failure) | platform LLM proxy (`routes/llm-proxy.ts`) |
 

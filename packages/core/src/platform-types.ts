@@ -50,15 +50,6 @@ export interface WorkloadSpec {
   env: Record<string, string>;
   resources: WorkloadResources;
   /**
-   * Place this workload on the egress network (direct internet + platform
-   * reachability) instead of the internal isolation boundary. Set for the
-   * agent in `skipSidecar` runs: with no sidecar there is no egress proxy,
-   * so the agent must reach the upstream LLM and the platform sink itself —
-   * the same network treatment the orchestrator gives the sidecar. Ignored
-   * by orchestrators without network isolation (e.g. the process orchestrator).
-   */
-  egress?: boolean;
-  /**
    * Hard, last-resort lifetime ceiling (seconds) an orchestrator MAY
    * enforce host-side — kill the workload with crash semantics once it
    * outlives this bound. Only matters when the platform's own timeout can
@@ -77,9 +68,8 @@ export interface WorkloadSpec {
  * in-guest loopback for microVMs) and must never leak into
  * orchestrator-agnostic launch code as magic strings.
  *
- * Always present on a boundary: the endpoints describe where a sidecar
- * WOULD live for this run. Runs that skip the sidecar simply never read
- * them.
+ * Always present on a boundary: every run boots its sidecar at these
+ * endpoints.
  */
 export interface SidecarEndpoints {
   /** Base URL of the sidecar's HTTP surface (`/mcp`, `/health`) as seen from the agent. */
@@ -147,17 +137,6 @@ export interface CleanupReport {
 
 export type StopResult = "stopped" | "not_found" | "already_stopped";
 
-/** Optional hints for {@link RunOrchestrator.createIsolationBoundary}. */
-export interface IsolationBoundaryOptions {
-  /**
-   * The run will never launch a sidecar (no integrations, static API key,
-   * no proxy, no alias). Lets port-allocating backends skip reserving a
-   * sidecar port the run will never bind — the boundary's
-   * `sidecarEndpoints` are then placeholders that must not be dialled.
-   */
-  skipSidecar?: boolean;
-}
-
 // ---------------------------------------------------------------------------
 // RunOrchestrator — structural contract
 // ---------------------------------------------------------------------------
@@ -183,10 +162,7 @@ export interface RunOrchestrator {
   ensureImages(images: string[]): Promise<void>;
 
   /** Create an isolated environment for a run. Docker: bridge network. K8s: namespace. */
-  createIsolationBoundary(
-    runId: string,
-    opts?: IsolationBoundaryOptions,
-  ): Promise<IsolationBoundary>;
+  createIsolationBoundary(runId: string): Promise<IsolationBoundary>;
 
   /** Remove an isolated environment. Idempotent. */
   removeIsolationBoundary(boundary: IsolationBoundary): Promise<void>;

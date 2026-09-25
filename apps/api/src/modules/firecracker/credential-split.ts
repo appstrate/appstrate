@@ -66,11 +66,10 @@ export const SIDECAR_SECRET_KEYS: readonly string[] = [
 ];
 
 /**
- * Agent-env keys that carry secrets: the HMAC sink signing secret, the
- * agent↔sidecar bearer (the other half of the sidecar's SIDECAR_AUTH_TOKEN),
- * and — on skipSidecar (direct-provider) runs — the REAL model API key
- * (sidecar-backed runs only ever put the placeholder in the agent env,
- * which is harmless to broker too).
+ * Agent-env keys that carry secrets: the HMAC sink signing secret and the
+ * agent↔sidecar bearer (the other half of the sidecar's SIDECAR_AUTH_TOKEN).
+ * MODEL_API_KEY only ever holds the placeholder; it is brokered anyway, so a
+ * credential-named key never lands on the drive whatever its value.
  */
 export const AGENT_SECRET_KEYS: readonly string[] = [
   "APPSTRATE_SINK_SECRET",
@@ -88,7 +87,7 @@ interface CredentialSplit {
   /**
    * Sidecar env for the config drive — the input minus the brokered
    * secrets. `undefined` when the input sidecar env was `undefined`
-   * (skipSidecar runs).
+   * (an agent-only VM).
    */
   driveSidecarEnv: Record<string, string> | undefined;
   /** Agent env for the config drive — the input minus the brokered secrets. */

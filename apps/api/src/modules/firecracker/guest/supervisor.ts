@@ -92,32 +92,23 @@ function readConfig(): GuestConfig {
  *   - root (supervisor): allowed — it is the trust anchor of the guest.
  *   - sidecar uid: full egress (it fronts the LLM proxy + forward proxy).
  *   - runner uid: full egress (integration MCP servers call external APIs).
- *   - agent uid: loopback + the platform sink only, UNLESS the run is
- *     skipSidecar (then the agent needs direct upstream egress).
+ *   - agent uid: loopback + the platform sink only.
  *   - everything else — any uid, any socketless packet — is dropped.
  *
  * DNS to the configured resolvers is allowed for whoever has egress
- * (sidecar/runner always, agent only when unrestricted) via the general
- * accept rules — no special-casing needed.
+ * (sidecar/runner) via the general accept rules — no special-casing needed.
  */
 function applyFirewall(exec: RunHostCmd, cfg: GuestConfig): Promise<void> {
-  const agentEgress = cfg.agent.unrestricted_egress
-    ? [`      meta skuid ${GUEST_AGENT_UID} accept`]
-    : [
-        `      meta skuid ${GUEST_AGENT_UID} ip daddr 127.0.0.1 accept`,
-        `      meta skuid ${GUEST_AGENT_UID} ip daddr ${cfg.network.platform_ip} tcp dport ${cfg.network.platform_port} accept`,
-      ];
-
   const script = [
     `table inet appstrate_guest {`,
     `  chain output {`,
     `    type filter hook output priority filter; policy drop;`,
     // Credential broker: by the time this firewall is applied the
     // supervisor has already fetched the run's secrets from MMDS. Slam the
-    // link-local metadata address shut for EVERY uid — including root and
-    // any unrestricted_egress agent — so no workload can ever read the
-    // credential store back. First rule = highest precedence (drops before
-    // the skuid-0/sidecar/runner accepts below). Unconditional: in
+    // link-local metadata address shut for EVERY uid — including root — so
+    // no workload can ever read the credential store back. First rule =
+    // highest precedence (drops before the skuid-0/sidecar/runner accepts
+    // below). Unconditional: in
     // config-drive mode MMDS is not even configured, so this is a harmless
     // belt-and-suspenders (the host forward chain also drops 169.254/16).
     `    ip daddr ${MMDS_IPV4_ADDRESS} drop`,
@@ -125,7 +116,8 @@ function applyFirewall(exec: RunHostCmd, cfg: GuestConfig): Promise<void> {
     `    meta skuid 0 accept`,
     `    meta skuid ${GUEST_SIDECAR_UID} accept`,
     `    meta skuid ${GUEST_RUNNER_UID} accept`,
-    ...agentEgress,
+    `    meta skuid ${GUEST_AGENT_UID} ip daddr 127.0.0.1 accept`,
+    `    meta skuid ${GUEST_AGENT_UID} ip daddr ${cfg.network.platform_ip} tcp dport ${cfg.network.platform_port} accept`,
     `  }`,
     `}`,
     ``,

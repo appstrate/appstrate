@@ -53,6 +53,8 @@ function containerModel() {
       MODEL_ID: "claude-sonnet-4-6",
       MODEL_COST: JSON.stringify(COST),
       AGENT_PROMPT: "You are a helpful agent.",
+      SIDECAR_URL: "http://sidecar:8080",
+      SIDECAR_AUTH_TOKEN: "sidecar-auth-token",
     }),
   );
 }

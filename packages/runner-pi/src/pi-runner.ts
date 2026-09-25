@@ -1656,9 +1656,8 @@ export function installSessionBridge(
       // dedicated `compaction` session entry (which is why its own
       // `getSessionStats()` counts it and a message-only accumulator does
       // not). Without this the tokens are invisible to `RunResult.usage` /
-      // `.cost`, and on a run with no llm-proxy rows to fall back on (a
-      // no-sidecar run against a static key) they are missing from
-      // `runs.cost` outright.
+      // `.cost`, and on a run with no llm-proxy rows to fall back on they
+      // are missing from `runs.cost` outright.
       case "compaction_end": {
         const e = event as unknown as PiCompactionEndEvent;
         const usage = e.result?.usage;

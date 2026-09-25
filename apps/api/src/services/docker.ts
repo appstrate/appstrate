@@ -45,8 +45,8 @@ export const EXEC_NETWORK_PREFIX = "appstrate-exec-";
 export const WORKSPACE_VOLUME_PREFIX = "appstrate-ws-";
 
 /**
- * Name of the shared egress network sidecars (and `skipSidecar` agents)
- * attach to for DNS + internet access. Durable infrastructure: it is
+ * Name of the shared egress network sidecars attach to for DNS + internet
+ * access. Durable infrastructure: it is
  * resolved **by name at use time** (`ensureNetwork`), never removed by
  * `shutdown()` nor by the boot orphan sweep — several API processes may
  * share one Docker daemon (dev server + integration test app, blue/green

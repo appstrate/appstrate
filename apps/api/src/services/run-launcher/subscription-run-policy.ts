@@ -31,8 +31,7 @@ import { isOAuthModelProvider } from "../model-providers/registry.ts";
  * NO stored credential id. That configuration is invalid, never a downgrade:
  * an OAuth token can only be delivered via the sidecar bearer-swap keyed by a
  * `model_provider_credentials` row — treating the run as an API-key run would
- * put the RAW subscription token into `MODEL_API_KEY` inside the agent
- * container (and, with no integrations/proxy, skip the sidecar entirely).
+ * hand the sidecar a subscription token it can neither refresh nor route.
  */
 export class OauthProviderMissingCredentialError extends Error {
   constructor(public readonly providerId: string) {
@@ -40,7 +39,7 @@ export class OauthProviderMissingCredentialError extends Error {
       `Provider "${providerId}" declares authMode "oauth2" but the run resolved no stored ` +
         `credential id. OAuth subscription tokens are delivered via the sidecar bearer-swap ` +
         `against a stored model provider credential — they can never run as static API keys ` +
-        `(the raw token would leak into the agent container). Bind the model to a stored ` +
+        `(the sidecar could neither refresh nor route it). Bind the model to a stored ` +
         `OAuth credential; SYSTEM_PROVIDER_KEYS cannot carry OAuth providers.`,
     );
     this.name = "OauthProviderMissingCredentialError";

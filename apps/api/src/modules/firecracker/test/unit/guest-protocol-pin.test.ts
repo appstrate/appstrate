@@ -50,6 +50,23 @@ const CONTRACT_BY_PROTOCOL: Record<number, string[]> = {
     "sidecar.env",
     "sidecar.env.RUN_TOKEN",
   ],
+  3: [
+    "agent",
+    "agent.argv",
+    "agent.env",
+    "agent.env.MODEL_API_KEY",
+    "credentials",
+    "credentials.source",
+    "exit_marker_nonce",
+    "network",
+    "network.platform_ip",
+    "network.platform_port",
+    "run_id",
+    "sidecar",
+    "sidecar.enabled",
+    "sidecar.env",
+    "sidecar.env.RUN_TOKEN",
+  ],
 };
 
 describe("guest config ↔ GUEST_PROTOCOL_VERSION pin", () => {
@@ -68,7 +85,6 @@ describe("guest config ↔ GUEST_PROTOCOL_VERSION pin", () => {
       platformPort: 3000,
       sidecarEnv: { RUN_TOKEN: "tok" },
       agentEnv: { MODEL_API_KEY: "sk-x" },
-      agentUnrestrictedEgress: false,
       credentialSource: "mmds",
       agentArgv: ["/bin/sh", "-c", "true"],
     });

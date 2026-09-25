@@ -12,12 +12,10 @@ import {
 const model = {
   api: "anthropic-messages",
   modelId: "claude-sonnet-4-5",
-  baseUrl: "https://api.anthropic.com",
 };
 
-// Sidecar-backed calls must pass the topology explicitly — buildRuntimePiEnv
-// throws instead of defaulting (the Docker magic string is gone; the
-// orchestrator's sidecarEndpoints is the single topology owner).
+// Every call passes the topology explicitly — buildRuntimePiEnv throws instead
+// of defaulting (the orchestrator's sidecarEndpoints is the single topology owner).
 const sidecar = { sidecarUrl: "http://sidecar:8080", sidecarAuthToken: "sidecar-auth-token" };
 
 describe("buildRuntimePiEnv", () => {
@@ -46,8 +44,13 @@ describe("buildRuntimePiEnv", () => {
     expect(env.SIDECAR_URL).toBe("http://sidecar:8080");
   });
 
-  it("throws when a sidecar-backed run omits sidecarUrl", () => {
-    expect(() => buildRuntimePiEnv({ model, agentPrompt: "p" })).toThrow(/sidecarUrl is required/);
+  it("throws when sidecarUrl or sidecarAuthToken is empty", () => {
+    expect(() =>
+      buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar, sidecarUrl: "" }),
+    ).toThrow(/sidecarUrl is required/);
+    expect(() =>
+      buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar, sidecarAuthToken: "" }),
+    ).toThrow(/sidecarAuthToken is required/);
   });
 
   it("skips MODEL_BASE_URL when no proxy is configured", () => {
@@ -108,7 +111,6 @@ describe("buildRuntimePiEnv", () => {
       model: {
         api: "openai-completions",
         modelId: "deepseek-chat",
-        baseUrl: "https://api.deepseek.com/v1",
         piProvider: "deepseek",
         apiKey: "sk-secret",
         apiKeyPlaceholder: "sk-placeholder",
@@ -128,10 +130,10 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_PROVIDER).toBeUndefined();
   });
 
-  // P1-12: on the sidecar-proxied path the real provider key must NEVER reach
-  // the agent container. A missing apiKeyPlaceholder used to silently fall back
-  // to the raw apiKey (`apiKeyPlaceholder ?? apiKey`) — now it fails closed.
-  it("throws when sidecar-proxied and apiKey has no placeholder (P1-12)", () => {
+  // P1-12: the real provider key must NEVER reach the agent container. A
+  // missing apiKeyPlaceholder used to silently fall back to the raw apiKey
+  // (`apiKeyPlaceholder ?? apiKey`) — now it fails closed.
+  it("throws when apiKey has no placeholder (P1-12)", () => {
     expect(() =>
       buildRuntimePiEnv({
         model: { ...model, apiKey: "sk-test" }, // no apiKeyPlaceholder
@@ -142,52 +144,51 @@ describe("buildRuntimePiEnv", () => {
     ).toThrow(/apiKeyPlaceholder is required/);
   });
 
-  // Regression: #741 — a no-sidecar run (static API key, no integrations/proxy)
-  // talks to the provider directly, so MODEL_BASE_URL must carry the model's
-  // native endpoint. Without it the Pi SDK falls back to api.openai.com and
-  // sends an OpenAI-compatible key (DeepSeek/Mistral/z.ai/…) to the wrong host.
-  it("emits the model's native baseUrl when the sidecar is skipped (#741)", () => {
-    const env = buildRuntimePiEnv({
-      model: {
-        api: "openai-completions",
-        modelId: "deepseek-chat",
-        baseUrl: "https://api.deepseek.com/v1",
-        apiKey: "sk-deepseek-secret",
-      },
-      agentPrompt: "p",
-      noSidecar: true,
-    });
-    expect(env.MODEL_BASE_URL).toBe("https://api.deepseek.com/v1");
-    // No-sidecar path hands the real key directly to the agent.
-    expect(env.MODEL_API_KEY).toBe("sk-deepseek-secret");
-  });
+  describe("the vendor credential never enters the agent container", () => {
+    const REAL_KEY = "sk-ant-api03-real-secret-value";
+    const keyed = { ...model, apiKey: REAL_KEY, apiKeyPlaceholder: "sk-ant-placeholder" };
+    const llm = { sidecarProxyLlmUrl: "http://sidecar:8080/llm" };
 
-  it("does not emit MODEL_BASE_URL when the sidecar is skipped but baseUrl is empty", () => {
-    const env = buildRuntimePiEnv({
-      model: { api: "openai-completions", modelId: "gpt-4o", baseUrl: "", apiKey: "sk-x" },
-      agentPrompt: "p",
-      noSidecar: true,
+    it("MODEL_API_KEY is never the real key, and no env value carries it, for every option combination", () => {
+      const forwards = [{}, { forwardProxyUrl: "http://sidecar:8081", noProxy: "sidecar" }];
+      for (const aliased of [false, true]) {
+        for (const piProvider of [undefined, "anthropic"]) {
+          for (const forward of forwards) {
+            const env = buildRuntimePiEnv({
+              model: { ...keyed, aliased, piProvider },
+              agentPrompt: "p",
+              ...sidecar,
+              ...llm,
+              ...forward,
+            });
+            expect(env.MODEL_API_KEY).not.toBe(REAL_KEY);
+            expect(Object.values(env).filter((v) => v.includes(REAL_KEY))).toEqual([]);
+            expect(env.MODEL_BASE_URL).toBe(llm.sidecarProxyLlmUrl);
+          }
+        }
+      }
     });
-    // Empty baseUrl → keep the SDK's native default rather than emit "".
-    expect(env.MODEL_BASE_URL).toBeUndefined();
-  });
 
-  it("prefers the sidecar proxy URL over the model baseUrl when both could apply", () => {
-    const env = buildRuntimePiEnv({
-      // apiKeyPlaceholder present: sidecar-proxied traffic must carry the
-      // placeholder, not the raw key (P1-12) — supply it so this URL-precedence
-      // case doesn't trip the fail-closed guard.
-      model: {
-        ...model,
-        baseUrl: "https://api.deepseek.com/v1",
-        apiKey: "sk-x",
-        apiKeyPlaceholder: "ph",
-      },
-      agentPrompt: "p",
-      sidecarProxyLlmUrl: "http://sidecar:8080/llm",
-      noSidecar: true,
+    it("refuses a keyed model whose inference is not routed through the sidecar", () => {
+      expect(() =>
+        buildRuntimePiEnv({
+          model: { ...model, apiKey: REAL_KEY },
+          agentPrompt: "p",
+          ...sidecar,
+        }),
+      ).toThrow(/sidecarProxyLlmUrl is required/);
     });
-    expect(env.MODEL_BASE_URL).toBe("http://sidecar:8080/llm");
+
+    it("refuses a placeholder equal to the real key", () => {
+      expect(() =>
+        buildRuntimePiEnv({
+          model: { ...keyed, apiKeyPlaceholder: REAL_KEY },
+          agentPrompt: "p",
+          ...sidecar,
+          ...llm,
+        }),
+      ).toThrow(/apiKeyPlaceholder must differ from the real key/);
+    });
   });
 
   it("emits MODEL_INPUT / MODEL_COST / MODEL_CONTEXT_WINDOW / MODEL_MAX_TOKENS conditionally", () => {
@@ -280,12 +281,6 @@ describe("buildRuntimePiEnv", () => {
     expect(env2.MODEL_REASONING).toBe("false");
   });
 
-  it("serialises OUTPUT_SCHEMA when provided", () => {
-    const schema = { type: "object", properties: { summary: { type: "string" } } };
-    const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar, outputSchema: schema });
-    expect(env.OUTPUT_SCHEMA).toBe(JSON.stringify(schema));
-  });
-
   it("emits HTTP/HTTPS/NO proxy env vars when forward proxy is set", () => {
     const env = buildRuntimePiEnv({
       model,
@@ -329,25 +324,6 @@ describe("buildRuntimePiEnv", () => {
     expect(env.HTTP_PROXY).toBeUndefined();
     expect(env.HTTPS_PROXY).toBeUndefined();
     expect(env.NO_PROXY).toBeUndefined();
-  });
-
-  it("omits SIDECAR_URL and proxy env vars when noSidecar is true", () => {
-    const env = buildRuntimePiEnv({
-      model,
-      agentPrompt: "p",
-      noSidecar: true,
-      // Even with forwardProxyUrl supplied, it must be ignored — the
-      // forward proxy lives next to the sidecar.
-      forwardProxyUrl: "http://sidecar:8081",
-    });
-    expect(env.SIDECAR_URL).toBeUndefined();
-    expect(env.HTTP_PROXY).toBeUndefined();
-    expect(env.HTTPS_PROXY).toBeUndefined();
-    expect(env.NO_PROXY).toBeUndefined();
-    // Required keys still emitted.
-    expect(env.AGENT_PROMPT).toBe("p");
-    expect(env.MODEL_API).toBe(model.api);
-    expect(env.MODEL_ID).toBe(model.modelId);
   });
 
   it("forwards a W3C traceparent into TRACEPARENT when supplied", () => {

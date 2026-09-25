@@ -258,6 +258,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`IsolationBoundaryOptions`** (`@appstrate/core/platform-types`), the
+  `opts` parameter of `RunOrchestrator.createIsolationBoundary`, and
+  `WorkloadSpec.egress` — BREAKING. Every run boots its sidecar, so no boundary
+  is created for a sidecar-less run and no workload is placed on the egress
+  network: an orchestrator drops the parameter and places every workload on
+  the run's isolation boundary.
+
+- **The `sidecar` attribute of `recordContainerSpawn`** (`@appstrate/core/telemetry`)
+  and of `TelemetryProvider.recordContainerSpawn` — BREAKING for a provider
+  implementation. Every run has a sidecar, so the attribute was constant.
+
 - **`CatalogModelSelector`**, **`ModelIdSelection`**, **`isCatalogModelSelector`**
   and **`ModelProviderDefinition.modelDiscoveryCandidates`**
   (`@appstrate/core/module`) — BREAKING. A provider's discovery candidates, and

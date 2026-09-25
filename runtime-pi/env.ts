@@ -41,9 +41,9 @@ interface RuntimeEnv {
   modelApi: string;
   /** Model identifier passed to the SDK. */
   modelId: string;
-  /** Optional baseUrl override (sidecar proxy or compatible endpoint). */
+  /** The sidecar's LLM proxy; absent for a keyless model. */
   modelBaseUrl?: string;
-  /** Bearer key for the upstream LLM (placeholder when proxied). */
+  /** The placeholder the sidecar swaps for the real credential upstream. */
   modelApiKey?: string;
   /** Whether the model emits reasoning tokens. */
   modelReasoning?: boolean;
@@ -73,20 +73,20 @@ interface RuntimeEnv {
   agentInput: Record<string, unknown>;
   /** Sink credentials (HTTP-signed CloudEvents transport to the platform). */
   sink: { url: string; finalizeUrl: string; secret: string };
-  /** Sidecar URL — present when the platform attached a sidecar. */
-  sidecarUrl?: string;
+  /** The run's sidecar (`/mcp`, `/llm`, `/runtime-events`, boot report). */
+  sidecarUrl: string;
   /**
    * Per-run secret this container presents on `SIDECAR_AUTH_HEADER` for every
    * request to the sidecar's control surface (`/llm/*`, `/mcp`,
-   * `/integrations/boot-report`, `/runtime-events`). Present exactly when
-   * {@link sidecarUrl} is — the platform mints and emits the pair together.
+   * `/integrations/boot-report`, `/runtime-events`). The platform mints and
+   * emits it together with {@link sidecarUrl}.
    *
    * Captured here so `entrypoint.ts` can delete the env var alongside
    * `SIDECAR_URL` once the model and the clients hold it: the two together are
    * the capability to reach the sidecar, and the Pi bash extension must not be
    * able to `env | grep SIDECAR` its way to a free `/llm` call.
    */
-  sidecarAuthToken?: string;
+  sidecarAuthToken: string;
   /**
    * Wall-clock execution budget for the run, in seconds. Surfaced on
    * `ExecutionContext.timeoutSeconds`; the runner arms its own timeout
@@ -332,17 +332,16 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
   if (!agentPrompt) issues.push("AGENT_PROMPT: required");
 
   const sidecarUrl = source.SIDECAR_URL;
-  if (sidecarUrl !== undefined && sidecarUrl !== "" && normalizeHttpUrl(sidecarUrl) === null) {
-    issues.push(`SIDECAR_URL: must be an http(s) URL when set (got "${sidecarUrl}")`);
+  if (!sidecarUrl) issues.push("SIDECAR_URL: required");
+  else if (normalizeHttpUrl(sidecarUrl) === null) {
+    issues.push(`SIDECAR_URL: must be an http(s) URL (got "${sidecarUrl}")`);
   }
 
   // FATAL rather than a warning: without it every sidecar call answers 401, so
   // the run would boot, connect to nothing, and fail on its first tool call
   // with an error that names the symptom instead of the cause.
   const sidecarAuthToken = source.SIDECAR_AUTH_TOKEN;
-  if (sidecarUrl && !sidecarAuthToken) {
-    issues.push("SIDECAR_AUTH_TOKEN: required whenever SIDECAR_URL is set");
-  }
+  if (!sidecarAuthToken) issues.push("SIDECAR_AUTH_TOKEN: required");
 
   const modelBaseUrl = source.MODEL_BASE_URL;
   if (modelBaseUrl && normalizeHttpUrl(modelBaseUrl) === null)
@@ -429,8 +428,8 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     agentPrompt: agentPrompt!,
     agentInput,
     sink: { url: sinkUrl!, finalizeUrl: sinkFinalizeUrl!, secret: sinkSecret! },
-    sidecarUrl: sidecarUrl || undefined,
-    sidecarAuthToken: sidecarAuthToken || undefined,
+    sidecarUrl: sidecarUrl!,
+    sidecarAuthToken: sidecarAuthToken!,
     timeoutSeconds: agentTimeoutSeconds > 0 ? agentTimeoutSeconds : undefined,
     ...(mcpToolTimeoutMs > 0 ? { mcpToolTimeoutMs } : {}),
     traceparent: source.TRACEPARENT || undefined,
@@ -469,7 +468,7 @@ export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
     //
     // Carried on the model rather than read from `process.env` at request time,
     // so the bootloader can delete the variable once the run is wired.
-    ...(env.sidecarAuthToken ? { headers: { [SIDECAR_AUTH_HEADER]: env.sidecarAuthToken } } : {}),
+    headers: { [SIDECAR_AUTH_HEADER]: env.sidecarAuthToken },
   });
 }
 

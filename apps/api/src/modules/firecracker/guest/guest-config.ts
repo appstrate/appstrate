@@ -52,15 +52,9 @@ export interface GuestConfig {
     enabled: boolean;
     env: Record<string, string>;
   };
+  /** The supervisor confines the agent to loopback (sidecar) + the platform sink. */
   agent: {
     env: Record<string, string>;
-    /**
-     * skipSidecar runs have no in-guest egress proxy — the agent itself
-     * must reach the upstream LLM, so the supervisor skips the uid-based
-     * egress restriction for it. Sidecar-backed runs keep it: the agent
-     * may only talk to loopback (sidecar) and the platform sink.
-     */
-    unrestricted_egress: boolean;
     /**
      * Agent command override — NEVER set on production runs (the guest
      * supervisor defaults to the baked runtime entrypoint). Exists for

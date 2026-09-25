@@ -67,9 +67,9 @@ function containerModel(def: ModelProviderDefinition, modelId: string): Model<Ap
     model: {
       api: def.apiShape,
       modelId,
-      baseUrl: "https://vendor.example/v1",
       piProvider: piProviderOf(def),
       apiKey: "sk-test",
+      apiKeyPlaceholder: "sk-placeholder",
       input: defaults.input,
       contextWindow: defaults.contextWindow,
       maxTokens: defaults.maxTokens,
@@ -78,7 +78,9 @@ function containerModel(def: ModelProviderDefinition, modelId: string): Model<Ap
     },
     agentPrompt: "sys",
     runId: "run_parity",
-    noSidecar: true,
+    sidecarUrl: "http://sidecar:8080",
+    sidecarAuthToken: "sidecar-auth-token",
+    sidecarProxyLlmUrl: "http://sidecar:8080/llm",
     sink: {
       url: `${ORIGIN}/api/runs/run_parity/events`,
       finalizeUrl: `${ORIGIN}/api/runs/run_parity/events/finalize`,

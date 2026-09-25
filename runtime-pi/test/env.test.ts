@@ -13,6 +13,8 @@ const VALID = {
   MODEL_API: "openai-completions",
   MODEL_ID: "gpt-4o-mini",
   AGENT_PROMPT: "You are a helpful agent.",
+  SIDECAR_URL: "http://sidecar:8080",
+  SIDECAR_AUTH_TOKEN: "sidecar-auth-token",
 };
 
 describe("parseRuntimeEnv — happy path", () => {
@@ -41,7 +43,8 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.modelTemperature).toBeUndefined();
     expect(env.modelReasoningLevel).toBeUndefined();
     expect(env.agentInput).toEqual({});
-    expect(env.sidecarUrl).toBeUndefined();
+    expect(env.sidecarUrl).toBe("http://sidecar:8080");
+    expect(env.sidecarAuthToken).toBe("sidecar-auth-token");
     expect(env.modelApiKey).toBeUndefined();
     expect(env.timeoutSeconds).toBeUndefined();
     expect(env.mcpToolTimeoutMs).toBeUndefined();
@@ -72,9 +75,6 @@ describe("parseRuntimeEnv — happy path", () => {
       MODEL_CONTEXT_WINDOW: "200000",
       MODEL_MAX_TOKENS: "32768",
       AGENT_INPUT: '{"foo":"bar","n":1}',
-      SIDECAR_URL: "http://sidecar:8080",
-      SIDECAR_AUTH_TOKEN: "sidecar-auth-token",
-      OUTPUT_SCHEMA: '{"type":"object"}',
     });
     expect(env.workspaceDir).toBe("/agent");
     expect(env.modelBaseUrl).toBe("https://proxy.example.com/v1");
@@ -94,19 +94,13 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.sidecarAuthToken).toBe("sidecar-auth-token");
   });
 
-  it("refuses a SIDECAR_URL with no SIDECAR_AUTH_TOKEN", () => {
-    // The sidecar denies by default, so a container handed only the URL would
-    // boot and then 401 on every LLM and tool call. Fatal at parse instead.
-    expect(() => parseRuntimeEnv({ ...VALID, SIDECAR_URL: "http://sidecar:8080" })).toThrow(
-      /SIDECAR_AUTH_TOKEN: required/,
-    );
-    // Control: the same environment WITH the token parses, and the same
-    // environment with NEITHER parses too (a no-sidecar run owes no token).
-    expect(
-      parseRuntimeEnv({ ...VALID, SIDECAR_URL: "http://sidecar:8080", SIDECAR_AUTH_TOKEN: "t" })
-        .sidecarAuthToken,
-    ).toBe("t");
-    expect(parseRuntimeEnv({ ...VALID }).sidecarAuthToken).toBeUndefined();
+  it("refuses an environment without SIDECAR_URL or SIDECAR_AUTH_TOKEN", () => {
+    // Every run has a sidecar, and the sidecar denies by default: a container
+    // missing either half would boot and then fail every LLM and tool call.
+    const { SIDECAR_URL: _url, ...noUrl } = VALID;
+    expect(() => parseRuntimeEnv(noUrl)).toThrow(/SIDECAR_URL: required/);
+    const { SIDECAR_AUTH_TOKEN: _token, ...noToken } = VALID;
+    expect(() => parseRuntimeEnv(noToken)).toThrow(/SIDECAR_AUTH_TOKEN: required/);
   });
 
   it("forwards a TRACEPARENT env var through to env.traceparent", () => {
@@ -323,9 +317,8 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
 });
 
 describe("parseRuntimeEnv — backward-compat with empty strings", () => {
-  it("treats empty SIDECAR_URL as unset", () => {
-    const env = parseRuntimeEnv({ ...VALID, SIDECAR_URL: "" });
-    expect(env.sidecarUrl).toBeUndefined();
+  it("treats an empty SIDECAR_URL as missing", () => {
+    expect(() => parseRuntimeEnv({ ...VALID, SIDECAR_URL: "" })).toThrow(/SIDECAR_URL: required/);
   });
 
   it("treats empty MODEL_BASE_URL as unset", () => {

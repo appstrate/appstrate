@@ -115,7 +115,6 @@ function containerModelFor(
     model: {
       api: backing.apiShape,
       modelId: aliased ? ALIAS_ID : backing.modelId,
-      baseUrl: backing.baseUrl,
       piProvider: backing.piProvider,
       apiKey: "sk-real-key",
       apiKeyPlaceholder: "sk-placeholder",

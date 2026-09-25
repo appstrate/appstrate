@@ -17,6 +17,7 @@ import { _resetFirecrackerEnvCacheForTesting as _resetCacheForTesting } from "..
 import { FirecrackerOrchestrator, type FirecrackerOrchestratorDeps } from "../../orchestrator.ts";
 import { deriveJailId, jailChrootBase } from "../../jail.ts";
 import { workloadSpecSchema } from "../../runner/protocol.ts";
+import type { GuestConfig } from "../../guest/guest-config.ts";
 import { fakeHostExec as fakeExec, defaultRespond } from "../helpers/fake-host-exec.ts";
 import {
   installFirecrackerDataDir,
@@ -799,13 +800,21 @@ describe("MMDS credential broker (FIRECRACKER_CREDENTIAL_BROKER)", () => {
     runId: string,
     mmdsPut: (socketPath: string, payload: unknown) => Promise<void>,
     withSidecar = true,
-  ): Promise<{ orch: FirecrackerOrchestrator; start: () => Promise<void> }> {
+    agentSpecExtra: Record<string, unknown> = {},
+  ): Promise<{
+    orch: FirecrackerOrchestrator;
+    start: () => Promise<void>;
+    guestConfigs: GuestConfig[];
+  }> {
     const { exec } = fakeExec();
     const orch = readyOrchestrator(exec, {
       mmdsPut: mmdsPut as FirecrackerOrchestratorDeps["mmdsPut"],
     });
+    const guestConfigs: GuestConfig[] = [];
     Reflect.set(orch, "spawnVmm", async () => fakeVmmProc());
-    Reflect.set(orch, "buildConfigDrive", async () => {});
+    Reflect.set(orch, "buildConfigDrive", async (_dir: string, _img: string, cfg: GuestConfig) => {
+      guestConfigs.push(cfg);
+    });
     Reflect.set(orch, "startConsoleWatch", () => {});
 
     const boundary = await orch.createIsolationBoundary(runId);
@@ -817,10 +826,11 @@ describe("MMDS credential broker (FIRECRACKER_CREDENTIAL_BROKER)", () => {
         image: "unused",
         env: withSidecar ? {} : { APPSTRATE_SINK_SECRET: "hmac" },
         resources: { memoryBytes: 256 * 1024 * 1024, nanoCpus: 1_000_000_000 },
+        ...agentSpecExtra,
       },
       boundary,
     );
-    return { orch, start: () => orch.startWorkload(agent) };
+    return { orch, start: () => orch.startWorkload(agent), guestConfigs };
   }
 
   it("PUTs the secret payload exactly once on the happy path (default broker)", async () => {
@@ -868,6 +878,24 @@ describe("MMDS credential broker (FIRECRACKER_CREDENTIAL_BROKER)", () => {
     });
     await start();
     expect(called).toBe(0);
+    await orch.shutdown();
+  });
+
+  // The agent is confined to loopback (its sidecar) + the platform sink on
+  // every run, whatever extra field an older client still sends on the loose
+  // workload-spec wire.
+  it("never hands the guest an agent egress override", async () => {
+    process.env.FIRECRACKER_CREDENTIAL_BROKER = "config-drive";
+    _resetCacheForTesting();
+    const { orch, start, guestConfigs } = await primeToStart(
+      "run_agent_egress",
+      async () => {},
+      true,
+      { egress: true },
+    );
+    await start();
+    expect(guestConfigs).toHaveLength(1);
+    expect(guestConfigs[0]?.agent).not.toHaveProperty("unrestricted_egress");
     await orch.shutdown();
   });
 });

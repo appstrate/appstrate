@@ -10,7 +10,6 @@ function containerModel(aliased: boolean) {
     model: {
       api: "openai-completions",
       modelId: "deepseek-v4-flash",
-      baseUrl: "https://vendor.example/v1",
       piProvider: "opencode-go",
       apiKey: "sk-real-key",
       apiKeyPlaceholder: "sk-placeholder",

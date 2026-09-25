@@ -149,7 +149,7 @@ async function runPlatformContainerImpl(
   // else is a static API-key placeholder substitution. Fail-closed: an OAuth
   // provider that resolved WITHOUT a stored credential id throws here (invalid
   // configuration — it must never downgrade to API-key handling, which would
-  // leak the raw token into the agent container and skip the sidecar).
+  // hand the sidecar a token it cannot refresh).
   const delivery = resolveCredentialDelivery({
     providerId: llmConfig.providerId,
     credentialId: llmConfig.credentialId,
@@ -170,10 +170,6 @@ async function runPlatformContainerImpl(
   // posts its first event, so this only matters when provisioning failed or
   // the run ended without one.
   let stopBootHeartbeat: (() => void) | undefined;
-
-  // Hoisted out of the try so the spawn-failure metric path (catch) can read
-  // it. Assigned below once the run's sidecar policy is resolved.
-  let skipSidecar = false;
 
   const spawnStart = Date.now();
   // Guards against double-recording the container-spawn histogram: the success
@@ -203,25 +199,6 @@ async function runPlatformContainerImpl(
 
     const llmApiKey = llmConfig.apiKey;
 
-    // Skip the sidecar entirely when the run declares no integrations AND
-    // uses a static API key AND has no egress proxy. The sidecar's purposes
-    // are integration MCP multiplexing (Phase 1.4), LLM passthrough for
-    // OAuth, AND hosting the forward proxy that masks the agent's outbound
-    // IP. An API-key model with no integrations and no proxy needs none of
-    // these. When a proxy IS configured, the sidecar's forward-proxy bind
-    // is the ONLY path that routes agent egress through it — skipping the
-    // sidecar would silently drop the proxy and leak the host IP.
-    const hasIntegrations = (plan.integrations?.length ?? 0) > 0;
-    // A model alias MUST route through the sidecar — that's the only place the
-    // `model` alias→real swap happens. Skipping it would hand the agent the
-    // real backing id (in its own request) and the provider's real endpoint.
-    skipSidecar =
-      !hasIntegrations &&
-      !!llmConfig.apiKey &&
-      delivery.kind !== "oauth" &&
-      !plan.proxyUrl &&
-      !llmConfig.aliased;
-
     // Boot-phase liveness (see services/run-boot-heartbeat.ts). From here to
     // the runner's first event the platform — not the runner — owns this
     // run's liveness: it is pulling images, creating the boundary and
@@ -237,9 +214,7 @@ async function runPlatformContainerImpl(
       backend: "platform",
     });
 
-    // Resolved BEFORE the boundary so port-allocating backends don't
-    // reserve a sidecar port this run will never bind.
-    boundary = await orch.createIsolationBoundary(runId, { skipSidecar });
+    boundary = await orch.createIsolationBoundary(runId);
 
     // The placeholder is what actually lands in MODEL_API_KEY inside the
     // agent container. Provider-specific shape (e.g. a structured JWT) is
@@ -315,12 +290,11 @@ async function runPlatformContainerImpl(
     // Deliberately NOT `plan.runToken`, and not derived from it: the agent
     // container must stay unable to call the platform back (zero-knowledge),
     // so this secret carries no platform authority and no path to one.
-    // `skipSidecar` runs have no sidecar to authenticate to.
-    const sidecarAuthToken = skipSidecar ? undefined : randomBytes(32).toString("base64url");
+    const sidecarAuthToken = randomBytes(32).toString("base64url");
 
     const sidecarSpec: SidecarLaunchSpec = {
       runToken: plan.runToken,
-      ...(sidecarAuthToken ? { sidecarAuthToken } : {}),
+      sidecarAuthToken,
       proxyUrl: plan.proxyUrl ?? undefined,
       llm: sidecarLlm,
       // Propagate the resolved model's context window so the sidecar's
@@ -339,8 +313,7 @@ async function runPlatformContainerImpl(
         : {}),
       // Platform runtime tools (output/log/note/pin) the sidecar
       // hosts as in-process MCP tools — unified with the integration tool
-      // surface. The no-sidecar path reads the same selection from the
-      // bundle manifest instead.
+      // surface.
       ...(plan.runtimeTools && plan.runtimeTools.length > 0
         ? { runtimeTools: plan.runtimeTools }
         : {}),
@@ -349,8 +322,7 @@ async function runPlatformContainerImpl(
     const hasOutputSchema =
       plan.outputSchema?.properties && Object.keys(plan.outputSchema.properties).length > 0;
     // Forward the output schema to the sidecar so its `output` runtime tool
-    // can constrain + validate the `data` argument (mirrors the agent
-    // container's OUTPUT_SCHEMA env for the no-sidecar path).
+    // can constrain + validate the `data` argument.
     if (hasOutputSchema && plan.outputSchema) {
       sidecarSpec.outputSchema = plan.outputSchema as unknown as Record<string, unknown>;
     }
@@ -362,17 +334,13 @@ async function runPlatformContainerImpl(
       model: {
         api: llmConfig.apiShape,
         modelId,
-        baseUrl: llmConfig.baseUrl,
         // The Pi key the container resolves Pi's record (dialect, limits) by.
-        // A sidecar-proxied run replaces MODEL_BASE_URL with the sidecar's, so
-        // without it every provider would get plain-OpenAI bytes. An aliased
+        // MODEL_BASE_URL is the sidecar's, so without it every provider would
+        // get plain-OpenAI bytes. An aliased
         // run needs no vendor key at all.
         piProvider: llmConfig.piProvider,
         apiKey: llmApiKey,
-        // When the sidecar is skipped, the agent talks to the upstream
-        // provider directly — we must hand it the real API key, not the
-        // placeholder the sidecar would normally substitute.
-        apiKeyPlaceholder: skipSidecar ? llmApiKey : llmPlaceholder,
+        apiKeyPlaceholder: llmPlaceholder,
         input: llmConfig.input,
         contextWindow: llmConfig.contextWindow,
         maxTokens: llmConfig.maxTokens,
@@ -389,28 +357,15 @@ async function runPlatformContainerImpl(
       // run-loop start (boot excluded), and finalises a first-class `timeout`.
       // The platform setTimeout in `waitForWorkload` is the longer safety net.
       timeoutSeconds: plan.timeout,
-      noSidecar: skipSidecar,
       // All sidecar-relative URLs come from the boundary — the orchestrator
       // owns the topology (Docker DNS alias, host loopback port, in-guest
       // loopback for microVMs) and pi.ts stays backend-agnostic.
-      sidecarUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.sidecarUrl,
-      // Other half of the pair minted above. `buildRuntimePiEnv` throws when a
-      // sidecar-backed run reaches it without one, the same way it does for
-      // `sidecarUrl` — a run that cannot authenticate to its sidecar must not
-      // start rather than 401 on its first inference call.
+      sidecarUrl: boundary.sidecarEndpoints.sidecarUrl,
+      // Other half of the pair minted above.
       sidecarAuthToken,
-      // Sidecar-backed runs route LLM traffic through the sidecar proxy
-      // (sidecarProxyLlmUrl below). No-sidecar runs talk to the upstream
-      // directly, so buildRuntimePiEnv derives MODEL_BASE_URL from the
-      // model's own baseUrl (passed in `model` above) — otherwise the Pi
-      // SDK falls back to the api-shape's native default (api.openai.com)
-      // and misroutes custom-baseUrl providers like DeepSeek. See #741.
-      sidecarProxyLlmUrl: skipSidecar
-        ? undefined
-        : llmApiKey
-          ? boundary.sidecarEndpoints.llmProxyUrl
-          : undefined,
-      outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
+      // Inference rides the sidecar's `/llm` proxy, which swaps the
+      // placeholder for the real credential upstream.
+      sidecarProxyLlmUrl: boundary.sidecarEndpoints.llmProxyUrl,
       // Forward the effective per-file cap so the runtime's outputs
       // sweep agrees with the server-authoritative gate (avoids silently
       // skipping large deliverables when an operator raises the platform cap).
@@ -418,8 +373,8 @@ async function runPlatformContainerImpl(
       modelRetry: getEnv().MODEL_RETRY_ENABLED,
       modelCompaction: getEnv().MODEL_COMPACTION_ENABLED,
       toolResultByteLimit: getEnv().TOOL_RESULT_BYTE_LIMIT,
-      forwardProxyUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.forwardProxyUrl,
-      noProxy: skipSidecar ? undefined : boundary.sidecarEndpoints.noProxy,
+      forwardProxyUrl: boundary.sidecarEndpoints.forwardProxyUrl,
+      noProxy: boundary.sidecarEndpoints.noProxy,
       sink: {
         url: sinkCredentials.url,
         finalizeUrl: sinkCredentials.finalize_url,
@@ -436,9 +391,7 @@ async function runPlatformContainerImpl(
       traceparent: currentTraceparent() ?? context.traceparent,
     });
 
-    await orch.ensureImages(
-      skipSidecar ? [getEnv().PI_IMAGE] : [getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE],
-    );
+    await orch.ensureImages([getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE]);
 
     // Sidecar + agent + bundle upload in parallel. The AFPS bundle is uploaded
     // to run-scoped storage; the agent container fetches and extracts it itself
@@ -455,8 +408,7 @@ async function runPlatformContainerImpl(
     // is a free performance choice. The upload must finish before
     // `startWorkload` (inside waitForWorkload) so the object exists when the
     // agent boots; racing it alongside the create calls here satisfies that
-    // ordering. When `skipSidecar`, only the agent is created (it reaches the
-    // platform directly over its egress network).
+    // ordering.
     //
     // `allSettled`, NOT `all`. Two distinct leaks came out of `all`, and only
     // waiting for every branch closes both:
@@ -485,9 +437,7 @@ async function runPlatformContainerImpl(
         throw err;
       });
     const [sidecarResult, agentResult, uploadResult] = await Promise.allSettled([
-      track(
-        skipSidecar ? Promise.resolve(undefined) : orch.createSidecar(runId, boundary, sidecarSpec),
-      ),
+      track(orch.createSidecar(runId, boundary, sidecarSpec)),
       track(
         orch.createWorkload(
           {
@@ -496,10 +446,6 @@ async function runPlatformContainerImpl(
             image: getEnv().PI_IMAGE,
             env: containerEnv,
             resources: plan.resources.workload,
-            // Without a sidecar there is no egress proxy — the agent must
-            // reach the upstream LLM and the platform sink directly, so it
-            // goes on the egress network instead of the internal boundary.
-            egress: skipSidecar,
             // Hard host-side lifetime ceiling (B2): run budget + the same
             // boot grace the platform safety net uses + a 600 s margin, so
             // the daemon's kill is strictly a LAST resort behind the
@@ -528,7 +474,7 @@ async function runPlatformContainerImpl(
     }
     const sidecar = sidecarResult.value;
     const agent = agentResult.value;
-    recordContainerSpawn(Date.now() - spawnStart, { sidecar: !skipSidecar });
+    recordContainerSpawn(Date.now() - spawnStart);
     spawnRecorded = true;
 
     const lifecycle = await waitForWorkload(
@@ -548,7 +494,6 @@ async function runPlatformContainerImpl(
     // execution failure, not a spawn failure, and must not emit a spawn point.
     if (!spawnRecorded) {
       recordContainerSpawn(Date.now() - spawnStart, {
-        sidecar: !skipSidecar,
         errorType: boundary ? "workload" : "boundary",
       });
     }
@@ -605,7 +550,7 @@ async function runPlatformContainerImpl(
 async function waitForWorkload(
   orch: RunOrchestrator,
   agent: WorkloadHandle,
-  sidecar: WorkloadHandle | undefined,
+  sidecar: WorkloadHandle,
   timeoutSeconds: number,
   signal: AbortSignal | undefined,
   bootGraceMs: number,
@@ -635,14 +580,14 @@ async function waitForWorkload(
     () => {
       timedOut = true;
       orch.stopWorkload(agent).catch(() => {});
-      if (sidecar) orch.stopWorkload(sidecar).catch(() => {});
+      orch.stopWorkload(sidecar).catch(() => {});
     },
     timeoutSeconds * 1000 + bootGraceMs,
   );
 
   const onAbort = () => {
     orch.stopWorkload(agent).catch(() => {});
-    if (sidecar) orch.stopWorkload(sidecar).catch(() => {});
+    orch.stopWorkload(sidecar).catch(() => {});
   };
   if (signal) {
     if (signal.aborted) onAbort();

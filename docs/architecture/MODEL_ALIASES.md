@@ -727,11 +727,6 @@ variables an aliased container receives as an exact set, and pins the
 non-aliased set beside it so the assertion states the difference rather than one
 side of it. Any new variable fails it until someone adds it deliberately.
 
-That file also pins the one combination the env contract refuses outright:
-`buildRuntimePiEnv` throws on `aliased` + `noSidecar`, because the sidecar IS
-the masking and the no-sidecar path would otherwise put the backing's own
-hostname in `MODEL_BASE_URL`.
-
 `runtime-pi/sidecar/test/pi-messages-backend.test.ts` does the same for the
 reply: it pins the exact field set `projectAssistantEvent` emits for every member
 of the event union, in both directions. A new vendor-revealing field cannot join

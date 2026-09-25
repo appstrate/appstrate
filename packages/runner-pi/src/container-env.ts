@@ -33,12 +33,11 @@ export interface RuntimePiModelConfig {
   /** Pi SDK `api` slug — e.g. `"anthropic-messages"`, `"openai-completions"`. */
   api: string;
   modelId: string;
-  baseUrl: string;
   /** Pi provider key of the real upstream → `MODEL_PROVIDER`. Pass it even for an {@link aliased} run. */
   piProvider?: string | null;
   /** LLM API key. When unset, MODEL_API_KEY / MODEL_BASE_URL are not emitted. */
   apiKey?: string;
-  /** Stands in for the real apiKey inside the container. Required when LLM traffic is proxied. */
+  /** Stands in for the real apiKey inside the container. Required with {@link apiKey}, and never equal to it. */
   apiKeyPlaceholder?: string;
   input?: ReadonlyArray<ModelInputModality> | null;
   contextWindow?: number | null;
@@ -60,13 +59,13 @@ export interface RuntimePiEnvOptions {
   agentPrompt: string;
   runId?: string;
   agentInput?: unknown;
-  /** Sidecar URL reachable from the agent container. Required unless {@link noSidecar} — throws. */
-  sidecarUrl?: string;
+  /** Sidecar URL reachable from the agent container (the boundary's `sidecarEndpoints.sidecarUrl`). */
+  sidecarUrl: string;
   /**
    * Per-run secret the container presents on every request to its sidecar's
-   * control surface (`SIDECAR_AUTH_HEADER`). Required unless {@link noSidecar}
-   * — throws, because a run that cannot authenticate to its sidecar would
-   * otherwise 401 on its first inference call instead of failing at launch.
+   * control surface (`SIDECAR_AUTH_HEADER`). An empty value throws, because a
+   * run that cannot authenticate to its sidecar would otherwise 401 on its
+   * first inference call instead of failing at launch.
    *
    * A DISCLOSURE the agent is meant to have, unlike the sink secret or the run
    * token: it is the container's own identity toward its own sidecar, carries
@@ -74,18 +73,12 @@ export interface RuntimePiEnvOptions {
    * bootloader deletes it from `process.env` once captured, alongside
    * `SIDECAR_URL` — see `runtime-pi/entrypoint.ts` §2d.
    */
-  sidecarAuthToken?: string;
-  /** Routes LLM traffic through this URL; MODEL_API_KEY becomes the placeholder. */
+  sidecarAuthToken: string;
+  /** The sidecar's LLM proxy → `MODEL_BASE_URL`. Required with {@link RuntimePiModelConfig.apiKey}. */
   sidecarProxyLlmUrl?: string;
-  /**
-   * Skips MCP wiring and `SIDECAR_URL`. Only valid with no providers and a static
-   * API key — and never on an {@link RuntimePiModelConfig.aliased} run, which throws.
-   */
-  noSidecar?: boolean;
-  outputSchema?: unknown;
   /** Forward-proxy URL. When set, HTTP(S)_PROXY + NO_PROXY are emitted. */
   forwardProxyUrl?: string;
-  /** Hosts excluded from the proxy. Required with {@link forwardProxyUrl} on a sidecar run. */
+  /** Hosts excluded from the proxy. Required with {@link forwardProxyUrl}. */
   noProxy?: string;
   sink?: {
     /** POST target for each {@link RunEvent} — typically `…/api/runs/{runId}/events`. */
@@ -133,45 +126,25 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     MODEL_ID: model.modelId,
   };
 
-  // Fail closed: the sidecar IS the masking. It terminates `pi-messages`, swaps
-  // the alias id for the real one, re-originates against the backing and projects
-  // the response back through a closed event union. Drop it and every one of
-  // those disappears at once — most concretely `MODEL_BASE_URL` below, which on
-  // the no-sidecar path is the backing vendor's own hostname, handed to code that
-  // can read its own environment. There is no aliased no-sidecar run to support:
-  // the alias contract IS the indirection the sidecar performs.
-  if (model.aliased && opts.noSidecar) {
+  // No fallback: a Docker-shaped default here would silently misroute
+  // process/firecracker runs. `IsolationBoundary.sidecarEndpoints` owns topology.
+  if (!opts.sidecarUrl) {
     throw new Error(
-      "buildRuntimePiEnv: an aliased run cannot be launched with noSidecar: true — " +
-        "the sidecar is the only thing masking the backing vendor, so refusing " +
-        "to place the backing's own endpoint inside the agent container. Route " +
-        "the run through the sidecar, or launch the model unaliased.",
+      "buildRuntimePiEnv: sidecarUrl is required (pass the boundary's sidecarEndpoints.sidecarUrl)",
     );
   }
-
-  if (!opts.noSidecar) {
-    // No fallback: a Docker-shaped default here would silently misroute
-    // process/firecracker runs. `IsolationBoundary.sidecarEndpoints` owns topology.
-    if (!opts.sidecarUrl) {
-      throw new Error(
-        "buildRuntimePiEnv: sidecarUrl is required for sidecar-backed runs " +
-          "(pass the boundary's sidecarEndpoints.sidecarUrl, or set noSidecar: true)",
-      );
-    }
-    // Same fail-at-launch rule, for the credential half of "reach the sidecar".
-    // The sidecar's control surface denies by default, so a missing token here
-    // is not a degraded run — it is a run whose every LLM call and every tool
-    // call answers 401, discovered a minute later inside the container.
-    if (!opts.sidecarAuthToken) {
-      throw new Error(
-        "buildRuntimePiEnv: sidecarAuthToken is required for sidecar-backed runs " +
-          "(mint one per run and pass the SAME value in SidecarLaunchSpec.sidecarAuthToken, " +
-          "or set noSidecar: true)",
-      );
-    }
-    env.SIDECAR_URL = opts.sidecarUrl;
-    env.SIDECAR_AUTH_TOKEN = opts.sidecarAuthToken;
+  // Same fail-at-launch rule, for the credential half of "reach the sidecar".
+  // The sidecar's control surface denies by default, so a missing token here
+  // is not a degraded run — it is a run whose every LLM call and every tool
+  // call answers 401, discovered a minute later inside the container.
+  if (!opts.sidecarAuthToken) {
+    throw new Error(
+      "buildRuntimePiEnv: sidecarAuthToken is required (mint one per run and pass the " +
+        "SAME value in SidecarLaunchSpec.sidecarAuthToken)",
+    );
   }
+  env.SIDECAR_URL = opts.sidecarUrl;
+  env.SIDECAR_AUTH_TOKEN = opts.sidecarAuthToken;
 
   if (opts.runId) env.AGENT_RUN_ID = opts.runId;
   if (opts.agentInput !== undefined) env.AGENT_INPUT = JSON.stringify(opts.agentInput);
@@ -183,39 +156,35 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.AGENT_TIMEOUT_SECONDS = String(opts.timeoutSeconds);
   }
 
-  // Where the Pi SDK sends inference: the sidecar LLM proxy when there is one,
-  // else the model's native endpoint on a no-sidecar run. Never an empty string —
-  // an absent key keeps the SDK's per-`api` default, which misroutes every
-  // OpenAI-compatible provider with a custom base URL to api.openai.com.
-  if (opts.sidecarProxyLlmUrl) {
-    env.MODEL_BASE_URL = opts.sidecarProxyLlmUrl;
-  } else if (opts.noSidecar && model.baseUrl) {
-    env.MODEL_BASE_URL = model.baseUrl;
-  }
+  // Fail closed: the sidecar injects the real credential upstream, so a keyed
+  // model reaches inference through the sidecar and the container holds only
+  // the placeholder.
   if (model.apiKey) {
-    // Fail closed: the sidecar injects the real credential upstream, so the raw
-    // key must never cross the boundary the sidecar exists to protect. A caller
-    // that forgot the placeholder would leak it into the container silently.
-    if (opts.sidecarProxyLlmUrl && !model.apiKeyPlaceholder) {
+    if (!opts.sidecarProxyLlmUrl) {
       throw new Error(
-        "buildRuntimePiEnv: model.apiKeyPlaceholder is required when LLM traffic " +
-          "is sidecar-proxied (sidecarProxyLlmUrl is set) — refusing to place the " +
-          "real provider API key inside the agent container. Supply the placeholder, " +
-          "or route the run without the sidecar LLM proxy for a static direct key.",
+        "buildRuntimePiEnv: sidecarProxyLlmUrl is required with model.apiKey " +
+          "(pass the boundary's sidecarEndpoints.llmProxyUrl)",
       );
     }
-    // The raw-key fallback is reachable only on the direct path, where the agent
-    // talks to the provider itself and needs the real credential.
-    const placeholder = model.apiKeyPlaceholder ?? model.apiKey;
+    if (!model.apiKeyPlaceholder) {
+      throw new Error(
+        "buildRuntimePiEnv: model.apiKeyPlaceholder is required with model.apiKey — " +
+          "the agent container only ever holds the placeholder",
+      );
+    }
+    if (model.apiKeyPlaceholder === model.apiKey) {
+      throw new Error("buildRuntimePiEnv: model.apiKeyPlaceholder must differ from the real key");
+    }
+    env.MODEL_BASE_URL = opts.sidecarProxyLlmUrl;
     // An aliased run gets a vendor-neutral constant instead — see
     // ALIAS_API_KEY_PLACEHOLDER for why the derived placeholder cannot be used.
     // This is the same withholding the `MODEL_PROVIDER` line below performs,
     // applied to the other env var that carries the vendor.
-    env.MODEL_API_KEY = model.aliased ? ALIAS_API_KEY_PLACEHOLDER : placeholder;
+    env.MODEL_API_KEY = model.aliased ? ALIAS_API_KEY_PLACEHOLDER : model.apiKeyPlaceholder;
   }
 
-  // Which provider Pi is really talking to: a sidecar-proxied run replaces
-  // MODEL_BASE_URL with the sidecar's, erasing one of Pi's two detection inputs,
+  // Which provider Pi is really talking to: MODEL_BASE_URL is the sidecar's,
+  // erasing one of Pi's two detection inputs,
   // and without this the container emits plain-OpenAI shape at every provider.
   // An ALIASED run never emits it — naming the vendor is the leak, and there is
   // nothing left to configure, `pi-messages` having one request shape.
@@ -244,10 +213,6 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.MODEL_COST = JSON.stringify(model.cost);
   }
 
-  if (opts.outputSchema !== undefined && opts.outputSchema !== null) {
-    env.OUTPUT_SCHEMA = JSON.stringify(opts.outputSchema);
-  }
-
   if (
     opts.maxFileBytes !== undefined &&
     Number.isFinite(opts.maxFileBytes) &&
@@ -256,7 +221,7 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.FILE_MAX_BYTES = String(opts.maxFileBytes);
   }
 
-  if (opts.forwardProxyUrl && !opts.noSidecar) {
+  if (opts.forwardProxyUrl) {
     // Same invariant as sidecarUrl above: the exclusion list names the sidecar's
     // own host, which only the orchestrator knows.
     const { noProxy } = opts;

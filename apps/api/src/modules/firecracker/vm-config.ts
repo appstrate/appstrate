@@ -24,10 +24,9 @@ interface BuildGuestConfigInput {
   exitMarkerNonce: string;
   platformIp: string;
   platformPort: number;
-  /** Absent for skipSidecar runs. */
+  /** Absent when no sidecar was created (the smoke harness's agent-only VMs). */
   sidecarEnv?: Record<string, string>;
   agentEnv: Record<string, string>;
-  agentUnrestrictedEgress: boolean;
   /**
    * Where the guest's secrets come from — `"mmds"` (broker; the drive env
    * maps are stripped of secret keys) or `"inline"` (drive carries them).
@@ -47,7 +46,6 @@ export function buildGuestConfig(input: BuildGuestConfigInput): GuestConfig {
     sidecar: { enabled: !!input.sidecarEnv, env: input.sidecarEnv ?? {} },
     agent: {
       env: input.agentEnv,
-      unrestricted_egress: input.agentUnrestrictedEgress,
       ...(input.agentArgv ? { argv: input.agentArgv } : {}),
     },
   };
@@ -196,8 +194,8 @@ export function buildVmConfig(input: BuildVmConfigInput): Record<string, unknown
 /**
  * VM sizing from the agent's workload resources. The microVM hosts the
  * agent AND (usually) the sidecar (+ kernel/init overhead), so the guest
- * budget is the agent budget plus a fixed envelope. skipSidecar runs
- * (`hasSidecar: false`) drop the sidecar's share of that envelope.
+ * budget is the agent budget plus a fixed envelope. An agent-only VM
+ * (`hasSidecar: false`, the smoke harness) drops the sidecar's share.
  */
 export function vmSizing(
   agent: { memoryBytes: number; nanoCpus: number },

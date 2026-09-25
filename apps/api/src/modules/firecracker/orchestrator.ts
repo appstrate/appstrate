@@ -1401,7 +1401,8 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // supervisor's platform endpoint must target the override, not the
     // host lo alias (which nothing listens on in that topology).
     const aliasIp = platformAliasIp(fcEnv.FIRECRACKER_SUBNET_CIDR);
-    // skipSidecar runs never called createSidecar — no pending env entry.
+    // No pending entry when createSidecar was never called (the smoke
+    // harness's agent-only VMs).
     const sidecarEnv = this.pendingSidecarEnv.get(handle.runId);
 
     // Credential broker: with FIRECRACKER_CREDENTIAL_BROKER=mmds (default)
@@ -1437,7 +1438,6 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       platformPort: this.platformForward?.port ?? loAliasPlatformPort(),
       sidecarEnv: split.driveSidecarEnv,
       agentEnv: split.driveAgentEnv,
-      agentUnrestrictedEgress: agentSpec.egress === true,
       credentialSource: mmdsMode ? "mmds" : "inline",
       ...(this.agentArgvOverride ? { agentArgv: this.agentArgvOverride } : {}),
     });

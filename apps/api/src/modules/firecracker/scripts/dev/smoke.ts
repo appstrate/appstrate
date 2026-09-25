@@ -52,9 +52,8 @@ const BROKER = process.env.FIRECRACKER_CREDENTIAL_BROKER ?? "mmds";
 const FAKE_RUN_TOKEN = "smoke-fake-secret-DEADBEEFCAFE";
 /**
  * Distinctive fake model API key pushed through the AGENT env. In MMDS
- * mode it must be brokered too (skipSidecar/direct-provider runs put the
- * REAL provider key in the agent env — regression guard for it landing
- * on the config drive).
+ * mode it must be brokered too (regression guard for a credential-named
+ * key landing on the config drive).
  */
 const FAKE_MODEL_KEY = "sk-smoke-fake-model-key-0DEFACED";
 
@@ -194,9 +193,9 @@ async function dumpConsole(runDir: string, label: string): Promise<void> {
 const aliasIp = platformAliasIp(process.env.FIRECRACKER_SUBNET_CIDR ?? "10.231.0.0/16");
 const platformPort = Number(process.env.PORT ?? "3000");
 
-// The probe script runs as the RESTRICTED agent (uid 1001, no
-// unrestricted_egress): direct internet egress must be firewall-dropped,
-// the platform alias must stay reachable, the config drive must be gone
+// The probe script runs as the agent (uid 1001): direct internet egress
+// must be firewall-dropped, the platform alias must stay reachable, the
+// config drive must be gone
 // (unmounted before workloads start) AND its raw block node unreadable,
 // the in-guest sidecar must answer its /health endpoint, and hidepid=2
 // must hide foreign-uid /proc entries. Each probe prints a marker the
@@ -344,8 +343,8 @@ try {
   await orch.removeWorkload(agent);
 
   // ---------------------------------------------------------------------
-  // Second minimal VM: non-zero exit-code propagation. No sidecar (the
-  // skipSidecar path), trivial agent — the guest's `exit 42` must round-
+  // Second minimal VM: non-zero exit-code propagation. Agent-only (no
+  // createSidecar), trivial agent — the guest's `exit 42` must round-
   // trip through the nonce-authenticated marker to waitForExit.
   // ---------------------------------------------------------------------
   console.log("==> second microVM (exit-code propagation)");
@@ -386,7 +385,7 @@ try {
   // ---------------------------------------------------------------------
   // Third VM (B4): the REAL agent entrypoint — NO argv override, so the
   // supervisor runs the baked default `bun run /runtime/dist/entrypoint.js`.
-  // skipSidecar + a minimal agent env (no valid platform sink) makes the
+  // Agent-only + a minimal agent env (no valid platform sink) makes the
   // bundle LOAD, run under bun in-guest, and fail env validation — leaving
   // runtime-pi's `[runtime-pi fatal]` last-resort line on the serial
   // console. This catches module-resolution / transpiler breakage that the
@@ -398,7 +397,7 @@ try {
   Reflect.set(orch, "agentArgvOverride", undefined);
   const boundary3 = await orch.createIsolationBoundary(RUN_ID3);
   try {
-    // No createSidecar → skipSidecar path. Minimal env: the entrypoint's
+    // No createSidecar → agent-only VM. Minimal env: the entrypoint's
     // parseRuntimeEnv fails fast on the missing APPSTRATE_SINK_* contract.
     const agent3 = await orch.createWorkload(
       {
