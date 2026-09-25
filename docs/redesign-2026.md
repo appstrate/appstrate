@@ -822,11 +822,6 @@ it carries no licence):
 - **No animation library.** tw-animate-css plus these tokens is the whole
   system; a new animation starts from the same four values.
 
-Left as they were, on purpose: the five `duration-200` transitions in app
-code (the catalogue modal twice, the settings layout, the panel dialog header,
-the connections chevron). 200 against 150 is not a defect worth a conflict
-with the dashboard branch; align them to `duration-fast` when next touched.
-
 ## Settings
 
 Two settings surfaces, one rendering. **Organisation and workspace share one

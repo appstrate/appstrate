@@ -272,7 +272,7 @@ function SourceGroupCard({
         </div>
         <span
           className={cn(
-            "text-muted-foreground text-xs transition-transform duration-200",
+            "text-muted-foreground duration-fast ease-surface text-xs transition-transform",
             expanded && "rotate-90",
           )}
         >

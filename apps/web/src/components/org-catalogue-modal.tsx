@@ -782,7 +782,7 @@ export function OrgCatalogueModal({
                 it only once that page has scrolled past its own title. */}
             <span
               className={cn(
-                "truncate text-sm font-medium transition-opacity duration-200",
+                "duration-fast truncate text-sm font-medium transition-opacity",
                 stuck ? "opacity-100" : "opacity-0",
               )}
             >
@@ -792,7 +792,7 @@ export function OrgCatalogueModal({
         ) : (
           <span
             className={cn(
-              "text-sm font-semibold transition-opacity duration-200",
+              "duration-fast text-sm font-semibold transition-opacity",
               stuck ? "opacity-100" : "opacity-0",
             )}
           >

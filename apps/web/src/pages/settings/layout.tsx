@@ -374,7 +374,7 @@ export function UnifiedSettingsLayout() {
         activeItem ? (
           <span
             className={cn(
-              "truncate text-sm font-semibold transition-opacity duration-200",
+              "duration-fast truncate text-sm font-semibold transition-opacity",
               stuck ? "opacity-100" : "opacity-0",
             )}
           >
