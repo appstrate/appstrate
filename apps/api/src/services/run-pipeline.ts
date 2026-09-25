@@ -155,10 +155,9 @@ interface RunPipelineSuccess {
   runId: string;
   /**
    * Resolved model label snapshot — same value persisted on
-   * `runs.model_label`. Echoed by the run route so callers can detect
-   * org-default drift at trigger time (#635).
+   * `runs.model_label`.
    */
-  modelLabel: string | null;
+  modelLabel: string;
   modelSource: string | null;
 }
 
