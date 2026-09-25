@@ -3903,11 +3903,11 @@ Three verdicts: **have** (where), **have, worse** (what exactly), **absent**.
 | primitive          | verdict     | what we have, and the gap                                                                                                                                                                                                                                                |
 | ------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | ApprovalCard       | absent      | The thread's disclaimer says "vérifiez avant de confirmer", and there is nothing to confirm: every tool call executes. `structured-session.ts` already maps an `output-denied` part, so the wire shape is half there; no gate and no card.                               |
-| ThinkingState      | have, worse | Three bouncing dots (`ThinkingIndicator`, `thread.tsx`). The engine streams `reasoning-delta` (`pi-chat/ui-stream-mapper.ts`), and assistant-ui's default `Reasoning` renderer is `() => null`, so the reasoning is sent and thrown away on screen. No step trace.       |
+| ThinkingState      | have        | Since 25 September the reasoning the engine streams is shown (item 2 below); before, assistant-ui's default `Reasoning` renderer (`() => null`) dropped it. The dots remain until the first part arrives. No step trace.                                                 |
 | StreamingText      | have, worse | The typewriter reveal is there (`markdown-text.tsx`, `smooth`). No inline sources (`Source` parts also render `null`), the action bar has Copy only (no Reload), follow-ups exist only after an error (`MessageError`) and on the welcome screen.                        |
 | ToolChips          | have, worse | `ToolCallCard` (`tool-uis.tsx`): phase glyph, verb icon, label, id, HTTP status, duration, error inline, fixed height. Gaps: the detail is raw JSON in a modal rather than an inline expand, and consecutive calls are not grouped (assistant-ui `ToolGroup` is unused). |
 | TaskRows           | have        | `ChatRunProgressCard` in the chat (status glyph, paced log line, live elapsed in tabular figures, constant height); the runs table and `run-card` in Studio.                                                                                                             |
-| ContextCards       | absent      | `recall_memory` and `run_history` results fall through to `ToolFallback`, i.e. a JSON modal. The memory tab of an agent lists memories, but nothing shows the chat which ones a turn actually used.                                                                      |
+| ContextCards       | absent      | Not a chat surface here: `recall_memory` and `run_history` are run tools, and their results show as JSON in the run journal's tool modal (`log-viewer.tsx`). See item 3 below.                                                                                           |
 | DiffTable          | have, worse | `DraftDiffView` (Monaco) diffs package TEXT between versions. Nothing shows a proposed change to DATA, row by row, with a per-row include/exclude before applying.                                                                                                       |
 | RecordsTable       | have        | `DataTable` + `ListToolbar` (faceted filters, column menu, tiered columns). No sort, and no AI-computed column, which nothing asks for.                                                                                                                                  |
 | FilterTable        | have        | The same `ListToolbar` faceted filters.                                                                                                                                                                                                                                  |
@@ -3944,7 +3944,8 @@ Three verdicts: **have** (where), **have, worse** (what exactly), **absent**.
   use today. Cheap, and a candidate for the empty-state component only.
 - **Exit faster than enter**, one easing for surfaces: done, see "Motion".
 
-**What deserves building, in order** (for validation, none started):
+**What deserves building, in order.** Validated 25 September, except where
+said otherwise.
 
 1. **ApprovalCard, a gate before a mutating call.** The disclaimer already
    promises it. Anchor: AI SDK tool approval (`needsApproval`, part state
@@ -3954,13 +3955,28 @@ Three verdicts: **have** (where), **have, worse** (what exactly), **absent**.
    request carries options). Cost to know up front: the chat runs on the Pi
    engine, so the gate is a SERVER change (pause the turn on a write verb of
    `invoke_operation`, resume on the answer), not a card alone.
-2. **Reasoning, shown.** The stream already carries it; the missing piece is a
-   `Reasoning` / `ReasoningGroup` component passed to `MessagePrimitive.Parts`,
-   collapsed by default in a shadcn `Collapsible`, replacing the bouncing dots
-   while it streams. The cheapest item on the list and pure UI.
-3. **ContextCards for memory and history.** A `makeAssistantToolUI` for
-   `recall_memory` and `run_history` that draws the returned items as compact
-   cards (the `item-list.tsx` row shape) instead of a JSON modal. Pure UI.
+   **Waits on the run pause/resume capability planned elsewhere; do not start
+   it before that lands (4 and 5 wait with it).**
+2. **Reasoning, shown. Done 25 September.** `ReasoningText`
+   (`markdown-text.tsx`, the same renderer in the muted tone) and
+   `ReasoningGroup` (`reasoning.tsx`, a shadcn `Collapsible` on the motion
+   scale) are passed to `MessagePrimitive.Parts`. The group is open while its
+   run of reasoning is the part still streaming, which is the place the dots
+   held, and folds to one line once the answer moves on; the first click hands
+   the open state to the reader. The dots stay for the one moment nothing has
+   arrived yet. `ReasoningGroup` is marked deprecated in assistant-ui 0.15 in
+   favour of `MessagePrimitive.GroupedParts`; moving to it means rewriting the
+   whole parts rendering, so it waits for a reason of its own. The lab's
+   conversation carries a reasoning part (open it from the list: a deep link
+   to `/chat/chat_01` stays on "Chargement…", true before this change).
+3. **ContextCards for memory and history. Not built, the premise was wrong.**
+   The chat never calls `recall_memory` or `run_history`: they are sidecar
+   tools of an agent RUN, and the chat's tools are the platform MCP ones
+   (`search_operations`, `invoke_operation`, `run_and_wait`…). A
+   `makeAssistantToolUI` for them would never render. Where their results are
+   actually seen is the run journal: `ToolDetailsModal` in `log-viewer.tsx`,
+   which prints the result as JSON. Cards there (the `item-list.tsx` row
+   shape) are the real version of this item, and need a decision of their own.
 4. **DiffTable, as the body of the approval for an update.** Before/after per
    field of a PUT or PATCH, each row includable, in shadcn `Table` +
    `Checkbox`. Depends on 1, and on knowing the "before", which the tool call
