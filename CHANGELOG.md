@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`generation_setting_dropped` — a run's log now says when a stored
+  generation setting was ignored** (#1571). A schedule's override or a space
+  default (`temperature`, `reasoning_level`) that the run's model does not
+  support is still dropped for that run rather than refused, but it no longer
+  lives only in server logs: one `warn` run log per setting, next to
+  `integration_dropped`, carrying `setting`, `model` and
+  `reason: "unsupported_by_model"`.
 - **`appstrate code sync` installs the pinned space's agents as Claude Code
   commands** (#1268). Each agent active in the pinned space becomes
   `/appstrate:run-<agent>` in the plugin: Claude builds the input from your
