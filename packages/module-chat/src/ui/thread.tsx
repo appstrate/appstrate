@@ -405,9 +405,9 @@ function ThinkingIndicator() {
   if (!running) return null;
   return (
     <div className="flex h-6 items-center gap-1" role="status" aria-label="L'assistant réfléchit…">
-      <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.3s]" />
-      <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.15s]" />
-      <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full" />
+      <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.3s] motion-reduce:animate-pulse" />
+      <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.15s] motion-reduce:animate-pulse" />
+      <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full motion-reduce:animate-pulse" />
     </div>
   );
 }

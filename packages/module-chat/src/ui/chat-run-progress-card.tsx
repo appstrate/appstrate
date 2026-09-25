@@ -267,7 +267,7 @@ export function ChatRunProgressCard({
             {line ? (
               <span
                 key={line.id}
-                className={`${launchFailed ? "text-destructive" : "text-muted-foreground"} animate-in fade-in slide-in-from-bottom-1 col-start-1 row-start-1 truncate duration-300`}
+                className={`${launchFailed ? "text-destructive" : "text-muted-foreground"} animate-in fade-in slide-in-from-bottom-1 ease-surface duration-base col-start-1 row-start-1 truncate`}
               >
                 {line.text}
               </span>
