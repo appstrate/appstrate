@@ -573,11 +573,10 @@ combined manifest + its Ed25519 signature to each `v*` GitHub Release.
   ceiling, and the periodic exit-reaper destroys an exited-but-unclaimed
   VMM after ~5 min (see _Launch sequence_).
 - **Capacity planning.** Per-run guest RAM =
-  `agent MiB + 512 MiB` (256 MiB sidecar — dropped for skipSidecar runs —
-  plus 256 MiB kernel/init/overlay headroom), **plus workspace bytes**: the
-  rootfs overlay and `/workspace` are tmpfs-backed, so every byte the
-  workload writes is host RAM, capped at 50% of guest RAM by the init's
-  tmpfs mount.
+  `agent MiB + 512 MiB` (256 MiB sidecar plus 256 MiB kernel/init/overlay
+  headroom), **plus workspace bytes**: the rootfs overlay and `/workspace`
+  are tmpfs-backed, so every byte the workload writes is host RAM, capped at
+  50% of guest RAM by the init's tmpfs mount.
 
 ## Observability — debugging a failed run
 

@@ -66,11 +66,10 @@ export const SIDECAR_SECRET_KEYS: readonly string[] = [
 ];
 
 /**
- * Agent-env keys that carry secrets: the HMAC sink signing secret, the
- * agent↔sidecar bearer (the other half of the sidecar's SIDECAR_AUTH_TOKEN),
- * and — on skipSidecar (direct-provider) runs — the REAL model API key
- * (sidecar-backed runs only ever put the placeholder in the agent env,
- * which is harmless to broker too).
+ * Agent-env keys that carry secrets: the HMAC sink signing secret and the
+ * agent↔sidecar bearer (the other half of the sidecar's SIDECAR_AUTH_TOKEN).
+ * MODEL_API_KEY only ever holds the placeholder; it is brokered anyway, so a
+ * credential-named key never lands on the drive whatever its value.
  */
 export const AGENT_SECRET_KEYS: readonly string[] = [
   "APPSTRATE_SINK_SECRET",
@@ -85,12 +84,8 @@ export interface MmdsPayload {
 }
 
 interface CredentialSplit {
-  /**
-   * Sidecar env for the config drive — the input minus the brokered
-   * secrets. `undefined` when the input sidecar env was `undefined`
-   * (skipSidecar runs).
-   */
-  driveSidecarEnv: Record<string, string> | undefined;
+  /** Sidecar env for the config drive — the input minus the brokered secrets. */
+  driveSidecarEnv: Record<string, string>;
   /** Agent env for the config drive — the input minus the brokered secrets. */
   driveAgentEnv: Record<string, string>;
   /** Secrets served in-memory via MMDS. */
@@ -109,19 +104,17 @@ export function mmdsPayloadBytes(payload: MmdsPayload): number {
  * doc-comment) — this function never moves a secret back to the drive.
  */
 export function splitCredentials(
-  sidecarEnv: Record<string, string> | undefined,
+  sidecarEnv: Record<string, string>,
   agentEnv: Record<string, string>,
 ): CredentialSplit {
-  const driveSidecarEnv = sidecarEnv ? { ...sidecarEnv } : undefined;
+  const driveSidecarEnv = { ...sidecarEnv };
   const driveAgentEnv = { ...agentEnv };
   const payload: MmdsPayload = { sidecar_env: {}, agent_env: {} };
 
-  if (driveSidecarEnv) {
-    for (const key of SIDECAR_SECRET_KEYS) {
-      if (key in driveSidecarEnv) {
-        payload.sidecar_env[key] = driveSidecarEnv[key] as string;
-        delete driveSidecarEnv[key];
-      }
+  for (const key of SIDECAR_SECRET_KEYS) {
+    if (key in driveSidecarEnv) {
+      payload.sidecar_env[key] = driveSidecarEnv[key] as string;
+      delete driveSidecarEnv[key];
     }
   }
   for (const key of AGENT_SECRET_KEYS) {

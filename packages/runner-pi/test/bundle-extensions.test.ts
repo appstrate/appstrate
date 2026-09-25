@@ -71,7 +71,7 @@ describe("prepareBundleForPi — skills/ install", () => {
     // Runtime tools (output/log/note/pin) are no longer Pi extensions
     // built here: they are transport-neutral MCP defs
     // (`@appstrate/core/runtime-tool-defs`) served by the sidecar or
-    // registered by the no-sidecar call site via `buildRuntimeToolExtensions`.
+    // registered by the CLI via `buildRuntimeToolExtensions`.
     // `prepareBundleForPi` is skills-only and returns nothing — even a
     // `runtimeTools` selection produces no side effect here.
     const root = makeBundlePackage(

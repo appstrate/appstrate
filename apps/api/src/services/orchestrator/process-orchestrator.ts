@@ -29,7 +29,6 @@ import type {
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
-  IsolationBoundaryOptions,
   SidecarLaunchSpec,
   CleanupReport,
   StopResult,
@@ -381,10 +380,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
     return { workloads, isolationBoundaries, workspaces };
   }
 
-  async createIsolationBoundary(
-    runId: string,
-    opts?: IsolationBoundaryOptions,
-  ): Promise<IsolationBoundary> {
+  async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
     const dir = join(dataDir, runId);
     // Create both the pidfile boundary dir and the shared workspace
     // dir in parallel — independent fs operations, no ordering
@@ -398,16 +394,9 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // createWorkload ordering hazard: both are launched in a Promise.all
     // by pi.ts, and the old lazy allocation meant the agent env could be
     // built before the ports were known.
-    //
-    // skipSidecar runs never bind the ports — don't probe any. The
-    // probe would only widen the probe→bind TOCTOU window for nothing;
-    // port 0 in the placeholder endpoints fails loudly if anything dials
-    // them by mistake.
     const workspacePath = workspaceDirFor(runId);
     const [ports] = await Promise.all([
-      opts?.skipSidecar
-        ? Promise.resolve({ sidecar: 0, forwardProxy: 0 })
-        : this.findAvailablePorts(),
+      this.findAvailablePorts(),
       mkdir(dir, { recursive: true }),
       // 0o700: the workspace sits under the shared `os.tmpdir()` and
       // holds the agent's run inputs/outputs — keep it readable only by
@@ -420,7 +409,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
         Bun.write(ownerMarkerPathFor(runId), String(process.pid)),
       ),
     ]);
-    if (!opts?.skipSidecar) this.sidecarPorts.set(runId, ports);
+    this.sidecarPorts.set(runId, ports);
     return {
       id: dir,
       name: `process-${runId}`,
@@ -436,7 +425,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
 
   async removeIsolationBoundary(boundary: IsolationBoundary): Promise<void> {
     // Port allocation is boundary-scoped (see createIsolationBoundary) —
-    // release it here so a run that never spawned a sidecar (skipSidecar)
+    // release it here so a run whose sidecar never started (a failed launch)
     // doesn't leak one map entry per run.
     const runId = boundary.name.replace(/^process-/, "");
     this.sidecarPorts.delete(runId);

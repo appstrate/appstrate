@@ -120,7 +120,6 @@ describe("runtime-pi sidecar transport wiring", () => {
       };
       const sink = createCaptureSink();
       const runner = createRuntimePiRunner({
-        sidecarUrl: server.url.origin,
         model,
         apiKey: TEST_JWT,
         systemPrompt: "Answer briefly.",

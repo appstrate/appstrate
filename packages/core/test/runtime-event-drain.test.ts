@@ -168,19 +168,6 @@ function stubDrainer(batches: RuntimeToolEvent[][]): RuntimeEventDrainer {
 }
 
 describe("drainAndEmitInto", () => {
-  it("is a no-op when no drainer is wired", async () => {
-    const emitted: RuntimeToolEvent[] = [];
-    await drainAndEmitInto({
-      drainer: undefined,
-      emit: (e) => {
-        emitted.push(e);
-      },
-      now: () => 999,
-      runId: "run_1",
-    });
-    expect(emitted).toEqual([]);
-  });
-
   it("stamps runId and preserves the event's own (journaled) timestamp", async () => {
     const emitted: RuntimeToolEvent[] = [];
     await drainAndEmitInto({

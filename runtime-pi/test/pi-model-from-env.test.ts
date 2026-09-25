@@ -10,7 +10,6 @@ function containerModel(aliased: boolean) {
     model: {
       api: "openai-completions",
       modelId: "deepseek-v4-flash",
-      baseUrl: "https://vendor.example/v1",
       piProvider: "opencode-go",
       apiKey: "sk-real-key",
       apiKeyPlaceholder: "sk-placeholder",
@@ -23,6 +22,8 @@ function containerModel(aliased: boolean) {
     runId: "run_1",
     sidecarUrl: "http://sidecar:8080",
     sidecarAuthToken: "sidecar-auth-token",
+    forwardProxyUrl: "http://sidecar:8081",
+    noProxy: "sidecar,localhost,127.0.0.1",
     sidecarProxyLlmUrl: "http://sidecar:8080/llm/v1",
     sink: {
       url: "https://appstrate.test/api/runs/run_1/events",

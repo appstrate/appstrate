@@ -115,7 +115,6 @@ function containerModelFor(
     model: {
       api: backing.apiShape,
       modelId: aliased ? ALIAS_ID : backing.modelId,
-      baseUrl: backing.baseUrl,
       piProvider: backing.piProvider,
       apiKey: "sk-real-key",
       apiKeyPlaceholder: "sk-placeholder",
@@ -130,6 +129,8 @@ function containerModelFor(
     runId: "run_1",
     sidecarUrl: "http://sidecar:8080",
     sidecarAuthToken: "sidecar-auth-token",
+    forwardProxyUrl: "http://sidecar:8081",
+    noProxy: "sidecar,localhost,127.0.0.1",
     sidecarProxyLlmUrl: SIDECAR_LLM_URL,
     sink: SINK,
   });

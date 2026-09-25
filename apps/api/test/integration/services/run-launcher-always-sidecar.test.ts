@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for the "no-sidecar" run path.
+ * Integration tests for the run launcher's sidecar wiring.
  *
- * When a run's plan declares no integrations AND uses a static API key
- * (not OAuth), the sidecar is no overhead — its sole jobs are
- * integration MCP multiplexing and OAuth-LLM passthrough. The launcher
- * must skip `createSidecar` entirely in that case.
+ * Every run boots its sidecar: the agent container is handed only the
+ * placeholder credential, reaches inference through the sidecar's `/llm`
+ * proxy, and egresses through its forward proxy. The model-alias cases below
+ * pin what the container env may and may not name.
  *
- * This complements `run-launcher-parallel-boot.test.ts` — that file
- * asserts the parallel-create contract WHEN the sidecar is needed.
+ * This complements `run-launcher-parallel-boot.test.ts`, which asserts the
+ * parallel-create contract.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -30,6 +30,7 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { defaultTestAgentResources } from "../../helpers/run-resources.ts";
 
 interface CallCounts {
+  createBoundaryCalls: number;
   createSidecarCalls: number;
   createWorkloadCalls: number;
   capturedAgentEnv: Record<string, string> | null;
@@ -42,6 +43,7 @@ function createCountingFake(): {
   counts: CallCounts;
 } {
   const counts: CallCounts = {
+    createBoundaryCalls: 0,
     createSidecarCalls: 0,
     createWorkloadCalls: 0,
     capturedAgentEnv: null,
@@ -57,6 +59,7 @@ function createCountingFake(): {
     },
     async ensureImages() {},
     async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
+      counts.createBoundaryCalls++;
       return {
         id: `net_${runId}`,
         name: `appstrate-exec-${runId}`,
@@ -147,52 +150,61 @@ function buildContext(runId: string): ExecutionContext {
   return { runId, input: {}, memories: [] };
 }
 
-describe("run-launcher — sidecar skip decision", () => {
+describe("run-launcher — sidecar wiring", () => {
   beforeEach(async () => {
     await truncateAll();
   });
 
-  it("skips createSidecar when no integrations AND llm uses a static API key", async () => {
-    const { orchestrator, counts } = createCountingFake();
-    const resources: AppstrateRunPlan["resources"] = {
-      requested: { memoryMb: 768, cpu: 1 },
-      effective: { memoryMb: 768, cpu: 1 },
-      memoryCapped: false,
-      cpuCapped: false,
-      workload: { memoryBytes: 805_306_368, nanoCpus: 1_000_000_000 },
-    };
-    const plan = buildRunPlan({ resources });
+  // One run topology, for every credential source.
+  for (const isSystemModel of [true, false]) {
+    it(`boots the sidecar and hands the agent only the placeholder (isSystemModel: ${isSystemModel})`, async () => {
+      const { orchestrator, counts } = createCountingFake();
+      const resources: AppstrateRunPlan["resources"] = {
+        requested: { memoryMb: 768, cpu: 1 },
+        effective: { memoryMb: 768, cpu: 1 },
+        memoryCapped: false,
+        cpuCapped: false,
+        workload: { memoryBytes: 805_306_368, nanoCpus: 1_000_000_000 },
+      };
+      const realKey = "sk-ant-api03-real-secret-1234";
+      const runId = `run_placeholder_${isSystemModel ? "system" : "org"}`;
+      const plan = buildRunPlan({
+        resources,
+        llmConfig: { ...buildRunPlan().llmConfig, apiKey: realKey, isSystemModel },
+      });
 
-    await runPlatformContainer({
-      runId: "run_no_sidecar",
-      context: buildContext("run_no_sidecar"),
-      plan, // no integrations + apiKey set, no credentialId
-      sinkCredentials: mintSinkCredentials({
-        runId: "run_no_sidecar",
-        appUrl: "http://platform:3000",
-        ttlSeconds: 60,
-      }),
-      orchestrator,
+      await runPlatformContainer({
+        runId,
+        context: buildContext(runId),
+        plan,
+        sinkCredentials: mintSinkCredentials({
+          runId,
+          appUrl: "http://platform:3000",
+          ttlSeconds: 60,
+        }),
+        orchestrator,
+      });
+
+      expect(counts.createSidecarCalls).toBe(1);
+      expect(counts.createWorkloadCalls).toBe(1);
+      expect(counts.capturedAgentSpec?.resources).toBe(resources.workload);
+
+      // The real key goes to the sidecar, and nowhere in the agent env.
+      const llm = counts.capturedSidecarSpec?.llm;
+      if (llm?.authMode !== "api_key")
+        throw new Error(`expected api_key llm, got ${llm?.authMode}`);
+      expect(llm.apiKey).toBe(realKey);
+      const env = counts.capturedAgentEnv ?? {};
+      expect(Object.entries(env).filter(([, v]) => v.includes(realKey))).toEqual([]);
+      expect(env.MODEL_API_KEY).toBe(llm.placeholder);
+
+      // Inference and egress both ride the sidecar.
+      expect(env.SIDECAR_URL).toBe("http://fake-sidecar.test:19080");
+      expect(env.MODEL_BASE_URL).toBe("http://fake-sidecar.test:19080/llm");
+      expect(env.HTTP_PROXY).toBe("http://fake-sidecar.test:19081");
+      expect(env.HTTPS_PROXY).toBe("http://fake-sidecar.test:19081");
     });
-
-    expect(counts.createSidecarCalls).toBe(0);
-    expect(counts.createWorkloadCalls).toBe(1);
-    expect(counts.capturedAgentSpec?.resources).toBe(resources.workload);
-
-    // The agent env must not advertise a sidecar URL nor a forward proxy
-    // — both would point at a non-existent service. MODEL_BASE_URL, however,
-    // MUST carry the model's own baseUrl on the no-sidecar path so the Pi
-    // SDK talks to the correct upstream instead of falling back to the
-    // api-shape's native default (api.openai.com). See #741.
-    const env = counts.capturedAgentEnv ?? {};
-    expect(env.SIDECAR_URL).toBeUndefined();
-    expect(env.HTTP_PROXY).toBeUndefined();
-    expect(env.HTTPS_PROXY).toBeUndefined();
-    expect(env.MODEL_BASE_URL).toBe("https://api.anthropic.com");
-    // The real API key must reach the container — there's no sidecar to
-    // substitute the placeholder back to the real value.
-    expect(env.MODEL_API_KEY).toBe("sk-test-secret");
-  });
+  }
 
   // The sidecar looks Pi's record up by the backing's Pi provider key — here
   // one that differs from the Appstrate id (`moonshot`).
@@ -348,14 +360,12 @@ describe("run-launcher — sidecar skip decision", () => {
     });
   });
 
-  it("forces the sidecar for a model alias and wires the swap + alias MODEL_ID (api-key, no integrations)", async () => {
+  it("wires the alias swap + alias MODEL_ID through the sidecar", async () => {
     const { orchestrator, counts } = createCountingFake();
 
     await runPlatformContainer({
       runId: "run_alias",
       context: buildContext("run_alias"),
-      // Would normally skip the sidecar (api-key, no integrations, no proxy) —
-      // but an alias MUST route through it for the model swap.
       plan: buildRunPlan({
         llmConfig: {
           providerId: "deepseek",
@@ -377,9 +387,6 @@ describe("run-launcher — sidecar skip decision", () => {
       }),
       orchestrator,
     });
-
-    // Sidecar is NOT skipped despite api-key + no integrations + no proxy.
-    expect(counts.createSidecarCalls).toBe(1);
 
     // The sidecar receives the alias→real swap descriptor.
     const llm = counts.capturedSidecarSpec?.llm;
@@ -549,99 +556,50 @@ describe("run-launcher — sidecar skip decision", () => {
     expect(JSON.stringify(env)).not.toContain("claude-sonnet-4-6");
   });
 
-  it("creates the sidecar when the plan declares at least one integration", async () => {
-    const { orchestrator, counts } = createCountingFake();
-
-    await runPlatformContainer({
-      runId: "run_with_integrations",
-      context: buildContext("run_with_integrations"),
-      plan: buildRunPlan({
-        integrations: [
-          {
-            integrationId: "@test/gmail-mcp",
-            namespace: "gmail",
-            sourceKind: "local",
-            manifest: { name: "@test/gmail-mcp", version: "1.0.0" },
-            spawnEnv: {},
-            toolAllowlist: [],
-          },
-        ],
-      }),
-      sinkCredentials: mintSinkCredentials({
-        runId: "run_with_integrations",
-        appUrl: "http://platform:3000",
-        ttlSeconds: 60,
-      }),
-      orchestrator,
+  // Inference rides the sidecar's `/llm`, whose egress floor refuses a base URL
+  // on a blocked range unless EGRESS_ALLOW_INTERNAL_HOSTS lists the host. The
+  // launcher applies the same guard before provisioning anything.
+  describe("LLM base URL on a blocked network range", () => {
+    const localModel = (baseUrl: string): AppstrateRunPlan["llmConfig"] => ({
+      providerId: "openai-compatible",
+      piProvider: null,
+      apiShape: "openai-completions",
+      baseUrl,
+      modelId: "llama3",
+      apiKey: "sk-local",
+      label: "Local",
+      isSystemModel: false,
+      aliased: false,
+      aliasId: "llama3",
     });
 
-    expect(counts.createSidecarCalls).toBe(1);
-    expect(counts.createWorkloadCalls).toBe(1);
-    // With sidecar wired, the agent env must point at it.
-    const env = counts.capturedAgentEnv ?? {};
-    expect(env.SIDECAR_URL).toBe("http://fake-sidecar.test:19080");
-  });
+    const launch = (runId: string, baseUrl: string, orchestrator: RunOrchestrator) =>
+      runPlatformContainer({
+        runId,
+        context: buildContext(runId),
+        plan: buildRunPlan({ llmConfig: localModel(baseUrl) }),
+        sinkCredentials: mintSinkCredentials({
+          runId,
+          appUrl: "http://platform:3000",
+          ttlSeconds: 60,
+        }),
+        orchestrator,
+      });
 
-  it("creates the sidecar when a proxy is configured (even with api-key + no integrations)", async () => {
-    const { orchestrator, counts } = createCountingFake();
-
-    await runPlatformContainer({
-      runId: "run_proxy",
-      context: buildContext("run_proxy"),
-      // No integrations + static API key would normally skip the sidecar,
-      // but a configured proxy forces it: the sidecar's forward proxy is
-      // the only path that routes agent egress through the proxy. Skipping
-      // it would silently drop the proxy and leak the host IP.
-      plan: buildRunPlan({ proxyUrl: "http://proxy.local:8080" }),
-      sinkCredentials: mintSinkCredentials({
-        runId: "run_proxy",
-        appUrl: "http://platform:3000",
-        ttlSeconds: 60,
-      }),
-      orchestrator,
+    it("fails the run before provisioning, naming EGRESS_ALLOW_INTERNAL_HOSTS", async () => {
+      const { orchestrator, counts } = createCountingFake();
+      await expect(
+        launch("run_blocked_llm", "http://host.docker.internal:11434/v1", orchestrator),
+      ).rejects.toThrow(/host\.docker\.internal.*EGRESS_ALLOW_INTERNAL_HOSTS/s);
+      expect(counts.createBoundaryCalls).toBe(0);
+      expect(counts.createSidecarCalls).toBe(0);
     });
 
-    expect(counts.createSidecarCalls).toBe(1);
-    expect(counts.createWorkloadCalls).toBe(1);
-    // With the sidecar wired, the agent egresses through its forward proxy.
-    const env = counts.capturedAgentEnv ?? {};
-    expect(env.SIDECAR_URL).toBe("http://fake-sidecar.test:19080");
-    expect(env.HTTP_PROXY).toBe("http://fake-sidecar.test:19081");
-    expect(env.HTTPS_PROXY).toBe("http://fake-sidecar.test:19081");
-  });
-
-  it("skip path passes the real api key through (no placeholder substitution without a sidecar)", async () => {
-    const { orchestrator, counts } = createCountingFake();
-
-    await runPlatformContainer({
-      runId: "run_real_key",
-      context: buildContext("run_real_key"),
-      plan: buildRunPlan({
-        llmConfig: {
-          providerId: "openai",
-          piProvider: "openai",
-          apiShape: "openai-completions",
-          baseUrl: "https://api.openai.com",
-          modelId: "gpt-4o",
-          apiKey: "sk-real-secret-1234",
-          label: "GPT-4o",
-          isSystemModel: false,
-          aliased: false,
-          aliasId: "gpt-4o",
-        },
-      }),
-      sinkCredentials: mintSinkCredentials({
-        runId: "run_real_key",
-        appUrl: "http://platform:3000",
-        ttlSeconds: 60,
-      }),
-      orchestrator,
+    it("launches when the operator allowlisted the host", async () => {
+      // `localhost` is on the test preload's EGRESS_ALLOW_INTERNAL_HOSTS.
+      const { orchestrator, counts } = createCountingFake();
+      await launch("run_allowlisted_llm", "http://localhost:11434/v1", orchestrator);
+      expect(counts.createSidecarCalls).toBe(1);
     });
-
-    expect(counts.createSidecarCalls).toBe(0);
-    const env = counts.capturedAgentEnv ?? {};
-    // Real key reaches the agent — without the sidecar there is no
-    // intermediary to translate the placeholder back to the real secret.
-    expect(env.MODEL_API_KEY).toBe("sk-real-secret-1234");
   });
 });

@@ -27,6 +27,9 @@ import {
 import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import type { RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { buildMcpDirectFactories } from "../mcp/direct.ts";
+
+/** Runtime-event drainer whose journal is always empty. */
+const EMPTY_DRAINER: RuntimeEventDrainer = { drain: async () => [] };
 import { McpHost } from "../sidecar/mcp-host.ts";
 import {
   createApiCallToolDefs,
@@ -158,6 +161,7 @@ describe("buildMcpDirectFactories — runtime-injected tools", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -179,6 +183,7 @@ describe("buildMcpDirectFactories — run_history dispatch", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -203,6 +208,7 @@ describe("buildMcpDirectFactories — recall_memory dispatch", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -227,6 +233,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -266,6 +273,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -303,6 +311,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-1",
         emit: (event) => emitted.push(event),
         workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -339,6 +348,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -433,6 +443,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-drive-slack",
         emit: () => {},
         workspace,
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -493,6 +504,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-drive-multiauth",
         emit: () => {},
         workspace,
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -555,6 +567,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-ambiguous",
         emit: () => {},
         workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -600,7 +613,7 @@ describe("buildMcpDirectFactories — runtime-event capture (drain, not _meta)",
     };
   }
 
-  async function setup(toolName: string, drainer: RuntimeEventDrainer | undefined) {
+  async function setup(toolName: string, drainer: RuntimeEventDrainer) {
     const pair = await createInProcessPair([
       {
         descriptor: { name: "run_history", description: "mock", inputSchema: { type: "object" } },
@@ -619,7 +632,7 @@ describe("buildMcpDirectFactories — runtime-event capture (drain, not _meta)",
       runId: "run-1",
       emit: (e) => emitted.push(e as { type: string }),
       workspace: "/tmp",
-      ...(drainer ? { drainer } : {}),
+      drainer,
     });
     const captured: CapturedTool[] = [];
     const api = makeMockExtensionApi(captured);
@@ -682,7 +695,13 @@ describe("buildMcpDirectFactories — failure modes", () => {
     const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
     try {
       await expect(
-        buildMcpDirectFactories({ mcp, runId: "run-1", emit: () => {}, workspace: "/tmp" }),
+        buildMcpDirectFactories({
+          mcp,
+          runId: "run-1",
+          emit: () => {},
+          workspace: "/tmp",
+          drainer: EMPTY_DRAINER,
+        }),
       ).rejects.toThrow(/run_history/);
     } finally {
       await pair.close();

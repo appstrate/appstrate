@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Regression #834 — orchestrator-level: the DockerOrchestrator used to cache
- * the egress network's ID at boot and reuse it for every run. When the
- * network disappeared mid-lifetime (concurrent Appstrate instance shutting
- * down, `docker network prune`, daemon restart) every subsequent run failed
- * with `network <staleId> not found` until the API was restarted.
+ * DockerOrchestrator network placement, against the real Docker daemon (DinD).
  *
- * The fix resolves the egress network **by name at use time** (create-or-get
- * via `ensureNetwork`), so a run launched after the network vanished simply
- * recreates it. These tests exercise the exact repro from the issue against
- * the real Docker daemon (DinD).
+ * - An agent workload sits on its run's isolation boundary only — never on the
+ *   shared egress network, which is the sidecar's.
+ * - Regression #834: the shared egress network is durable infrastructure that
+ *   `shutdown()` leaves in place for other instances. Its by-name self-heal
+ *   is covered in `docker-api.test.ts`.
  */
 
 import { expect, it, afterEach } from "bun:test";
@@ -18,7 +15,6 @@ import { describeRequiresDocker } from "../../helpers/tier.ts";
 import { DockerOrchestrator } from "../../../src/services/orchestrator/docker-orchestrator.ts";
 import {
   ensureNetwork,
-  removeNetwork,
   removeContainersByRun,
   EGRESS_NETWORK_NAME,
 } from "../../../src/services/docker.ts";
@@ -54,27 +50,17 @@ async function inspectContainerNetworks(containerId: string): Promise<Record<str
   return data.NetworkSettings.Networks;
 }
 
-describeRequiresDocker("DockerOrchestrator egress network resilience (#834)", () => {
+describeRequiresDocker("DockerOrchestrator network placement", () => {
   it(
-    "launches an egress workload after the egress network was deleted out of band",
+    "attaches an agent workload to its isolation boundary only",
     async () => {
-      const runId = `egress-heal-${uid()}`;
+      const runId = `agent-net-${uid()}`;
       runsToCleanup.push(runId);
-
-      // Boot-equivalent: the network exists (a previous run / initialize
-      // created it)...
-      const staleId = await ensureNetwork(EGRESS_NETWORK_NAME);
+      await ensureNetwork(EGRESS_NETWORK_NAME);
 
       const boundary = await orchestrator.createIsolationBoundary(runId);
       boundariesToCleanup.push(boundary);
 
-      // ...then a concurrent instance's shutdown (or `docker network rm
-      // appstrate-egress`) deletes it while this process is still alive.
-      await removeNetwork(staleId);
-
-      // Next run must self-heal: create + START must succeed (the issue's
-      // failure mode was `Docker start container failed: 404 network not
-      // found` — create alone doesn't prove the wiring works).
       const handle: WorkloadHandle = await orchestrator.createWorkload(
         {
           runId,
@@ -82,19 +68,12 @@ describeRequiresDocker("DockerOrchestrator egress network resilience (#834)", ()
           image: IMAGE,
           env: {},
           resources: { memoryBytes: 64 * 1024 * 1024, nanoCpus: 500_000_000 },
-          egress: true,
         },
         boundary,
       );
-      await orchestrator.startWorkload(handle);
-      const exitCode = await orchestrator.waitForExit(handle);
-      expect(exitCode).toBe(0);
 
-      // The workload landed on a *fresh* egress network, not the stale ID.
       const networks = await inspectContainerNetworks(handle.id);
-      const egressEndpoint = networks[EGRESS_NETWORK_NAME] as { NetworkID: string } | undefined;
-      expect(egressEndpoint).toBeDefined();
-      expect(egressEndpoint!.NetworkID).not.toBe(staleId);
+      expect(Object.keys(networks)).toEqual([boundary.name]);
     },
     TIMEOUT,
   );

@@ -18,7 +18,8 @@
  * This module owns the two things that still differ for an OAuth run: the
  * credential is delivered via the sidecar `/llm` bearer-swap (not a static
  * placeholder→key substitution), and the run MUST execute under an isolating
- * orchestrator because that swap only exists on the sidecar path.
+ * orchestrator, the only kind that keeps the sidecar's credential apart from
+ * the agent.
  */
 
 import type { LlmProxyOauthConfig } from "@appstrate/core/sidecar-types";
@@ -31,8 +32,7 @@ import { isOAuthModelProvider } from "../model-providers/registry.ts";
  * NO stored credential id. That configuration is invalid, never a downgrade:
  * an OAuth token can only be delivered via the sidecar bearer-swap keyed by a
  * `model_provider_credentials` row — treating the run as an API-key run would
- * put the RAW subscription token into `MODEL_API_KEY` inside the agent
- * container (and, with no integrations/proxy, skip the sidecar entirely).
+ * hand the sidecar a subscription token it can neither refresh nor route.
  */
 export class OauthProviderMissingCredentialError extends Error {
   constructor(public readonly providerId: string) {
@@ -40,7 +40,7 @@ export class OauthProviderMissingCredentialError extends Error {
       `Provider "${providerId}" declares authMode "oauth2" but the run resolved no stored ` +
         `credential id. OAuth subscription tokens are delivered via the sidecar bearer-swap ` +
         `against a stored model provider credential — they can never run as static API keys ` +
-        `(the raw token would leak into the agent container). Bind the model to a stored ` +
+        `(the sidecar could neither refresh nor route it). Bind the model to a stored ` +
         `OAuth credential; SYSTEM_PROVIDER_KEYS cannot carry OAuth providers.`,
     );
     this.name = "OauthProviderMissingCredentialError";
@@ -72,8 +72,7 @@ type CredentialDelivery =
  * whether a credential id happens to be present. An OAuth provider WITHOUT a
  * stored credential id is an invalid configuration and throws
  * {@link OauthProviderMissingCredentialError} (fail-closed — it must never be
- * downgraded to API-key handling, which would hand the raw token to the agent
- * container). Everything else is a static API-key provider whose placeholder
+ * downgraded to API-key handling, which cannot refresh the token). Everything else is a static API-key provider whose placeholder
  * is substituted for the real key inline.
  */
 export function resolveCredentialDelivery(params: {
@@ -90,12 +89,12 @@ export function resolveCredentialDelivery(params: {
 /**
  * Thrown when an OAuth-subscription run is launched without an isolation
  * boundary (e.g. RUN_ADAPTER=process). An OAuth run delivers its credential via
- * the sidecar `/llm` bearer-swap: the real subscription token is fetched by the
- * sidecar and never enters the agent container. That swap only exists on the
- * sidecar path, which only an isolating orchestrator (Docker container /
- * Firecracker microVM) provisions. Under the in-host process orchestrator there
- * is no sidecar to swap the bearer, so the run cannot deliver its credential.
- * Fail-closed: refuse rather than run unauthenticated.
+ * the sidecar `/llm` bearer-swap: the sidecar holds what it needs to fetch the
+ * real subscription token, and the agent only ever sees a placeholder. That
+ * separation holds only under an isolating orchestrator (Docker container /
+ * Firecracker microVM). The process orchestrator runs the agent and its sidecar
+ * as host processes of one user, so nothing keeps the agent from the sidecar's
+ * environment. Fail-closed: refuse rather than run without that boundary.
  */
 export class OauthRunRequiresIsolationError extends Error {
   constructor(
@@ -107,9 +106,9 @@ export class OauthRunRequiresIsolationError extends Error {
       .join(" or ");
     super(
       `Provider "${providerId}" uses an OAuth subscription credential, which is ` +
-        `delivered through the sidecar (${isolating}). The current execution mode ` +
-        `"${orchestratorMode}" does not provision a sidecar to swap the bearer — ` +
-        `the run could not authenticate. Switch RUN_ADAPTER, or run this agent ` +
+        `kept apart from the agent by an isolating orchestrator (${isolating}). The ` +
+        `current execution mode "${orchestratorMode}" runs the agent and its sidecar ` +
+        `as host processes of one user. Switch RUN_ADAPTER, or run this agent ` +
         `with an API-key model provider.`,
     );
     this.name = "OauthRunRequiresIsolationError";

@@ -179,11 +179,8 @@ export function createRuntimeEventDrainer(
 }
 
 export interface DrainAndEmitOptions {
-  /**
-   * The run's drainer, or `undefined` when the run has no runtime tools — in
-   * which case this is a no-op (resolves immediately without a network call).
-   */
-  drainer: RuntimeEventDrainer | undefined;
+  /** The run's drainer. */
+  drainer: RuntimeEventDrainer;
   /**
    * Emit one drained event on the run's single sink. Each event is stamped with
    * `runId` and a `timestamp` (see below) before being passed here.
@@ -216,7 +213,6 @@ export interface DrainAndEmitOptions {
  */
 export async function drainAndEmitInto(opts: DrainAndEmitOptions): Promise<void> {
   const { drainer, emit, now, runId, final } = opts;
-  if (!drainer) return;
   for (const e of await drainer.drain(final ? { final: true } : undefined)) {
     const event: RuntimeToolEvent = { timestamp: now(), ...e, runId };
     if (final) {

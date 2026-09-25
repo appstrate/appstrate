@@ -140,7 +140,7 @@ Primary source of truth: the `@appstrate/env` Zod schema (`packages/env/src/inde
 
 ## `EGRESS_ALLOW_INTERNAL_HOSTS` — full semantics
 
-Opt-in, comma-separated hostnames the operator explicitly trusts on private/internal addresses. Exempts **only** the SSRF host blocklist — never the redirect discipline — across every platform egress site that consults it: OAuth token exchange/refresh/discovery, LLM upstream `baseUrl`, org proxies, org model tests, credential-proxy targets, and remote MCP servers (spawn validation allows plain `http://` for these hosts). The value is forwarded to the sidecar under the same name at launch, so the sidecar's own gates honour the same allowlist.
+Opt-in, comma-separated hostnames the operator explicitly trusts on private/internal addresses. Exempts **only** the SSRF host blocklist — never the redirect discipline — across every platform egress site that consults it: OAuth token exchange/refresh/discovery, LLM upstream `baseUrl`, org proxies, org model tests, credential-proxy targets, and remote MCP servers (spawn validation allows plain `http://` for these hosts). The value is forwarded to the sidecar under the same name at launch, so the sidecar's own gates honour the same allowlist. Model inference always goes through the run's sidecar, so a model on a private or local endpoint (Ollama on `localhost`, `host.docker.internal`, a LAN vLLM) needs its host listed here; without it the run fails before provisioning with an error naming this variable.
 
 Redirect chains are checked per hop: a trusted host redirecting to a second internal host requires that host to be listed too, and a cross-host redirect still strips credentials and the request body. Unset ⇒ every internal host stays blocked (the secure default).
 

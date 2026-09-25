@@ -86,10 +86,6 @@ describe("deriveOauthPlaceholder", () => {
       const placeholder = deriveOauthPlaceholder("opaque-token", SYNTH_PROVIDER_ID);
       expect(placeholder).toBe(deriveKeyPlaceholder("opaque-token"));
     });
-
-    it("returns sk-placeholder when input is undefined", () => {
-      expect(deriveOauthPlaceholder(undefined, SYNTH_PROVIDER_ID)).toBe("sk-placeholder");
-    });
   });
 
   describe("provider without hook / unknown provider", () => {
@@ -100,4 +96,15 @@ describe("deriveOauthPlaceholder", () => {
       expect(placeholder).not.toContain("DEADBEEFCAFEBABE");
     });
   });
+});
+
+describe("deriveKeyPlaceholder — never the key itself", () => {
+  // The container env refuses a placeholder equal to the key, so the derivation
+  // must never land on one — including for a key already shaped like its output.
+  it.each(["sk-placeholder", "a-placeholder", "sk-placeholder-placeholder"])(
+    "differs from %s",
+    (key) => {
+      expect(deriveKeyPlaceholder(key)).not.toBe(key);
+    },
+  );
 });

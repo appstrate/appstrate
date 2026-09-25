@@ -66,6 +66,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (operators): one run topology — every run boots its sidecar.**
+  The agent container gets a placeholder credential and the restricted
+  network, like every run: inference goes through the sidecar's `/llm` proxy
+  (`MODEL_BASE_URL`), and every other outbound request through its forward
+  proxy, under the egress policy every run already had (`HTTP_PROXY`, the
+  internal-range blocklist, `EGRESS_ALLOW_INTERNAL_HOSTS`). Runs that used to
+  start without a sidecar now start one more container.
+  **Operators with a model on a private or local endpoint** (Ollama on
+  `localhost`, `host.docker.internal`, a LAN vLLM): list its host in
+  `EGRESS_ALLOW_INTERNAL_HOSTS`. A run whose model base URL targets a blocked
+  range fails before provisioning, with an error naming the variable.
+  The agent image refuses to boot without `SIDECAR_URL` and
+  `SIDECAR_AUTH_TOKEN`, and the agent env no longer carries `OUTPUT_SCHEMA`
+  (the sidecar's `output` tool has its own copy); the platform, `PI_IMAGE` and
+  `SIDECAR_IMAGE` ship together as usual. The `appstrate.run.container_spawn`
+  metric drops its `sidecar` attribute, which is now constant.
+  **Firecracker operators**: every VM is sized with its sidecar — agent memory
+  plus 512 MiB (256 MiB sidecar, 256 MiB kernel/init/overlay), agent vCPUs plus
+  1, between 2 and 8. The runner protocol moves to `2` (the boundary request
+  takes `{ runId }` alone) and the guest protocol to `3` (the config drive drops
+  `agent.unrestricted_egress` and `sidecar.enabled`). Upgrade the platform, the
+  `appstrate-runner` daemon and the guest artifacts together; a platform and a
+  daemon on different runner protocols refuse each other at `initialize`.
+
 - **BREAKING (operators): MinIO runs from `cgr.dev/chainguard/minio`, as uid
   65532 — an existing MinIO volume must be re-owned before the upgrade.**
   MinIO's own registries (`quay.io/minio/*`, Docker Hub `minio/*`) now refuse

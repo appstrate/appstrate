@@ -390,20 +390,9 @@ export class DockerOrchestrator implements RunOrchestrator {
   }
 
   async createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle> {
-    // `skipSidecar` runs have no egress proxy, so the agent must reach the
-    // upstream LLM + platform sink itself. Give it the same network setup
-    // as the sidecar (egress network primary + host-gateway / platform net)
-    // instead of the internal-only isolation boundary, which has no route
-    // out and would fail the agent's first `emitRuntimeReady` POST.
-    // Same by-name resolution as createSidecar: never trust a cached
-    // network ID across the process lifetime (#834).
-    const [platformNetwork, egressNetworkId] = spec.egress
-      ? await Promise.all([
-          docker.detectPlatformNetwork(),
-          docker.ensureNetwork(docker.EGRESS_NETWORK_NAME),
-        ])
-      : [null, null];
-
+    // The workload sits on the run's internal isolation boundary only: every
+    // outbound call it makes goes through the sidecar.
+    //
     // Mount the per-run workspace into the agent container at
     // /workspace (already exists as the agent's CWD, chowned to `pi`
     // at image build time). The boundary's init step set the volume's
@@ -434,17 +423,10 @@ export class DockerOrchestrator implements RunOrchestrator {
       adapterName: spec.role,
       memory: spec.resources.memoryBytes,
       nanoCpus: spec.resources.nanoCpus,
-      networkId: egressNetworkId ?? boundary.id,
+      networkId: boundary.id,
       networkAlias: spec.role,
       ...(workspaceBinds.length > 0 ? { binds: workspaceBinds } : {}),
-      ...(spec.egress
-        ? { extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"] }
-        : {}),
     });
-
-    if (spec.egress && platformNetwork) {
-      await docker.connectContainerToNetwork(platformNetwork.networkId, containerId);
-    }
 
     return new DockerWorkloadHandle(containerId, spec.runId, spec.role);
   }

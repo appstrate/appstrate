@@ -203,9 +203,8 @@ describe("resolveCredentialDelivery (oauth-class classification)", () => {
 
   it("throws rather than downgrading an oauth provider that resolved no credential id", () => {
     // Classification is by `authMode` FIRST. Treating a missing credential id
-    // as "not oauth-class" is what let the raw subscription bearer reach
-    // MODEL_API_KEY inside the agent container (skipSidecar requires a
-    // non-oauth delivery). The invalid configuration must fail the run.
+    // as "not oauth-class" would run a subscription bearer down the static-key
+    // path, which cannot refresh it. The invalid configuration must fail the run.
     expect(() =>
       resolveCredentialDelivery({ providerId: "claude-code", credentialId: null }),
     ).toThrow(OauthProviderMissingCredentialError);

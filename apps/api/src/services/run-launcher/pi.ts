@@ -49,6 +49,7 @@ import { startBootHeartbeat } from "../run-boot-heartbeat.ts";
 import { runWithSpan, currentTraceparent, recordContainerSpawn } from "@appstrate/core/telemetry";
 
 import { getEnv } from "@appstrate/env";
+import { isBlockedEgressUrl } from "../../lib/egress-host-guard.ts";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { LlmProxyConfig, ModelSwap, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 
@@ -71,6 +72,24 @@ import type { LlmProxyConfig, ModelSwap, SidecarLaunchSpec } from "@appstrate/co
  */
 function platformTimeoutBootGraceMs(): number {
   return getEnv().RUN_BOOT_DEADLINE_SECONDS * 1000;
+}
+
+/**
+ * Thrown before provisioning when the model's base URL targets a network range
+ * the sidecar's egress floor refuses (loopback, private, link-local, internal
+ * names) and `EGRESS_ALLOW_INTERNAL_HOSTS` does not list its host.
+ */
+class LlmBaseUrlBlockedError extends Error {
+  constructor(baseUrl: string) {
+    const host = URL.parse(baseUrl)?.hostname ?? "(unparseable URL)";
+    super(
+      `The model's base URL targets a blocked network range (host "${host}"). Model ` +
+        `inference goes through the run's sidecar, which reaches a private or local ` +
+        `endpoint only when EGRESS_ALLOW_INTERNAL_HOSTS lists its host. Add "${host}" ` +
+        `to EGRESS_ALLOW_INTERNAL_HOSTS, or point the model at a public endpoint.`,
+    );
+    this.name = "LlmBaseUrlBlockedError";
+  }
 }
 
 /** Terminal state reported back to the caller once the container has exited. */
@@ -149,7 +168,7 @@ async function runPlatformContainerImpl(
   // else is a static API-key placeholder substitution. Fail-closed: an OAuth
   // provider that resolved WITHOUT a stored credential id throws here (invalid
   // configuration — it must never downgrade to API-key handling, which would
-  // leak the raw token into the agent container and skip the sidecar).
+  // hand the sidecar a token it cannot refresh).
   const delivery = resolveCredentialDelivery({
     providerId: llmConfig.providerId,
     credentialId: llmConfig.credentialId,
@@ -171,21 +190,16 @@ async function runPlatformContainerImpl(
   // the run ended without one.
   let stopBootHeartbeat: (() => void) | undefined;
 
-  // Hoisted out of the try so the spawn-failure metric path (catch) can read
-  // it. Assigned below once the run's sidecar policy is resolved.
-  let skipSidecar = false;
-
   const spawnStart = Date.now();
   // Guards against double-recording the container-spawn histogram: the success
   // record fires before `waitForWorkload`, so a later execution failure (which
   // is NOT a spawn failure) must not also emit a spawn data point.
   let spawnRecorded = false;
   try {
-    // Fail-closed BEFORE provisioning any isolation boundary: an OAuth run
-    // delivers its credential via the sidecar `/llm` bearer-swap, which only an
-    // isolating orchestrator (docker, firecracker) provisions. The in-host
-    // process orchestrator has no sidecar to swap the bearer. API-key providers
-    // are unaffected.
+    // Fail-closed BEFORE provisioning any isolation boundary: an OAuth run's
+    // subscription credential sits with the sidecar, which only an isolating
+    // orchestrator (docker, firecracker) keeps apart from the agent. API-key
+    // providers are unaffected.
     assertOauthRunIsolation({
       isOauthCredential: delivery.kind === "oauth",
       providerId: llmConfig.providerId,
@@ -203,24 +217,12 @@ async function runPlatformContainerImpl(
 
     const llmApiKey = llmConfig.apiKey;
 
-    // Skip the sidecar entirely when the run declares no integrations AND
-    // uses a static API key AND has no egress proxy. The sidecar's purposes
-    // are integration MCP multiplexing (Phase 1.4), LLM passthrough for
-    // OAuth, AND hosting the forward proxy that masks the agent's outbound
-    // IP. An API-key model with no integrations and no proxy needs none of
-    // these. When a proxy IS configured, the sidecar's forward-proxy bind
-    // is the ONLY path that routes agent egress through it — skipping the
-    // sidecar would silently drop the proxy and leak the host IP.
-    const hasIntegrations = (plan.integrations?.length ?? 0) > 0;
-    // A model alias MUST route through the sidecar — that's the only place the
-    // `model` alias→real swap happens. Skipping it would hand the agent the
-    // real backing id (in its own request) and the provider's real endpoint.
-    skipSidecar =
-      !hasIntegrations &&
-      !!llmConfig.apiKey &&
-      delivery.kind !== "oauth" &&
-      !plan.proxyUrl &&
-      !llmConfig.aliased;
+    // Inference rides the sidecar's `/llm`, whose egress floor refuses a base
+    // URL on a blocked range. Same guard, same allowlist, checked here so the
+    // run fails with the remedy instead of a 403 inside the container.
+    if (isBlockedEgressUrl(llmConfig.baseUrl)) {
+      throw new LlmBaseUrlBlockedError(llmConfig.baseUrl);
+    }
 
     // Boot-phase liveness (see services/run-boot-heartbeat.ts). From here to
     // the runner's first event the platform — not the runner — owns this
@@ -237,9 +239,7 @@ async function runPlatformContainerImpl(
       backend: "platform",
     });
 
-    // Resolved BEFORE the boundary so port-allocating backends don't
-    // reserve a sidecar port this run will never bind.
-    boundary = await orch.createIsolationBoundary(runId, { skipSidecar });
+    boundary = await orch.createIsolationBoundary(runId);
 
     // The placeholder is what actually lands in MODEL_API_KEY inside the
     // agent container. Provider-specific shape (e.g. a structured JWT) is
@@ -273,37 +273,34 @@ async function runPlatformContainerImpl(
         }
       : undefined;
 
-    let sidecarLlm: LlmProxyConfig | undefined;
     // OAuth credentials must take the sidecar's OAuth branch — the API-key
     // path can't refresh tokens or inject the provider's identity routing
     // headers at request time. Narrowing `delivery` (rather than carrying a
     // boolean) is what supplies `credentialId` here: `resolveCredentialDelivery`
     // refused to build an `oauth` delivery without one, so there is nothing
     // left to re-assert at this point.
-    if (delivery.kind === "oauth") {
-      // OAuth subscription: the Pi SDK signs the subscription request shape
-      // itself, so the sidecar just swaps the placeholder bearer for the real
-      // token — no forging, no modelSwap (aliases rejected above).
-      sidecarLlm = buildOauthSidecarLlm({
-        baseUrl: llmConfig.baseUrl,
-        credentialId: delivery.credentialId,
-      });
-    } else if (llmApiKey) {
-      // API-key flow: the sidecar forwards directly to the upstream
-      // provider. Transient 429/5xx are absorbed by two budgets, neither of
-      // them this file's and neither restated here (one number, one place):
-      // the container's turn-level retry policy in
-      // `packages/runner-pi/src/pi-runner.ts`, and — for an ALIASED run, whose
-      // container never sees a `retry-after` header — the sidecar's own
-      // provider-level budget in `runtime-pi/sidecar/pi-messages-backend.ts`.
-      sidecarLlm = {
-        authMode: "api_key",
-        baseUrl: llmConfig.baseUrl,
-        apiKey: llmApiKey,
-        placeholder: llmPlaceholder,
-        ...(modelSwap ? { modelSwap } : {}),
-      };
-    }
+    //
+    // OAuth subscription: the Pi SDK signs the subscription request shape
+    // itself, so the sidecar just swaps the placeholder bearer for the real
+    // token — no forging, no modelSwap (aliases rejected above).
+    //
+    // API-key flow: the sidecar forwards directly to the upstream provider.
+    // Transient 429/5xx are absorbed by two budgets, neither of them this
+    // file's and neither restated here (one number, one place): the
+    // container's turn-level retry policy in `packages/runner-pi/src/pi-runner.ts`,
+    // and — for an ALIASED run, whose container never sees a `retry-after`
+    // header — the sidecar's own provider-level budget in
+    // `runtime-pi/sidecar/pi-messages-backend.ts`.
+    const sidecarLlm: LlmProxyConfig =
+      delivery.kind === "oauth"
+        ? buildOauthSidecarLlm({ baseUrl: llmConfig.baseUrl, credentialId: delivery.credentialId })
+        : {
+            authMode: "api_key",
+            baseUrl: llmConfig.baseUrl,
+            apiKey: llmApiKey,
+            placeholder: llmPlaceholder,
+            ...(modelSwap ? { modelSwap } : {}),
+          };
 
     // Agent↔sidecar bearer for THIS run. Minted here, in the one frame that
     // feeds both halves of the pair (`sidecarSpec` → the sidecar's env,
@@ -315,12 +312,11 @@ async function runPlatformContainerImpl(
     // Deliberately NOT `plan.runToken`, and not derived from it: the agent
     // container must stay unable to call the platform back (zero-knowledge),
     // so this secret carries no platform authority and no path to one.
-    // `skipSidecar` runs have no sidecar to authenticate to.
-    const sidecarAuthToken = skipSidecar ? undefined : randomBytes(32).toString("base64url");
+    const sidecarAuthToken = randomBytes(32).toString("base64url");
 
     const sidecarSpec: SidecarLaunchSpec = {
       runToken: plan.runToken,
-      ...(sidecarAuthToken ? { sidecarAuthToken } : {}),
+      sidecarAuthToken,
       proxyUrl: plan.proxyUrl ?? undefined,
       llm: sidecarLlm,
       // Propagate the resolved model's context window so the sidecar's
@@ -339,8 +335,7 @@ async function runPlatformContainerImpl(
         : {}),
       // Platform runtime tools (output/log/note/pin) the sidecar
       // hosts as in-process MCP tools — unified with the integration tool
-      // surface. The no-sidecar path reads the same selection from the
-      // bundle manifest instead.
+      // surface.
       ...(plan.runtimeTools && plan.runtimeTools.length > 0
         ? { runtimeTools: plan.runtimeTools }
         : {}),
@@ -349,8 +344,7 @@ async function runPlatformContainerImpl(
     const hasOutputSchema =
       plan.outputSchema?.properties && Object.keys(plan.outputSchema.properties).length > 0;
     // Forward the output schema to the sidecar so its `output` runtime tool
-    // can constrain + validate the `data` argument (mirrors the agent
-    // container's OUTPUT_SCHEMA env for the no-sidecar path).
+    // can constrain + validate the `data` argument.
     if (hasOutputSchema && plan.outputSchema) {
       sidecarSpec.outputSchema = plan.outputSchema as unknown as Record<string, unknown>;
     }
@@ -362,17 +356,13 @@ async function runPlatformContainerImpl(
       model: {
         api: llmConfig.apiShape,
         modelId,
-        baseUrl: llmConfig.baseUrl,
         // The Pi key the container resolves Pi's record (dialect, limits) by.
-        // A sidecar-proxied run replaces MODEL_BASE_URL with the sidecar's, so
-        // without it every provider would get plain-OpenAI bytes. An aliased
+        // MODEL_BASE_URL is the sidecar's, so without it every provider would
+        // get plain-OpenAI bytes. An aliased
         // run needs no vendor key at all.
         piProvider: llmConfig.piProvider,
         apiKey: llmApiKey,
-        // When the sidecar is skipped, the agent talks to the upstream
-        // provider directly — we must hand it the real API key, not the
-        // placeholder the sidecar would normally substitute.
-        apiKeyPlaceholder: skipSidecar ? llmApiKey : llmPlaceholder,
+        apiKeyPlaceholder: llmPlaceholder,
         input: llmConfig.input,
         contextWindow: llmConfig.contextWindow,
         maxTokens: llmConfig.maxTokens,
@@ -389,28 +379,15 @@ async function runPlatformContainerImpl(
       // run-loop start (boot excluded), and finalises a first-class `timeout`.
       // The platform setTimeout in `waitForWorkload` is the longer safety net.
       timeoutSeconds: plan.timeout,
-      noSidecar: skipSidecar,
       // All sidecar-relative URLs come from the boundary — the orchestrator
       // owns the topology (Docker DNS alias, host loopback port, in-guest
       // loopback for microVMs) and pi.ts stays backend-agnostic.
-      sidecarUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.sidecarUrl,
-      // Other half of the pair minted above. `buildRuntimePiEnv` throws when a
-      // sidecar-backed run reaches it without one, the same way it does for
-      // `sidecarUrl` — a run that cannot authenticate to its sidecar must not
-      // start rather than 401 on its first inference call.
+      sidecarUrl: boundary.sidecarEndpoints.sidecarUrl,
+      // Other half of the pair minted above.
       sidecarAuthToken,
-      // Sidecar-backed runs route LLM traffic through the sidecar proxy
-      // (sidecarProxyLlmUrl below). No-sidecar runs talk to the upstream
-      // directly, so buildRuntimePiEnv derives MODEL_BASE_URL from the
-      // model's own baseUrl (passed in `model` above) — otherwise the Pi
-      // SDK falls back to the api-shape's native default (api.openai.com)
-      // and misroutes custom-baseUrl providers like DeepSeek. See #741.
-      sidecarProxyLlmUrl: skipSidecar
-        ? undefined
-        : llmApiKey
-          ? boundary.sidecarEndpoints.llmProxyUrl
-          : undefined,
-      outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
+      // Inference rides the sidecar's `/llm` proxy, which swaps the
+      // placeholder for the real credential upstream.
+      sidecarProxyLlmUrl: boundary.sidecarEndpoints.llmProxyUrl,
       // Forward the effective per-file cap so the runtime's outputs
       // sweep agrees with the server-authoritative gate (avoids silently
       // skipping large deliverables when an operator raises the platform cap).
@@ -418,8 +395,8 @@ async function runPlatformContainerImpl(
       modelRetry: getEnv().MODEL_RETRY_ENABLED,
       modelCompaction: getEnv().MODEL_COMPACTION_ENABLED,
       toolResultByteLimit: getEnv().TOOL_RESULT_BYTE_LIMIT,
-      forwardProxyUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.forwardProxyUrl,
-      noProxy: skipSidecar ? undefined : boundary.sidecarEndpoints.noProxy,
+      forwardProxyUrl: boundary.sidecarEndpoints.forwardProxyUrl,
+      noProxy: boundary.sidecarEndpoints.noProxy,
       sink: {
         url: sinkCredentials.url,
         finalizeUrl: sinkCredentials.finalize_url,
@@ -436,9 +413,7 @@ async function runPlatformContainerImpl(
       traceparent: currentTraceparent() ?? context.traceparent,
     });
 
-    await orch.ensureImages(
-      skipSidecar ? [getEnv().PI_IMAGE] : [getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE],
-    );
+    await orch.ensureImages([getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE]);
 
     // Sidecar + agent + bundle upload in parallel. The AFPS bundle is uploaded
     // to run-scoped storage; the agent container fetches and extracts it itself
@@ -455,8 +430,7 @@ async function runPlatformContainerImpl(
     // is a free performance choice. The upload must finish before
     // `startWorkload` (inside waitForWorkload) so the object exists when the
     // agent boots; racing it alongside the create calls here satisfies that
-    // ordering. When `skipSidecar`, only the agent is created (it reaches the
-    // platform directly over its egress network).
+    // ordering.
     //
     // `allSettled`, NOT `all`. Two distinct leaks came out of `all`, and only
     // waiting for every branch closes both:
@@ -485,9 +459,7 @@ async function runPlatformContainerImpl(
         throw err;
       });
     const [sidecarResult, agentResult, uploadResult] = await Promise.allSettled([
-      track(
-        skipSidecar ? Promise.resolve(undefined) : orch.createSidecar(runId, boundary, sidecarSpec),
-      ),
+      track(orch.createSidecar(runId, boundary, sidecarSpec)),
       track(
         orch.createWorkload(
           {
@@ -496,10 +468,6 @@ async function runPlatformContainerImpl(
             image: getEnv().PI_IMAGE,
             env: containerEnv,
             resources: plan.resources.workload,
-            // Without a sidecar there is no egress proxy — the agent must
-            // reach the upstream LLM and the platform sink directly, so it
-            // goes on the egress network instead of the internal boundary.
-            egress: skipSidecar,
             // Hard host-side lifetime ceiling (B2): run budget + the same
             // boot grace the platform safety net uses + a 600 s margin, so
             // the daemon's kill is strictly a LAST resort behind the
@@ -528,7 +496,7 @@ async function runPlatformContainerImpl(
     }
     const sidecar = sidecarResult.value;
     const agent = agentResult.value;
-    recordContainerSpawn(Date.now() - spawnStart, { sidecar: !skipSidecar });
+    recordContainerSpawn(Date.now() - spawnStart);
     spawnRecorded = true;
 
     const lifecycle = await waitForWorkload(
@@ -548,7 +516,6 @@ async function runPlatformContainerImpl(
     // execution failure, not a spawn failure, and must not emit a spawn point.
     if (!spawnRecorded) {
       recordContainerSpawn(Date.now() - spawnStart, {
-        sidecar: !skipSidecar,
         errorType: boundary ? "workload" : "boundary",
       });
     }
@@ -605,7 +572,7 @@ async function runPlatformContainerImpl(
 async function waitForWorkload(
   orch: RunOrchestrator,
   agent: WorkloadHandle,
-  sidecar: WorkloadHandle | undefined,
+  sidecar: WorkloadHandle,
   timeoutSeconds: number,
   signal: AbortSignal | undefined,
   bootGraceMs: number,
@@ -635,14 +602,14 @@ async function waitForWorkload(
     () => {
       timedOut = true;
       orch.stopWorkload(agent).catch(() => {});
-      if (sidecar) orch.stopWorkload(sidecar).catch(() => {});
+      orch.stopWorkload(sidecar).catch(() => {});
     },
     timeoutSeconds * 1000 + bootGraceMs,
   );
 
   const onAbort = () => {
     orch.stopWorkload(agent).catch(() => {});
-    if (sidecar) orch.stopWorkload(sidecar).catch(() => {});
+    orch.stopWorkload(sidecar).catch(() => {});
   };
   if (signal) {
     if (signal.aborted) onAbort();
@@ -743,14 +710,14 @@ const PLACEHOLDER_PREFIX_SEGMENTS = 2;
  * `MODEL_PROVIDER`. An aliased run never reaches this value — see
  * `ALIAS_API_KEY_PLACEHOLDER` in `@appstrate/runner-pi`.
  */
-function deriveKeyPlaceholder(key: string | undefined): string {
-  if (!key) return "sk-placeholder";
+function deriveKeyPlaceholder(key: string): string {
   const parts = key.split("-");
-  if (parts.length <= 1) return "sk-placeholder";
   const kept = parts.slice(0, Math.min(PLACEHOLDER_PREFIX_SEGMENTS, parts.length - 1)).join("-");
   const ceiling = Math.floor(key.length / 2);
   const bounded = kept.length > ceiling ? kept.slice(0, ceiling) : kept;
-  return bounded ? `${bounded}-placeholder` : "sk-placeholder";
+  const placeholder = bounded ? `${bounded}-placeholder` : "sk-placeholder";
+  // A key already shaped like its placeholder still gets a different value.
+  return placeholder === key ? `${placeholder}-0` : placeholder;
 }
 
 /**
@@ -763,8 +730,7 @@ function deriveKeyPlaceholder(key: string | undefined): string {
  * is absent or returns null, the platform falls back to the generic
  * dash-stripping strategy — safe for opaque bearer tokens.
  */
-function deriveOauthPlaceholder(key: string | undefined, providerId: string): string {
-  if (!key) return deriveKeyPlaceholder(key);
+function deriveOauthPlaceholder(key: string, providerId: string): string {
   const config = getModelProvider(providerId);
   const fromHook = config?.hooks?.buildApiKeyPlaceholder?.(key);
   return fromHook ?? deriveKeyPlaceholder(key);

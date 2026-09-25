@@ -27,13 +27,10 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, chownSync, readFileSync, writeFileSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 // Wire contract shared with the host-side producer (vm-config.ts's
-// buildGuestConfig). Type-only: erased by `bun build`, so the supervisor
-// bundle stays self-contained.
+// buildGuestConfig). Type-only: erased by `bun build`.
 import type { GuestConfig } from "./guest-config.ts";
+import { buildGuestFirewallScript, GUEST_SIDECAR_UID, MMDS_IPV4_ADDRESS } from "./firewall.ts";
 
-const GUEST_SIDECAR_UID = "1000";
-const GUEST_AGENT_UID = "1001";
-const GUEST_RUNNER_UID = "1002";
 const GUEST_AGENT_USER = "pi"; // uid 1001, baked into the rootfs
 const SIDECAR_BIN = "/usr/local/bin/sidecar";
 /** setuid(1002) wrapper the sidecar uses to spawn integration runners. */
@@ -49,14 +46,6 @@ const CONFIG_PATH = "/config/config.json";
  * injects it. New entries written at runtime land in the tmpfs overlay.
  */
 const TRANSPILER_CACHE_PATH = "/runtime/.transpiler-cache";
-
-/**
- * Firecracker MMDS link-local service address (matches the host-side
- * mmds-config in vm-config.ts). The credential broker serves the run's
- * secrets here; the supervisor fetches them at boot, then applyFirewall
- * drops all further access.
- */
-const MMDS_IPV4_ADDRESS = "169.254.169.254";
 
 function log(msg: string): void {
   process.stdout.write(`[supervisor] ${msg}\n`);
@@ -81,56 +70,9 @@ function readConfig(): GuestConfig {
   return raw as GuestConfig;
 }
 
-/**
- * Guest egress firewall (nftables `inet` family), default-deny.
- *
- * The chain policy is DROP with an explicit allowlist — a denylist keyed
- * on the agent uid alone would let any OTHER uid (root helpers, a future
- * user, a compromised process that changed uid) egress freely:
- *
- *   - loopback: always allowed (agent ↔ sidecar traffic rides 127.0.0.1).
- *   - root (supervisor): allowed — it is the trust anchor of the guest.
- *   - sidecar uid: full egress (it fronts the LLM proxy + forward proxy).
- *   - runner uid: full egress (integration MCP servers call external APIs).
- *   - agent uid: loopback + the platform sink only, UNLESS the run is
- *     skipSidecar (then the agent needs direct upstream egress).
- *   - everything else — any uid, any socketless packet — is dropped.
- *
- * DNS to the configured resolvers is allowed for whoever has egress
- * (sidecar/runner always, agent only when unrestricted) via the general
- * accept rules — no special-casing needed.
- */
+/** Apply the guest egress firewall — see {@link buildGuestFirewallScript}. */
 function applyFirewall(exec: RunHostCmd, cfg: GuestConfig): Promise<void> {
-  const agentEgress = cfg.agent.unrestricted_egress
-    ? [`      meta skuid ${GUEST_AGENT_UID} accept`]
-    : [
-        `      meta skuid ${GUEST_AGENT_UID} ip daddr 127.0.0.1 accept`,
-        `      meta skuid ${GUEST_AGENT_UID} ip daddr ${cfg.network.platform_ip} tcp dport ${cfg.network.platform_port} accept`,
-      ];
-
-  const script = [
-    `table inet appstrate_guest {`,
-    `  chain output {`,
-    `    type filter hook output priority filter; policy drop;`,
-    // Credential broker: by the time this firewall is applied the
-    // supervisor has already fetched the run's secrets from MMDS. Slam the
-    // link-local metadata address shut for EVERY uid — including root and
-    // any unrestricted_egress agent — so no workload can ever read the
-    // credential store back. First rule = highest precedence (drops before
-    // the skuid-0/sidecar/runner accepts below). Unconditional: in
-    // config-drive mode MMDS is not even configured, so this is a harmless
-    // belt-and-suspenders (the host forward chain also drops 169.254/16).
-    `    ip daddr ${MMDS_IPV4_ADDRESS} drop`,
-    `    oifname "lo" accept`,
-    `    meta skuid 0 accept`,
-    `    meta skuid ${GUEST_SIDECAR_UID} accept`,
-    `    meta skuid ${GUEST_RUNNER_UID} accept`,
-    ...agentEgress,
-    `  }`,
-    `}`,
-    ``,
-  ].join("\n");
-  return exec(["nft", "-f", "-"], script);
+  return exec(["nft", "-f", "-"], buildGuestFirewallScript(cfg.network));
 }
 
 type RunHostCmd = (cmd: string[], stdin?: string) => Promise<void>;
@@ -274,7 +216,7 @@ async function fetchMmdsStore(): Promise<MmdsStore> {
 async function main(): Promise<void> {
   const cfg = readConfig();
   exitNonce = cfg.exit_marker_nonce;
-  log(`run ${cfg.run_id} starting (sidecar=${cfg.sidecar.enabled})`);
+  log(`run ${cfg.run_id} starting`);
 
   // Credential broker: fetch the run's secrets from MMDS BEFORE the firewall
   // goes up (applyFirewall then drops MMDS for every uid). Only the root
@@ -310,20 +252,17 @@ async function main(): Promise<void> {
     fatal(`could not lock down /dev/vdb: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  let sidecar: Child | undefined;
-  if (cfg.sidecar.enabled) {
-    sidecar = spawnAs(
-      GUEST_SIDECAR_UID,
-      [SIDECAR_BIN],
-      // The wrapper path rides the env (not the adapter's own config): the
-      // process adapter is shared with host process-mode, where runners
-      // stay plain children of the sidecar.
-      { ...cfg.sidecar.env, APPSTRATE_RUNNER_EXEC: RUNNER_EXEC_WRAPPER },
-      "/tmp",
-      { harden: false },
-    );
-    log(`sidecar pid ${sidecar.pid}`);
-  }
+  const sidecar = spawnAs(
+    GUEST_SIDECAR_UID,
+    [SIDECAR_BIN],
+    // The wrapper path rides the env (not the adapter's own config): the
+    // process adapter is shared with host process-mode, where runners
+    // stay plain children of the sidecar.
+    { ...cfg.sidecar.env, APPSTRATE_RUNNER_EXEC: RUNNER_EXEC_WRAPPER },
+    "/tmp",
+    { harden: false },
+  );
+  log(`sidecar pid ${sidecar.pid}`);
 
   // The agent is the primary workload; its exit is the run's outcome. The
   // sidecar's HTTP listener may not be up yet — the agent's MCP handshake
@@ -339,10 +278,8 @@ async function main(): Promise<void> {
   const code = await agent.exited;
   log(`agent exited ${code}`);
 
-  if (sidecar) {
-    sidecar.kill();
-    await Promise.race([sidecar.exited, delay(2000)]);
-  }
+  sidecar.kill();
+  await Promise.race([sidecar.exited, delay(2000)]);
 
   printExitMarker(code);
   powerOff();

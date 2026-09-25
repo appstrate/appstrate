@@ -164,18 +164,6 @@ function buildRunPlan(): AppstrateRunPlan {
       aliased: false,
       aliasId: "claude-3-5-sonnet-latest",
     },
-    // At least one integration, otherwise the launcher's skipSidecar shortcut
-    // bypasses `createSidecar` and there is no three-way race to test.
-    integrations: [
-      {
-        integrationId: "@test/gmail-mcp",
-        namespace: "gmail",
-        sourceKind: "local",
-        manifest: { name: "@test/gmail-mcp", version: "1.0.0" },
-        spawnEnv: {},
-        toolAllowlist: [],
-      },
-    ],
     timeout: 60,
     resources: defaultTestAgentResources(),
   };
