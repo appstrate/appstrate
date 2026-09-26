@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The skills the space imposes on every conversation: one read, shared by the
-// skill picker and, when the caller cannot pin skills, a read-only indicator.
-
-import { useQuery } from "@tanstack/react-query";
 import { LockIcon } from "lucide-react";
 import {
   Tooltip,
@@ -11,30 +7,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@appstrate/ui/components/tooltip";
-import { fetchEnforcedSkills } from "./chat-skills.ts";
 import { useChatHost, type GetHeaders } from "./runtime-context.ts";
-import { spaceIdFromHeaders } from "./sessions.ts";
+import { useEnforcedSkills } from "./use-enforced-skills.ts";
 
-/**
- * Default freshness on purpose: a toggle in the space library is the whole
- * point of this read, and the picker remounts with each conversation, which
- * refetches it without a cross-module invalidation.
- */
-export function useEnforcedSkills(getHeaders: GetHeaders | undefined) {
-  const spaceId = spaceIdFromHeaders(getHeaders);
-  return useQuery({
-    queryKey: ["chat", "enforced-skills", spaceId],
-    queryFn: () => fetchEnforcedSkills(getHeaders),
-    // The route reads the space from `X-Space-Id`; without one it is a 400.
-    enabled: !!spaceId,
-  });
-}
-
-/**
- * For a member who chats without `skills:read`: no picker, but the space's
- * policy still applies to them, so its names are shown. Nothing when the space
- * imposes nothing, or while the read has no answer.
- */
+/** For a member who chats without `skills:read`: the space's policy applies to them too. */
 export function EnforcedSkillsIndicator({ getHeaders }: { getHeaders: GetHeaders | undefined }) {
   const { t } = useChatHost();
   const { data: enforced } = useEnforcedSkills(getHeaders);

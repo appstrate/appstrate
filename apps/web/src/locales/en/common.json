@@ -117,7 +117,6 @@
   "library.column.chatEnforced": "Required in chat",
   "library.chatEnforce.toggle": "Require {{package}} in the chat of space {{space}}",
   "library.chatEnforce.cannot": "You do not have permission to change the skills of this space",
-  "library.chatEnforce.activateFirst": "Activate this skill in the space to require it in the chat",
   "library.chatEnforce.publishFirst": "Publish a version of the skill first",
   "library.chatEnforce.confirmTitle": "Require this skill in the chat?",
   "library.chatEnforce.confirmDescription": "The SKILL.md of the latest published version of “{{package}}” will be injected into every conversation of space {{space}}. Its content will be visible to every member who chats in this space, whatever their skill permissions.",

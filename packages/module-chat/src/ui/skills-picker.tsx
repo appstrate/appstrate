@@ -22,7 +22,7 @@ import {
 import { cn } from "@appstrate/ui/cn";
 import { injectsSkills, MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
 import { fetchSkills, ownPins, skillPickerRows, togglePinned } from "./chat-skills.ts";
-import { useEnforcedSkills } from "./enforced-skills.tsx";
+import { useEnforcedSkills } from "./use-enforced-skills.ts";
 import { useChatHost, type GetHeaders } from "./runtime-context.ts";
 import { spaceIdFromHeaders } from "./sessions.ts";
 
@@ -59,12 +59,9 @@ export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerPr
   const enforced = enforcedQuery.data ?? [];
   const enforcedIds = new Set(enforced.map((skill) => skill.packageId));
   // A disabled query stays `isPending` forever; unreadable reads as "nothing".
-  // Both reads gate the list: before the enforced one lands, an imposed skill
-  // would briefly render as choosable.
+  // Waiting on the enforced read too keeps an imposed skill from flashing as choosable.
   const loading = (readable && catalogue.isPending) || (!!spaceId && enforcedQuery.isPending);
 
-  // An enforced skill is injected whatever the selection: a pin naming it is
-  // not the user's, not counted against the cap, and dropped on the next change.
   const pinned = ownPins(selection.pinnedSkills, enforcedIds);
   const pinnedSet = new Set(pinned);
   const atPinCap = pinned.length >= MAX_PINNED_SKILLS;
@@ -92,7 +89,9 @@ export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerPr
                 aria-label={inUse > 0 ? t("skills.labelCount", { n: inUse }) : t("skills.label")}
                 className={cn(
                   "relative size-8 shrink-0 rounded-lg",
-                  inUse > 0 ? "text-primary hover:text-primary" : "text-muted-foreground",
+                  choosing || enforced.length > 0
+                    ? "text-primary hover:text-primary"
+                    : "text-muted-foreground",
                 )}
               >
                 <BookOpenIcon />
@@ -158,8 +157,6 @@ export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerPr
 
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t pt-2">
           {enforced.map((skill) => (
-            // Checked and locked: the space injects it in every mode, and no
-            // selection sent from here can take it out.
             <div key={skill.packageId} className="flex items-start gap-2 rounded-md p-1">
               <Checkbox
                 data-testid={`skill-enforced-${skill.packageId}`}

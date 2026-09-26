@@ -109,7 +109,6 @@ function hintOf(element: string): string | null {
   if (title === i18n.t("library.cannotShareHere")) return "notPlaced";
   // The chat-enforcement box's own refusals.
   if (title === i18n.t("library.chatEnforce.cannot")) return "configure";
-  if (title === i18n.t("library.chatEnforce.activateFirst")) return "activateFirst";
   if (title === i18n.t("library.chatEnforce.publishFirst")) return "publishFirst";
   // Not a refusal: a live box on an untaken offer says what taking it up means.
   if (title === i18n.t("library.offerHint")) return "offer";
@@ -405,8 +404,8 @@ describe("one space's view", () => {
     expect(html).not.toContain(i18n.t("library.badge.offered"));
     expect(readCheckboxes(html)).toEqual([
       { checked: false, disabled: false, hint: null },
-      // A skill that is off here cannot be imposed on the chat until it is back on.
-      { checked: false, disabled: true, hint: "activateFirst" },
+      // Imposing a switched-off skill is accepted: the flag waits for re-activation.
+      { checked: false, disabled: false, hint: null },
     ]);
   });
 

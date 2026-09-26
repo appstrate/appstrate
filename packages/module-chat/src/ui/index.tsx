@@ -471,8 +471,6 @@ const Conversation = memo(function Conversation({
         {showPicker ? (
           <SkillsPicker getHeaders={getHeaders} selection={skills} onChange={chooseSkills} />
         ) : (
-          // The space's enforced skills apply to whoever chats here, picker or
-          // not: a member without `skills:read` still sees their names.
           canWrite && <EnforcedSkillsIndicator getHeaders={getHeaders} />
         )}
         {composerSlot}

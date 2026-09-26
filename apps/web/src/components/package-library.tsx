@@ -280,19 +280,9 @@ function ActivationCheckbox({
 }
 
 /**
- * Whether a skill placed in this space is imposed on every chat conversation
- * held here, for one placement ROW (`state` active or inactive — an untaken
- * offer has no row to carry the flag).
- *
- * The flag lives on the row and survives deactivation, so a switched-off skill
- * still shows it; it only applies again once the skill is back on. Hence the
- * asymmetry: releasing is open to whoever may configure the skill here,
- * imposing also needs it ON and published — what is imposed is the latest
- * published version, never the draft. A version deleted between the read and
- * the click still gets the server's 409 `no_published_version`.
- *
- * Imposing is not applied from here: `onEnforce` asks for the confirmation that
- * states what it discloses, and the table owns that one dialog.
+ * Imposing needs a published version (what is imposed is never the draft);
+ * releasing never does, so a flag on an unpublished skill can still be lifted.
+ * On an inactive row the flag waits for re-activation.
  */
 function ChatEnforceCheckbox({
   pkg,
@@ -314,9 +304,8 @@ function ChatEnforceCheckbox({
   const { t } = useTranslation();
   const enforced = placement.chat_enforced;
   const mayConfigure = mayConfigurePackage(grants?.get(space.id), "skill");
-  const needsActivation = !enforced && placement.state !== "active";
   const needsPublication = !enforced && !pkg.published;
-  const blocked = !mayConfigure || needsActivation || needsPublication;
+  const blocked = !mayConfigure || needsPublication;
   const pending =
     setChatEnforced.isPending &&
     setChatEnforced.variables?.packageId === pkg.id &&
@@ -327,11 +316,9 @@ function ChatEnforceCheckbox({
       ? undefined
       : !mayConfigure
         ? t("library.chatEnforce.cannot")
-        : needsActivation
-          ? t("library.chatEnforce.activateFirst")
-          : needsPublication
-            ? t("library.chatEnforce.publishFirst")
-            : undefined;
+        : needsPublication
+          ? t("library.chatEnforce.publishFirst")
+          : undefined;
 
   return (
     <Checkbox
@@ -345,7 +332,6 @@ function ChatEnforceCheckbox({
           onEnforce(pkg);
           return;
         }
-        // Releasing discloses nothing: no confirmation.
         setChatEnforced.mutate(
           { spaceId: space.id, packageId: pkg.id, enforced: false },
           { onError },
@@ -605,10 +591,8 @@ function SpacePlacements({
   const grants = useSpaceGrants();
   const setActive = useSetPackageActive();
   const setChatEnforced = useSetChatEnforced();
-  // Only a skill can be imposed on the chat; the column exists on that tab alone.
   const enforceable = type === "skill";
-  // ONE confirmation for the table: imposing discloses the skill's content to
-  // every member who chats here, and the reader says yes to that, not to a box.
+  // Imposing discloses the content to every member who chats here: one dialog per table.
   const [confirming, setConfirming] = useState<LibraryPackageItem | null>(null);
 
   const notifyChatEnforceError = (err: unknown) => {

@@ -117,7 +117,6 @@
   "library.column.chatEnforced": "Imposé dans le chat",
   "library.chatEnforce.toggle": "Imposer {{package}} dans le chat de l'espace {{space}}",
   "library.chatEnforce.cannot": "Vous n'avez pas la permission de modifier les skills de cet espace",
-  "library.chatEnforce.activateFirst": "Activez ce skill dans l'espace pour pouvoir l'imposer dans le chat",
   "library.chatEnforce.publishFirst": "Publiez une version du skill d'abord",
   "library.chatEnforce.confirmTitle": "Imposer ce skill dans le chat ?",
   "library.chatEnforce.confirmDescription": "Le SKILL.md de la dernière version publiée de « {{package}} » sera injecté dans chaque conversation de l'espace {{space}}. Son contenu sera visible par tous les membres qui discutent dans cet espace, quels que soient leurs droits sur les skills.",

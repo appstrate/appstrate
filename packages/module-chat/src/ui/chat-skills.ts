@@ -16,19 +16,13 @@ export async function fetchSkills(getHeaders: GetHeaders | null | undefined): Pr
   return parseSkillList(await res.json());
 }
 
-/** The fields read off a row of `GET /api/chat/enforced-skills`. */
 const enforcedSkillRowSchema = z.object({
   id: z.string(),
   name: z.string(),
   version: z.string().nullable(),
 });
 
-/**
- * The skills the space imposes on every conversation, names only. Read through
- * the chat module (`chat:write`), not the skills listing, so a member without
- * `skills:read` still learns what the space requires. A malformed row is
- * dropped.
- */
+/** Through the chat module (`chat:write`): a member without `skills:read` sees them too. */
 export async function fetchEnforcedSkills(
   getHeaders: GetHeaders | null | undefined,
 ): Promise<SkillHint[]> {
@@ -46,10 +40,7 @@ export async function fetchEnforcedSkills(
   });
 }
 
-/**
- * The user's own pins: an enforced skill is injected whatever the selection,
- * so a pin naming one is neither counted against the cap nor sent again.
- */
+/** An enforced skill is injected anyway: a pin naming it is not counted nor re-sent. */
 export function ownPins(pinned: readonly string[], enforced: ReadonlySet<string>): string[] {
   return pinned.filter((id) => !enforced.has(id));
 }
@@ -63,8 +54,8 @@ export function togglePinned(pinned: readonly string[], packageId: string): stri
 
 /**
  * A choosable picker row: the catalogue, then every pin missing from it
- * (`available: false`), so a dead pin can still be removed. An enforced skill
- * is neither: the picker lists it apart, locked.
+ * (`available: false`), so a dead pin can still be removed. Enforced skills are
+ * listed apart, locked.
  */
 export function skillPickerRows(
   catalogue: readonly SkillHint[],
