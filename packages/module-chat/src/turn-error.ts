@@ -17,9 +17,16 @@ export interface ClientTurnError {
 
 const ERROR_MARKER_PREFIX = "appstrate:chat-turn-error:";
 
+/**
+ * The message of a failure: a string, or any object carrying a string
+ * `message` — an Error, or the `{ code, message }` assistant-ui normalizes
+ * the thrown Error into before it reaches `message.status.error`.
+ */
 function messageFromError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return typeof error === "string" ? error : "";
+  if (typeof error === "string") return error;
+  if (!error || typeof error !== "object") return "";
+  const { message } = error as { message?: unknown };
+  return typeof message === "string" ? message : "";
 }
 
 /**
@@ -68,10 +75,11 @@ export function clientTurnErrorMarker(error: ClientTurnError): string {
   return `${ERROR_MARKER_PREFIX}${error.category}`;
 }
 
-/** Recover a safe category from a transient stream marker. */
+/** Recover a safe category from a transient stream marker, bare or as an error's message. */
 export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | undefined {
-  if (typeof value !== "string" || !value.startsWith(ERROR_MARKER_PREFIX)) return undefined;
-  const category = value.slice(ERROR_MARKER_PREFIX.length) as ChatTurnErrorCategory;
+  const marker = messageFromError(value);
+  if (!marker.startsWith(ERROR_MARKER_PREFIX)) return undefined;
+  const category = marker.slice(ERROR_MARKER_PREFIX.length) as ChatTurnErrorCategory;
   return Object.prototype.hasOwnProperty.call(MODEL_ERROR_RETRYABLE_BY_CATEGORY, category)
     ? clientTurnErrorForCategory(category)
     : undefined;
@@ -85,7 +93,9 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
  * emitted. Instead the AI SDK puts the raw HTTP body in an Error's message and
  * throws it — `ai/src/ui/http-chat-transport.ts`: `throw new Error(await
  * response.text())`, on both `sendMessages` and `reconnectToStream`, so the
- * resumed path lands here too. That body is the `application/problem+json` our
+ * resumed path lands here too. assistant-ui then normalizes that Error to
+ * `{ code: "unknown", message }` before it reaches the message status; either
+ * way the body is the message. It is the `application/problem+json` our
  * refusals answer with (`chat-stream.ts`), so parsing the message back into a
  * problem document recovers what the transport discarded. Its `code` is the
  * stable machine-readable half of the contract; its `detail` is English prose
