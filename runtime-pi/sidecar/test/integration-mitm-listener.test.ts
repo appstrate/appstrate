@@ -31,6 +31,7 @@ import {
 } from "@appstrate/connect";
 import { createOpensslCertGenerator } from "../ca-cert-openssl.ts";
 import { createCertMinter } from "../integration-cert-minter.ts";
+import { compileEgressPolicy } from "@appstrate/afps-runtime/resolvers";
 import {
   createIntegrationMitmListener,
   type MitmCredentialSource,
@@ -129,6 +130,8 @@ async function drivenFetch(opts: {
   listenerPort: number;
   /** SNI host the listener should mint a cert for. */
   sni: string;
+  /** Port named in the CONNECT (defaults to 443). */
+  port?: number;
   /** CA PEM to trust for the inner TLS chain. */
   caCertPem: string;
   method: string;
@@ -140,7 +143,8 @@ async function drivenFetch(opts: {
     // 1) Raw TCP to the listener.
     const raw = netConnect(opts.listenerPort, "127.0.0.1", () => {
       // 2) Send CONNECT preamble.
-      raw.write(`CONNECT ${opts.sni}:443 HTTP/1.1\r\nHost: ${opts.sni}:443\r\n\r\n`);
+      const target = `${opts.sni}:${opts.port ?? 443}`;
+      raw.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`);
     });
     raw.on("error", reject);
 
@@ -1187,6 +1191,7 @@ describe("MITM listener — egress allowlist (#1458)", () => {
         kind: "connect-rejected",
         reason: "not-authorized",
         host: "evil.test.local",
+        port: 443,
       });
       expect(resolved).toEqual([]);
       expect(minter.cacheSize).toBe(0);
@@ -1230,6 +1235,81 @@ describe("MITM listener — egress allowlist (#1458)", () => {
         expect(calls.length).toBe(1);
         expect(calls[0]!.url).toBe("https://api.test.local/allowed/items");
         expect((calls[0]!.init.headers as Headers).get("Authorization")).toBe("Bearer t");
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+  runIfOpenssl(
+    "refuses a CONNECT to a port the pattern does not grant instead of forwarding to 443 (#1588)",
+    async () => {
+      const { listener, caCertPem, minter, events, calls } = await setup({
+        egressPolicy: compileEgressPolicy({
+          authorizedUris: ["https://api.test.local/**"],
+          allowAllUris: false,
+        }),
+      });
+      try {
+        await expect(
+          drivenFetch({
+            listenerPort: listener.address().port,
+            sni: "api.test.local",
+            port: 8443,
+            caCertPem,
+            method: "GET",
+            path: "/items",
+            headers: {},
+          }),
+        ).rejects.toThrow();
+        expect(events).toContainEqual({
+          kind: "connect-rejected",
+          reason: "not-authorized",
+          host: "api.test.local",
+          port: 8443,
+        });
+        expect(minter.cacheSize).toBe(0);
+        expect(calls.length).toBe(0);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
+  runIfOpenssl(
+    "forwards to the CONNECT port a pattern grants explicitly, and keeps 443 apart (#1588)",
+    async () => {
+      const authorizedUris = ["https://api.test.local:8443/**", "https://api.test.local/**"];
+      const { listener, caCertPem, calls } = await setup({
+        egressPolicy: compileEgressPolicy({ authorizedUris, allowAllUris: false }),
+        credentials: {
+          current: () => payload("v", "oauth2", { access_token: "t" }, authorizedUris),
+          deliveryPlans: () => ({ v: plan("Authorization", "t") }),
+        },
+      });
+      try {
+        const request = (port: number) =>
+          drivenFetch({
+            listenerPort: listener.address().port,
+            sni: "api.test.local",
+            port,
+            caCertPem,
+            method: "GET",
+            path: "/items?page=2",
+            headers: {},
+          });
+
+        expect((await request(8443)).status).toBe(200);
+        expect((await request(443)).status).toBe(200);
+        expect(calls.map((c) => c.url)).toEqual([
+          "https://api.test.local:8443/items?page=2",
+          "https://api.test.local/items?page=2",
+        ]);
+        const headers = calls.map((c) => c.init.headers as Headers);
+        expect(headers.map((h) => h.get("Host"))).toEqual([
+          "api.test.local:8443",
+          "api.test.local",
+        ]);
+        expect(headers.map((h) => h.get("Authorization"))).toEqual(["Bearer t", "Bearer t"]);
       } finally {
         await listener.close();
       }
