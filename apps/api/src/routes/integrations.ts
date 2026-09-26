@@ -310,6 +310,42 @@ export const oauthClientUpdateSchema = oauthClientSchema
     path: ["client_secret"],
   });
 
+// Body → service input, shared by the space routes here and the org routes
+// (`routes/org-integrations.ts`).
+
+export function toOAuthClientCreateInput(body: z.infer<typeof oauthClientCreateSchema>) {
+  return {
+    clientId: body.client_id,
+    // `?? ""` is reachable only for a declared public client: the schema
+    // refuses an absent secret under any other method, so the blank never
+    // stands in for one the admin meant to supply.
+    clientSecret: body.client_secret ?? "",
+    ...(body.token_endpoint_auth_method !== undefined
+      ? { tokenEndpointAuthMethod: body.token_endpoint_auth_method }
+      : {}),
+    ...(body.redirect_uri !== undefined ? { redirectUri: body.redirect_uri } : {}),
+  };
+}
+
+export function toOAuthClientUpdateInput(body: z.infer<typeof oauthClientUpdateSchema>) {
+  return {
+    clientId: body.client_id,
+    ...(body.client_secret !== undefined ? { clientSecret: body.client_secret } : {}),
+    ...(body.token_endpoint_auth_method !== undefined
+      ? { tokenEndpointAuthMethod: body.token_endpoint_auth_method }
+      : {}),
+    ...(body.redirect_uri !== undefined ? { redirectUri: body.redirect_uri } : {}),
+  };
+}
+
+/** A custom client id is a row UUID: anything else cannot exist → 404. */
+export function assertOAuthClientRowId(clientId: string): string {
+  if (!z.uuid().safeParse(clientId).success) {
+    throw notFound(`OAuth client '${clientId}' not found`);
+  }
+  return clientId;
+}
+
 // ─────────────────────────────────────────────
 // Guards
 // ─────────────────────────────────────────────
@@ -581,9 +617,10 @@ export function createIntegrationsRouter() {
 
   // ─── OAuth client registration (admin) ─────
 
-  // List every OAuth client registered for this auth: the org's custom
-  // (BYO-app) clients plus any env-provided system clients, with `source` and
-  // which is the default. Secrets are never returned. Drives the admin clients
+  // List every OAuth client this space resolves for the auth: its own custom
+  // (BYO-app) clients, the org-level ones it inherits and any env-provided
+  // system clients, with `source`, which is the default and which may be made
+  // the default here. Secrets are never returned. Drives the admin clients
   // CRUD table (register/rotate/delete/set-default). New connections always use
   // the default — there is no per-connect picker.
   router.get(
@@ -602,9 +639,10 @@ export function createIntegrationsRouter() {
   );
 
   // Choose which OAuth client is the default for new connections on this auth
-  // (the model-provider `setDefaultModel` analogue). Selecting the org's custom
-  // client flags it default; selecting a system client un-flags the custom one
-  // so the resolution cascade falls to the system client. Returns the refreshed
+  // (the model-provider `setDefaultModel` analogue). Selecting one of the
+  // space's own clients flags it default; selecting the inherited default (org
+  // or system client) un-flags the space's clients so the cascade falls back to
+  // it. Any other org/system client is a 400. Returns the refreshed
   // clients list so the UI re-badges the default without a second fetch.
   router.put(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/default-client",
@@ -650,17 +688,12 @@ export function createIntegrationsRouter() {
           `Integration '${packageId}' auth '${authKey}' provisions its OAuth client automatically at connect time (DCR/CIMD); a manual client must not be registered. Connect without supplying credentials, or delete the existing client to restore auto-registration.`,
         );
       }
-      const client = await createIntegrationOAuthClient(scope, packageId, authKey, {
-        clientId: body.client_id,
-        // `?? ""` is reachable only for a declared public client: the schema
-        // refuses an absent secret under any other method, so the blank never
-        // stands in for one the admin meant to supply.
-        clientSecret: body.client_secret ?? "",
-        ...(body.token_endpoint_auth_method !== undefined
-          ? { tokenEndpointAuthMethod: body.token_endpoint_auth_method }
-          : {}),
-        ...(body.redirect_uri !== undefined ? { redirectUri: body.redirect_uri } : {}),
-      });
+      const client = await createIntegrationOAuthClient(
+        scope,
+        packageId,
+        authKey,
+        toOAuthClientCreateInput(body),
+      );
       await recordAuditFromContext(c, {
         action: "integration.oauth_client.created",
         resourceType: "integration",
@@ -677,20 +710,15 @@ export function createIntegrationsRouter() {
     requirePermission("integrations", "configure"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
-      const clientId = c.req.param("clientId")!;
-      if (!z.uuid().safeParse(clientId).success) {
-        throw notFound(`OAuth client '${clientId}' not found`);
-      }
+      const clientId = assertOAuthClientRowId(c.req.param("clientId")!);
       const scope = getSpaceScope(c);
       const body = await readJsonBody(c, oauthClientUpdateSchema);
-      const client = await updateIntegrationOAuthClient(scope, clientId, {
-        clientId: body.client_id,
-        ...(body.client_secret !== undefined ? { clientSecret: body.client_secret } : {}),
-        ...(body.token_endpoint_auth_method !== undefined
-          ? { tokenEndpointAuthMethod: body.token_endpoint_auth_method }
-          : {}),
-        ...(body.redirect_uri !== undefined ? { redirectUri: body.redirect_uri } : {}),
-      });
+      const client = await updateIntegrationOAuthClient(
+        scope,
+        packageId,
+        clientId,
+        toOAuthClientUpdateInput(body),
+      );
       await recordAuditFromContext(c, {
         action: "integration.oauth_client.rotated",
         resourceType: "integration",
@@ -710,12 +738,9 @@ export function createIntegrationsRouter() {
     requirePermission("integrations", "configure"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
-      const clientId = c.req.param("clientId")!;
-      if (!z.uuid().safeParse(clientId).success) {
-        throw notFound(`OAuth client '${clientId}' not found`);
-      }
+      const clientId = assertOAuthClientRowId(c.req.param("clientId")!);
       const scope = getSpaceScope(c);
-      const { deletedConnections } = await deleteIntegrationOAuthClient(scope, clientId);
+      const { deletedConnections } = await deleteIntegrationOAuthClient(scope, packageId, clientId);
       await recordAuditFromContext(c, {
         action: "integration.oauth_client.deleted",
         resourceType: "integration",

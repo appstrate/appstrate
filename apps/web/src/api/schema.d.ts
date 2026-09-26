@@ -1494,7 +1494,7 @@ export interface paths {
         };
         /**
          * List the OAuth clients registered for an integration auth
-         * @description Returns the org's custom (BYO-app) clients plus any platform-provided system clients, with `source` and which is the default. Secrets are never returned. Drives the admin clients CRUD table; new connections always use the default (no per-connect picker).
+         * @description Returns the clients this space resolves for the auth: its own custom (BYO-app) clients (`custom`), the org-level clients it inherits (`org`) and any platform-provided system clients (`built-in`), with which is the default (space > org > system) and which may be made the default here (`default_selectable`). Secrets are never returned. Drives the admin clients CRUD table; new connections always use the default (no per-connect picker). Org-level clients are managed on `/api/org-integrations`.
          */
         get: operations["listIntegrationClients"];
         put?: never;
@@ -1577,7 +1577,7 @@ export interface paths {
         get?: never;
         /**
          * Set the default OAuth client for an integration auth
-         * @description Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting the org's custom client flags it default; selecting a system client un-flags the custom one so the cascade falls to the system client. Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Requires `integrations:configure`, which is never granted to an API key.
+         * @description Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting one of the space's own clients flags it default; selecting the default the space inherits (the org default, else the system client) un-flags the space's clients so the cascade falls back to it. Any other `org` / `built-in` client is a 400 (`default_selectable: false`). Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Requires `integrations:configure`, which is never granted to an API key.
          */
         put: operations["setDefaultIntegrationClient"];
         post?: never;
@@ -1598,7 +1598,7 @@ export interface paths {
         put?: never;
         /**
          * Register a custom OAuth client for an integration auth
-         * @description Registers a NEW custom (BYO-app) client for this auth. Repeatable — an org may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR/CIMD) auths. Requires `integrations:configure`, which is never granted to an API key.
+         * @description Registers a NEW custom (BYO-app) client for this auth, in this space — it overrides the org-level clients here. Repeatable — a space may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR/CIMD) auths. Requires `integrations:configure`, which is never granted to an API key.
          */
         post: operations["createIntegrationOAuthClient"];
         delete?: never;
@@ -1699,13 +1699,13 @@ export interface paths {
         get?: never;
         /**
          * Rotate a custom OAuth client's credentials
-         * @description Rotates one custom client in place, by its id. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.
+         * @description Rotates one of this space's custom clients in place, by its id (an org-level client id is a 404 here). Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.
          */
         put: operations["rotateIntegrationOAuthClient"];
         post?: never;
         /**
          * Delete a custom OAuth client
-         * @description Deletes one custom client by id. If it was the default, the cascade falls to the system client (no auto-promotion). Requires `integrations:configure`, which is never granted to an API key.
+         * @description Deletes one of this space's custom clients by id (an org-level client id is a 404 here), with the connections it minted. If it was the default, the cascade re-resolves (org default, else system client) with no auto-promotion. Requires `integrations:configure`, which is never granted to an API key.
          */
         delete: operations["deleteIntegrationOAuthClient"];
         options?: never;
@@ -2606,6 +2606,90 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/org-integrations/{packageId}/auths/{authKey}/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the org-level OAuth clients of an integration auth
+         * @description Returns the org's own clients (`org`) plus any platform-provided system clients (`built-in`), with the org-tier default. Every entry is `default_selectable`. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (DCR/CIMD) have an org tier; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.
+         */
+        get: operations["listOrgIntegrationClients"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/org-integrations/{packageId}/auths/{authKey}/default-client": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set the org-level default OAuth client of an integration auth
+         * @description Selecting an org client flags it default for every space that has not flagged one of its own; selecting the system client un-flags the org's clients. Returns the refreshed org clients list. Requires `org-integrations:configure`, which is never granted to an API key.
+         */
+        put: operations["setOrgDefaultIntegrationClient"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/org-integrations/{packageId}/auths/{authKey}/oauth-clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register an org-level OAuth client for an integration auth
+         * @description Registers a custom (BYO-app) client at the org level (`spaceId: null`), inherited by every space of the org. The first one becomes the org default. Rejected (400) for auto-provisioned (DCR/CIMD) auths, whose clients are per space. Requires `org-integrations:configure`, which is never granted to an API key.
+         */
+        post: operations["createOrgIntegrationOAuthClient"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/org-integrations/{packageId}/oauth-clients/{clientId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Rotate an org-level OAuth client's credentials
+         * @description Rotates one org-level client in place, by its id (a space client id is a 404 here). Requires `org-integrations:configure`, which is never granted to an API key.
+         */
+        put: operations["rotateOrgIntegrationOAuthClient"];
+        post?: never;
+        /**
+         * Delete an org-level OAuth client
+         * @description Deletes one org-level client by id (a space client id is a 404 here), with every connection it minted in any space of the org. Requires `org-integrations:configure`, which is never granted to an API key.
+         */
+        delete: operations["deleteOrgIntegrationOAuthClient"];
         options?: never;
         head?: never;
         patch?: never;
@@ -11725,8 +11809,9 @@ export interface operations {
                             }[];
                             /** @description Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun. */
                             ready: boolean;
+                            /** @description True when a custom OAuth client is registered for this auth, in this space or at the org level (inherited). */
                             has_oauth_client: boolean;
-                            /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
+                            /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when neither the space nor the org has flagged a default client of its own, so the auth is connectable without a pre-registered client. */
                             has_system_client: boolean;
                             /** @description True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
@@ -11795,11 +11880,17 @@ export interface operations {
                         hasMore: boolean;
                         data: {
                             client_ref: string;
-                            /** @enum {string} */
-                            source: "built-in" | "custom";
-                            /** @description For `custom` clients, the org's OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            /**
+                             * @description `custom` = the space's own client, `org` = an org-level client inherited by every space of the org, `built-in` = a platform-provided system client. Resolution: space > org > system.
+                             * @enum {string}
+                             */
+                            source: "built-in" | "org" | "custom";
+                            /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
+                            /** @description True for the client that mints new connections at the listed tier. */
                             is_default: boolean;
+                            /** @description Whether PUT .../default-client accepts this client at the listed tier: the tier's own clients, plus the default it inherits (a space: the org or system default; an org: the system client). */
+                            default_selectable: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
                             /**
@@ -12076,11 +12167,17 @@ export interface operations {
                         hasMore: boolean;
                         data: {
                             client_ref: string;
-                            /** @enum {string} */
-                            source: "built-in" | "custom";
-                            /** @description For `custom` clients, the org's OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            /**
+                             * @description `custom` = the space's own client, `org` = an org-level client inherited by every space of the org, `built-in` = a platform-provided system client. Resolution: space > org > system.
+                             * @enum {string}
+                             */
+                            source: "built-in" | "org" | "custom";
+                            /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
+                            /** @description True for the client that mints new connections at the listed tier. */
                             is_default: boolean;
+                            /** @description Whether PUT .../default-client accepts this client at the listed tier: the tier's own clients, plus the default it inherits (a space: the org or system default; an org: the system client). */
+                            default_selectable: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
                             /**
@@ -12146,7 +12243,8 @@ export interface operations {
                          * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
                          */
                         id: string;
-                        spaceId: string;
+                        /** @description Owning space; `null` for an org-level client, inherited by every space. */
+                        spaceId: string | null;
                         integration_package_id: string;
                         auth_key: string;
                         client_id: string;
@@ -12530,7 +12628,8 @@ export interface operations {
                          * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
                          */
                         id: string;
-                        spaceId: string;
+                        /** @description Owning space; `null` for an org-level client, inherited by every space. */
+                        spaceId: string | null;
                         integration_package_id: string;
                         auth_key: string;
                         client_id: string;
@@ -12769,8 +12868,9 @@ export interface operations {
                             }[];
                             /** @description Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun. */
                             ready: boolean;
+                            /** @description True when a custom OAuth client is registered for this auth, in this space or at the org level (inherited). */
                             has_oauth_client: boolean;
-                            /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
+                            /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when neither the space nor the org has flagged a default client of its own, so the auth is connectable without a pre-registered client. */
                             has_system_client: boolean;
                             /** @description True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
@@ -15567,6 +15667,301 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    listOrgIntegrationClients: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Auth key as declared in the manifest's `auths` map. */
+                authKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Org-level and system OAuth clients */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        hasMore: boolean;
+                        data: {
+                            client_ref: string;
+                            /**
+                             * @description `custom` = the space's own client, `org` = an org-level client inherited by every space of the org, `built-in` = a platform-provided system client. Resolution: space > org > system.
+                             * @enum {string}
+                             */
+                            source: "built-in" | "org" | "custom";
+                            /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            client_id: string;
+                            /** @description True for the client that mints new connections at the listed tier. */
+                            is_default: boolean;
+                            /** @description Whether PUT .../default-client accepts this client at the listed tier: the tier's own clients, plus the default it inherits (a space: the org or system default; an org: the system client). */
+                            default_selectable: boolean;
+                            auto_provisioned: boolean;
+                            has_client_secret: boolean;
+                            /**
+                             * @description Method declared for this client, overriding the manifest's. `none` = PUBLIC client (no secret at the provider). `null` = undeclared.
+                             * @enum {string|null}
+                             */
+                            token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
+                            redirect_uri: string | null;
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setOrgDefaultIntegrationClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Auth key as declared in the manifest's `auths` map. */
+                authKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Client to make default — a `client_ref` from GET .../clients. */
+                    client_ref: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Default set; org-level and system OAuth clients (re-badged) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        hasMore: boolean;
+                        data: {
+                            client_ref: string;
+                            /**
+                             * @description `custom` = the space's own client, `org` = an org-level client inherited by every space of the org, `built-in` = a platform-provided system client. Resolution: space > org > system.
+                             * @enum {string}
+                             */
+                            source: "built-in" | "org" | "custom";
+                            /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            client_id: string;
+                            /** @description True for the client that mints new connections at the listed tier. */
+                            is_default: boolean;
+                            /** @description Whether PUT .../default-client accepts this client at the listed tier: the tier's own clients, plus the default it inherits (a space: the org or system default; an org: the system client). */
+                            default_selectable: boolean;
+                            auto_provisioned: boolean;
+                            has_client_secret: boolean;
+                            /**
+                             * @description Method declared for this client, overriding the manifest's. `none` = PUBLIC client (no secret at the provider). `null` = undeclared.
+                             * @enum {string|null}
+                             */
+                            token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
+                            redirect_uri: string | null;
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createOrgIntegrationOAuthClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Auth key as declared in the manifest's `auths` map. */
+                authKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    client_id: string;
+                    /** @description REQUIRED unless `token_endpoint_auth_method` is `none`. A public client is declared, never inferred: omitting the secret under any other method is rejected with 400 rather than silently registering a public client. */
+                    client_secret?: string;
+                    /**
+                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider), and then send no `client_secret`. Omit to leave it undeclared, in which case the manifest's value applies — and a `client_secret` is then mandatory.
+                     * @enum {string}
+                     */
+                    token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
+                    /** Format: uri */
+                    redirect_uri?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         */
+                        id: string;
+                        /** @description Owning space; `null` for an org-level client, inherited by every space. */
+                        spaceId: string | null;
+                        integration_package_id: string;
+                        auth_key: string;
+                        client_id: string;
+                        has_client_secret: boolean;
+                        /**
+                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
+                         * @enum {string|null}
+                         */
+                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
+                        redirect_uri: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                        /** Format: date-time */
+                        updatedAt: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    rotateOrgIntegrationOAuthClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
+                clientId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    client_id: string;
+                    /** @description OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable. */
+                    client_secret?: string;
+                    /**
+                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies.
+                     * @enum {string}
+                     */
+                    token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
+                    /** Format: uri */
+                    redirect_uri?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Rotated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         */
+                        id: string;
+                        /** @description Owning space; `null` for an org-level client, inherited by every space. */
+                        spaceId: string | null;
+                        integration_package_id: string;
+                        auth_key: string;
+                        client_id: string;
+                        has_client_secret: boolean;
+                        /**
+                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
+                         * @enum {string|null}
+                         */
+                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
+                        redirect_uri: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                        /** Format: date-time */
+                        updatedAt: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteOrgIntegrationOAuthClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
+                clientId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OAuth client deleted */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listOrganizations: {
