@@ -236,20 +236,29 @@ jobs:
 
           PUBKEY=$(grep -v '^untrusted' /tmp/dry.pub | head -1 | tr -d '\n')
 
-          # ── Rewrite bootstrap.sh: URL_BASE → localhost, pubkey → ours ──
-          # `latest` and pinned paths both hit the same served dir because
-          # we only maintain one release tree.
+          # Signed channel manifest, same shape publish-installer.yml writes,
+          # naming the dry release as "latest".
+          mkdir -p "$ROOT/channels"
+          jq -n --arg tag v1.0.0-dry '{schema: 1, channel: "latest", tag: $tag}' \
+            > "$ROOT/channels/latest.json"
+          minisign -S -s /tmp/dry.key -t "dry-run channel" -m "$ROOT/channels/latest.json"
+
+          # ── Rewrite bootstrap.sh: URLs → localhost, pubkey → ours ─────
+          # URL_BASE is rewritten whatever VERSION resolves to, since we only
+          # maintain one release tree; CHANNEL_URL points at the manifest above.
           # shellcheck disable=SC2016  # `${VERSION}` is literal in the sed pattern
           sed \
             -e "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" \
-            -e 's|https://github.com/appstrate/appstrate/releases/latest/download|http://localhost:8766/release|' \
             -e 's|https://github.com/appstrate/appstrate/releases/download/${VERSION}|http://localhost:8766/release|' \
+            -e 's|https://get.appstrate.dev/channels/latest.json|http://localhost:8766/channels/latest.json|' \
             -e "s|APPSTRATE_MINISIGN_PUBKEY=\"[^\"]*\"|APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"|" \
             scripts/bootstrap.sh > /tmp/bootstrap.sh
           bash -n /tmp/bootstrap.sh
 
           grep -q "http://localhost:8766/release" /tmp/bootstrap.sh \
             || { echo "::error::URL_BASE rewrite did not take effect"; exit 1; }
+          grep -q 'CHANNEL_URL="http://localhost:8766/channels/latest.json"' /tmp/bootstrap.sh \
+            || { echo "::error::CHANNEL_URL rewrite did not take effect"; exit 1; }
           grep -q "APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"" /tmp/bootstrap.sh \
             || { echo "::error::pubkey rewrite did not take effect"; exit 1; }
 
@@ -561,6 +570,71 @@ jobs:
           mv "$ROOT/release/checksums.txt.minisig.bak" "$ROOT/release/checksums.txt.minisig"
           echo "::endgroup::"
           echo "✓ empty-manifest path OK"
+
+          # ── Scenario 7b: APPSTRATE_VERSION=latest → signed channel manifest ─
+          echo "::group::latest via channel manifest"
+          set +e
+          LATEST_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-latest" \
+            APPSTRATE_VERSION=latest \
+            APPSTRATE_NO_LAUNCH=1 \
+            APPSTRATE_FORCE_DUAL=1 \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$LATEST_OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap exited $rc resolving latest"; exit 1; }
+          echo "$LATEST_OUT" | grep -q "Resolved latest release: v1.0.0-dry" \
+            || { echo "::error::latest did not resolve to the manifest's tag"; exit 1; }
+          echo "$LATEST_OUT" | grep -q "Integrity + provenance verified" \
+            || { echo "::error::latest install skipped verification"; exit 1; }
+          test -x "$GITHUB_WORKSPACE/bin-latest/appstrate" \
+            || { echo "::error::latest did not install the binary"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ latest path OK"
+
+          # ── Scenario 7c: tampered channel manifest (content changed after signing) ─
+          echo "::group::tampered channel manifest"
+          cp "$ROOT/channels/latest.json" "$ROOT/channels/latest.json.bak"
+          sed -i 's/v1.0.0-dry/v9.9.9/' "$ROOT/channels/latest.json"
+          set +e
+          CHAN_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-chan-tampered" \
+            APPSTRATE_VERSION=latest \
+            APPSTRATE_FORCE_DUAL=1 \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$CHAN_OUT"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::bootstrap accepted a tampered channel manifest"; exit 1
+          fi
+          echo "$CHAN_OUT" | grep -q "Channel manifest signature verification FAILED" \
+            || { echo "::error::bootstrap did not report the manifest signature failure"; exit 1; }
+          test ! -e "$GITHUB_WORKSPACE/bin-chan-tampered/appstrate" \
+            || { echo "::error::bootstrap installed despite a tampered manifest"; exit 1; }
+          mv "$ROOT/channels/latest.json.bak" "$ROOT/channels/latest.json"
+          echo "::endgroup::"
+          echo "✓ tampered-manifest path OK"
+
+          # ── Scenario 7d: skip-verify cannot resolve latest (fail closed) ─
+          echo "::group::skip-verify + latest"
+          set +e
+          SKIP_LATEST_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-skip-latest" \
+            APPSTRATE_VERSION=latest \
+            APPSTRATE_SKIP_VERIFY=1 \
+            APPSTRATE_FORCE_DUAL=1 \
+            CI=true \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$SKIP_LATEST_OUT"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::bootstrap resolved latest with verification skipped"; exit 1
+          fi
+          echo "$SKIP_LATEST_OUT" | grep -q 'cannot resolve "latest"' \
+            || { echo "::error::bootstrap did not refuse skip-verify + latest"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ skip-verify + latest refused"
 
           # ── Scenario 8a: dual-install pre-check (issue #249) ─────────
           # When `appstrate` already exists on PATH at a different path
@@ -901,7 +975,6 @@ jobs:
           # shellcheck disable=SC2016  # `${VERSION}` is literal in the sed pattern
           sed \
             -e "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" \
-            -e 's|https://github.com/appstrate/appstrate/releases/latest/download|http://localhost:8767/release|' \
             -e 's|https://github.com/appstrate/appstrate/releases/download/${VERSION}|http://localhost:8767/release|' \
             -e "s|APPSTRATE_MINISIGN_PUBKEY=\"[^\"]*\"|APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"|" \
             scripts/bootstrap.sh > /tmp/bootstrap-${{ matrix.name }}.sh
@@ -1050,7 +1123,6 @@ jobs:
           # shellcheck disable=SC2016  # `${VERSION}` is literal in the sed pattern
           sed \
             -e "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" \
-            -e 's|https://github.com/appstrate/appstrate/releases/latest/download|http://localhost:8768/release|' \
             -e 's|https://github.com/appstrate/appstrate/releases/download/${VERSION}|http://localhost:8768/release|' \
             -e "s|APPSTRATE_MINISIGN_PUBKEY=\"[^\"]*\"|APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"|" \
             scripts/bootstrap.sh > /tmp/bootstrap-macos.sh
