@@ -105,11 +105,13 @@ jobs:
 
       - name: sync-installer-pages.sh fixtures
         # publish-installer.yml's copy/promotion step, against a scratch
-        # installer-pages tree. Rendered files carry their tag so every copy
-        # is traceable; `snap` hashes every installer file (all but channels/).
+        # installer-pages tree. Rendered files carry their tag (+ a MARK for a
+        # re-render) so every copy is traceable; `installers` hashes every file
+        # but the promoted-from-out ones (channels/, verify.sh, appstrate.pub).
         run: |
           set -euo pipefail
           W=$(mktemp -d)
+          trap 'rm -rf "$W"' EXIT
           P="$W/pages"
           mkdir -p "$P"
           fail() { echo "::error::$*"; exit 1; }
@@ -117,7 +119,8 @@ jobs:
             local o="$W/out-$1" f
             rm -rf "$o"
             mkdir -p "$o/$1" "$o/channels"
-            for f in install.sh install.sh.sha256 install.sh.minisig runner runner.sha256 runner.minisig; do
+            for f in install.sh install.sh.sha256 install.sh.minisig runner runner.sha256 runner.minisig \
+              verify.sh appstrate.pub; do
               echo "$f $1${2:-}" >"$o/$f"
             done
             for f in install.sh install.sh.sha256 runner runner.sha256; do cp "$o/$f" "$o/$1/"; done
@@ -125,13 +128,16 @@ jobs:
             echo "sig $1${2:-}" >"$o/channels/latest.json.minisig"
           }
           publish() { scripts/sync-installer-pages.sh "$1" "$W/out-$1" "$P"; }
-          channel_is() { # TAG [MARK]
+          channel_is() { # TAG [MARK]: manifest, verify.sh and appstrate.pub
             if [ "$(jq -r .tag "$P/channels/latest.json")" != "$1" ] ||
               ! grep -qx "sig $1${2:-}" "$P/channels/latest.json.minisig"; then
               fail "channel is $(cat "$P/channels/latest.json"), want $1${2:-}"
             fi
+            for f in verify.sh appstrate.pub; do
+              grep -qx "$f $1${2:-}" "$P/$f" || fail "root $f is '$(cat "$P/$f")', want $1${2:-}"
+            done
           }
-          root_is() {
+          root_is() { # TAG: the originally published bytes, never a re-render
             for f in install.sh install.sh.sha256 install.sh.minisig runner runner.sha256 runner.minisig; do
               grep -qx "$f $1" "$P/$f" || fail "root $f is '$(cat "$P/$f")', want $1"
             done
@@ -142,7 +148,16 @@ jobs:
               grep -qx "$f $1" "$P/$1/$f" || fail "$1/$f missing or wrong"
             done
           }
-          snap() { (cd "$P" && find . -type f ! -path './channels/*' | LC_ALL=C sort | xargs sha256sum); }
+          hash_tree() { (cd "$P" && find . -type f "$@" | LC_ALL=C sort | xargs sha256sum); }
+          installers() { hash_tree ! -path './channels/*' ! -name verify.sh ! -name appstrate.pub; }
+          # The documented rollback (sync-installer-pages.sh header), from a copy.
+          rollback_to() {
+            local f
+            for f in channels index.html install.sh install.sh.sha256 install.sh.minisig \
+              runner runner.sha256 runner.minisig verify.sh appstrate.pub; do
+              rm -rf "${P:?}/$f" && cp -R "$1/$f" "$P/$f"
+            done
+          }
 
           # First publish: no manifest yet → versioned, root and channel written.
           render v1.0.0; publish v1.0.0
@@ -150,30 +165,42 @@ jobs:
           # Newer tag → promoted, the older versioned dir kept.
           render v1.1.0; publish v1.1.0
           versioned_is v1.1.0; versioned_is v1.0.0; root_is v1.1.0; channel_is v1.1.0
-          # Older tag → versioned only; root and channel stay put, exit 0.
+          # Older tag → versioned only; root, verify.sh, appstrate.pub and the
+          # channel stay put, exit 0.
           render v1.0.5; publish v1.0.5
           versioned_is v1.0.5; root_is v1.1.0; channel_is v1.1.0
 
           # Already published: re-rendered bytes differ (`-rerun`), yet every
           # installer file must stay byte-identical. Seeding (no manifest) and
           # re-pointing the current tag rewrite the channel; an older tag doesn't.
-          before=$(snap)
+          before=$(installers)
           rm -r "$P/channels"
           render v1.1.0 -rerun; publish v1.1.0
-          channel_is v1.1.0 -rerun
+          root_is v1.1.0; channel_is v1.1.0 -rerun
           render v1.0.5 -rerun; publish v1.0.5
           channel_is v1.1.0 -rerun
           render v1.1.0 -again; publish v1.1.0
           channel_is v1.1.0 -again
-          [ "$(snap)" = "$before" ] || fail "an already-published tag rewrote installer files"
+          [ "$(installers)" = "$before" ] || fail "an already-published tag rewrote installer files"
 
-          # Malformed current tag → non-zero, nothing written at all.
-          echo '{"schema":1,"channel":"latest","tag":"core@1.0.0"}' >"$P/channels/latest.json"
-          render v2.0.0
-          if publish v2.0.0; then fail "promoted over a malformed channel tag"; fi
-          [ ! -e "$P/v2.0.0" ] || fail "versioned dir written despite the abort"
-          [ "$(snap)" = "$before" ] || fail "installer files changed despite the abort"
-          grep -q core@1.0.0 "$P/channels/latest.json" || fail "malformed manifest overwritten"
+          # Already published and newer than the manifest (after a rollback) →
+          # channel AND root move, the root to the published v1.2.0 bytes.
+          cp -R "$P" "$W/prev"
+          render v1.2.0; publish v1.2.0
+          rollback_to "$W/prev"
+          versioned_is v1.2.0; root_is v1.1.0; channel_is v1.1.0 -again
+          render v1.2.0 -rerun; publish v1.2.0
+          versioned_is v1.2.0; root_is v1.2.0; channel_is v1.2.0 -rerun
+
+          # Unreadable manifest (malformed tag, not JSON) → non-zero, nothing written.
+          for bad in '{"schema":1,"channel":"latest","tag":"core@1.0.0"}' 'not json'; do
+            echo "$bad" >"$P/channels/latest.json"
+            before=$(hash_tree)
+            render v2.0.0
+            if publish v2.0.0; then fail "promoted over the manifest '$bad'"; fi
+            [ ! -e "$P/v2.0.0" ] || fail "versioned dir written despite the abort"
+            [ "$(hash_tree)" = "$before" ] || fail "files changed despite the abort"
+          done
           echo "✓ sync-installer-pages.sh fixtures OK"
 
   workflow-lint:
@@ -236,7 +263,7 @@ jobs:
             -t "appstrate v1.0.0-dry (latest)" \
             -m out/install.sh
 
-          # --- Substitute pubkey into verify.sh (mirrors sync step) ---
+          # --- Substitute pubkey into verify.sh (same substitution as the sync step) ---
           PUBKEY=$(grep -v '^untrusted' /tmp/dry.pub | head -1 | tr -d '\n')
           if [ -z "$PUBKEY" ]; then
             echo "::error::pubkey extraction failed"; cat /tmp/dry.pub; exit 1

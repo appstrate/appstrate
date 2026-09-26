@@ -18,16 +18,9 @@ name: Publish Installer
 # Besides the installers, it publishes the signed channel manifest
 # `channels/latest.json` (+ .minisig) that `self-update` and the bootstrap
 # scripts read to resolve "latest" without the rate-limited GitHub API.
-# `pages/<tag>/` is written once and never overwritten; the root pointers and
-# the manifest are promoted only when the tag is >= the current manifest's tag
-# (scripts/semver-lt.sh), so an old tag or out-of-order runs never move
-# "latest" back. Re-dispatching an already-published tag is channel-only: every
-# installer file stays untouched and only the manifest is (re)published, under
-# the same guard — how the first manifest is seeded and how the channel is
-# re-pointed forward. That logic is scripts/sync-installer-pages.sh, fixture-
-# tested in test-install.yml. Roll "latest" back = `git revert` the bad
-# `publish: <tag>` commit on `installer-pages`; the guard then compares against
-# the restored manifest.
+# Versioned dirs are immutable and "latest" only moves forward; the rules and
+# the rollback procedure (never `git revert` a publish commit) live in
+# scripts/sync-installer-pages.sh.
 on:
   push:
     tags:
@@ -62,7 +55,8 @@ jobs:
       - name: Resolve version
         id: ver
         # Via env, never `${{ }}` in the script: the dispatch input is
-        # untrusted until the regex below has validated it.
+        # untrusted until the whole-string match below has validated it (later
+        # steps paste the output into their scripts).
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
@@ -71,7 +65,7 @@ jobs:
           else
             VERSION="${GITHUB_REF_NAME}"
           fi
-          if ! echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$'; then
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$ ]]; then
             echo "Invalid version format: $VERSION (expected vMAJOR.MINOR.PATCH[-prerelease])" >&2
             exit 1
           fi
@@ -260,17 +254,17 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          # Versioned dir, already-published (channel-only) case and monotonic
-          # promotion of the root pointers + channel manifest.
-          scripts/sync-installer-pages.sh "$VERSION" out pages
-
-          # Publish verify.sh with the committed public key substituted in, so
-          # users don't need a second round-trip (earlier steps already fail
-          # without scripts/appstrate.pub). Minisign public keys contain a
-          # comment line + a single base64 line — extract the base64 line.
+          # verify.sh with the committed public key substituted in, so users
+          # don't need a second round-trip (earlier steps already fail without
+          # scripts/appstrate.pub). Minisign public keys contain a comment line +
+          # a single base64 line — extract the base64 line. Rendered into out/:
+          # the sync script publishes them only on promotion, so an older-line
+          # hotfix cannot revert them.
           PUBKEY=$(grep -v '^untrusted' scripts/appstrate.pub | head -1 | tr -d '\n')
-          sed "s|__APPSTRATE_MINISIGN_PUBKEY__|${PUBKEY}|" scripts/verify.sh > pages/verify.sh
-          cp scripts/appstrate.pub pages/appstrate.pub
+          sed "s|__APPSTRATE_MINISIGN_PUBKEY__|${PUBKEY}|" scripts/verify.sh > out/verify.sh
+          cp scripts/appstrate.pub out/appstrate.pub
+
+          scripts/sync-installer-pages.sh "$VERSION" out pages
 
           # Custom domain for GitHub Pages
           echo "get.appstrate.dev" > pages/CNAME

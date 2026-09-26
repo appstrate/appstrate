@@ -3,6 +3,8 @@
 #
 # semver-lt.sh A B — exit 0 iff release tag A < tag B, 1 otherwise, 2 on a
 # usage error, a malformed tag or a dpkg failure. Tags are vX.Y.Z[-pre].
+# Mixed dotted/undotted prerelease identifiers (`ab` vs `a.b`) follow dpkg, not
+# SemVer; real tags (`beta.N`, `rc.N`) are unaffected.
 #
 # Used by publish-installer.yml to keep the "latest" channel monotonic;
 # table-tested in test-install.yml. Needs dpkg (Debian/Ubuntu runners).
@@ -31,12 +33,11 @@ done
 # dpkg sorts `~` before everything, even the end of the string, so mapping the
 # prerelease `-` to `~` puts a prerelease before its release (1.0.0~rc.1 <
 # 1.0.0); GNU `sort -V` would put 1.0.0 before 1.0.0-beta.1. Numeric
-# dot-separated identifiers then compare as SemVer does (beta.9 < beta.10 <
-# rc.1); mixed forms such as `beta1` vs `beta.1` follow dpkg's rules instead.
+# dot-separated identifiers then compare as SemVer does (beta.9 < beta.10 < rc.1).
 deb_version() { sed 's/^v//; s/-/~/' <<<"$1"; }
 
-# 0/1 are dpkg's verdict; anything else is an error (e.g. a version it cannot
-# parse) and must not read as "not lower" — callers would promote blindly.
+# 0/1 are dpkg's verdict (odd characters only draw a warning); anything else is
+# a dpkg failure (crash, invalid invocation) and must not read as "not lower".
 rc=0
 dpkg --compare-versions "$(deb_version "$1")" lt "$(deb_version "$2")" || rc=$?
 case "$rc" in

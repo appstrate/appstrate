@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# sync-installer-pages.sh VERSION OUT_DIR PAGES_DIR — copy the rendered, signed
-# installers of VERSION from OUT_DIR into the installer-pages checkout
+# sync-installer-pages.sh VERSION OUT_DIR PAGES_DIR — publish the rendered,
+# signed installers of VERSION from OUT_DIR into the installer-pages checkout
 # PAGES_DIR, and move the "latest" channel only forward:
 #
-#   - PAGES_DIR/VERSION/ is written once, never overwritten. A tag that is
-#     already published leaves every installer file untouched (versioned AND
-#     root) and only (re)publishes channels/latest.json — how the first
-#     manifest is seeded, and how the channel is re-pointed forward.
-#   - The root pointers (install.sh, runner, index.html) and the manifest are
-#     promoted only when VERSION is not older than the current manifest's tag
-#     (scripts/semver-lt.sh). An unreadable current tag aborts before any write.
+#   - PAGES_DIR/VERSION/ is written once, never overwritten: re-dispatching an
+#     already-published tag keeps its originally published (and attested) bytes.
+#     That is how the first manifest is seeded and the channel re-pointed.
+#   - VERSION is promoted only when it is not older than the current manifest's
+#     tag (scripts/semver-lt.sh); an unreadable manifest aborts before any write.
+#     Promotion copies the root pointers (install.sh, runner, their .sha256 and
+#     .minisig, index.html) from PAGES_DIR/VERSION/, so channel and root always
+#     name the same immutable bytes, then verify.sh, appstrate.pub and
+#     channels/latest.json(.minisig) from OUT_DIR. An older tag (a hotfix on a
+#     previous line) only adds its versioned dir.
+#
+# Rollback: on installer-pages, restore only the pointers from the previous
+# commit, then commit and push:
+#   git checkout <prev> -- channels index.html install.sh install.sh.sha256 \
+#     install.sh.minisig runner runner.sha256 runner.minisig verify.sh appstrate.pub
+# Never `git revert` the `publish: <tag>` commit: it also created <tag>/, and
+# deleting it 404s pinned installs (a re-dispatch would re-render other bytes).
+# Later publishes are then compared against the restored manifest.
 #
 # Used by publish-installer.yml; fixture-tested in test-install.yml. Needs jq
 # and dpkg (Debian/Ubuntu runners).
@@ -31,12 +42,15 @@ summary() {
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$*" >>"$GITHUB_STEP_SUMMARY"; fi
 }
 
-# Decide first: a malformed current tag must leave the branch as it is, never
-# fall through to promotion. semver-lt: 0 = older, 1 = not older, else error.
+# Decide first: a malformed current manifest must leave the branch as it is,
+# never fall through to promotion. semver-lt: 0 = older, 1 = not older, else error.
 PROMOTE=true
 CURRENT=""
 if [ -f "$PAGES/channels/latest.json" ]; then
-  CURRENT=$(jq -r .tag "$PAGES/channels/latest.json")
+  if ! CURRENT=$(jq -r .tag "$PAGES/channels/latest.json"); then
+    echo "::error::channels/latest.json is not valid JSON — fix the installer-pages branch by hand."
+    exit 1
+  fi
   rc=0
   "$SEMVER_LT" "$VERSION" "$CURRENT" || rc=$?
   case "$rc" in
@@ -49,10 +63,8 @@ if [ -f "$PAGES/channels/latest.json" ]; then
   esac
 fi
 
-PUBLISHED=false
 if [ -e "$PAGES/$VERSION" ]; then
-  PUBLISHED=true
-  echo "::notice::${VERSION} is already published — installer files left untouched, channel manifest only."
+  echo "::notice::${VERSION} is already published — its versioned installers are kept as published."
 else
   mkdir -p "$PAGES/$VERSION"
   for f in install.sh install.sh.sha256 runner runner.sha256; do
@@ -68,14 +80,13 @@ if [ "$PROMOTE" = false ]; then
   exit 0
 fi
 
-if [ "$PUBLISHED" = false ]; then
-  for f in install.sh install.sh.sha256 install.sh.minisig runner runner.sha256 runner.minisig; do
-    cp "$OUT/$f" "$PAGES/$f"
-  done
-  # GitHub Pages serves index.html at /, so `curl -fsSL https://get.appstrate.dev
-  # | bash` gets the installer itself (same pattern as get.docker.com).
-  cp "$OUT/install.sh" "$PAGES/index.html"
-fi
+for f in install.sh install.sh.sha256 install.sh.minisig runner runner.sha256 runner.minisig; do
+  cp "$PAGES/$VERSION/$f" "$PAGES/$f"
+done
+# GitHub Pages serves index.html at /, so `curl -fsSL https://get.appstrate.dev
+# | bash` gets the installer itself (same pattern as get.docker.com).
+cp "$PAGES/$VERSION/install.sh" "$PAGES/index.html"
+cp "$OUT/verify.sh" "$OUT/appstrate.pub" "$PAGES/"
 mkdir -p "$PAGES/channels"
 cp "$OUT/channels/latest.json" "$OUT/channels/latest.json.minisig" "$PAGES/channels/"
 summary "Channel latest promoted to ${VERSION} (was: ${CURRENT:-none})."
