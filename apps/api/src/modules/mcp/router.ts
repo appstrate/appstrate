@@ -85,6 +85,7 @@ import {
   type McpSurface,
 } from "./tools.ts";
 import { buildOperationIndex, operationIdGranted } from "./catalog.ts";
+import { skillReaderFor } from "./skill-tools.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 /** Path prefix owning the per-org sub-tree. `:org` is the organization id. */
@@ -538,6 +539,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const toolCtx = {
       authorizeBundle: (bundle: Bundle) => authorizeBundlePackages(c, bundle),
       mayShareRoot: (packageId: string) => holdsPackageShareAuthority(c, packageId),
+      readSkill: skillReaderFor(c, scope),
+      requestId: c.get("requestId"),
       origin,
       permissions,
       ceiling,

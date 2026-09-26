@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **A space can enforce skills on its chat** (#1586). `chat_enforced` on
+  `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` (skills only, gated
+  `skills:write` in the space) injects the skill's latest published `SKILL.md`
+  in every conversation held there, in every skill mode and whatever the
+  member's `skills:*` grants; the member cannot remove it. At most three per
+  space, within the chat's skills budget. Enforcing discloses the `SKILL.md` to
+  everyone who chats in the space. `GET /api/chat/enforced-skills` names them.
+- **MCP `read_skill` tool** (#1586), declared on every connection: a skill's
+  `SKILL.md`, its file list and the version served, or one of its files with
+  `path`. With `skills:read` it serves what `GET /api/packages/{scope}/{name}/files`
+  serves (the draft to an author, else the latest published version). A skill
+  enforced in the request's space is served to anyone holding `chat:write`
+  there, at its latest published version only. Refusals carry the REST status
+  and problem body (403 without `skills:read`, else 404).
+
 ### Fixed
 
 - **Runs on an aliased model backed by the OpenCode Go provider no longer fail
