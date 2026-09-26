@@ -17,7 +17,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { organizationMembers, packages } from "@appstrate/db/schema";
+import { organizationMembers, packages, packageVersions } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
@@ -191,8 +191,14 @@ describe("GET /api/library — the organization map", () => {
     ]);
     // Draft-only until a `latest` version exists — the fact the enforce switch reads.
     expect(row!.published).toBe(false);
-    await seedPublishedVersion(TEAMLESS, "0.1.0");
+    const version = await seedPublishedVersion(TEAMLESS, "0.1.0");
     expect(rowOf(await orgLibrary(owner(alphaId)), "skill", TEAMLESS)?.published).toBe(true);
+    // A yanked `latest` resolves to nothing, exactly as the run and chat paths read it.
+    await db
+      .update(packageVersions)
+      .set({ yanked: true })
+      .where(eq(packageVersions.id, version.id));
+    expect(rowOf(await orgLibrary(owner(alphaId)), "skill", TEAMLESS)?.published).toBe(false);
   });
 
   it("is refused to a member, a guest and an API key", async () => {

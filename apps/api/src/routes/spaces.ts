@@ -61,9 +61,9 @@ import {
   listSpacePackages,
   getSpacePackage,
   getResolvedRunConfig,
+  updatePlacementSettings,
 } from "../services/space-packages.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
-import { updatePlacementSettings } from "../services/chat-enforced-skills.ts";
 import {
   assertCatalogPackageAccess,
   assertPackageShareAccess,

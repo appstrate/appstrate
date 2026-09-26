@@ -22,8 +22,18 @@
 import { eq, and, exists, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packages, packageShares, packageDistTags } from "@appstrate/db/schema";
-import { notFound, parseBody } from "../lib/errors.ts";
+import {
+  spacePackages,
+  packages,
+  packageShares,
+  packageDistTags,
+  packageVersions,
+} from "@appstrate/db/schema";
+import {
+  CHAT_SKILLS_CONTENT_BUDGET_CHARS,
+  MAX_ENFORCED_CHAT_SKILLS,
+} from "@appstrate/core/chat-contract";
+import { conflict, notFound, parseBody } from "../lib/errors.ts";
 import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
@@ -36,7 +46,7 @@ import { ApiError } from "../lib/errors.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { parsePackageZip } from "@appstrate/core/zip";
 import { placementReadFilter, placementRowJoin, placementShareJoin } from "./package-placement.ts";
-import { getVersionForDownload } from "./package-versions.ts";
+import { getVersionForDownload, loadPublishedDefinition } from "./package-versions.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import {
   activeHereSql,
@@ -697,9 +707,21 @@ interface PackageHint {
   home_writable: boolean;
 }
 
-/** ON clause for the package's `latest` dist-tag — at most one row per package. */
+/** ON clause for the package's non-yanked `latest` dist-tag — at most one row per package. */
 export function latestTagJoin(packageIdColumn: AnyPgColumn) {
-  return and(eq(packageDistTags.packageId, packageIdColumn), eq(packageDistTags.tag, "latest"));
+  return and(
+    eq(packageDistTags.packageId, packageIdColumn),
+    eq(packageDistTags.tag, "latest"),
+    // A yanked target does not resolve as `latest` (`resolveVersionFromCatalog`).
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(packageVersions)
+        .where(
+          and(eq(packageVersions.id, packageDistTags.versionId), eq(packageVersions.yanked, false)),
+        ),
+    ),
+  );
 }
 
 /** A `latest` dist-tag ({@link latestTagJoin}), or a system package — published by construction. */
@@ -1185,4 +1207,74 @@ export async function updateSpacePackage(
     return { chatEnforcedChanged: false };
   };
   return opts?.tx ? work(opts.tx) : db.transaction(work);
+}
+
+type PlacementSettings = Parameters<typeof updateSpacePackage>[2];
+
+/**
+ * Enforcing writes first and checks after, under a per-space lock: concurrent
+ * enforcements cannot both pass the cap, an unplaced 404 precedes any 409, and
+ * a refusal rolls the whole patch back.
+ */
+export async function updatePlacementSettings(
+  scope: SpaceScope,
+  packageId: string,
+  updates: PlacementSettings,
+): Promise<{ chatEnforcedChanged: boolean }> {
+  if (!updates.chatEnforced) {
+    return updateSpacePackage(scope, packageId, updates, { requirePlacement: true });
+  }
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`space-chat-enforced:${scope.spaceId}`})::bigint)`,
+    );
+    const result = await updateSpacePackage(scope, packageId, updates, {
+      requirePlacement: true,
+      tx,
+    });
+    if (result.chatEnforcedChanged) await assertChatEnforceable(scope, packageId, tx);
+    return result;
+  });
+}
+
+// Every read goes through `tx`: under PGlite's single connection a query on
+// the root `db` would wait on this very transaction.
+async function assertChatEnforceable(scope: SpaceScope, packageId: string, tx: Tx) {
+  const own = await loadPublishedDefinition("skill", packageId, "latest", tx);
+  if (!own) {
+    throw conflict(
+      "no_published_version",
+      `Skill '${packageId}' has no published version to enforce — publish it first`,
+    );
+  }
+
+  // Every flagged row counts, enabled or not: re-activation brings the flag back unchecked.
+  const flagged = await tx
+    .select({ packageId: spacePackages.packageId })
+    .from(spacePackages)
+    .where(and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.chatEnforced, true)));
+  if (flagged.length > MAX_ENFORCED_CHAT_SKILLS) {
+    throw conflict(
+      "enforced_skills_limit",
+      `A space enforces at most ${MAX_ENFORCED_CHAT_SKILLS} skills in its chat`,
+      { limit: MAX_ENFORCED_CHAT_SKILLS },
+    );
+  }
+
+  const others = await Promise.all(
+    flagged
+      .filter((row) => row.packageId !== packageId)
+      .map((row) => loadPublishedDefinition("skill", row.packageId, "latest", tx)),
+  );
+  const total = others.reduce(
+    (sum, skill) => sum + (skill?.content.length ?? 0),
+    own.content.length,
+  );
+  if (total > CHAT_SKILLS_CONTENT_BUDGET_CHARS) {
+    throw conflict(
+      "enforced_skills_budget",
+      `The enforced skills would total ${total} characters; the chat budget is ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}`,
+      { budget: CHAT_SKILLS_CONTENT_BUDGET_CHARS, total },
+    );
+  }
 }

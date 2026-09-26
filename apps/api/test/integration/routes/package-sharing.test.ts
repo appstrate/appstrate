@@ -1871,9 +1871,12 @@ describe("the table has no other reader", () => {
     // same LEFT JOIN. Resolving it on `org_id` alone was the one reader that
     // answered for a package no route will show — and since an unresolved
     // skill is a blocking readiness error, that answer is what let a private
-    // skill's bytes into a run's bundle (§6.9).
+    // skill's bytes into a run's bundle (§6.9). `chat-enforced-skills.ts` joins
+    // it for `activePackagesFilter` (`activeHereSql`) alone: a skill the space
+    // enforces in its chat only when it is placed and active here.
     expect(files).toEqual([
       "apps/api/src/lib/package-access.ts",
+      "apps/api/src/services/chat-enforced-skills.ts",
       "apps/api/src/services/integration-connection-resolver.ts",
       "apps/api/src/services/integration-connections.ts",
       "apps/api/src/services/integration-pins-service.ts",
