@@ -59,7 +59,7 @@ function placement(
   state: LibraryPlacement["state"],
   shared_by: LibraryPlacement["shared_by"] = null,
 ): LibraryPlacement {
-  return { space_id, via, state, shared_by };
+  return { space_id, via, state, shared_by, chat_enforced: false };
 }
 
 function packageRow(
@@ -77,6 +77,7 @@ function packageRow(
     home_writable: false,
     home_shareable: false,
     home_deletable: false,
+    published: true,
     placements,
     ...overrides,
   };
@@ -106,6 +107,9 @@ function hintOf(element: string): string | null {
   if (title === i18n.t("library.cannotActivate")) return "activate";
   if (title === i18n.t("library.cannotDeactivate")) return "deactivate";
   if (title === i18n.t("library.cannotShareHere")) return "notPlaced";
+  // The chat-enforcement box's own refusals.
+  if (title === i18n.t("library.chatEnforce.cannot")) return "configure";
+  if (title === i18n.t("library.chatEnforce.publishFirst")) return "publishFirst";
   // Not a refusal: a live box on an untaken offer says what taking it up means.
   if (title === i18n.t("library.offerHint")) return "offer";
   return title;
@@ -398,7 +402,11 @@ describe("one space's view", () => {
     expect(html).toContain(i18n.t("library.badge.inactive"));
     expect(html).toContain(i18n.t("library.origin.home"));
     expect(html).not.toContain(i18n.t("library.badge.offered"));
-    expect(readCheckboxes(html)).toEqual([{ checked: false, disabled: false, hint: null }]);
+    expect(readCheckboxes(html)).toEqual([
+      { checked: false, disabled: false, hint: null },
+      // Imposing a switched-off skill is accepted: the flag waits for re-activation.
+      { checked: false, disabled: false, hint: null },
+    ]);
   });
 
   it("names a candidate the caller could place here as exactly that", () => {
@@ -433,5 +441,75 @@ describe("one space's view", () => {
     );
     expect(html).toContain(i18n.t("library.origin.shared"));
     expect(html).not.toContain("library.origin.sharedBy");
+  });
+});
+
+describe("imposing a skill on the space's chat", () => {
+  /** A skill homed in `spc_team`, in `state`, imposed or not. */
+  function skillIn(
+    state: LibraryPlacement["state"],
+    chatEnforced = false,
+    overrides: Partial<LibraryPackageItem> = {},
+  ) {
+    return packageRow(
+      "skill",
+      [{ ...placement("spc_team", "home", state), chat_enforced: chatEnforced }],
+      overrides,
+    );
+  }
+
+  it("is offered on an active, published skill to a caller holding skills:write", () => {
+    const html = renderSpaceLibrary(space("spc_team", ["skills:write"]), skillIn("active"));
+    expect(html).toContain(i18n.t("library.column.chatEnforced"));
+    expect(readCheckboxes(html)).toEqual([
+      { checked: true, disabled: false, hint: null },
+      { checked: false, disabled: false, hint: null },
+    ]);
+  });
+
+  it("waits for a published version: what is imposed is never the draft", () => {
+    const html = renderSpaceLibrary(
+      space("spc_team", ["skills:write"]),
+      skillIn("active", false, { published: false }),
+    );
+    expect(readCheckboxes(html)[1]).toEqual({
+      checked: false,
+      disabled: true,
+      hint: "publishFirst",
+    });
+  });
+
+  it("is refused without skills:write in the space", () => {
+    const html = renderSpaceLibrary(space("spc_team", ["skills:read"]), skillIn("active"));
+    expect(readCheckboxes(html)[1]).toEqual({ checked: false, disabled: true, hint: "configure" });
+  });
+
+  it("CONTROL: the owner of a personal space gets no exemption, unlike activation", () => {
+    const html = renderSpaceLibrary(space("spc_team", [], { personal: true }), skillIn("active"));
+    expect(readCheckboxes(html)).toEqual([
+      { checked: true, disabled: false, hint: null },
+      { checked: false, disabled: true, hint: "configure" },
+    ]);
+  });
+
+  it("can still be released on a skill switched off here, even unpublished", () => {
+    // The flag survives deactivation; releasing it discloses nothing.
+    const html = renderSpaceLibrary(
+      space("spc_team", ["skills:write"]),
+      skillIn("inactive", true, { published: false }),
+    );
+    expect(readCheckboxes(html)).toEqual([
+      { checked: false, disabled: false, hint: null },
+      { checked: true, disabled: false, hint: null },
+    ]);
+  });
+
+  it("has no column on the other tabs", () => {
+    const html = renderSpaceLibrary(
+      space("spc_team", ["agents:configure", "skills:write"]),
+      packageRow("agent", [placement("spc_team", "home", "active")]),
+    );
+    expect(html).not.toContain(i18n.t("library.column.chatEnforced"));
+    expect(readCheckboxes(html)).toEqual([{ checked: true, disabled: false, hint: null }]);
   });
 });

@@ -3,7 +3,15 @@
 /** The skill picker's data and pure rules. */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { fetchSkills, skillPickerRows, togglePinned } from "../src/ui/chat-skills.ts";
+import {
+  fetchEnforcedSkills,
+  fetchSkills,
+  ownPins,
+  pinCapReached,
+  skillPickerRows,
+  togglePinned,
+} from "../src/ui/chat-skills.ts";
+import { MAX_PINNED_SKILLS } from "../src/skills.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -36,6 +44,79 @@ describe("fetchSkills", () => {
     globalThis.fetch = (async (_input: RequestInfo | URL) =>
       new Response(null, { status: 403 })) as typeof fetch;
     await expect(fetchSkills(() => ({}))).rejects.toThrow("HTTP 403");
+  });
+});
+
+describe("fetchEnforcedSkills", () => {
+  it("GETs the chat read with the scoping headers and parses its rows", async () => {
+    let input: RequestInfo | URL | undefined;
+    let init: RequestInit | undefined;
+    globalThis.fetch = (async (i: RequestInfo | URL, o?: RequestInit) => {
+      input = i;
+      init = o;
+      return Response.json({
+        object: "list",
+        data: [
+          { id: "@acme/tone", name: "Tone", version: "1.2.0" },
+          { id: "@acme/gone", name: "Gone", version: null },
+        ],
+      });
+    }) as typeof fetch;
+
+    const got = await fetchEnforcedSkills(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
+
+    expect(String(input)).toBe("/api/chat/enforced-skills");
+    expect(init?.credentials).toBe("include");
+    expect(init?.headers).toEqual({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" });
+    expect(got).toEqual([
+      { packageId: "@acme/tone", display_name: "Tone", version: "1.2.0" },
+      { packageId: "@acme/gone", display_name: "Gone", version: null },
+    ]);
+  });
+
+  it("throws on a refusal", async () => {
+    globalThis.fetch = (async (_input: RequestInfo | URL) =>
+      new Response(null, { status: 503 })) as typeof fetch;
+    await expect(fetchEnforcedSkills(() => ({}))).rejects.toThrow("HTTP 503");
+  });
+
+  // Fail closed: a drifted policy read is an error, never "nothing imposed".
+  for (const [label, body] of [
+    ["a malformed row", { object: "list", data: [{ id: 42, name: "x", version: null }] }],
+    ["a missing envelope", [{ id: "@acme/tone", name: "Tone", version: null }]],
+    ["a missing data member", { object: "list" }],
+  ] as const) {
+    it(`throws on ${label}`, async () => {
+      globalThis.fetch = (async (_input: RequestInfo | URL) => Response.json(body)) as typeof fetch;
+      await expect(fetchEnforcedSkills(() => ({}))).rejects.toThrow("Unexpected");
+    });
+  }
+});
+
+describe("ownPins", () => {
+  it("drops the pins naming an enforced skill, keeping the order of the rest", () => {
+    expect(ownPins(["@a/x", "@s/enforced", "@b/y"], new Set(["@s/enforced"]))).toEqual([
+      "@a/x",
+      "@b/y",
+    ]);
+  });
+
+  it("keeps every pin when the space enforces nothing", () => {
+    expect(ownPins(["@a/x"], new Set())).toEqual(["@a/x"]);
+  });
+});
+
+describe("pinCapReached", () => {
+  const own = Array.from({ length: MAX_PINNED_SKILLS - 1 }, (_, i) => `@a/own-${i}`);
+
+  it("does not count a stored pin naming an enforced skill", () => {
+    const stored = [...own, "@s/enforced"];
+    expect(stored.length).toBe(MAX_PINNED_SKILLS);
+    expect(pinCapReached(stored, new Set(["@s/enforced"]))).toBe(false);
+  });
+
+  it("CONTROL: the same pins with nothing enforced reach the cap", () => {
+    expect(pinCapReached([...own, "@s/enforced"], new Set())).toBe(true);
   });
 });
 
@@ -74,6 +155,18 @@ describe("skillPickerRows", () => {
     expect(skillPickerRows([], ["@acme/gone"])).toEqual([
       { skill: { packageId: "@acme/gone" }, available: false },
     ]);
+  });
+
+  it("lists an enforced skill neither as choosable nor as a dead pin", () => {
+    const policy = { ...tone, packageId: "@acme/policy" };
+    expect(
+      skillPickerRows([policy, tone], ["@acme/policy", "@acme/gone"], new Set(["@acme/policy"])),
+    ).toEqual([
+      { skill: tone, available: true },
+      { skill: { packageId: "@acme/gone" }, available: false },
+    ]);
+    // Enforced but absent from the caller's catalogue: still not a dead pin.
+    expect(skillPickerRows([], ["@acme/policy"], new Set(["@acme/policy"]))).toEqual([]);
   });
 
   it("has no rows for an empty catalogue and no pins", () => {

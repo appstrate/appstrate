@@ -42,6 +42,7 @@ const CONTEXT_OPTS = {
   spaceRole: "builder",
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
+  enforced: [],
 };
 
 describe("full persona invariants", () => {
@@ -145,15 +146,16 @@ describe("full persona invariants", () => {
     expect(FULL).not.toMatch(/the 403 names the permission it required/);
   });
 
-  it("teaches loading a skill through getSkill, one at a time, before acting", () => {
+  it("teaches loading a skill through `read_skill`, one at a time, before acting", () => {
     expect(FULL).toContain("guides for YOU");
-    expect(FULL).toContain('`operation_id: "getSkill"`');
-    expect(FULL).toContain("LOAD IT BEFORE acting");
+    expect(FULL).toContain("LOAD IT BEFORE acting: call `read_skill` with its `id`");
     expect(FULL).toContain("KEEP the leading `@`");
     expect(FULL).toContain("Load ONE at a time");
-    expect(FULL).toContain("Never call `getSkill` for a skill whose content already appears");
-    // The injected ones are already loaded; `getSkill` is for a skill listed by name.
+    expect(FULL).toContain("Never load a skill whose content already appears");
+    expect(FULL).toContain("call `read_skill` with the skill's `id` and the file's `path`");
+    // The injected ones are already loaded; `read_skill` is for a skill listed by name.
     expect(FULL).toContain("One shown in full, inside a `<skill>` tag, is already loaded");
+    expect(FULL).not.toContain("getSkill");
   });
 
   it("names the same heading the context block renders", () => {
@@ -170,8 +172,16 @@ describe("full persona invariants", () => {
 
   it("teaches the loading rules whatever the turn may author", () => {
     const readerOnly = promptFor([...MCP, "skills:read"]);
-    expect(readerOnly).toContain('`operation_id: "getSkill"`');
+    expect(readerOnly).toContain("call `read_skill` with its `id`");
     expect(readerOnly).toContain("guides for YOU");
+  });
+
+  it("teaches `read_skill` without dispatch, and `listSkills` only with it", () => {
+    // `read_skill` is declared on every MCP connection; `listSkills` goes through `invoke_operation`.
+    const noDispatch = promptFor(["mcp:read", "skills:read"]);
+    expect(noDispatch).toContain("call `read_skill` with its `id`");
+    expect(noDispatch).toContain("and the skills available");
+    expect(noDispatch).not.toContain("listSkills");
   });
 
   it("names `listSkills` for an unlisted request here, and for a truncated list only in the list bullet", () => {
@@ -182,7 +192,7 @@ describe("full persona invariants", () => {
   it("teaches nothing about skills to a turn without `skills:read`", () => {
     const noSkills = promptFor(BUILDER.filter((permission) => permission !== "skills:read"));
     for (const skillRule of [
-      "getSkill",
+      "read_skill",
       "listSkills",
       "## Skills",
       "Skills are not run on their own",
@@ -457,6 +467,7 @@ describe("the persona without agent runs", () => {
         spaceRole: "builder",
         permissions: ["agents:read", "mcp:invoke"],
         skills: DEFAULT_SKILL_SELECTION,
+        enforced: [],
       }),
     ).toContain("## Existing agents you can run");
     const off = formatCallerContext(raw, {
@@ -465,6 +476,7 @@ describe("the persona without agent runs", () => {
       spaceRole: "builder",
       permissions: ["agents:read", "mcp:invoke"],
       skills: DEFAULT_SKILL_SELECTION,
+      enforced: [],
     });
     expect(off).not.toContain("## Existing agents you can run");
     expect(off).not.toContain("@acme/triage");

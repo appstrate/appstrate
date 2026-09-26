@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Chat API — session CRUD + history READ.
+ * Chat API — session CRUD + history READ, and the space's enforced skills (names).
  *
  * Sessions are personal: every query filters by (orgId, userId).
  *
@@ -280,6 +280,21 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     notifySessionUpdate(session.id, session.orgId, session.userId);
     return c.body(null, 204);
   });
+
+  // GET /api/chat/enforced-skills — names only, from the database: a member
+  // without `skills:read` may call it. Gated like the turn that injects them.
+  router.get(
+    "/api/chat/enforced-skills",
+    rateLimited(120),
+    requireModulePermission("chat", "write"),
+    async (c) => {
+      const skills = await deps.listEnforcedSkills(c.get("orgId"), c.get("space").id);
+      return c.json({
+        object: "list",
+        data: skills.map(({ packageId, name, version }) => ({ id: packageId, name, version })),
+      });
+    },
+  );
 
   // POST /api/chat — the conversational loop (AI SDK UIMessage stream).
   // 20/min: every call fans out into metered LLM traffic. The server is the

@@ -59,6 +59,8 @@ import { isValidVersion } from "@appstrate/core/semver";
 import {
   getVersionDetail,
   getVersionRow,
+  loadPublishedDefinition,
+  type PublishedDefinition,
   readVersionArchive,
   requirePublishedArchive,
   versionArtifactUnavailable,
@@ -88,7 +90,6 @@ import {
   assertForkSourceAccess,
   authorizeBundlePackages,
   assertExistingPackageActivationAccess,
-  defaultDefinitionSelector,
   assertPackageMutationAccess,
   assertPackageShareAccess,
   holdsPackageShareAuthority,
@@ -113,6 +114,7 @@ import { assertSpaceId, isSpaceId } from "../lib/ids.ts";
 import {
   resolvePackageFileValidator,
   readPackageSnapshot,
+  snapshotFile,
   resolveDraftContent,
   mutatePackageDraftFiles,
   buildFileIndex,
@@ -125,6 +127,13 @@ import {
   type PackageFileOperation,
   type PackageFileSource,
 } from "../services/package-files.ts";
+import {
+  findFileExplorerPackage,
+  resolveFileExplorerVersion,
+  rendersStoredTree,
+  servedDefinition,
+  type FileExplorerPackage,
+} from "../services/package-file-explorer.ts";
 import {
   PackageFileWriteError,
   type PackageFileWriteErrorCode,
@@ -873,48 +882,6 @@ async function loadOrgItemOr404(rcfg: PackageRouteConfig, orgId: string, itemId:
 }
 
 /**
- * The manifest-derived half of a package detail, read from a PUBLISHED
- * snapshot instead of the draft columns — `getOrgItem`'s projection applied to
- * a version's own manifest and archive, so the two halves of a detail response
- * never come from two different definitions.
- *
- * The manifest is the `package_versions.manifest` column: authoritative, one
- * DB read, and immune to an archive that will not open. The CONTENT is the
- * archive entry this type is authored around ({@link PACKAGE_CONTENT_ENTRY}),
- * and the fallbacks below are the exact inverse of `applyDraftOverlay`: a type
- * with no content entry at all (`mcp-server`, whose content IS its manifest)
- * and an `integration` published without its optional `INTEGRATION.md` both
- * store the manifest TEXT in `draft_content`, so the published projection
- * reproduces that rather than handing back a `null` the editor would render as
- * an empty file.
- *
- * That fallback stands only for an entry missing from an archive that opened:
- * an unreadable archive, or one without a REQUIRED entry, is refused by
- * {@link requirePublishedArchive} — the same 422 the run and restore paths answer.
- */
-async function loadPublishedDefinition(
-  type: PackageType,
-  packageId: string,
-  spec: string,
-): Promise<Record<string, unknown>> {
-  const detail = await getVersionDetail(packageId, spec);
-  if (!detail) throw notFound(`Version '${spec}' not found`);
-  const m = asRecord(detail.manifest);
-  const { entry } = requirePublishedArchive(type, packageId, detail);
-  return {
-    // Same projection `getOrgItem` runs over the draft manifest, field for
-    // field: a reader must not be able to tell which definition answered by
-    // the SHAPE of what came back.
-    name: typeof m.display_name === "string" ? m.display_name : packageId,
-    description: typeof m.description === "string" ? m.description : null,
-    version: typeof m.version === "string" ? m.version : null,
-    manifest_name: typeof m.name === "string" ? m.name : null,
-    manifest: m,
-    content: entry ? decodeSkillMarkdown(entry) : JSON.stringify(m, null, 2),
-  };
-}
-
-/**
  * Build the canonical package detail DTO for skills / integrations / mcp-servers
  * — the exact object the `GET` detail endpoint serializes (`OrgPackageItemDetail`).
  * Org-scoped (no space activation gate): the GET handler applies that gate before
@@ -960,16 +927,17 @@ async function buildPackageDetailDto(
   // `resolvePackageFileValidator` treats them as one. So must this: `draft` is
   // not a row in `package_versions`, and handing it to the version resolver
   // would 404 the very page an author just asked for by name.
-  const rendersStoredTree = spec === undefined || spec === VERSION_SELECTOR_DRAFT;
   // For an org-authored package that stored tree IS the draft; for a system
   // package it is the definition the platform ships, published by
   // construction. The bytes are the same either way — only the wire name
   // differs, and a system package must never be labelled `draft` or the SPA
   // renders "never published" over something that cannot be published at all.
-  const definition = rendersStoredTree && item.source !== "system" ? "draft" : "published";
-  const published = rendersStoredTree
-    ? null
-    : await loadPublishedDefinition(rcfg.cfg.type, item.id, spec);
+  const definition = servedDefinition(item, spec);
+  let published: PublishedDefinition | null = null;
+  if (!rendersStoredTree(spec)) {
+    published = await loadPublishedDefinition(rcfg.cfg.type, item.id, spec);
+    if (!published) throw notFound(`Version '${spec}' not found`);
+  }
 
   const { homeSpaceId, lockVersion, ...rest } = item;
   const body = {
@@ -1574,9 +1542,8 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  *   from the row — which is why the guard runs here and not as route-level
  *   middleware.
  *
- * The row read in between adds the org boundary (`isPackageReadableInSpace`
- * does not filter `orgId`) and fetches the draft columns the overlay needs
- * plus the `source` {@link resolveFileExplorerVersion} reads.
+ * {@link findFileExplorerPackage} settles visibility and the org boundary
+ * (`isPackageReadableInSpace` does not filter `orgId`) in one call.
  *
  * Authorizing HERE rather than at each call site is what makes the ordering
  * safe. Both handlers call this before they touch a validator, so no
@@ -1590,26 +1557,10 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  * `/{version}/download`.
  */
 async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<FileExplorerPackage> {
-  const packageId = getItemId(c);
-  const orgId = c.get("orgId");
-  const spaceId = c.get("spaceId");
-
-  if (!(await isPackageReadableInSpace(spaceId, packageId))) {
-    throw notFound("Package not found");
-  }
-
-  const [pkg] = await db
-    .select({
-      id: packages.id,
-      type: packages.type,
-      source: packages.source,
-      orgId: packages.orgId,
-      draftManifest: packages.draftManifest,
-      draftContent: packages.draftContent,
-    })
-    .from(packages)
-    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
-    .limit(1);
+  const pkg = await findFileExplorerPackage(
+    { orgId: c.get("orgId"), spaceId: c.get("spaceId") },
+    getItemId(c),
+  );
   if (!pkg) {
     throw notFound("Package not found");
   }
@@ -1620,55 +1571,6 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<FileExplorer
   await requirePackageReadPermission(c, pkg.type);
 
   return pkg;
-}
-
-/**
- * The file-explorer row: a {@link PackageFileSource} plus the `source` column,
- * which is what tells a platform-shipped definition from an org-authored one.
- */
-type FileExplorerPackage = PackageFileSource & { source: string };
-
-/**
- * WHICH definition a file-explorer read renders — the same question the agent
- * detail page answers, from the same two functions, because they are the same
- * question (RBAC spec §6.10).
- *
- * Reading is not executing, so an omitted `?version` gets the definition that
- * EXISTS for this caller: the author's draft when they may write the package,
- * the latest published version otherwise, and the draft again when nothing is
- * published — a readable package whose explorer 404s is a tab the detail page
- * has just promised and cannot honour. That is {@link defaultDefinitionSelector},
- * verbatim, mapped onto the version-spec vocabulary these two routes speak:
- * `undefined` is their word for the draft and `latest` for the published tag.
- *
- * An EXPLICIT `?version=draft` is the other act, and keeps the other rule:
- * naming the working copy is an author's move, refused with
- * `403 draft_not_writable` ({@link assertDraftSelectorAllowed}). Without it
- * these two routes would be a fifth door to a draft the run, the schedule, the
- * readiness and the bundle export all close.
- *
- * A system package ships its definition with the platform and owns no
- * `package_versions` rows, so `latest` would resolve to nothing: its stored
- * tree IS its published definition, and every selector but the named `draft`
- * reads it. Same rule the run path applies (`resolveAgentRunVersion` ignores
- * the selector for `source === "system"`), stated here rather than inherited
- * because the 404 it prevents shows up only on a system package's Files tab.
- *
- * Takes the two columns it reads rather than a whole row, because the DETAIL
- * projection asks the same question from a different query
- * ({@link buildPackageDetailDto}) and must get it from this function rather
- * than from a second spelling of it.
- */
-async function resolveFileExplorerVersion(
-  c: Context<AppEnv>,
-  pkg: Pick<FileExplorerPackage, "id" | "source">,
-  explicit: string | undefined,
-): Promise<string | undefined> {
-  await assertDraftSelectorAllowed(c, pkg.id, explicit);
-  if (pkg.source === "system") return undefined;
-  if (explicit) return explicit;
-  const { selector } = await defaultDefinitionSelector(c, pkg);
-  return selector === VERSION_SELECTOR_DRAFT ? undefined : "latest";
 }
 
 /**
@@ -2958,13 +2860,10 @@ export function createPackagesRouter() {
 
     const snapshot = await readPackageSnapshot(pkg, validator);
 
-    // Plain own-key lookup on the already-sanitized map — no filesystem, no
-    // `..` resolution. `Object.hasOwn` keeps a `__proto__`/`toString` probe
-    // from resolving to something off the prototype chain.
-    if (!Object.hasOwn(snapshot.files, path)) {
+    const bytes = snapshotFile(snapshot, path);
+    if (!bytes) {
       throw notFound("File not found");
     }
-    const bytes = snapshot.files[path]!;
 
     const etag = fileEtag(snapshot.snapshotId, path);
     const headers = fileCacheHeaders(etag, validator.yanked);

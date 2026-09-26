@@ -42,7 +42,7 @@ import { mintSessionId } from "../src/session-id.ts";
 import { acquirePiChatSlot, releaseOnClose } from "../src/pi-chat/concurrency.ts";
 import type { PiChatInput } from "../src/pi-chat/engine.ts";
 import type { ChatAttachmentRequest } from "@appstrate/core/chat-contract";
-import type { PrincipalKind } from "@appstrate/core/module";
+import type { ModuleInitContext, PrincipalKind } from "@appstrate/core/module";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "../src/platform-services.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
@@ -279,12 +279,25 @@ describe("handleChatStream", () => {
       history?: unknown[];
       /** Extra body fields, e.g. the picker's `skill_mode` / `pinned_skills`. */
       body?: Record<string, unknown>;
+      /** Stand in for the PLATFORM service, so the deps wrapper still runs over it. */
+      loadEnforcedChatSkills?: ModuleInitContext["services"]["loadEnforcedChatSkills"];
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
     // overridden by the scripted one so no request leaves this process.
+    const initCtx = buildModuleInitContext();
     const deps = {
-      ...buildChatPlatformDeps(buildModuleInitContext()),
+      ...buildChatPlatformDeps(
+        overrides?.loadEnforcedChatSkills
+          ? {
+              ...initCtx,
+              services: {
+                ...initCtx.services,
+                loadEnforcedChatSkills: overrides.loadEnforcedChatSkills,
+              },
+            }
+          : initCtx,
+      ),
       dispatch: overrides?.dispatch ?? scriptedDispatch(overrides?.apiShape, overrides?.context),
       ...(overrides?.resolveChatModel ? { resolveChatModel: overrides.resolveChatModel } : {}),
       ...(overrides?.resolveChatAttachment
@@ -588,11 +601,9 @@ describe("handleChatStream", () => {
     );
     expect(input.system).not.toContain("@acme/catalogued");
     // No skill tool is taught, and the token cannot reach one.
-    expect(input.system).not.toContain("getSkill");
+    expect(input.system).not.toContain("read_skill");
     expect(input.system).not.toContain("listSkills");
-    expect(input.system).toContain(
-      "The user restricted this conversation to the skills they chose",
-    );
+    expect(input.system).toContain("This conversation is restricted to the skills shown here");
     expect(await tokenPermissions(input)).toEqual(["mcp:invoke", "mcp:read"]);
 
     await waitForAssistantPersist(sessionId);
@@ -713,11 +724,125 @@ describe("handleChatStream", () => {
     expect(skillReads).toEqual([]);
     const system = calls[0]!.system;
     expect(system).toContain(CONTEXT_ORG_MARKER);
-    for (const absent of ["## Skills", PIN, "@acme/catalogued", "getSkill", "listSkills"]) {
+    for (const absent of ["## Skills", PIN, "@acme/catalogued", "read_skill", "listSkills"]) {
       expect(system).not.toContain(absent);
     }
 
     await waitForAssistantPersist(sessionId);
+  });
+
+  describe("space-enforced skills", () => {
+    const HOUSE = {
+      packageId: "@acme/house",
+      name: "House rules",
+      version: "2.0.0",
+      content: "Always sign with the house motto.",
+    };
+
+    it("refuses the turn with a 503 when they cannot be loaded: no message, no marker, no engine", async () => {
+      const sessionId = mintSessionId();
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(sessionId, undefined, engine, {
+        permissions: new Set(["chat:write", "mcp:read", "mcp:invoke"]),
+        loadEnforcedChatSkills: async () => {
+          throw new Error("storage outage");
+        },
+      });
+
+      expect(res.status).toBe(503);
+      expect(res.headers.get("content-type") ?? "").toContain("application/problem+json");
+      const body = (await res.json()) as { code?: string };
+      expect(body.code).toBe("enforced_skills_unavailable");
+      // The session row and its selection are upserted, as for every preamble refusal.
+      expect(calls).toEqual([]);
+      const rows = await db
+        .select()
+        .from(chatMessages)
+        .where(eq(chatMessages.sessionId, sessionId));
+      expect(rows).toEqual([]);
+      const [session] = await db
+        .select({ activeStreamId: chatSessions.activeStreamId })
+        .from(chatSessions)
+        .where(eq(chatSessions.id, sessionId));
+      expect(session?.activeStreamId ?? null).toBeNull();
+    });
+
+    it("refuses before materializing any composer attachment", async () => {
+      const sessionId = mintSessionId();
+      const resolved: string[] = [];
+      const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+        permissions: new Set(["chat:write", "mcp:read", "mcp:invoke"]),
+        parts: [
+          { type: "text", text: "résume ce fichier" },
+          {
+            type: "file",
+            url: "appfile://file_abcdefgh",
+            mediaType: "text/plain",
+            filename: "r.txt",
+          },
+        ],
+        resolveChatAttachment: async (request) => {
+          resolved.push(request.uri);
+          return { uri: request.uri, name: "r.txt", mime: "text/plain", size: 12 };
+        },
+        loadEnforcedChatSkills: async () => {
+          throw new Error("storage outage");
+        },
+      });
+      expect(res.status).toBe(503);
+      expect(resolved).toEqual([]);
+    });
+
+    it("injects them for a caller who holds `chat:write` and no `skills:*`, in every mode", async () => {
+      for (const skillMode of ["auto", "manual", "strict"] as const) {
+        const sessionId = mintSessionId();
+        const loaded: [string, string][] = [];
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(sessionId, undefined, engine, {
+          permissions: new Set(["chat:write", "mcp:read", "mcp:invoke"]),
+          body: { skill_mode: skillMode, pinned_skills: [] },
+          loadEnforcedChatSkills: async (orgId, spaceId) => {
+            loaded.push([orgId, spaceId]);
+            return [HOUSE];
+          },
+        });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+
+        // Keyed on the space the router entered, not on a header.
+        expect(loaded).toEqual([[ctx.orgId, ctx.defaultSpaceId]]);
+        const system = calls[0]!.system;
+        expect(system).toContain("This space requires these skills in every conversation.");
+        expect(system).toContain(
+          '<skill id="@acme/house" version="2.0.0">\nAlways sign with the house motto.\n</skill>',
+        );
+        // The turn's token still reaches no skill: the content needed none, and
+        // only the enforced lead names `read_skill` (no loading rule is taught).
+        expect(system).not.toContain("LOAD IT BEFORE acting");
+        expect(system.split("read_skill")).toHaveLength(2);
+        expect(await tokenPermissions(calls[0]!)).toEqual(["chat:write", "mcp:invoke", "mcp:read"]);
+
+        await waitForAssistantPersist(sessionId);
+      }
+    });
+
+    it("keeps them when the caller-context read fails", async () => {
+      const sessionId = mintSessionId();
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(sessionId, undefined, engine, {
+        permissions: new Set(["chat:write", "mcp:read", "mcp:invoke"]),
+        context: () => new Response(null, { status: 500 }),
+        loadEnforcedChatSkills: async () => [HOUSE],
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+
+      const system = calls[0]!.system;
+      expect(system).not.toContain(CONTEXT_ORG_MARKER);
+      expect(system).toContain('<skill id="@acme/house" version="2.0.0">');
+
+      await waitForAssistantPersist(sessionId);
+    });
   });
 
   it("streams start → text → finish, hands the engine a proxy binding, and persists the turn", async () => {
@@ -1038,8 +1163,8 @@ describe("handleChatStream", () => {
     });
 
     it("teaches no authoring without `mcp:invoke` — `createAgent` dispatches through it", async () => {
-      // `agents:write` and `skills:read` without `mcp:invoke` are grants the
-      // turn cannot dispatch, so neither the skill teaching nor the list renders.
+      // `agents:write` without `mcp:invoke` is a grant the turn cannot dispatch.
+      // Skills are the counterpoint: `read_skill` needs no dispatch, so they stay.
       const withSkill = () =>
         Response.json({
           user: { name: "Chat Tester", email: "chat-tester@test.com" },
@@ -1055,9 +1180,9 @@ describe("handleChatStream", () => {
         withSkill,
       );
       expect(system).not.toContain(SKILLS_MARKER);
-      expect(system).not.toContain(SKILL_ID);
-      expect(system).not.toContain("## Skills");
-      // Control: the same set plus `mcp:invoke` IS taught both.
+      expect(system).toContain(SKILL_ID);
+      expect(system).toContain("call `read_skill` with its `id`");
+      // Control: the same set plus `mcp:invoke` IS taught authoring.
       const { system: invoking } = await turn(
         new Set(["mcp:read", "mcp:invoke", "agents:write", "skills:read"]),
         true,

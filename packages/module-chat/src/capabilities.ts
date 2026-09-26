@@ -8,19 +8,26 @@ import { agentCapabilities, type RunLevel } from "@appstrate/core/permissions";
 export { reaches, type RunLevel } from "@appstrate/core/permissions";
 
 export interface TurnCapabilities {
+  /** `mcp:read`: the platform MCP transport — without it the turn holds no tool at all. */
+  readonly transport: boolean;
   readonly invokes: boolean;
   readonly runLevel: RunLevel;
   readonly authors: boolean;
-  /** `invokes` ∧ `skills:read`: a skill is loaded through `getSkill`, so reading needs dispatch. */
+  /**
+   * `transport` ∧ `skills:read`: the context lists the space's skills on `skills:read`, and
+   * `read_skill`, which loads one, is declared on every MCP connection — no dispatch needed.
+   */
   readonly readsSkills: boolean;
 }
 
 export function turnCapabilities(has: (permission: string) => boolean): TurnCapabilities {
-  const invokes = has("mcp:read") && has("mcp:invoke");
+  const transport = has("mcp:read");
+  const invokes = transport && has("mcp:invoke");
   return {
+    transport,
     invokes,
     ...agentCapabilities(has, invokes),
-    readsSkills: invokes && has("skills:read"),
+    readsSkills: transport && has("skills:read"),
   };
 }
 

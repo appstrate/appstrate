@@ -112,7 +112,7 @@ export const INDEX_JSON_BUDGET_BYTES = 2_097_152;
  * The two inputs cannot disagree: `bytes` is the file's exact UTF-8 length and
  * `text` is its strict-`fatal` decode of those same bytes. The one input for
  * which `JSON.stringify` escapes a NON-ASCII unit — a lone surrogate, emitted
- * as `\uD800` — cannot reach here: {@link classify}'s strict decode refuses it
+ * as `\uD800` — cannot reach here: {@link classifyPackageFile}'s strict decode refuses it
  * and calls the file binary.
  *
  * Verified by exhaustive comparison against `TextEncoder().encode(...)` over
@@ -180,7 +180,7 @@ function extensionOf(path: string): string {
  * kept — the one the editor and the CLI ask too, so a file is text or binary
  * the same way on every side of the wire.
  */
-function classify(
+export function classifyPackageFile(
   path: string,
   bytes: Uint8Array,
 ): { kind: PackageFileMediaKind; text: string | null } {
@@ -433,6 +433,18 @@ export async function readPackageSnapshot(
 }
 
 /**
+ * One file of a snapshot, by its exact archive key — `null` when absent.
+ *
+ * A plain own-key lookup on the already-sanitized map: no filesystem and no
+ * `..` resolution, so a traversal attempt is simply a key that does not exist.
+ * `Object.hasOwn` keeps a `__proto__`/`toString` probe from resolving to
+ * something off the prototype chain.
+ */
+export function snapshotFile(snapshot: PackageFileSnapshot, path: string): Uint8Array | null {
+  return Object.hasOwn(snapshot.files, path) ? snapshot.files[path]! : null;
+}
+
+/**
  * Flatten a snapshot into the wire index.
  *
  * Entries are emitted in sorted path order so the same snapshot always yields
@@ -447,7 +459,7 @@ export function buildFileIndex(snapshot: PackageFileSnapshot): PackageFileEntry[
 
   for (const path of Object.keys(snapshot.files).sort()) {
     const bytes = snapshot.files[path]!;
-    const { kind, text } = classify(path, bytes);
+    const { kind, text } = classifyPackageFile(path, bytes);
     const entry: PackageFileEntry = { path, size: bytes.byteLength, media_kind: kind };
     // `remaining > 0` short-circuits the stringify itself, not just its
     // result: once the budget is spent, every remaining text file would

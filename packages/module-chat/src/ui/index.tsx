@@ -84,6 +84,7 @@ import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
+import { EnforcedSkillsIndicator } from "./enforced-skills.tsx";
 import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
 import { canAuthorAgents, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
@@ -374,6 +375,7 @@ export function ChatPage({
                   attachments={attachments}
                   composerSlot={composerSlot}
                   canPinSkills={canPinSkills(can)}
+                  canWrite={canWrite}
                   serverGenerating={serverGenerating}
                   serverUpdatedAt={serverUpdatedAt}
                 />
@@ -395,6 +397,8 @@ interface ConversationProps {
   attachments: AttachmentAdapter;
   composerSlot?: React.ReactNode;
   canPinSkills: boolean;
+  /** `chat:write`: without the picker, the space's enforced skills are still named. */
+  canWrite: boolean;
   /** Server session row `generating`, from the shared list; `undefined` = no row. */
   serverGenerating: boolean | undefined;
   /** Server session row `updatedAt`, from the shared list; `undefined` = no row. */
@@ -422,6 +426,7 @@ const Conversation = memo(function Conversation({
   isPersisted,
   composerSlot,
   canPinSkills,
+  canWrite,
   ...rest
 }: ConversationProps) {
   // Freeze persistence at mount. The runtime key (`id`) is stable across the
@@ -463,13 +468,15 @@ const Conversation = memo(function Conversation({
   const slot = useMemo(
     () => (
       <div className="flex items-center gap-2">
-        {showPicker && (
+        {showPicker ? (
           <SkillsPicker getHeaders={getHeaders} selection={skills} onChange={chooseSkills} />
+        ) : (
+          canWrite && <EnforcedSkillsIndicator getHeaders={getHeaders} />
         )}
         {composerSlot}
       </div>
     ),
-    [getHeaders, skills, chooseSkills, showPicker, composerSlot],
+    [getHeaders, skills, chooseSkills, showPicker, canWrite, composerSlot],
   );
 
   if (persistedAtMount && history.isPending) {
@@ -503,7 +510,7 @@ function ConversationInner({
   serverGenerating,
   serverUpdatedAt,
   getChosenSkills,
-}: Omit<ConversationProps, "canPinSkills"> & {
+}: Omit<ConversationProps, "canPinSkills" | "canWrite"> & {
   initialMessages: UIMessage[];
   getChosenSkills: () => ChatSkillSelection | undefined;
 }) {

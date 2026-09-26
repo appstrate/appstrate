@@ -61,17 +61,20 @@ const PACKAGES_EXAMPLE = {
       home_writable: true,
       home_deletable: true,
       home_shareable: true,
+      published: true,
       placements: [
         {
           space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
           via: "home",
           state: "active",
+          chat_enforced: false,
           shared_by: null,
         },
         {
           space_id: "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
           via: "shared",
           state: "none",
+          chat_enforced: false,
           shared_by: { user_id: "usr_1", name: "Alex" },
         },
       ],
@@ -90,17 +93,20 @@ const PACKAGES_EXAMPLE = {
       home_writable: false,
       home_deletable: false,
       home_shareable: false,
+      published: true,
       placements: [
         {
           space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
           via: "system",
           state: "active",
+          chat_enforced: false,
           shared_by: null,
         },
         {
           space_id: "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
           via: "system",
           state: "inactive",
+          chat_enforced: false,
           shared_by: null,
         },
       ],

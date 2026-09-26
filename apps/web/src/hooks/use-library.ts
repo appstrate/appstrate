@@ -106,6 +106,7 @@ function applyActivation(
                 via: "shared" as const,
                 state: active ? ("active" as const) : ("inactive" as const),
                 shared_by: null,
+                chat_enforced: false,
               },
             ],
       };
@@ -191,6 +192,37 @@ export function useInvalidatePackageActivation() {
     void qc.invalidateQueries({ queryKey: agentsKeys.all });
     void invalidateIntegrationQueries(qc);
   };
+}
+
+/**
+ * No optimistic patch: the cap and the budget are the server's to judge. The
+ * awaited invalidation keeps the box disabled until the refetch lands.
+ */
+export function useSetChatEnforced() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      spaceId,
+      packageId,
+      enforced,
+    }: {
+      spaceId: string;
+      packageId: string;
+      enforced: boolean;
+    }) => {
+      const parsed = parseScopedName(packageId);
+      if (!parsed) throw new Error(`Invalid packageId: ${packageId}`);
+      await client.PATCH("/api/spaces/{spaceId}/packages/{scope}/{name}", {
+        params: { path: { spaceId, scope: `@${parsed.scope}`, name: parsed.name } },
+        body: { chat_enforced: enforced },
+      });
+    },
+    onSettled: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["get", "/api/library"] }),
+        qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{spaceId}/library"] }),
+      ]),
+  });
 }
 
 /**

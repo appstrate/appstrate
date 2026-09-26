@@ -89,6 +89,10 @@ export const spacePackages = pgTable(
     // because the gate is per-(space, integration) and spacePackages
     // already keys on those (when type=integration).
     blockUserConnections: boolean("block_user_connections").notNull().default(false),
+    // Skills only. Every chat turn in this space injects the skill's latest
+    // published SKILL.md, whatever the skill mode and the member's `skills:*`
+    // grants. Like every setting here, it survives deactivation.
+    chatEnforced: boolean("chat_enforced").notNull().default(false),
     enabled: boolean("enabled").notNull().default(true),
     installedAt: timestamp("installed_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

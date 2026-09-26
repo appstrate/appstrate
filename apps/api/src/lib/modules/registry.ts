@@ -29,6 +29,10 @@ import {
   setOrgFileStorageLimit,
 } from "../../services/files.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
+import {
+  listEnforcedChatSkills,
+  loadEnforcedChatSkills,
+} from "../../services/chat-enforced-skills.ts";
 import type { AppEnv } from "../../types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -76,6 +80,10 @@ function buildPlatformServices(): PlatformServices {
     // file (or validate an existing file) and hand back its stable
     // `appfile://` URI. The module has no DB access, so it crosses here.
     resolveChatAttachment,
+    // Space-enforced chat skills — read with platform authority, since the
+    // members they bind may hold no `skills:read`.
+    loadEnforcedChatSkills,
+    listEnforcedChatSkills,
     // Chat session teardown — detach-or-delete the session's contained files
     // before the session row is removed (the module has no DB/storage access).
     cleanupSessionFiles: (chatSessionId, tx) =>

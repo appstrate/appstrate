@@ -348,7 +348,11 @@ export async function handleChatStream(
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
-  // Only the caller-context block. It depends on the space id and the caller's
+  // The space's enforced skills depend on nothing but the ids, so they start
+  // now; phase A's join awaits them, so their 503 refuses the turn before any
+  // file is materialized.
+  const enforcedSkills = deps.loadEnforcedSkills(orgId, spaceId);
+  // Then the caller-context block. It depends on the space id and the caller's
   // headers and the session row (the turn's grants and its skills) — never on the
   // chosen model or the admission gate — so it starts the moment the row
   // resolves, overlapping the model list, the attachment materialization, the
@@ -385,6 +389,7 @@ export async function handleChatStream(
           capabilities,
           permissions,
           skills,
+          enforced: enforcedSkills,
         }).finally(() => {
           phaseBMs = Date.now() - phaseBStart;
         }),
@@ -397,6 +402,7 @@ export async function handleChatStream(
   const [models, { permissions, capabilities }] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
     turn,
+    enforcedSkills,
   ]);
   const chosen = pickModel(models, modelId);
   let generationSettings;
