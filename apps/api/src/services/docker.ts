@@ -1071,7 +1071,7 @@ let platformNetworkCache: { networkId: string; hostname: string } | null | undef
  * Uses os.hostname() (Docker sets hostname = container ID prefix) to inspect
  * ourselves and find the first non-default-bridge network.
  * Returns null when running outside Docker (local dev).
- * Only a 5xx or a transport error (daemon/proxy unavailable) throws uncached,
+ * A 5xx, a transport error or an unreadable body throws uncached,
  * so an outage at boot is retried rather than pinning every sidecar to
  * `host.docker.internal` for the process lifetime (#1129). Any other status is
  * definitive (404 = not a container, 401/403 = proxy ACL): null is cached.

@@ -149,7 +149,10 @@ export type StopResult = "stopped" | "not_found" | "already_stopped";
  * registry (`apps/api/src/services/orchestrator/registry.ts`).
  */
 export interface RunOrchestrator {
-  /** Init one-shot: pool init, platform detection, etc. */
+  /**
+   * Pool init, platform detection, etc. The platform retries it in the background
+   * after a rejection until it resolves once, so it must be safe to call again.
+   */
   initialize(): Promise<void>;
 
   /** Graceful shutdown: drain pool, release resources. */
