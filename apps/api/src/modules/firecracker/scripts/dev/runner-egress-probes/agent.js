@@ -34,6 +34,7 @@ import { join } from "node:path";
 
 import {
   CONNECT_EXAMPLE_COM,
+  REPORT_END,
   clean,
   errorOf,
   exchange,
@@ -94,6 +95,12 @@ const LINE_RE = new RegExp("^" + TAG + " ([a-z0-9]+)\\.([a-z0-9-]+)=([A-Za-z0-9_
 
 const reported = new Map();
 const done = new Set();
+/**
+ * Every runner line already printed. A runner re-sends a report it saw no ack
+ * for, and the console is a bounded serial line (Firecracker drops output it
+ * cannot drain): each distinct line is printed exactly once.
+ */
+const printed = new Set();
 let finish;
 const runnersDone = new Promise((resolve) => {
   finish = resolve;
@@ -122,16 +129,29 @@ function answer(key) {
   return reported.get(key) || "unknown";
 }
 
+/**
+ * One line from a runner connection: a `GET` (answered at once), the report's
+ * {@link REPORT_END} (acked with `ok` — every line before it was processed),
+ * or a marker line.
+ */
 function onLine(socket, state, text) {
   if (text.startsWith("GET ")) {
     state.replied = true;
     socket.end(answer(text.slice(4).trim()) + "\r\n");
     return;
   }
+  if (text === REPORT_END) {
+    state.replied = true;
+    socket.end("ok\r\n");
+    return;
+  }
   const m = LINE_RE.exec(text);
   if (!m || !EXPECTED.includes(m[1])) return;
-  // The console is the host's evidence: print the runner's line verbatim.
-  console.log(text);
+  // The console is the host's evidence: print the runner's line verbatim, once.
+  if (!printed.has(text)) {
+    printed.add(text);
+    console.log(text);
+  }
   const key = m[1] + "." + m[2];
   if (!reported.has(key)) reported.set(key, m[3]);
   if (m[2] === "done") {
@@ -150,13 +170,6 @@ const server = net.createServer((socket) => {
       state.buf = state.buf.slice(nl + 1);
       onLine(socket, state, text);
     }
-  });
-  socket.on("end", () => {
-    if (state.replied) return;
-    if (state.buf) onLine(socket, state, state.buf.replace(/\r$/, ""));
-    if (state.replied) return;
-    state.replied = true;
-    socket.end("ok\r\n");
   });
   socket.on("error", () => socket.destroy());
 });
@@ -298,9 +311,11 @@ async function listenSockets() {
 /**
  * The MITM listener's inner TLS servers sit on unix sockets in a 0700 dir the
  * sidecar creates under its tmpdir (`mitm-XXXXXX`). /tmp is 1777, so the agent
- * sees the name; it must not list the dir nor reach a socket inside it. One
- * comma-separated entry per `mitm-*` dir, in the same order across the three
- * markers.
+ * sees the name; it must neither list the dir nor reach a socket inside it.
+ * One comma-separated entry per `mitm-*` dir, in the same order across the
+ * markers. The verdict is `mitm-socket-stat`: `connect()` on that path is
+ * informational only — Bun reports ENOENT there where the kernel returns
+ * EACCES (a non-owner cannot search the 0700 dir), while `stat` reports EACCES.
  */
 async function mitmSocketProbes() {
   let names;
@@ -308,22 +323,27 @@ async function mitmSocketProbes() {
     names = (await readdir(SIDECAR_TMPDIR)).filter((name) => name.startsWith("mitm-")).sort();
   } catch (err) {
     const unlisted = "tmp-" + errorOf(err);
-    for (const probe of ["mitm-dir-stat", "mitm-dir-readdir", "mitm-socket-connect"]) {
+    const probes = ["mitm-dir-stat", "mitm-dir-readdir", "mitm-socket-stat", "mitm-socket-connect"];
+    for (const probe of probes) {
       mark(probe, unlisted);
     }
     return;
   }
   const stats = [];
   const listings = [];
+  const socketStats = [];
   const connects = [];
   for (const name of names) {
     const dir = join(SIDECAR_TMPDIR, name);
+    const socketPath = join(dir, FIRST_INNER_SOCKET);
     stats.push(await stat(dir).then((st) => octal(st.mode) + ":" + st.uid, errorOf));
     listings.push(await readdir(dir).then((entries) => "listed:" + entries.length, errorOf));
-    connects.push(await connectOnce({ path: join(dir, FIRST_INNER_SOCKET) }, 5000));
+    socketStats.push(await stat(socketPath).then((st) => "stat:" + octal(st.mode), errorOf));
+    connects.push(await connectOnce({ path: socketPath }, 5000));
   }
   mark("mitm-dir-stat", stats.join(",") || "none", 400);
   mark("mitm-dir-readdir", listings.join(",") || "none", 400);
+  mark("mitm-socket-stat", socketStats.join(",") || "none", 400);
   mark("mitm-socket-connect", connects.join(",") || "none", 400);
 }
 

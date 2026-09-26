@@ -898,7 +898,9 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
     // 6c. The inner TLS servers' unix sockets sit in a 0700 sidecar dir under
     //     /tmp. The dir exists (control) and an inner server lives in it
     //     (mitm-allowed succeeded through one), yet the agent can neither list
-    //     it nor connect to a socket inside.
+    //     it nor reach the socket inside: `stat` on the socket path is EACCES.
+    //     (`connect` there is informational only — Bun reports ENOENT where the
+    //     kernel returns EACCES.)
     const dirStat = need("agent.mitm-dir-stat");
     const statEntries = dirStat.split(",");
     if (dirStat === "none" || statEntries.some((e) => e !== `700:${GUEST_SIDECAR_UID}`)) {
@@ -908,14 +910,16 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
           "vacuous) or not sidecar-private",
       );
     }
-    for (const probe of ["mitm-dir-readdir", "mitm-socket-connect"]) {
+    const connects = marker(log, "agent.mitm-socket-connect") ?? "not-reported";
+    for (const probe of ["mitm-dir-readdir", "mitm-socket-stat"]) {
       const value = need(`agent.${probe}`);
       const results = value.split(",");
       const allDenied = results.every((r) => PERMISSION_DENIED.test(r));
       if (results.length !== statEntries.length || !allDenied) {
         fail(
-          `the agent's ${probe} on the MITM socket dir(s) got ${value}, expected EACCES for ` +
-            "each — the MITM listener's inner servers are reachable outside the sidecar",
+          `the agent's ${probe} on the MITM socket dir(s) got ${value} (connect: ${connects}), ` +
+            "expected EACCES for each — the MITM listener's inner servers are reachable " +
+            "outside the sidecar",
         );
       }
     }

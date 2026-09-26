@@ -140,8 +140,16 @@ export function exchange(host, port, payload, timeoutMs) {
 }
 
 /**
- * Deliver a report to the agent: write it, half-close, and settle "acked" only
- * once the agent answered "ok" — i.e. it read (and printed) every line.
+ * The line that closes a report on the agent channel. The agent acks on it,
+ * not on the client's half-close: Bun closes an accepted socket as soon as the
+ * peer's FIN arrives, before an `end` handler's write goes out, so an ack sent
+ * from there never arrived and every runner re-sent its report each second.
+ */
+export const REPORT_END = "END";
+
+/**
+ * Deliver a report to the agent: write its lines and {@link REPORT_END}, and
+ * settle "acked" only once the agent answered "ok" — i.e. it read every line.
  */
 export function deliver(host, port, text, timeoutMs) {
   return new Promise((resolve) => {
@@ -162,7 +170,7 @@ export function deliver(host, port, text, timeoutMs) {
     );
     socket.on("connect", () => {
       connected = true;
-      socket.end(text);
+      socket.write(text + REPORT_END + "\n");
     });
     socket.on("data", (chunk) => {
       data += chunk.toString("latin1");
@@ -174,14 +182,16 @@ export function deliver(host, port, text, timeoutMs) {
 }
 
 /**
- * A TLS handshake to host:port presenting `servername` as SNI.
- * `rejectUnauthorized` is off on purpose: the question is whether ANY TLS
- * server answered.
+ * A fully verified TLS handshake to host:port presenting `servername` as SNI
+ * (public roots, hostname checked against `servername`): `secure` means the
+ * real `servername` answered — through a splice, when host:port is the
+ * transparent plane. A refusal is a reset or close; a wrong certificate is an
+ * `error:<verification code>`.
  */
 export function tlsHandshake(host, port, servername, timeoutMs) {
   return new Promise((resolve) => {
     let settled = false;
-    const socket = tls.connect({ host, port, servername, rejectUnauthorized: false });
+    const socket = tls.connect({ host, port, servername });
     const settle = (result) => {
       if (settled) return;
       settled = true;

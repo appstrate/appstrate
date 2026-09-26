@@ -31,8 +31,8 @@
  * another prefix (`runner-egress-diag`), so the host never reads it by mistake.
  *
  * Channel protocol (one request per connection, newline-separated):
- *   - marker lines, then EOF → the agent validates and prints each line, then
- *     acks `ok`. The `<id>.done=1` line (sent only once every probe, child
+ *   - marker lines, then `END` → the agent validates each line, prints it
+ *     once (a re-sent report adds nothing), and acks `ok` on `END`. The `<id>.done=1` line (sent only once every probe, child
  *     processes included, has settled) marks this runner finished.
  *   - `GET <id>.<probe>` → the agent answers the value it holds, or `unknown`
  *     (r2 learns r1's listener address this way). `GET agent.go` answers `1`
