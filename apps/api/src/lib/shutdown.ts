@@ -21,6 +21,7 @@ import { drainProxyMetering } from "../services/llm-proxy/metering.ts";
 import { stopRunWatchdog } from "../services/run-watchdog.ts";
 import { stopRuntimeImageWarmer } from "../services/orchestrator/runtime-image-warmer.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
+import { stopAgentRuntimeRecovery } from "../services/orchestrator/agent-runtime-readiness.ts";
 import { stopUploadGc } from "../services/uploads.ts";
 import { stopFileGc } from "../services/files.ts";
 import { stopStorageDeletionWorker } from "../services/storage-deletion.ts";
@@ -73,6 +74,8 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     stopUploadGc();
     stopFileGc();
     stopStorageDeletionWorker();
+    // Retire the init retry loop: a late attempt must not act on an orchestrator being shut down.
+    stopAgentRuntimeRecovery();
     await getOrchestrator().shutdown();
 
     // Unsubscribe from cancel channel before draining to avoid processing

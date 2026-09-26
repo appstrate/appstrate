@@ -17,6 +17,9 @@
  *     handler — routes must never run before their dependencies exist.
  *   - Once `markServerReady()` fires, the gate is transparent: requests reach
  *     the real handlers, `/health` runs its real checks.
+ *   - `checks.agents` is read live from the orchestrator readiness module, so
+ *     a failed boot handshake that later succeeds on retry flips `/health`
+ *     back to healthy without a restart (#1129).
  *
  * The gate is mounted before EVERY other middleware except request-id /
  * telemetry / client-ip / CORS / body-limit, so this test mounts it the same
@@ -31,6 +34,11 @@ import healthRouter, {
   _resetServerReadyForTesting,
 } from "../../../src/routes/health.ts";
 import { initRealtime } from "../../../src/services/realtime.ts";
+import {
+  initializeAgentRuntime,
+  isAgentRuntimeReady,
+  _resetAgentRuntimeReadinessForTesting,
+} from "../../../src/services/orchestrator/agent-runtime-readiness.ts";
 import { errorHandler } from "../../../src/middleware/error-handler.ts";
 import type { AppEnv } from "../../../src/types/index.ts";
 
@@ -45,14 +53,31 @@ function buildGatedApp(): Hono<AppEnv> {
   return app;
 }
 
+type HealthBody = { status: string; checks?: { agents?: { status?: string } } };
+
+async function getHealth(app: Hono<AppEnv>): Promise<{ httpStatus: number; body: HealthBody }> {
+  const res = await app.request("/health");
+  return { httpStatus: res.status, body: (await res.json()) as HealthBody };
+}
+
+/** An orchestrator whose boot handshake fails, as on a runtime-image pull error. */
+const failingOrchestrator = {
+  initialize: async (): Promise<void> => {
+    throw new Error("runtime image pull failed");
+  },
+};
+
 describe("boot gate", () => {
   beforeEach(() => {
     _resetServerReadyForTesting();
+    _resetAgentRuntimeReadinessForTesting();
   });
 
   afterEach(() => {
-    // Never leave the module-level flag flipped for other suites.
+    // Never leave the module-level flags flipped (or a retry timer armed) for
+    // other suites.
     _resetServerReadyForTesting();
+    _resetAgentRuntimeReadinessForTesting();
   });
 
   // ─── While starting ────────────────────────────────────
@@ -111,7 +136,7 @@ describe("boot gate", () => {
     // registered after the bind.
     expect((await app.request("/api/agents")).status).toBe(503);
 
-    markServerReady({ agentsHealthy: true });
+    markServerReady();
 
     const res = await app.request("/api/agents");
     expect(res.status).toBe(200);
@@ -127,7 +152,8 @@ describe("boot gate", () => {
     // The rollup also reads `checks.realtime`, which boot installs; do the same
     // here so this asserts the agents dimension it is about.
     await initRealtime();
-    markServerReady({ agentsHealthy: true });
+    await initializeAgentRuntime({ initialize: async () => {} });
+    markServerReady();
 
     const res = await app.request("/health");
 
@@ -144,16 +170,42 @@ describe("boot gate", () => {
 
   it("reports degraded when boot completes without the agents orchestrator", async () => {
     const app = buildGatedApp();
-    markServerReady({ agentsHealthy: false });
+    await initializeAgentRuntime(failingOrchestrator);
+    markServerReady();
 
-    const res = await app.request("/health");
-    const body = (await res.json()) as {
-      status: string;
-      checks?: { agents?: { status?: string } };
-    };
+    const { httpStatus, body } = await getHealth(app);
 
-    expect(res.status).toBe(200);
+    expect(httpStatus).toBe(200);
     expect(body.status).toBe("degraded");
     expect(body.checks?.agents?.status).toBe("degraded");
+  });
+
+  it("recovers to healthy without a restart once the orchestrator init succeeds on retry (#1129)", async () => {
+    const app = buildGatedApp();
+    await initRealtime();
+    let dependencyUp = false;
+    await initializeAgentRuntime(
+      {
+        initialize: async () => {
+          if (!dependencyUp) throw new Error("runtime image pull failed");
+        },
+      },
+      { initialDelayMs: 1, maxDelayMs: 4 },
+    );
+    markServerReady();
+
+    const before = await getHealth(app);
+    expect(before.body.status).toBe("degraded");
+    expect(before.body.checks?.agents?.status).toBe("degraded");
+
+    // The transient failure clears; the background retry must pick it up.
+    dependencyUp = true;
+    const deadline = Date.now() + 2_000;
+    while (!isAgentRuntimeReady() && Date.now() < deadline) await Bun.sleep(5);
+
+    const after = await getHealth(app);
+    expect(after.httpStatus).toBe(200);
+    expect(after.body.status).toBe("healthy");
+    expect(after.body.checks?.agents?.status).toBe("healthy");
   });
 });

@@ -23321,7 +23321,7 @@ export interface operations {
                                 status?: "healthy" | "unhealthy";
                                 latency_ms?: number;
                             };
-                            /** @description Agent runtime readiness established during platform boot. */
+                            /** @description Agent runtime readiness: `degraded` until the run orchestrator has initialized. A failed boot handshake is retried in the background, so this recovers without a restart. */
                             agents?: {
                                 /** @enum {string} */
                                 status?: "healthy" | "degraded";
