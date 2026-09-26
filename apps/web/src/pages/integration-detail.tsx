@@ -15,8 +15,8 @@
  *     table of connected accounts with rename / share / reconnect / disconnect.
  *     Runtime view, visible to members.
  *   - Configuration (admin) — per-auth metadata (scopes, resource, authorized
- *     URIs), the OAuth clients table (system + custom) and the BYO-app
- *     registration form, the org-wide access rules (block member connections,
+ *     URIs), the OAuth clients table (system + org + space custom), the org's
+ *     own clients table (org admins), the BYO-app registration form, the org-wide access rules (block member connections,
  *     default connection, per-agent pins), and the publisher setup guide.
  *   - Outils — read-only catalog of tools the integration exposes (resolved
  *     server-side via `resolveIntegrationToolCatalog`: MCPB-canonical from
@@ -111,6 +111,7 @@ import {
   type IntegrationAuthStatus,
   type IntegrationAuthType,
   type IntegrationClient,
+  type IntegrationClientTier,
   type IntegrationConnection,
   type IntegrationManifestAuth,
 } from "../hooks/use-integrations";
@@ -140,6 +141,7 @@ import { ConnectionStatusBadge } from "../components/integration-connect/connect
  * back, shown as a placeholder when one is already set.
  */
 function OAuthClientModal({
+  tier,
   packageId,
   authKey,
   authDecl,
@@ -148,6 +150,7 @@ function OAuthClientModal({
   platformRedirectUri,
   onClose,
 }: {
+  tier: IntegrationClientTier;
   packageId: string;
   authKey: string;
   authDecl?: IntegrationManifestAuth;
@@ -157,8 +160,8 @@ function OAuthClientModal({
   onClose: () => void;
 }) {
   const { t } = useTranslation("settings");
-  const create = useCreateIntegrationOAuthClient();
-  const rotate = useRotateIntegrationOAuthClient();
+  const create = useCreateIntegrationOAuthClient(tier);
+  const rotate = useRotateIntegrationOAuthClient(tier);
   const pending = mode === "create" ? create.isPending : rotate.isPending;
   const [clientId, setClientId] = useState(existing?.client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
@@ -343,34 +346,41 @@ function OAuthClientModal({
 /**
  * The admin hub for an auth's OAuth clients: every client that can mint a
  * connection — the platform's system client(s) (`SYSTEM_INTEGRATIONS`,
- * read-only) plus the org's N custom (BYO-app) clients — with which is the
+ * read-only) plus N custom (BYO-app) clients — with which is the
  * default. Multi-client: an admin registers as many custom clients as needed,
  * rotates or deletes each by id, and picks the default (the model-provider
  * pattern). Auto-provisioned (remote MCP DCR/CIMD) auths keep ONE machine
  * client, shown read-only with a delete action that re-triggers registration;
  * a manual escape hatch (opt-in) covers the rare server needing a pre-registered
  * public client. Secrets are never returned by the endpoint.
+ *
+ * `tier` picks the routes: `space` lists the space's own clients plus the
+ * inherited org and system ones (only its own are editable; the default is
+ * settable where `default_selectable`); `org` manages the org's clients,
+ * inherited by every space.
  */
 function ClientsTable({
+  tier,
   packageId,
   authKey,
   authDecl,
   autoProvisioned,
 }: {
+  tier: IntegrationClientTier;
   packageId: string;
   authKey: string;
   authDecl?: IntegrationManifestAuth;
   autoProvisioned: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const { data: clients } = useIntegrationClients(packageId, authKey);
+  const { data: clients } = useIntegrationClients(tier, packageId, authKey);
   // Read from the same query key the page already holds, rather than threading
   // the value down through `ConfigAuthBlock`, which would carry a prop it never
   // reads. React Query dedupes, so this costs no request.
   const { data: detail } = useIntegrationDetail(packageId);
   const platformRedirectUri = detail?.platform_redirect_uri ?? "";
-  const setDefault = useSetDefaultIntegrationClient();
-  const del = useDeleteIntegrationOAuthClient();
+  const setDefault = useSetDefaultIntegrationClient(tier);
+  const del = useDeleteIntegrationOAuthClient(tier);
   const [modal, setModal] = useState<
     { mode: "create" } | { mode: "rotate"; client: IntegrationClient } | null
   >(null);
@@ -389,30 +399,40 @@ function ClientsTable({
   // exactly the setup this display exists to get right. New connections always
   // use the default client, so that client's override is the one that decides.
   const effectiveRedirectUri = rows.find((c) => c.is_default)?.redirect_uri || platformRedirectUri;
-  // Choosing a default only matters when more than one client can mint connections.
-  const canChooseDefault = rows.length > 1;
+  // Choosing a default only matters when more than one row may be picked here.
+  const canChooseDefault = rows.filter((c) => c.default_selectable).length > 1;
+  // The rows this tier owns (edit/delete); the others are inherited.
+  const ownSource = tier === "space" ? "custom" : "org";
+  // Both tables share the page, and an org row shows in both: prefix the org
+  // table's test ids so none collide.
+  const tid = (id: string) => (tier === "space" ? id : `org-${id}`);
   const hasAutoClient = rows.some((c) => c.auto_provisioned);
   // Classic auths always allow registering more custom clients; auto-provisioned
   // auths only via the opt-in escape hatch (and only when none is registered yet).
   const canRegister = !autoProvisioned || (showManual && !hasAutoClient);
 
   return (
-    <div className="mb-3" data-testid={`oauth-clients-list-${authKey}`}>
+    <div
+      className={tier === "space" ? "mb-3" : "mt-4 mb-3 border-t pt-4"}
+      data-testid={tid(`oauth-clients-list-${authKey}`)}
+    >
       {/* Registering this exact string on the provider's OAuth app is a
           prerequisite to the FIRST connect attempt, so it is shown before the
           clients table rather than only inside the registration modal — an
           admin setting the app up at the provider needs it before there is any
-          client to register. */}
-      <div className="mb-3 space-y-1">
-        <p className="text-muted-foreground text-xs font-semibold">
-          {t("integration.oauthClient.platformRedirectUri")}
-        </p>
-        <CopyBlock value={effectiveRedirectUri} testId={`platform-redirect-uri-${authKey}`} />
-      </div>
+          client to register. Once per auth: the org table follows this one. */}
+      {tier === "space" && (
+        <div className="mb-3 space-y-1">
+          <p className="text-muted-foreground text-xs font-semibold">
+            {t("integration.oauthClient.platformRedirectUri")}
+          </p>
+          <CopyBlock value={effectiveRedirectUri} testId={`platform-redirect-uri-${authKey}`} />
+        </div>
+      )}
 
       <div className="mb-2 flex items-center justify-between gap-2">
         <h4 className="text-muted-foreground text-xs font-semibold">
-          {t("integration.clients.title")}
+          {tier === "space" ? t("integration.clients.title") : t("integration.clients.orgTitle")}
         </h4>
         {canRegister && (
           <Button
@@ -421,13 +441,17 @@ function ClientsTable({
             variant="outline"
             className="h-7 text-xs"
             onClick={() => setModal({ mode: "create" })}
-            data-testid={`oauth-client-register-${authKey}`}
+            data-testid={tid(`oauth-client-register-${authKey}`)}
           >
             <Plus size={14} />
             {t("integration.clients.register")}
           </Button>
         )}
       </div>
+
+      {tier === "org" && (
+        <p className="text-muted-foreground mb-2 text-xs">{t("integration.clients.orgHint")}</p>
+      )}
 
       {autoProvisioned && !hasAutoClient && (
         <p
@@ -453,12 +477,12 @@ function ClientsTable({
             </TableHeader>
             <TableBody>
               {rows.map((client) => {
-                const editable = client.source === "custom" && !client.auto_provisioned;
-                const deletable = client.source === "custom";
+                const deletable = client.source === ownSource;
+                const editable = deletable && !client.auto_provisioned;
                 return (
                   <TableRow
                     key={client.client_ref}
-                    data-testid={`oauth-client-row-${client.client_ref}`}
+                    data-testid={tid(`oauth-client-row-${client.client_ref}`)}
                   >
                     <TableCell>
                       <SourceBadge
@@ -472,7 +496,7 @@ function ClientsTable({
                         isDefault={client.is_default}
                         defaultLabel={t("integration.clients.default")}
                         setLabel={t("integration.clients.setDefault.action")}
-                        canSetDefault={canChooseDefault}
+                        canSetDefault={canChooseDefault && client.default_selectable}
                         disabled={setDefault.isPending}
                         onSetDefault={() =>
                           setDefault.mutate({
@@ -480,7 +504,7 @@ function ClientsTable({
                             body: { client_ref: client.client_ref },
                           })
                         }
-                        testId={`set-default-client-${client.client_ref}`}
+                        testId={tid(`set-default-client-${client.client_ref}`)}
                       />
                     </TableCell>
                     <TableCell className="text-right">
@@ -492,7 +516,7 @@ function ClientsTable({
                             variant="ghost"
                             className="h-7 w-7 p-0"
                             onClick={() => setModal({ mode: "rotate", client })}
-                            data-testid={`oauth-client-rotate-${client.client_ref}`}
+                            data-testid={tid(`oauth-client-rotate-${client.client_ref}`)}
                             aria-label={t("integration.oauthClient.btnRotate")}
                           >
                             <Pencil size={14} />
@@ -506,7 +530,7 @@ function ClientsTable({
                             className="h-7 w-7 p-0"
                             onClick={() => setConfirmDelete(client)}
                             disabled={del.isPending}
-                            data-testid={`oauth-client-delete-${client.client_ref}`}
+                            data-testid={tid(`oauth-client-delete-${client.client_ref}`)}
                             aria-label={t("integration.oauthClient.btnDelete")}
                           >
                             <Trash2 size={14} className="text-destructive" />
@@ -538,6 +562,7 @@ function ClientsTable({
       {modal && (
         <OAuthClientModal
           key={modal.mode === "rotate" ? modal.client.client_ref : "create"}
+          tier={tier}
           packageId={packageId}
           authKey={authKey}
           authDecl={authDecl}
@@ -551,7 +576,11 @@ function ClientsTable({
         open={confirmDelete !== null}
         onClose={() => setConfirmDelete(null)}
         title={t("btn.confirm", { ns: "common" })}
-        description={t("integration.oauthClient.delete.confirm")}
+        description={
+          tier === "space"
+            ? t("integration.oauthClient.delete.confirm")
+            : t("integration.oauthClient.delete.confirmOrg")
+        }
         isPending={del.isPending}
         onConfirm={() => {
           if (!confirmDelete) return;
@@ -686,6 +715,7 @@ function ConfigAuthBlock({
   authDecl: IntegrationManifestAuth;
 }) {
   const { t } = useTranslation("settings");
+  const { can } = usePermissions();
   const isOAuth = status.type === "oauth2";
 
   return (
@@ -722,13 +752,25 @@ function ConfigAuthBlock({
         </div>
       )}
 
-      {/* OAuth clients (system + custom) — list, register, rotate, delete, default. */}
+      {/* OAuth clients (system + org + space) — list, register, rotate, delete, default. */}
       {isOAuth && (
         <ClientsTable
+          tier="space"
           packageId={packageId}
           authKey={status.auth_key}
           authDecl={authDecl}
           autoProvisioned={status.client_auto_provisioned}
+        />
+      )}
+      {/* The org's own clients, inherited by every space. Auto-provisioned
+          (DCR/CIMD) clients are per space, so those auths have no org tier. */}
+      {isOAuth && !status.client_auto_provisioned && can("org-integrations:configure") && (
+        <ClientsTable
+          tier="org"
+          packageId={packageId}
+          authKey={status.auth_key}
+          authDecl={authDecl}
+          autoProvisioned={false}
         />
       )}
       {!isOAuth && (

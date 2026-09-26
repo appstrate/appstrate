@@ -7,19 +7,23 @@ import { Badge } from "@appstrate/ui/components/badge";
  * The provenance badge shared by every system+DB table (integration OAuth
  * clients, models, model-provider credentials, proxies): `built-in` (a
  * platform/env entry, read-only), `auto-provisioned` (a DCR/CIMD machine
- * client, read-only) or `custom` (the org's own row). One component so the
+ * client, read-only), `org` (an integration OAuth client inherited from the
+ * organization) or `custom` (the org's — or space's — own row). One component so the
  * wording + variant never drift across surfaces.
  */
 export function SourceBadge({
   source,
   autoProvisioned = false,
 }: {
-  source: "built-in" | "custom";
+  source: "built-in" | "org" | "custom";
   autoProvisioned?: boolean;
 }) {
   const { t } = useTranslation("settings");
   if (source === "built-in") {
     return <Badge variant="secondary">{t("source.builtIn")}</Badge>;
+  }
+  if (source === "org") {
+    return <Badge variant="secondary">{t("source.org")}</Badge>;
   }
   if (autoProvisioned) {
     return <Badge variant="outline">{t("source.autoProvisioned")}</Badge>;
