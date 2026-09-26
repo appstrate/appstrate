@@ -5,9 +5,11 @@
  * assistant-ui runtime, not the generic failure.
  *
  * `turn-error-state.test.ts` feeds `turnErrorState` a hand-built
- * `{ code, message }`; here the Error goes in where the AI SDK transport puts
- * it (`throw new Error(await response.text())`) and everything after is real.
- * `useAISDKRuntime` normalizes it with its private `toChatError`, and
+ * `{ code, message }`; here the error goes in as the AI SDK throws it and
+ * everything after is real. A refusal is the transport's `APICallError` (body as
+ * `message`); an in-stream failure is `new Error(errorText)` from the `error`
+ * chunk. `useAISDKRuntime` normalizes either with its private `toChatError`
+ * (`code: "AI_APICallError"` for the first, `"unknown"` for the second), and
  * `completeExternalMessageConversion` (`@assistant-ui/core`) appends an
  * assistant message with `status.reason: "error"` after the last user message.
  * Both run during render, so SSR is enough.
@@ -17,6 +19,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { renderToString } from "react-dom/server";
 import { AssistantRuntimeProvider, ThreadPrimitive } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
+import { APICallError } from "ai";
 import { conflict } from "@appstrate/core/api-errors";
 
 import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
@@ -76,18 +79,28 @@ function renderFailedTurn(error: Error, host: ChatHost = member): string {
   );
 }
 
+/** A refused request, as `createUIApiCallError` (`ai`) throws it. */
+function refused<P extends { status: number }>(problem: P): APICallError {
+  const responseBody = JSON.stringify(problem);
+  return new APICallError({
+    message: responseBody,
+    url: "/api/chat",
+    requestBodyValues: undefined,
+    statusCode: problem.status,
+    responseBody,
+  });
+}
+
 /** The 402 body `usageRejectionResponse` (`src/chat-stream.ts`) answers with. */
 const usageRefusal = (code: string, ownCredentialAdmitted = false) =>
-  new Error(
-    JSON.stringify({
-      type: "https://docs.appstrate.dev/errors/usage-not-allowed",
-      title: "Usage not allowed",
-      status: 402,
-      detail: "English prose for API consumers.",
-      code,
-      own_credential_admitted: ownCredentialAdmitted,
-    }),
-  );
+  refused({
+    type: "https://docs.appstrate.dev/errors/usage-not-allowed",
+    title: "Usage not allowed",
+    status: 402,
+    detail: "English prose for API consumers.",
+    code,
+    own_credential_admitted: ownCredentialAdmitted,
+  });
 
 describe("a failed chat turn, through the real assistant-ui runtime", () => {
   // Only the own-credential case seeds the catalog; leave it empty for the rest.
@@ -126,13 +139,14 @@ describe("a failed chat turn, through the real assistant-ui runtime", () => {
   it("names a dead model credential, with no retry", () => {
     // The 409 `chat-stream.ts` throws, serialized as the API's error handler does.
     const body = conflict("needs_reconnection", "Credential revoked.").toProblemDetail("req_1");
-    const html = renderFailedTurn(new Error(JSON.stringify(body)));
+    const html = renderFailedTurn(refused(body));
     expect(html).toContain("turn.error.needsReconnection");
     expect(html).not.toContain("turn.error.unknown");
     expect(html).not.toContain("turn.retry");
   });
 
   it("names an in-stream rate limit, and offers a retry", () => {
+    // What `processUIMessageStream` (`ai`) raises for an `error` chunk.
     const html = renderFailedTurn(new Error("appstrate:chat-turn-error:rate_limited"));
     expect(html).toContain("turn.error.rateLimited");
     expect(html).toContain("turn.retry");

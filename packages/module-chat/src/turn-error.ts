@@ -92,15 +92,15 @@ export interface TurnRefusal {
  *
  * A turn refused by the admission gate or by a dead subscription credential
  * never enters the stream, so no `appstrate:chat-turn-error:` marker is ever
- * emitted. Instead the AI SDK puts the raw HTTP body in an Error's message and
- * throws it — `ai/src/ui/http-chat-transport.ts`: `throw new Error(await
- * response.text())`, on both `sendMessages` and `reconnectToStream`, so the
- * resumed path lands here too. That body is the `application/problem+json` our
- * refusals answer with (`chat-stream.ts`), so parsing the message back into a
- * problem document recovers what the transport discarded. Its `code` is the
- * stable machine-readable half of the contract; its `detail` is English prose
- * for API consumers (as everywhere else in this API) and must NOT be shown in
- * a localized UI. Return the code so the caller can pick its own sentence.
+ * emitted. Instead the AI SDK's HTTP chat transport throws an `APICallError`
+ * whose `message` is the raw response body (`ai/src/ui/create-ui-api-call-error.ts`),
+ * on both `sendMessages` and `reconnectToStream`, so the resumed path lands
+ * here too; assistant-ui then normalizes it to `{ code, message }`. That body is
+ * the `application/problem+json` our refusals answer with (`chat-stream.ts`), so
+ * parsing the message recovers the problem document. Its `code` is the stable
+ * machine-readable half of the contract; its `detail` is English prose for API
+ * consumers (as everywhere else in this API) and must NOT be shown in a
+ * localized UI. Return the refusal so the caller can pick its own sentence.
  *
  * Only a REFUSAL carries a code worth displaying: 401/402/403/409 mean "you
  * must act". Any other status (a module failing closed with a 500) describes an

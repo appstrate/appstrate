@@ -26,10 +26,10 @@ const turn = (fields: Record<string, unknown>) => ({
 });
 
 /**
- * `message.status.error` as assistant-ui actually stores it: the runtime runs
- * every thrown value through `toAssistantError` (`@assistant-ui/core`, not
- * re-exported by `@assistant-ui/react`), which turns an Error — and a string —
- * into `{ code: "unknown", message }`. Mirrored here rather than imported.
+ * `message.status.error` as assistant-ui actually stores it: the AI-SDK runtime
+ * normalizes the thrown error with `toChatError` (`@assistant-ui/ai-sdk`, not
+ * exported) into `{ code, message }`. Mirrored here rather than imported; the
+ * `code` does not matter here, `turn-error-runtime.test.tsx` drives the real one.
  */
 const assistantError = (message: string) => ({ code: "unknown", message });
 
@@ -190,6 +190,12 @@ describe("turnErrorState", () => {
         refused("turn.error.needsReconnection"),
       );
     }
+  });
+
+  it("names an organization being deleted, with no retry", () => {
+    // The 409 `usageRejectionResponse` answers once the org's deletion is reserved.
+    const deleting = failed(problem({ status: 409, code: "org_deleting" }));
+    expect(turnErrorState(deleting, t, manager)).toEqual(refused("turn.error.orgDeleting"));
   });
 
   it("degrades a refusal code it has no sentence for to the generic failure", () => {

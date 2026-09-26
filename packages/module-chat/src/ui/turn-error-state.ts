@@ -56,6 +56,7 @@ const REFUSAL: Record<string, { text: string; billing?: true }> = {
   quota_exceeded: { text: "turn.error.quotaExceeded", billing: true },
   subscription_blocked: { text: "turn.error.subscriptionBlocked", billing: true },
   needs_reconnection: { text: "turn.error.needsReconnection" },
+  org_deleting: { text: "turn.error.orgDeleting" },
 };
 
 /** What the reader can do about a refusal, as the host resolved it. */
@@ -150,11 +151,11 @@ export function turnErrorState(
       };
     }
     const manager = refusal.billing && context.canManageBilling;
-    const sentences = [
-      refusal.text,
-      refusal.billing && !manager && "turn.error.contactAdmin",
-      read.ownCredentialAdmitted && context.hasOwnCredentialModel && "turn.error.otherModel",
-    ].filter((key): key is string => typeof key === "string");
+    const sentences = [refusal.text];
+    if (refusal.billing && !manager) sentences.push("turn.error.contactAdmin");
+    if (read.ownCredentialAdmitted && context.hasOwnCredentialModel) {
+      sentences.push("turn.error.otherModel");
+    }
     return {
       text: sentences.map((key) => t(key)).join(" "),
       retryable: false,

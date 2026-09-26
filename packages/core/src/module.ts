@@ -1489,9 +1489,9 @@ export interface PlatformServices {
   /**
    * Chat admission gate — the chat-surface entry point into the `beforeUsage`
    * hook. The chat module calls this before starting ANY turn, and the platform
-   * dispatches the hook for every one of them. A turn refused with 402 is asked
-   * once more, hypothetically, with `subscription: true` — a turn that will not
-   * run — so the hook must answer without side effects. Returns a
+   * dispatches the hook for every one of them. A non-subscription turn refused
+   * with 402 is asked once more, hypothetically, with `subscription: true` — a
+   * turn that will not run — so the hook must answer without side effects. Returns a
    * {@link UsageRejection} to block the turn (the module surfaces it as an RFC
    * 9457 problem response with the hook's status — 402 flows through), or null
    * to allow.

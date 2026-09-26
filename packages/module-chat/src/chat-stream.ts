@@ -448,11 +448,15 @@ export async function handleChatStream(
   };
   const rejection = await deps.checkUsageAllowed(gateArgs);
   if (rejection) {
-    // 402: would the org's own credential get through? A subscription turn just asked that.
+    // 402: would the org's own credential get through? Best-effort: a failed probe says no.
+    // A BYOK turn is re-asked too: only the platform tells BYOK from system models.
     const ownCredentialAdmitted =
       rejection.status === 402 &&
       !isSubscription &&
-      (await deps.checkUsageAllowed({ ...gateArgs, subscription: true })) === null;
+      (await deps.checkUsageAllowed({ ...gateArgs, subscription: true }).then(
+        (probe) => probe === null,
+        () => false,
+      ));
     const refused = usageRejectionResponse(rejection, ownCredentialAdmitted);
     logger.info("chat turn refused by admission gate", {
       code: rejection.code,

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`beforeUsage` must be a side-effect-free query** (`@appstrate/core/module`,
+  #1582) — the chat surface may dispatch it a second time, hypothetically, for a
+  turn it refused with 402.
+
 ## [12.0.0] — 2026-09-25
 
 ### Added

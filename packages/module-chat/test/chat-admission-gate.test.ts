@@ -244,6 +244,27 @@ describe("chat admission gate (handleChatStream)", () => {
     expect(await res.json()).toMatchObject({ code: "over_cap", own_credential_admitted: true });
   });
 
+  it("a throwing probe still answers the 402, as not admitted", async () => {
+    const c = fakeContext({
+      orgId: ctx.orgId,
+      user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
+      spaceId: ctx.defaultSpaceId,
+      body: { messages: [userTurn("u1", "hello")] },
+    });
+    const res = await handleChatStream(
+      c,
+      fakeDeps({
+        checkUsageAllowed: async (args) => {
+          if (args.subscription) throw new Error("gate unavailable");
+          return REJECTION;
+        },
+      }),
+    );
+
+    expect(res.status).toBe(402);
+    expect(await res.json()).toMatchObject({ code: "over_cap", own_credential_admitted: false });
+  });
+
   it("does not probe a subscription turn", async () => {
     // The probe would ask the identical question: its answer is the refusal.
     const gateArgs: GateArgs[] = [];

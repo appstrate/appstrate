@@ -61,6 +61,7 @@
   "turn.error.otherModel": "Vous pouvez aussi choisir un autre modèle.",
   "turn.error.manageBilling": "Gérer la facturation",
   "turn.error.needsReconnection": "La connexion du modèle sélectionné a expiré ou a été révoquée. Reconnectez-la, puis réessayez.",
+  "turn.error.orgDeleting": "Cette organisation est en cours de suppression.",
   "turn.error.requestId": "Identifiant de requête : {{id}}",
   "turn.retry": "Réessayer",
   "turn.retryPrompt": "Réessaie ma dernière demande. Vérifie d’abord l’état actuel avant de répéter une action qui aurait peut-être déjà réussi.",
