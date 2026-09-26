@@ -163,18 +163,12 @@ jobs:
         with:
           generate_release_notes: true
           # Never GitHub's "latest". `appstrate self-update`, `bootstrap.sh`
-          # and `bootstrap-runner.sh` resolve "latest" by LISTING the Releases
-          # API and taking the newest platform `v<semver>` tag — they no longer
-          # follow `releases/latest`, precisely because every non-`v*` release
-          # published before this line became "latest" until the next `v*` tag
-          # and broke all three (cli@1.0.0-beta.56:
-          # `vcli@1.0.0-beta.56/checksums.txt.minisig` → 404).
-          #
-          # The flag still matters, so do NOT drop it: "latest" remains visible
-          # wherever nothing lists — the residual `releases/latest/download`
-          # redirect the firecracker guest-artifact resolver still uses when
+          # and `bootstrap-runner.sh` no longer read it: they resolve "latest"
+          # from the signed channel manifest (get.appstrate.dev/channels/latest.json).
+          # The flag still matters, so do NOT drop it: GitHub's "latest" is what
+          # the Releases UI shows humans and what every `releases/latest/download`
+          # redirect follows — e.g. the firecracker guest-artifact resolver when
           # `FIRECRACKER_ARTIFACTS_VERSION` is unset
-          # (`apps/api/src/modules/firecracker/runner/artifacts.ts`), and the
-          # GitHub UI / repo sidebar, where an npm tag would be shown to humans
-          # as the project's current release.
+          # (`apps/api/src/modules/firecracker/runner/artifacts.ts`), which an npm
+          # release there would 404.
           make_latest: false

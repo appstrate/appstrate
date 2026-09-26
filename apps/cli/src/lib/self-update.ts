@@ -9,8 +9,9 @@
  * formats user-facing prompts; this module owns the algorithm.
  *
  * Channel handling (issue #249, phase 2):
- *   - `curl`: download release asset + signed checksums + minisign sig,
- *     verify, atomic-rename over `process.execPath`.
+ *   - `curl`: resolve the target (a `--release` pin, else the tag named by the
+ *     minisign-signed channel manifest), download release asset + signed
+ *     checksums + minisign sig, verify, atomic-rename over `process.execPath`.
  *   - `bun`: refuse with `bun update -g appstrate` hint (npm owns the
  *     binary, our atomic-replace would desync npm metadata).
  *   - `unknown`: refuse with a diagnostic — we cannot prove what produced
@@ -36,43 +37,15 @@ export const APPSTRATE_MINISIGN_PUBKEY = "RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaX
 
 const RELEASE_URL_BASE = "https://github.com/appstrate/appstrate/releases";
 /**
- * The newest releases, not `releases/latest`. GitHub's `latest` is whichever
- * non-prerelease Release was created last, whatever its tag — a `cli@`, `core@`
- * or `afps-shared@` Release created without `make_latest: false`, or by hand in
- * the UI, would be handed back here and carries no CLI binary. Listing lets the
- * CLI pick the newest platform `v<semver>` Release itself, so nothing outside
- * `release.yml` can steer an update.
+ * The signed channel manifest naming the newest platform release
+ * (`{ schema: 1, channel: "latest", tag: "v<semver>" }`), published by
+ * `publish-installer.yml` next to the installer and signed with the release
+ * key. It replaces any GitHub API lookup: it is not rate limited, and only the
+ * workflow holding the key can move it — a `cli@`/`core@` Release, or one
+ * created by hand, cannot steer an update.
  */
-const RELEASES_API_URL = "https://api.github.com/repos/appstrate/appstrate/releases";
-// 100 is the API maximum, and the walk always reads every page, so a larger
-// page is strictly fewer requests. Two pages = 200 releases, ~50 platform
-// cycles, bounded against GitHub's 60 req/h unauthenticated limit.
-const RELEASES_PAGE_SIZE = 100;
-const RELEASES_MAX_PAGES = 2;
-const PLATFORM_TAG = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-
-function releasesPageUrl(page: number): string {
-  return `${RELEASES_API_URL}?per_page=${RELEASES_PAGE_SIZE}&page=${page}`;
-}
-
-/**
- * Error thrown by the default fetch deps when an HTTP request returns a
- * non-2xx. Carries the status so callers can special-case rate limits
- * (GitHub's unauthenticated API caps at 60 req/h per IP — a shared CI
- * runner hitting the limit would otherwise show a generic "non-JSON"
- * error). Test fakes that throw plain `Error` are unaffected.
- */
-export class HttpError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-    public readonly statusText: string,
-    public readonly url: string,
-  ) {
-    super(message);
-    this.name = "HttpError";
-  }
-}
+const CHANNEL_MANIFEST_URL = "https://get.appstrate.dev/channels/latest.json";
+const CHANNEL_TAG = /^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$/;
 
 export type Platform = "darwin" | "linux";
 export type Architecture = "x64" | "arm64";
@@ -132,8 +105,8 @@ interface ReleaseUrls {
  * UX is identical whether the user is bootstrapping or self-updating.
  */
 export function releaseUrls(version: string, info: PlatformInfo): ReleaseUrls {
-  // Always a pinned tag: `resolveTargetVersion` turns "latest" into the newest
-  // platform `v*` Release first, so `releases/latest/download` is never built.
+  // Always a pinned tag: `resolveTargetVersion` turns "latest" into the tag the
+  // signed channel manifest names first, so `releases/latest/download` is never built.
   const base = `${RELEASE_URL_BASE}/download/v${stripVersionPrefix(version)}`;
   const asset = assetName(info);
   return {
@@ -257,19 +230,29 @@ export function compareSemver(a: string, b: string): number {
   return 0;
 }
 
-export interface SelfUpdateDeps {
+/** I/O needed to download a small minisign-signed text artefact and verify it. */
+export interface ReleaseChannelDeps {
+  /** GET a URL and return the body as bytes (small artefacts: the minisig). */
+  fetchBinary(url: string): Promise<Uint8Array>;
+  /** GET a URL and return the body as text (checksums.txt, the channel manifest). */
+  fetchText(url: string): Promise<string>;
+  /** Run a subprocess; same shape as `runCommand`. */
+  runCommand(cmd: string, args: string[]): Promise<CommandResult>;
+  /** Write a file (used in the work dir for minisign input). */
+  writeFile(path: string, data: Uint8Array | string): Promise<void>;
+  /** Working directory for downloaded artefacts (signed file + sig). */
+  makeWorkDir(): Promise<string>;
+  /** Best-effort `rm -rf` — cleans the work dir (and, for self-update, the staged download). */
+  removeDir(path: string): Promise<void>;
+}
+
+export interface SelfUpdateDeps extends ReleaseChannelDeps {
   /**
    * Stream a URL to `dest` on disk and return its on-the-fly SHA-256. Used for
    * the large CLI binary — progress ticks feed a spinner, and a stalled
    * download aborts instead of hanging forever. Throws on HTTP error.
    */
   fetchToFile(url: string, dest: string, onProgress?: ProgressFn): Promise<{ sha256: string }>;
-  /** GET a URL and return the body as bytes (small artefacts: the minisig). */
-  fetchBinary(url: string): Promise<Uint8Array>;
-  /** GET a URL and return the body as text (small artefact: checksums.txt). */
-  fetchText(url: string): Promise<string>;
-  /** Run a subprocess; same shape as `runCommand`. */
-  runCommand(cmd: string, args: string[]): Promise<CommandResult>;
   /** `process.execPath` — the running binary path that gets atomic-renamed over. */
   execPath(): string;
   /**
@@ -279,12 +262,6 @@ export interface SelfUpdateDeps {
    * running binary. Tests stub this to avoid touching the real binary.
    */
   promoteFile(staged: string, dest: string): Promise<void>;
-  /** Working directory for downloaded artefacts (checksums + sig). */
-  makeWorkDir(): Promise<string>;
-  /** Best-effort `rm -rf` — cleans the work dir and the staged download. */
-  removeDir(path: string): Promise<void>;
-  /** Write a file (used in the work dir for minisign input). */
-  writeFile(path: string, data: Uint8Array | string): Promise<void>;
 }
 
 export const defaultSelfUpdateDeps: SelfUpdateDeps = {
@@ -299,14 +276,7 @@ export const defaultSelfUpdateDeps: SelfUpdateDeps = {
       headers: { "User-Agent": CLI_USER_AGENT },
       redirect: "follow",
     });
-    if (!res.ok) {
-      throw new HttpError(
-        `GET ${url} → ${res.status} ${res.statusText}`,
-        res.status,
-        res.statusText,
-        url,
-      );
-    }
+    if (!res.ok) throw new Error(`GET ${url} → ${res.status} ${res.statusText}`);
     return new Uint8Array(await res.arrayBuffer());
   },
   async fetchText(url) {
@@ -314,14 +284,7 @@ export const defaultSelfUpdateDeps: SelfUpdateDeps = {
       headers: { "User-Agent": CLI_USER_AGENT },
       redirect: "follow",
     });
-    if (!res.ok) {
-      throw new HttpError(
-        `GET ${url} → ${res.status} ${res.statusText}`,
-        res.status,
-        res.statusText,
-        url,
-      );
-    }
+    if (!res.ok) throw new Error(`GET ${url} → ${res.status} ${res.statusText}`);
     return res.text();
   },
   runCommand,
@@ -345,22 +308,122 @@ export const defaultSelfUpdateDeps: SelfUpdateDeps = {
   },
 };
 
-export interface ResolveTargetVersionDeps {
-  fetchText(url: string): Promise<string>;
+/**
+ * minisign is not installed. Its own class so the "pin a release" hints can
+ * pass it through untouched: a pinned install verifies with minisign too.
+ */
+export class MinisignMissingError extends Error {}
+
+/**
+ * Download a small text artefact and its detached minisign signature into
+ * `workDir`, verify them against the pinned Appstrate release key, and return
+ * the text. The content is only handed back once the signature holds, so no
+ * caller can parse bytes the release key did not sign.
+ *
+ * Fails closed when minisign is absent — same UX as bootstrap.sh: a signed
+ * check we cannot perform is no check at all. The probe runs before any
+ * download, so a host without minisign fails without touching the network.
+ * `subject` names the artefact in both failure messages.
+ */
+export async function fetchSignedText(
+  deps: ReleaseChannelDeps,
+  opts: { url: string; sigUrl: string; workDir: string; subject: string },
+): Promise<string> {
+  const probe = await deps.runCommand("minisign", ["-v"]);
+  if (!probe.ok && probe.exitCode === -1) {
+    // `runCommand` returns exitCode -1 for ENOENT (cmd not found).
+    throw new MinisignMissingError(
+      [
+        `minisign is required to verify ${opts.subject}.`,
+        "  → macOS:   brew install minisign",
+        "  → Debian:  sudo apt install minisign",
+        "  → Alpine:  apk add minisign",
+        "  → RHEL:    dnf install minisign",
+        "  → Other:   https://jedisct1.github.io/minisign/",
+      ].join("\n"),
+    );
+  }
+
+  const [text, sig] = await Promise.all([deps.fetchText(opts.url), deps.fetchBinary(opts.sigUrl)]);
+  const filePath = join(opts.workDir, opts.url.slice(opts.url.lastIndexOf("/") + 1));
+  const sigPath = `${filePath}.minisig`;
+  await deps.writeFile(filePath, text);
+  await deps.writeFile(sigPath, sig);
+  const check = await deps.runCommand("minisign", [
+    "-V",
+    "-m",
+    filePath,
+    "-x",
+    sigPath,
+    "-P",
+    APPSTRATE_MINISIGN_PUBKEY,
+  ]);
+  if (!check.ok) {
+    throw new Error(
+      `Signature verification FAILED: ${opts.subject} was NOT signed by the Appstrate ` +
+        `release key. Refusing to continue (broken release or tampering). ` +
+        `Report at https://github.com/appstrate/appstrate/issues`,
+    );
+  }
+  return text;
 }
 
 /**
- * Resolve the tag name to install. Defaults to the newest platform `v*`
- * Release (lists the GitHub Releases API), but accepts an explicit version
- * (`1.2.3` or `v1.2.3`).
- *
- * The API call is cheap (one GET) and avoids the GitHub-issued redirect chain
- * on `releases/latest/download/<asset>` which otherwise costs three round-trips
- * per file (binary + checksums + sig = 9 redirects).
+ * The newest platform release, as named by the signed channel manifest
+ * ({@link CHANNEL_MANIFEST_URL}), without the `v` prefix. The signature is
+ * verified BEFORE the body is parsed, then the manifest must be exactly the
+ * published contract. Every failure throws; callers append the pin escape
+ * hatch that fits their command (except to a {@link MinisignMissingError}).
+ */
+export async function resolveLatestRelease(deps: ReleaseChannelDeps): Promise<string> {
+  const workDir = await deps.makeWorkDir();
+  let body: string;
+  try {
+    body = await fetchSignedText(deps, {
+      url: CHANNEL_MANIFEST_URL,
+      sigUrl: `${CHANNEL_MANIFEST_URL}.minisig`,
+      workDir,
+      subject: "the release channel manifest",
+    });
+  } finally {
+    await deps.removeDir(workDir).catch(() => {});
+  }
+
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(body);
+  } catch {
+    throw new Error(`The channel manifest ${CHANNEL_MANIFEST_URL} is not valid JSON.`);
+  }
+  const { schema, channel, tag } = (manifest ?? {}) as {
+    schema?: unknown;
+    channel?: unknown;
+    tag?: unknown;
+  };
+  if (schema !== 1) {
+    throw new Error(`Unsupported channel manifest schema ${JSON.stringify(schema)} (expected 1).`);
+  }
+  if (channel !== "latest") {
+    throw new Error(
+      `The channel manifest is for channel ${JSON.stringify(channel)}, not "latest".`,
+    );
+  }
+  if (typeof tag !== "string" || !CHANNEL_TAG.test(tag)) {
+    throw new Error(
+      `The channel manifest names ${JSON.stringify(tag)}, not a platform v<semver> release tag.`,
+    );
+  }
+  return normalizeVersion(tag);
+}
+
+/**
+ * Resolve the version to install, without the `v` prefix. An explicit version
+ * (`1.2.3` or `v1.2.3`) is validated and returned without any network call;
+ * otherwise the signed channel manifest names the newest release.
  */
 export async function resolveTargetVersion(
   requested: string | undefined,
-  deps: ResolveTargetVersionDeps,
+  deps: ReleaseChannelDeps,
 ): Promise<string> {
   if (requested) {
     const v = normalizeVersion(requested);
@@ -373,78 +436,16 @@ export async function resolveTargetVersion(
     }
     return v;
   }
-  // The API orders releases by creation date, newest first. Only a platform
-  // `v<semver>` release carries the CLI binaries; the npm workflows (`cli@`,
-  // `core@`, `afps-shared@`) publish their own Releases and are skipped by
-  // tag, the same way `releases/latest` skips drafts and prereleases.
-  //
-  // EVERY page is collected before the HIGHEST version wins: creation order and
-  // version order diverge whenever a hotfix is cut for an older line, so the
-  // first page holding a candidate can hold the LOWER one.
-  const skipped: string[] = [];
-  const candidates: string[] = [];
-  for (let page = 1; page <= RELEASES_MAX_PAGES; page++) {
-    const releases = await fetchReleasesPage(deps, page);
-    for (const release of releases) {
-      if (!release || typeof release !== "object") continue;
-      const { tag_name, draft, prerelease } = release as {
-        tag_name?: unknown;
-        draft?: unknown;
-        prerelease?: unknown;
-      };
-      if (typeof tag_name !== "string") continue;
-      if (draft === true || prerelease === true) continue;
-      if (PLATFORM_TAG.test(tag_name)) candidates.push(tag_name);
-      else skipped.push(tag_name);
-    }
-    // GitHub fills every page but the last, so a short page is the end of the
-    // list: stop instead of spending a request on a page known to be empty.
-    if (releases.length < RELEASES_PAGE_SIZE) break;
-  }
-  if (candidates.length > 0) {
-    candidates.sort(compareSemver);
-    return normalizeVersion(candidates[candidates.length - 1]!);
-  }
-  throw new Error(
-    `No platform v* release among the newest ${skipped.length} GitHub Releases` +
-      (skipped.length > 0 ? ` (${skipped.slice(0, 5).join(", ")})` : "") +
-      `. Pin one with --release X.Y.Z.`,
-  );
-}
-
-/** One page of the Releases list, newest first. Empty past the last page. */
-async function fetchReleasesPage(deps: ResolveTargetVersionDeps, page: number): Promise<unknown[]> {
-  let body: string;
   try {
-    body = await deps.fetchText(releasesPageUrl(page));
+    return await resolveLatestRelease(deps);
   } catch (err) {
-    // GitHub's unauthenticated API caps at 60 req/h per IP. On shared CI
-    // runners this often surfaces as a 403 with X-RateLimit-Remaining: 0;
-    // distinguish that case so the user gets a direct fix ("authenticate
-    // or pin --release") instead of a generic "non-JSON" error.
-    if (err instanceof HttpError && err.status === 403) {
-      throw new Error(
-        `GitHub Releases API returned 403 (likely rate-limited). ` +
-          `Pin a specific version with --release X.Y.Z, or wait for the ` +
-          `60 req/h-per-IP limit to reset.`,
-        // "likely" is a guess from the status code alone. The HttpError holds
-        // GitHub's actual response body, which says whether it was the rate
-        // limit or something else — keep it reachable instead of guessing.
-        { cause: err },
-      );
-    }
-    throw err;
+    if (err instanceof MinisignMissingError) throw err;
+    throw new Error(
+      `${(err as Error).message}\n` +
+        `Pin a release with --release X.Y.Z to skip the channel manifest (${CHANNEL_MANIFEST_URL}).`,
+      { cause: err },
+    );
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    throw new Error(`GitHub Releases API returned non-JSON; cannot determine latest version.`);
-  }
-  if (!Array.isArray(parsed)) {
-    throw new Error(`GitHub Releases API response is not a release list.`);
-  }
-  return parsed as unknown[];
 }
 
 interface PerformCurlUpdateOptions {
@@ -502,33 +503,15 @@ export async function performCurlUpdate(
     );
   }
 
-  // Never move backwards. The resolver picks the highest published `v*`, so a
-  // target below the running version means either a `--release` naming an older
-  // line or a release that vanished from the list — in both cases installing it
-  // strands the user on the older binary, and the next run would resolve the
-  // same target and keep them there. `--force` is the deliberate override.
+  // Never move backwards. A target below the running version means either a
+  // `--release` naming an older line or a channel manifest pointing back at one
+  // (a rolled-back publish) — in both cases installing it strands the user on
+  // the older binary, and the next run would resolve the same target and keep
+  // them there. `--force` is the deliberate override.
   if (!opts.force) {
     const cmp = compareSemver(current, target);
     if (cmp === 0) return { status: "already-up-to-date", version: current };
     if (cmp > 0) return { status: "refused-downgrade", version: current };
-  }
-
-  // Require minisign on PATH. Same UX as bootstrap.sh — fail closed; a
-  // signed-checksum check we can't perform is no check at all. The user
-  // already has a working `appstrate` binary; nothing breaks if we don't
-  // upgrade today.
-  const minisignProbe = await deps.runCommand("minisign", ["-v"]);
-  if (!minisignProbe.ok && minisignProbe.exitCode === -1) {
-    // `runCommand` returns exitCode -1 for ENOENT (cmd not found).
-    throw new Error(
-      [
-        "minisign is required to verify the Appstrate CLI update.",
-        "  → macOS:   brew install minisign",
-        "  → Debian:  sudo apt install minisign",
-        "  → Alpine:  apk add minisign",
-        "  → Other:   https://jedisct1.github.io/minisign/",
-      ].join("\n"),
-    );
   }
 
   const dest = deps.execPath();
@@ -545,33 +528,17 @@ export async function performCurlUpdate(
     const asset = assetName(opts.platform);
 
     // Fetch + verify the small signed manifest FIRST, before the large binary
-    // stream. Two reasons: (1) it fails fast on a bad/missing signature without
-    // pulling ~113 MB; (2) it avoids running the big stream concurrently with
-    // the sidecars — a Promise.all reject would run cleanup while the stream is
-    // still writing `staged`, leaving an orphan download behind.
-    const [checksumsTxt, checksumsSig] = await Promise.all([
-      deps.fetchText(urls.checksums),
-      deps.fetchBinary(urls.checksumsSig),
-    ]);
-    const sumsPath = join(workDir, "checksums.txt");
-    const sigPath = join(workDir, "checksums.txt.minisig");
-    await deps.writeFile(sumsPath, checksumsTxt);
-    await deps.writeFile(sigPath, checksumsSig);
-
+    // stream. Two reasons: (1) it fails fast on a missing minisign or a bad
+    // signature without pulling ~113 MB; (2) it avoids running the big stream
+    // concurrently with the sidecars — a Promise.all reject would run cleanup
+    // while the stream is still writing `staged`, leaving an orphan download.
     log(`→ Verifying signature against Appstrate release key`);
-    const sigCheck = await deps.runCommand("minisign", [
-      "-Vm",
-      sumsPath,
-      "-P",
-      APPSTRATE_MINISIGN_PUBKEY,
-    ]);
-    if (!sigCheck.ok) {
-      throw new Error(
-        `Signature verification FAILED. ` +
-          `The checksums manifest was NOT signed by the Appstrate key. ` +
-          `Refusing to install. Report at https://github.com/appstrate/appstrate/issues`,
-      );
-    }
+    const checksumsTxt = await fetchSignedText(deps, {
+      url: urls.checksums,
+      sigUrl: urls.checksumsSig,
+      workDir,
+      subject: "the release checksums manifest",
+    });
 
     log(`→ Downloading Appstrate CLI ${target} (${asset})`);
     const { sha256: actual } = await deps.fetchToFile(urls.binary, staged, opts.onProgress);

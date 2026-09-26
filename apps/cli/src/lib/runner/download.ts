@@ -27,9 +27,11 @@ import {
 import type { RunnerExec, RunnerFs, RunnerHttp } from "./exec.ts";
 import type { ProgressFn } from "../download.ts";
 import {
-  APPSTRATE_MINISIGN_PUBKEY,
+  fetchSignedText,
+  MinisignMissingError,
   parseChecksumLine,
-  resolveTargetVersion,
+  resolveLatestRelease,
+  type ReleaseChannelDeps,
 } from "../self-update.ts";
 import { stripVersionPrefix } from "@appstrate/core/semver";
 
@@ -53,31 +55,61 @@ export function parseSha256(text: string): string {
 }
 
 /**
+ * The runner seams as the signed-artefact I/O `self-update` verifies with. The
+ * minisign inputs are written through `RunnerFs`, but into a scratch temp dir
+ * created and removed directly: it is throwaway, never host state.
+ */
+function releaseChannelDeps(opts: {
+  http: RunnerHttp;
+  exec: RunnerExec;
+  fs: RunnerFs;
+}): ReleaseChannelDeps {
+  return {
+    fetchText: (url) => opts.http.fetchText(url),
+    fetchBinary: (url) => opts.http.fetchBinary(url),
+    runCommand: (cmd, args) => opts.exec.run(cmd, args),
+    writeFile: (path, data) => opts.fs.writeFile(path, data),
+    makeWorkDir: () => mkdtemp(join(tmpdir(), "appstrate-runner-verify-")),
+    removeDir: (path) => rm(path, { recursive: true, force: true }),
+  };
+}
+
+/**
  * Turn the lockstep daemon version into a PINNED release tag.
  *
  * `resolveDaemonVersion()` (commands/runner.ts) yields the literal `"latest"`
  * for a dev build of the CLI, and that is what `runner install` and
  * `runner update` pass down. It is resolved here the same way
- * `appstrate self-update` resolves it — list the GitHub Releases and take the
- * newest platform `v<semver>` tag — instead of being turned into a
- * `releases/latest/download` URL.
+ * `appstrate self-update` resolves it — the tag named by the minisign-signed
+ * channel manifest — instead of being turned into a `releases/latest/download`
+ * URL, which follows whichever Release GitHub marks latest (a `cli@`/`core@`
+ * one carries no runner assets).
  *
- * Why not the redirect: GitHub's "latest" is whichever NON-prerelease Release
- * was created last, whatever its tag. A `cli@`, `core@` or `afps-shared@`
- * Release carries no runner assets, so the moment one of them is marked latest
- * (the failure `make_latest: false` in the three npm publish workflows exists
- * to prevent) every URL built off it 404s. Listing lets the CLI pick a release
- * that actually ships `appstrate-runner-<arch>` + the signed `checksums.txt`,
- * so nothing outside `release.yml` can steer a daemon install.
- *
- * Anything that is not `"latest"` is already a pin and passes straight through.
+ * Anything that is not `"latest"` is already a pin and passes straight through
+ * without a network call.
  */
 export async function resolveDaemonReleaseVersion(
   version: string,
-  http: Pick<RunnerHttp, "fetchText">,
+  deps: ReleaseChannelDeps,
 ): Promise<string> {
   if (version !== "latest") return version;
-  return resolveTargetVersion(undefined, { fetchText: (url) => http.fetchText(url) });
+  try {
+    return await resolveLatestRelease(deps);
+  } catch (err) {
+    // A pinned release verifies with minisign too: no hint helps there.
+    if (err instanceof MinisignMissingError) throw err;
+    // Only a dev CLI gets here: a release CLI pins the daemon to its own
+    // version, so the escape hatch is running one. The bootstrap uses the tag
+    // verbatim (hence the `v`) and elevates with `sudo -E` itself — no outer sudo.
+    throw new Error(
+      `${(err as Error).message}\n` +
+        `A dev CLI resolves the runner daemon to the latest release; a release CLI pins it ` +
+        `to its own version. Use a release CLI instead, e.g. ` +
+        `\`curl -fsSL https://get.appstrate.dev/runner | APPSTRATE_VERSION=vX.Y.Z bash -s -- ` +
+        `--platform-url <url> --token <token>\`.`,
+      { cause: err },
+    );
+  }
 }
 
 /**
@@ -141,7 +173,8 @@ export async function downloadDaemon(opts: {
   // A dev CLI passes "latest"; turn it into a concrete platform `v*` release
   // BEFORE any URL is built (see resolveDaemonReleaseVersion). Every message
   // below then names the release that was actually fetched, not "latest".
-  const version = await resolveDaemonReleaseVersion(opts.version, opts.http);
+  const deps = releaseChannelDeps(opts);
+  const version = await resolveDaemonReleaseVersion(opts.version, deps);
   const urls = daemonUrls(version, opts.arch);
   const asset = daemonAssetName(opts.arch);
   // Fixed staged name (no pid suffix): a retry after a crash/SIGKILL simply
@@ -157,17 +190,20 @@ export async function downloadDaemon(opts: {
   //    `stagedPath`. A 404 here almost always means this release shipped
   //    WITHOUT runner assets — the firecracker/daemon build jobs are decoupled
   //    from the core release (release.yml) and may have failed for this tag.
+  const workDir = await deps.makeWorkDir();
   let checksumsTxt: string;
-  let checksumsSig: Uint8Array;
   try {
-    [checksumsTxt, checksumsSig] = await Promise.all([
-      opts.http.fetchText(urls.checksums),
-      opts.http.fetchBinary(urls.checksumsSig),
-    ]);
+    checksumsTxt = await fetchSignedText(deps, {
+      url: urls.checksums,
+      sigUrl: urls.checksumsSig,
+      workDir,
+      subject: "the runner checksums manifest",
+    });
   } catch (err) {
     throw asRunnerAssetError(err, version, asset);
+  } finally {
+    await deps.removeDir(workDir).catch(() => {});
   }
-  await verifyDaemonSignature({ exec: opts.exec, fs: opts.fs, checksumsTxt, checksumsSig });
 
   // 2. Stream the daemon binary to disk, then verify its streamed digest
   //    against the (now trusted) manifest line for this asset.
@@ -216,63 +252,11 @@ function asRunnerAssetError(err: unknown, version: string, asset: string): Error
         `from the core release (release.yml) and likely failed for this tag. The daemon ` +
         `version is locked to the CLI version, so pin a CLI release that shipped runner ` +
         `assets and retry: \`appstrate self-update --release <previous-version>\` (or ` +
-        `re-bootstrap with APPSTRATE_VERSION=<previous-version>), then re-run ` +
+        `re-bootstrap with APPSTRATE_VERSION=v<previous-version>), then re-run ` +
         `\`appstrate runner install\`. Releases: https://github.com/appstrate/appstrate/releases`,
     );
   }
   return err instanceof Error ? err : new Error(msg);
-}
-
-/**
- * Verify `checksums.txt` against `checksums.txt.minisig` with the pinned
- * Appstrate release key via the system `minisign` binary. Mirrors the CLI
- * self-update verify path (`lib/self-update.ts`) and
- * `scripts/bootstrap-runner.sh` — fail closed when minisign is absent or the
- * signature does not verify. `minisign -Vm` resolves the `.minisig`
- * automatically from the sibling file, so both are written to one work dir.
- */
-async function verifyDaemonSignature(opts: {
-  exec: RunnerExec;
-  fs: RunnerFs;
-  checksumsTxt: string;
-  checksumsSig: Uint8Array;
-}): Promise<void> {
-  const probe = await opts.exec.run("minisign", ["-v"]);
-  if (!probe.ok && probe.exitCode === -1) {
-    // exitCode -1 = ENOENT (minisign not on PATH).
-    throw new Error(
-      [
-        "minisign is required to verify the runner daemon download (signed checksums).",
-        "  → Debian:  sudo apt install minisign",
-        "  → Alpine:  apk add minisign",
-        "  → RHEL:    dnf install minisign",
-        "  → Other:   https://jedisct1.github.io/minisign/",
-      ].join("\n"),
-    );
-  }
-
-  const work = await mkdtemp(join(tmpdir(), "appstrate-runner-verify-"));
-  try {
-    const sumsPath = join(work, "checksums.txt");
-    const sigPath = join(work, "checksums.txt.minisig");
-    await opts.fs.writeFile(sumsPath, opts.checksumsTxt);
-    await opts.fs.writeFile(sigPath, opts.checksumsSig);
-    const check = await opts.exec.run("minisign", [
-      "-Vm",
-      sumsPath,
-      "-P",
-      APPSTRATE_MINISIGN_PUBKEY,
-    ]);
-    if (!check.ok) {
-      throw new Error(
-        `Signature verification FAILED — the runner checksums manifest was NOT signed by the ` +
-          `Appstrate release key. Refusing to install (broken release or tampering). ` +
-          `Report at https://github.com/appstrate/appstrate/issues`,
-      );
-    }
-  } finally {
-    await rm(work, { recursive: true, force: true }).catch(() => {});
-  }
 }
 
 /** Build the firecracker tarball URLs for the pinned version. */

@@ -34,6 +34,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `IntegrationOAuthClient.spaceId` is nullable (`null` = org client), and a
   client descriptor's `source` gains `"org"`.
 
+- **"latest" now comes from a signed channel manifest, not the GitHub Releases
+  API** (#1271). `appstrate self-update`, the dev CLI's `runner install` /
+  `runner update` daemon download, and `scripts/bootstrap.sh` /
+  `scripts/bootstrap-runner.sh` (when `APPSTRATE_VERSION` is `latest` or left
+  unrendered) read `https://get.appstrate.dev/channels/latest.json`
+  (`{ schema: 1, channel: "latest", tag: "v…" }`) and its `.minisig`, verified
+  against the pinned release key before the body is parsed. No GitHub API call,
+  so no 60 req/h rate limit. Behaviour changes: an unpinned `self-update` now
+  needs minisign even when the CLI is already up to date;
+  `APPSTRATE_SKIP_VERIFY=1` together with `latest` is refused — pin a version;
+  `publish-installer.yml` only moves the root installers and the manifest
+  forward by SemVer, so re-publishing an older release no longer rolls them
+  back.
+
 ### Fixed
 
 - **Runs on an aliased model backed by the OpenCode Go provider no longer fail

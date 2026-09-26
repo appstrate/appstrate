@@ -22,11 +22,10 @@ import {
   type PerformCurlUpdateResult,
   type PlatformInfo,
   type SelfUpdateDeps,
-  type ResolveTargetVersionDeps,
 } from "../lib/self-update.ts";
 
 interface SelfUpdateOptions {
-  /** Specific version to install. Default: latest published release. */
+  /** Specific version to install. Default: the release the signed channel manifest names. */
   version?: string;
   /** Reinstall even if the current version equals the target. */
   force?: boolean;
@@ -107,10 +106,9 @@ export async function runSelfUpdate(opts: SelfUpdateOptions = {}): Promise<SelfU
 
   // source === "curl"
   const deps = opts.deps ?? defaultSelfUpdateDeps;
-  const resolveDeps: ResolveTargetVersionDeps = { fetchText: deps.fetchText.bind(deps) };
   let target: string;
   try {
-    target = await resolveTargetVersion(opts.version, resolveDeps);
+    target = await resolveTargetVersion(opts.version, deps);
   } catch (err) {
     return {
       exitCode: SELF_UPDATE_EXIT.UPDATE_FAILED,

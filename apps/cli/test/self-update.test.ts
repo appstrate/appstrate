@@ -3,13 +3,16 @@
 import { describe, it, expect } from "bun:test";
 
 import {
+  APPSTRATE_MINISIGN_PUBKEY,
   assetName,
   compareSemver,
   detectPlatform,
+  MinisignMissingError,
   normalizeVersion,
   parseChecksumLine,
   releaseUrls,
   resolveTargetVersion,
+  type ReleaseChannelDeps,
   type SelfUpdateDeps,
 } from "../src/lib/self-update.ts";
 import { runSelfUpdate, SELF_UPDATE_EXIT } from "../src/commands/self-update.ts";
@@ -18,8 +21,9 @@ import { runSelfUpdate, SELF_UPDATE_EXIT } from "../src/commands/self-update.ts"
  * Phase 2 — `appstrate self-update` (issue #249).
  *
  * Pure helpers (parsing, asset/url derivation, semver compare) get exhaustive
- * unit coverage. The full update flow is tested with a fake `SelfUpdateDeps`
- * that records every call — no network, no minisign, no real binary touched.
+ * unit coverage. Version resolution (the signed channel manifest) and the full
+ * update flow are tested with fakes that record every call — no network, no
+ * minisign, no real binary touched.
  */
 
 describe("detectPlatform", () => {
@@ -156,192 +160,172 @@ describe("normalizeVersion", () => {
   });
 });
 
-describe("resolveTargetVersion", () => {
-  it("returns the requested version stripped of v", async () => {
-    const out = await resolveTargetVersion("v1.4.0", {
-      fetchText: async () => "should not be called",
-    });
-    expect(out).toBe("1.4.0");
-  });
+// ─── resolveTargetVersion (signed channel manifest) ────────────────────────
 
-  it("rejects a non-semver requested version", async () => {
-    await expect(
-      resolveTargetVersion("not-a-version", { fetchText: async () => "" }),
-    ).rejects.toThrow(/Invalid version/);
-  });
+const MANIFEST_URL = "https://get.appstrate.dev/channels/latest.json";
+const MANIFEST_SIG_URL = `${MANIFEST_URL}.minisig`;
 
-  const RELEASES_URL = "https://api.github.com/repos/appstrate/appstrate/releases";
-  const release = (tag_name: string, flags: { draft?: boolean; prerelease?: boolean } = {}) => ({
-    tag_name,
-    draft: flags.draft ?? false,
-    prerelease: flags.prerelease ?? false,
-  });
-  /**
-   * Pad a page to `per_page` entries with filler npm-package Releases. GitHub
-   * fills every page but the last, and the resolver reads that as "keep
-   * walking" — a short page ends the walk, so a multi-page fixture needs full
-   * pages to be reached at all.
-   */
-  const fullPage = (...head: unknown[]) => [
-    ...head,
-    ...Array.from({ length: 100 - head.length }, (_, i) => release(`core@9.0.${i}`)),
-  ];
-  /** Serve `pages[n-1]` for `page=n`, `[]` past the last one, like GitHub. */
-  const paged = (pages: unknown[][], calls?: string[]) => async (url: string) => {
-    calls?.push(url);
-    const page = Number(new URL(url).searchParams.get("page"));
-    return JSON.stringify(pages[page - 1] ?? []);
+/** A channel manifest body; `fields` override the valid defaults. */
+function manifest(fields: Record<string, unknown> = {}): string {
+  return JSON.stringify({ schema: 1, channel: "latest", tag: "v1.0.0-beta.63", ...fields });
+}
+
+interface ChannelFake {
+  deps: ReleaseChannelDeps;
+  fetched: string[];
+  commands: Array<{ cmd: string; args: string[] }>;
+  written: string[];
+  removed: string[];
+}
+
+/** Records every side effect of a manifest resolution; no network, no minisign. */
+function channelFake(
+  opts: { body?: string; minisign?: "ok" | "missing" | "bad-sig"; fetchError?: string } = {},
+): ChannelFake {
+  const fake: Omit<ChannelFake, "deps"> = { fetched: [], commands: [], written: [], removed: [] };
+  const get = (url: string) => {
+    // The manifest replaced the GitHub API outright: no request may reach it.
+    if (url.includes("api.github.com")) throw new Error(`GitHub API requested: ${url}`);
+    fake.fetched.push(url);
+    if (opts.fetchError) throw new Error(opts.fetchError);
   };
-
-  it("lists GitHub releases when no version is requested", async () => {
-    const calls: string[] = [];
-    const out = await resolveTargetVersion(undefined, {
-      fetchText: paged([[release("v2.5.0")]], calls),
-    });
-    expect(out).toBe("2.5.0");
-    // A short page is the last one: no request is spent probing for an empty
-    // page 2.
-    expect(calls).toEqual([`${RELEASES_URL}?per_page=100&page=1`]);
-  });
-
-  it("skips newer npm-package releases and picks the newest platform v* release", async () => {
-    // The exact shape of the "latest" hijack: a `cli@` Release created after
-    // the platform one. `releases/latest` would return it; the list does not.
-    const out = await resolveTargetVersion(undefined, {
-      fetchText: paged([
-        [
-          release("cli@1.0.0-beta.56"),
-          release("core@9.0.0"),
-          release("v1.0.0-beta.56"),
-          release("v1.0.0-beta.55"),
-        ],
-      ]),
-    });
-    expect(out).toBe("1.0.0-beta.56");
-  });
-
-  it("picks the highest version on the page, not the most recently created", async () => {
-    // A hotfix for an older line published after a newer release: creation
-    // order (what `releases/latest` uses) would hand back 1.0.1.
-    const out = await resolveTargetVersion(undefined, {
-      fetchText: paged([[release("v1.0.1"), release("v1.1.0"), release("v1.0.0")]]),
-    });
-    expect(out).toBe("1.1.0");
-  });
-
-  it("orders beta builds numerically when picking the highest", async () => {
-    const out = await resolveTargetVersion(undefined, {
-      fetchText: paged([[release("v1.0.0-beta.9"), release("v1.0.0-beta.57")]]),
-    });
-    expect(out).toBe("1.0.0-beta.57");
-  });
-
-  it("skips draft and prerelease v* releases like releases/latest does", async () => {
-    const out = await resolveTargetVersion(undefined, {
-      fetchText: paged([
-        [
-          release("v3.0.0", { draft: true }),
-          release("v2.9.0-rc.1", { prerelease: true }),
-          release("v2.8.0"),
-        ],
-      ]),
-    });
-    expect(out).toBe("2.8.0");
-  });
-
-  it("walks to the next page when the newest one holds only npm-package releases", async () => {
-    const calls: string[] = [];
-    const out = await resolveTargetVersion(undefined, {
-      fetchText: paged(
-        [fullPage(release("cli@1.0.0-beta.56")), [release("v1.0.0-beta.56")]],
-        calls,
-      ),
-    });
-    expect(out).toBe("1.0.0-beta.56");
-    expect(calls).toEqual([
-      `${RELEASES_URL}?per_page=100&page=1`,
-      `${RELEASES_URL}?per_page=100&page=2`,
-    ]);
-  });
-
-  it("picks the highest version ACROSS pages, not the highest on the first page holding one", async () => {
-    // Issue #1361. `v1.1.0` shipped, a full page of npm Releases accumulated,
-    // then `v1.0.1` was cut for the old line — so page 1 holds only the lower
-    // version. Returning on the first page with a candidate downgrades every
-    // user to 1.0.1 and pins them there.
-    const calls: string[] = [];
-    const out = await resolveTargetVersion(undefined, {
-      fetchText: paged(
-        [fullPage(release("v1.0.1"), release("cli@1.0.1")), [release("v1.1.0")]],
-        calls,
-      ),
-    });
-    expect(out).toBe("1.1.0");
-    expect(calls).toHaveLength(2);
-  });
-
-  it("stops at the page cap and still returns the highest candidate seen", async () => {
-    // The cap bounds the API calls; it must not turn into an early return that
-    // reintroduces the first-page pick.
-    const calls: string[] = [];
-    const out = await resolveTargetVersion(undefined, {
-      fetchText: async (url) => {
-        calls.push(url);
-        const page = Number(new URL(url).searchParams.get("page"));
-        return JSON.stringify(fullPage(release(page === 1 ? "v1.0.1" : "v1.1.0")));
+  return {
+    ...fake,
+    deps: {
+      async fetchText(url) {
+        get(url);
+        return opts.body ?? manifest();
       },
-    });
-    expect(out).toBe("1.1.0");
-    expect(calls).toHaveLength(2);
+      async fetchBinary(url) {
+        get(url);
+        return new Uint8Array([0xde, 0xad]);
+      },
+      async runCommand(cmd, args) {
+        fake.commands.push({ cmd, args });
+        if (opts.minisign === "missing") {
+          return { ok: false, exitCode: -1, stdout: "", stderr: "ENOENT" };
+        }
+        if (opts.minisign === "bad-sig" && args[0] === "-V") {
+          return { ok: false, exitCode: 1, stdout: "", stderr: "BAD SIG" };
+        }
+        return { ok: true, exitCode: 0, stdout: "", stderr: "" };
+      },
+      async writeFile(path) {
+        fake.written.push(path);
+      },
+      async makeWorkDir() {
+        return "/tmp/fake-channel";
+      },
+      async removeDir(path) {
+        fake.removed.push(path);
+      },
+    },
+  };
+}
+
+describe("resolveTargetVersion", () => {
+  it("returns a pinned version stripped of v without touching the network", async () => {
+    const fake = channelFake();
+    expect(await resolveTargetVersion("v1.4.0", fake.deps)).toBe("1.4.0");
+    expect(fake.fetched).toEqual([]);
+    expect(fake.commands).toEqual([]);
   });
 
-  it("names the releases it saw when none is a platform v* release", async () => {
-    const calls: string[] = [];
-    await expect(
-      resolveTargetVersion(undefined, {
-        fetchText: paged([[release("cli@1.0.0-beta.56"), release("core@9.0.0")]], calls),
-      }),
-    ).rejects.toThrow(
-      /No platform v\* release among the newest 2 .*cli@1\.0\.0-beta\.56, core@9\.0\.0/,
+  it("rejects a non-semver pinned version", async () => {
+    const fake = channelFake();
+    await expect(resolveTargetVersion("not-a-version", fake.deps)).rejects.toThrow(
+      /Invalid version/,
     );
-    // A short page is the last one: stopped there, not at the page cap.
-    expect(calls).toHaveLength(1);
+    expect(fake.fetched).toEqual([]);
   });
 
-  it("stops at the page cap when every page holds only npm-package releases", async () => {
-    const calls: string[] = [];
-    await expect(
-      resolveTargetVersion(undefined, {
-        fetchText: async (url) => {
-          calls.push(url);
-          return JSON.stringify(fullPage(release("cli@1.0.0-beta.56")));
-        },
-      }),
-    ).rejects.toThrow(/No platform v\* release among the newest 200 /);
-    expect(calls).toHaveLength(2);
+  it("resolves the tag the signed channel manifest names", async () => {
+    const fake = channelFake();
+    expect(await resolveTargetVersion(undefined, fake.deps)).toBe("1.0.0-beta.63");
+    // Exactly the manifest and its signature — nothing else is requested.
+    expect(fake.fetched).toEqual([MANIFEST_URL, MANIFEST_SIG_URL]);
+    expect(fake.written).toEqual([
+      "/tmp/fake-channel/latest.json",
+      "/tmp/fake-channel/latest.json.minisig",
+    ]);
+    expect(fake.commands).toEqual([
+      { cmd: "minisign", args: ["-v"] },
+      {
+        cmd: "minisign",
+        args: [
+          "-V",
+          "-m",
+          "/tmp/fake-channel/latest.json",
+          "-x",
+          "/tmp/fake-channel/latest.json.minisig",
+          "-P",
+          APPSTRATE_MINISIGN_PUBKEY,
+        ],
+      },
+    ]);
+    // The scratch copies are cleaned up like the checksums ones.
+    expect(fake.removed).toEqual(["/tmp/fake-channel"]);
   });
 
-  it("throws on malformed GitHub response", async () => {
-    await expect(
-      resolveTargetVersion(undefined, { fetchText: async () => "not json" }),
-    ).rejects.toThrow(/non-JSON/);
-    await expect(resolveTargetVersion(undefined, { fetchText: async () => "{}" })).rejects.toThrow(
-      /not a release list/,
+  it("fails closed before any download when minisign is missing, with no pin hint", async () => {
+    const fake = channelFake({ minisign: "missing" });
+    const err = await resolveTargetVersion(undefined, fake.deps).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MinisignMissingError);
+    // Pinning cannot help: the pinned path verifies with minisign too.
+    expect((err as Error).message).toMatch(
+      /^minisign is required to verify the release channel manifest/,
     );
-    await expect(resolveTargetVersion(undefined, { fetchText: async () => "[]" })).rejects.toThrow(
-      /No platform v\* release among the newest 0/,
-    );
+    expect((err as Error).message).not.toContain("--release");
+    expect(fake.fetched).toEqual([]);
   });
 
-  it("surfaces a clear error when GitHub returns 403 (rate limit)", async () => {
-    const { HttpError } = await import("../src/lib/self-update.ts");
+  it("fails closed on a bad signature, before parsing and without fetching anything else", async () => {
+    // An unparseable body proves the order: the signature error wins, the
+    // bytes are never read.
+    const fake = channelFake({ minisign: "bad-sig", body: "not json" });
+    await expect(resolveTargetVersion(undefined, fake.deps)).rejects.toThrow(
+      /Signature verification FAILED: the release channel manifest[\s\S]*--release X\.Y\.Z/,
+    );
+    expect(fake.fetched).toEqual([MANIFEST_URL, MANIFEST_SIG_URL]);
+    expect(fake.written).toHaveLength(2);
+    expect(fake.removed).toEqual(["/tmp/fake-channel"]);
+  });
+
+  it("fails with the pin escape hatch when the manifest cannot be fetched", async () => {
+    const fake = channelFake({ fetchError: `GET ${MANIFEST_URL} → 503 Service Unavailable` });
+    await expect(resolveTargetVersion(undefined, fake.deps)).rejects.toThrow(
+      /503 Service Unavailable[\s\S]*--release X\.Y\.Z/,
+    );
+    expect(fake.written).toEqual([]);
+    expect(fake.removed).toEqual(["/tmp/fake-channel"]);
+  });
+
+  it("rejects a manifest that is not JSON", async () => {
     await expect(
-      resolveTargetVersion(undefined, {
-        fetchText: async () => {
-          throw new HttpError("403 forbidden", 403, "Forbidden", "https://api.github.com/…");
-        },
-      }),
-    ).rejects.toThrow(/rate-limited|--release/);
+      resolveTargetVersion(undefined, channelFake({ body: "not json" }).deps),
+    ).rejects.toThrow(/not valid JSON[\s\S]*--release X\.Y\.Z/);
+  });
+
+  it("rejects any schema other than 1", async () => {
+    for (const body of [manifest({ schema: 2 }), manifest({ schema: "1" }), "{}", "null"]) {
+      await expect(resolveTargetVersion(undefined, channelFake({ body }).deps)).rejects.toThrow(
+        /Unsupported channel manifest schema/,
+      );
+    }
+  });
+
+  it("rejects a manifest for another channel", async () => {
+    await expect(
+      resolveTargetVersion(undefined, channelFake({ body: manifest({ channel: "beta" }) }).deps),
+    ).rejects.toThrow(/channel "beta", not "latest"/);
+  });
+
+  it("rejects a tag that is not a platform v<semver> tag", async () => {
+    for (const tag of ["core@12.0.0", "1.2.3", "v1.2", "v1.2.3+build", "v1.2.3-x/../y", 123]) {
+      await expect(
+        resolveTargetVersion(undefined, channelFake({ body: manifest({ tag }) }).deps),
+      ).rejects.toThrow(/not a platform v<semver> release tag/);
+    }
   });
 });
 
@@ -351,6 +335,8 @@ interface FakeDepsState {
   binary: Uint8Array;
   checksumsTxt: string;
   checksumsSig: Uint8Array;
+  /** Body served for the channel manifest (an unpinned run); defaults to a valid one. */
+  channelManifest?: string;
   /** SHA-256 returned by the fake fetchToFile — must match parseChecksumLine output for happy path. */
   hashOverride?: string;
   /** When set, the small manifest fetch (fetchText) rejects with this message. */
@@ -391,6 +377,7 @@ function makeFakeDeps(state: FakeDepsState): SelfUpdateDeps {
     },
     async fetchText(url) {
       state.fetched.push(url);
+      if (url === MANIFEST_URL) return state.channelManifest ?? manifest();
       if (state.checksumsError) throw new Error(state.checksumsError);
       return state.checksumsTxt;
     },
@@ -495,8 +482,62 @@ describe("runSelfUpdate — curl flow", () => {
       "https://github.com/appstrate/appstrate/releases/download/v1.2.3/checksums.txt.minisig",
       "https://github.com/appstrate/appstrate/releases/download/v1.2.3/appstrate-linux-x64",
     ]);
-    expect(state.commands.find((c) => c.cmd === "minisign" && c.args[0] === "-Vm")).toBeTruthy();
+    expect(state.commands).toContainEqual({
+      cmd: "minisign",
+      args: [
+        "-V",
+        "-m",
+        "/tmp/fake-work/checksums.txt",
+        "-x",
+        "/tmp/fake-work/checksums.txt.minisig",
+        "-P",
+        APPSTRATE_MINISIGN_PUBKEY,
+      ],
+    });
     expect(state.replaced).toEqual([{ dest: "/home/user/.local/bin/appstrate" }]);
+  });
+
+  it("resolves an unpinned run from the signed channel manifest, then pins its downloads", async () => {
+    const state = freshState();
+    const out = await runSelfUpdate({
+      source: "curl",
+      platform: { platform: "linux", arch: "x64" },
+      log: () => {},
+      currentVersion: "1.0.0-beta.62",
+      deps: makeFakeDeps(state),
+    });
+    expect(out.exitCode).toBe(SELF_UPDATE_EXIT.OK);
+    expect(out.message).toContain("Updated appstrate to 1.0.0-beta.63");
+    const base = "https://github.com/appstrate/appstrate/releases/download/v1.0.0-beta.63";
+    expect(state.fetched).toEqual([
+      MANIFEST_URL,
+      MANIFEST_SIG_URL,
+      `${base}/checksums.txt`,
+      `${base}/checksums.txt.minisig`,
+      `${base}/appstrate-linux-x64`,
+    ]);
+    // Both signed files go through the same minisign verification.
+    expect(state.commands.filter((c) => c.args[0] === "-V").map((c) => c.args[2])).toEqual([
+      "/tmp/fake-work/latest.json",
+      "/tmp/fake-work/checksums.txt",
+    ]);
+  });
+
+  it("fails with the --release escape hatch when the channel manifest is invalid", async () => {
+    const state = freshState({ channelManifest: manifest({ tag: "core@12.0.0" }) });
+    const out = await runSelfUpdate({
+      source: "curl",
+      platform: { platform: "linux", arch: "x64" },
+      log: () => {},
+      currentVersion: "1.0.0",
+      deps: makeFakeDeps(state),
+    });
+    expect(out.exitCode).toBe(SELF_UPDATE_EXIT.UPDATE_FAILED);
+    expect(out.message).toContain("Could not resolve target version");
+    expect(out.message).toContain("--release X.Y.Z");
+    // Nothing past the manifest was fetched, nothing was installed.
+    expect(state.fetched).toEqual([MANIFEST_URL, MANIFEST_SIG_URL]);
+    expect(state.replaced).toEqual([]);
   });
 
   it("stages the download under a fixed hidden name (retry overwrites a crashed partial)", async () => {
