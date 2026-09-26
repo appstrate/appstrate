@@ -373,9 +373,23 @@ describe("code sync — guards and dry run", () => {
     expect(await exists(pluginRoot())).toBe(false);
     expect(await exists(codexRoot())).toBe(false);
     expect(server.downloads()).toBe(0);
-    expect(stdout()).toContain("+ pdf-tools");
+    expect(stdout()).toContain("+ pdf-tools 1.0.0\n");
     expect(stdout()).toContain("claude-plugin");
     expect(stdout()).toContain("codex");
+  });
+
+  it("reports the version of each skill it adds, moves and removes", async () => {
+    const notes = { id: "@acme/notes", skillMd: skillMd("notes"), version: "3.1.0" };
+    createSkillServer([...ONE_SKILL, notes]).install();
+    const first = createMemoryIO();
+    await codeSyncCommand({ target: ["codex"] }, first.io);
+    expect(first.stdout()).toContain("  + notes 3.1.0\n  + pdf-tools 1.0.0\n");
+
+    createSkillServer([{ ...ONE_SKILL[0]!, version: "2.0.0" }]).install();
+    const second = createMemoryIO();
+    await codeSyncCommand({ target: ["codex"] }, second.io);
+
+    expect(second.stdout()).toContain("  ~ pdf-tools 1.0.0 → 2.0.0\n  - notes 3.1.0\n");
   });
 
   it("treats a corrupt state file as empty and warns instead of crashing", async () => {

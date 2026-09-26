@@ -4,10 +4,16 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import {
   checkSystemModels,
   declaredSystemModels,
+  reachableSubscriptionTiers,
   registryOffers,
   type Offers,
 } from "../verify-system-models.ts";
 import { seedTestModelProviders } from "../../apps/api/test/helpers/model-providers.ts";
+import { TEST_OAUTH_PROVIDER_ID } from "../../apps/api/test/helpers/test-oauth-provider.ts";
+import {
+  getModelProvider,
+  listModelProviders,
+} from "../../apps/api/src/services/model-providers/registry.ts";
 
 const KEYS = [
   {
@@ -57,5 +63,31 @@ describe("checkSystemModels", () => {
       expect(registryOffers("openai-compatible", "anything")).toBe(true);
       expect(registryOffers("gone-module", "x")).toBeNull();
     });
+  });
+});
+
+describe("reachableSubscriptionTiers (#1552)", () => {
+  beforeAll(() => seedTestModelProviders());
+  afterAll(() => seedTestModelProviders());
+
+  it("finds no reachable tier on the shipped subscription providers", () => {
+    const shipped = listModelProviders().filter((d) =>
+      ["codex", "claude-code"].includes(d.providerId),
+    );
+    expect(shipped).toHaveLength(2);
+    expect(reachableSubscriptionTiers(shipped)).toEqual([]);
+  });
+
+  it("reports a tier below the context window on an oauth2 provider only", () => {
+    // The synthetic `test-oauth` offers Pi's `openai` records: gpt-5.5-pro has
+    // a tier above 272000 and a 1050000 context window.
+    const testOAuth = getModelProvider(TEST_OAUTH_PROVIDER_ID)!;
+    expect(reachableSubscriptionTiers([testOAuth])).toContainEqual({
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      modelId: "gpt-5.5-pro",
+      contextWindow: 1050000,
+      inputTokensAbove: 272000,
+    });
+    expect(reachableSubscriptionTiers([{ ...testOAuth, authMode: "api_key" }])).toEqual([]);
   });
 });

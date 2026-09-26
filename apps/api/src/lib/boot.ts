@@ -33,6 +33,7 @@ import { CLIENT_IP_HEADER } from "./client-ip.ts";
 import { triggerPostBootstrapOrg } from "./post-bootstrap-hook.ts";
 import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
+import { retryUntilSuccess } from "./retry-until-success.ts";
 import { initCacheBus } from "./cache-bus.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../services/model-registry.ts";
@@ -54,6 +55,7 @@ import { startRunWatchdog } from "../services/run-watchdog.ts";
 import { startRuntimeImageWarmer } from "../services/orchestrator/runtime-image-warmer.ts";
 import { getExecutionMode } from "../infra/mode.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
+import { initializeAgentRuntime } from "../services/orchestrator/agent-runtime-readiness.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 import { initBundleSignaturePolicy } from "../services/run-launcher/bundle-signature-policy.ts";
@@ -236,7 +238,7 @@ export async function bootCritical(): Promise<void> {
  * A rejection here is fatal exactly as it was when this code lived in a
  * blocking `await boot()`: the caller in `index.ts` exits the process.
  */
-export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
+export async function bootBackground(): Promise<void> {
   const env = (await import("@appstrate/env")).getEnv();
 
   // Reconcile the loaded system packages into the DB + S3.
@@ -255,8 +257,8 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
 
   // Parallel init: NOTIFY triggers and realtime are independent
   await Promise.all([
-    // `error`, not `warn`: without the triggers or without the LISTEN install
-    // every dashboard SSE is silent for the life of the process.
+    // `error`, not `warn`: without the triggers every dashboard SSE is silent
+    // for the life of the process, and without LISTEN until a retry succeeds.
     createNotifyTriggers(db)
       .then(() => logger.info("NOTIFY triggers installed"))
       .catch((err) => {
@@ -264,11 +266,9 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
           error: getErrorMessage(err),
         });
       }),
-    initRealtime().catch((err) => {
-      logger.error("Could not initialize realtime LISTEN", {
-        error: getErrorMessage(err),
-      });
-      retryRealtimeInBackground();
+    retryUntilSuccess("Realtime LISTEN", () => initRealtime(), {
+      initialDelayMs: 1_000,
+      level: "error",
     }),
     // Cross-replica cache invalidation rides the same LISTEN client. Without
     // it every `@appstrate/core/cache` invalidation stays process-local and
@@ -362,23 +362,13 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
   await initCancelSubscriber();
 
   // Parallel init: orchestrator, scheduler, and DB cleanups are all independent
-  let agentsHealthy = false;
   const parallelInits: Promise<void>[] = [
     // Billing correctness barrier: unlike ancillary workers, this init is not
     // caught/degraded. Boot must fail if the durable metering recovery channel
     // is unavailable; otherwise a transient ledger write failure after
     // provider spend could be lost permanently.
     initLlmUsageRetryWorker(),
-    orchestrator
-      .initialize()
-      .then(() => {
-        agentsHealthy = true;
-      })
-      .catch((err) => {
-        logger.warn("Could not initialize container orchestrator", {
-          error: getErrorMessage(err),
-        });
-      }),
+    initializeAgentRuntime(orchestrator),
     initScheduleWorker().catch((err) => {
       logger.warn("Could not initialize schedule worker", {
         error: getErrorMessage(err),
@@ -486,8 +476,6 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
   // immediately, then polls for due jobs. Purges S3/FS objects whose DB rows
   // were deleted (files, uploads, run workspaces, org/app/end-user cascades).
   startStorageDeletionWorker();
-
-  return { agentsHealthy };
 }
 
 /**
@@ -788,38 +776,6 @@ async function warnOnUnserveableApiVersionPins(): Promise<void> {
       orgs: offenders.map((o) => ({ orgId: o.id, pinnedVersion: o.apiVersion })),
     },
   );
-}
-
-let realtimeRetryArmed = false;
-
-/**
- * Retry the realtime LISTEN install until it lands, armed once per process.
- * Exponential backoff capped at 60 s: giving up would leave a process whose
- * every dashboard SSE is silent for its whole life, with `/health` reporting
- * `checks.realtime: degraded` and nothing acting on it. Fire-and-forget:
- * readiness never waits on it.
- */
-function retryRealtimeInBackground(): void {
-  if (realtimeRetryArmed) return;
-  realtimeRetryArmed = true;
-  void (async () => {
-    for (let delayMs = 1_000; ; delayMs = Math.min(delayMs * 2, 60_000)) {
-      // Unref'd: a pending retry must never hold the process (or a test run) open.
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, delayMs).unref?.();
-      });
-      try {
-        await initRealtime();
-        logger.info("Realtime LISTEN channels initialized after retry");
-        return;
-      } catch (err) {
-        logger.error("Realtime LISTEN retry failed", {
-          nextDelayMs: Math.min(delayMs * 2, 60_000),
-          error: getErrorMessage(err),
-        });
-      }
-    }
-  })();
 }
 
 /**
