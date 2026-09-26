@@ -14,6 +14,13 @@ name: Publish Installer
 # was merged to main). Polling the upstream run via `gh run list` is
 # noisier but deterministic, easy to reason about, and survives any
 # workflow_run quirks GitHub throws at us.
+#
+# Besides the installers, it publishes the signed channel manifest
+# `channels/latest.json` (+ .minisig) that `self-update` and the bootstrap
+# scripts read to resolve "latest" without the rate-limited GitHub API.
+# `pages/<tag>/` is always written; the root pointers and the manifest are
+# promoted only when the tag is >= the current manifest's tag (SemVer), so
+# a re-dispatched old tag or out-of-order runs never move "latest" back.
 on:
   push:
     tags:
@@ -63,8 +70,8 @@ jobs:
         # Polls every 30s until release.yml for the same tag completes.
         # If release.yml fails or is cancelled, we abort — publishing an
         # installer pointing at a missing release would brick
-        # `get.appstrate.dev`. Skip the poll when manually dispatched
-        # (operator already verified release exists before re-running).
+        # `get.appstrate.dev`. Skip the poll when manually dispatched —
+        # the signed-checksums check below still guards that path.
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -96,6 +103,24 @@ jobs:
           done
           echo "::error::Timeout waiting for release.yml after 25 minutes"
           exit 1
+
+      - name: Verify the release checksums are signed
+        # The channel manifest tells every client to install this tag, so
+        # refuse to point it at a release whose checksums.txt is missing or
+        # not signed by the pinned key (matters most for workflow_dispatch,
+        # which skips the poll above).
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          gh release download "$VERSION" --repo "${{ github.repository }}" \
+            --pattern checksums.txt --pattern checksums.txt.minisig \
+            --dir "$RUNNER_TEMP/release"
+          if ! minisign -Vm "$RUNNER_TEMP/release/checksums.txt" -p scripts/appstrate.pub; then
+            echo "::error::Release ${VERSION} has no valid signed checksums.txt — refusing to publish."
+            exit 1
+          fi
 
       - name: Render installer with pinned version
         run: |
@@ -142,7 +167,6 @@ jobs:
             out/${{ steps.ver.outputs.version }}/runner
 
       - name: Sign installer with minisign
-        id: minisign
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
@@ -154,14 +178,13 @@ jobs:
           # user's only verification option (`scripts/verify.sh`) silently
           # succeeds against a missing signature — worse than no verify
           # step at all. Mirror the guard in `release.yml`: if the secret
-          # is absent we refuse to publish rather than fan out `signed=false`
-          # through the rest of the workflow.
+          # is absent we refuse to publish.
           if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
             echo "::error::MINISIGN_SECRET_KEY secret is not set — refusing to publish an unsigned installer."
             echo "::error::  Configure the secret in repo settings, or dispatch a build that rotates the key."
             exit 1
           fi
-          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          # minisign is installed by the release-checksums check above.
           umask 077
           printf '%s' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
           # Sign once — the two rendered copies (out/install.sh and
@@ -179,8 +202,19 @@ jobs:
             minisign -S -s /tmp/minisign.key \
               -t "appstrate runner $VERSION" \
               -m out/runner
+          # Channel manifest — the contract `self-update` and the bootstrap
+          # scripts verify (signature, then schema/channel/tag).
+          mkdir -p out/channels
+          jq -n --arg tag "$VERSION" '{schema: 1, channel: "latest", tag: $tag}' \
+            > out/channels/latest.json
+          printf '%s\n' "$MINISIGN_PASSWORD" | \
+            minisign -S -s /tmp/minisign.key \
+              -t "appstrate channel latest $VERSION" \
+              -m out/channels/latest.json
           rm -f /tmp/minisign.key
-          echo "signed=true" >> "$GITHUB_OUTPUT"
+          # Verify against the committed public key: a secret/public-key
+          # mismatch must fail here, not publish a manifest every client rejects.
+          minisign -Vm out/channels/latest.json -p scripts/appstrate.pub
 
       - name: Checkout installer-pages branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -213,40 +247,67 @@ jobs:
       - name: Sync rendered files
         env:
           VERSION: ${{ steps.ver.outputs.version }}
-          SIGNED: ${{ steps.minisign.outputs.signed }}
         run: |
-          # Latest (overwrite)
-          cp out/install.sh        pages/install.sh
-          cp out/install.sh.sha256 pages/install.sh.sha256
-          # Versioned (immutable — refuse overwrite)
+          # Versioned (immutable — refuse overwrite). Always written, even
+          # when the root pointers are not promoted below.
           if [ -e "pages/${VERSION}/install.sh" ]; then
             echo "::error::Version ${VERSION} already published — refusing to overwrite"
+            exit 1
+          fi
+          if [ -e "pages/${VERSION}/runner" ]; then
+            echo "::error::Version ${VERSION} runner already published — refusing to overwrite"
             exit 1
           fi
           mkdir -p "pages/${VERSION}"
           cp "out/${VERSION}/install.sh"        "pages/${VERSION}/install.sh"
           cp "out/${VERSION}/install.sh.sha256" "pages/${VERSION}/install.sh.sha256"
+          cp "out/${VERSION}/runner"            "pages/${VERSION}/runner"
+          cp "out/${VERSION}/runner.sha256"     "pages/${VERSION}/runner.sha256"
 
-          # Minisign signature (if step ran — controlled by presence of MINISIGN_SECRET_KEY secret).
-          # Only one signature is produced (both installer copies are byte-identical);
-          # fan it out to both publish locations here.
-          if [ "$SIGNED" = "true" ]; then
+          # One signature per installer (both copies are byte-identical);
+          # fanned out to the versioned and root locations.
+          cp out/install.sh.minisig "pages/${VERSION}/install.sh.minisig"
+          cp out/runner.minisig     "pages/${VERSION}/runner.minisig"
+
+          # Monotonic promotion: the root pointers and the channel manifest
+          # only move forward. dpkg sorts `~` before everything, even the end
+          # of the string, so mapping the prerelease `-` to `~` yields SemVer
+          # precedence (1.0.0~beta.9 < 1.0.0~beta.10 < 1.0.0~rc.1 < 1.0.0);
+          # GNU `sort -V` would put 1.0.0 before 1.0.0-beta.1.
+          deb_version() { sed 's/^v//; s/-/~/' <<<"$1"; }
+          PROMOTE=true
+          CURRENT=""
+          if [ -f pages/channels/latest.json ]; then
+            CURRENT=$(jq -r .tag pages/channels/latest.json)
+            if ! grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$' <<<"$CURRENT"; then
+              echo "::error::pages/channels/latest.json has an invalid tag '${CURRENT}' — fix the branch by hand."
+              exit 1
+            fi
+            if dpkg --compare-versions "$(deb_version "$VERSION")" lt "$(deb_version "$CURRENT")"; then
+              PROMOTE=false
+            fi
+          fi
+
+          if [ "$PROMOTE" = true ]; then
+            # Latest (overwrite)
+            cp out/install.sh        pages/install.sh
+            cp out/install.sh.sha256 pages/install.sh.sha256
+            # Runner installer (served at get.appstrate.dev/runner).
+            cp out/runner            pages/runner
+            cp out/runner.sha256     pages/runner.sha256
             cp out/install.sh.minisig pages/install.sh.minisig
-            cp out/install.sh.minisig "pages/${VERSION}/install.sh.minisig"
-          fi
-
-          # Runner installer (served at get.appstrate.dev/runner).
-          cp out/runner        pages/runner
-          cp out/runner.sha256 pages/runner.sha256
-          if [ -e "pages/${VERSION}/runner" ]; then
-            echo "::error::Version ${VERSION} runner already published — refusing to overwrite"
-            exit 1
-          fi
-          cp "out/${VERSION}/runner"        "pages/${VERSION}/runner"
-          cp "out/${VERSION}/runner.sha256" "pages/${VERSION}/runner.sha256"
-          if [ "$SIGNED" = "true" ]; then
-            cp out/runner.minisig pages/runner.minisig
-            cp out/runner.minisig "pages/${VERSION}/runner.minisig"
+            cp out/runner.minisig     pages/runner.minisig
+            # Serve the installer at the root (curl -fsSL https://get.appstrate.dev | bash).
+            # GitHub Pages serves index.html at /, so we point it at the script content.
+            # Browsers see the script in plain text, same pattern as get.docker.com / sh.rustup.rs.
+            cp out/install.sh pages/index.html
+            mkdir -p pages/channels
+            cp out/channels/latest.json         pages/channels/latest.json
+            cp out/channels/latest.json.minisig pages/channels/latest.json.minisig
+            echo "Channel latest promoted to ${VERSION} (was: ${CURRENT:-none})." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Channel latest stays at ${CURRENT}: ${VERSION} is older. Published under /${VERSION}/ only."
+            echo "Channel latest NOT promoted: ${VERSION} < ${CURRENT}; published under /${VERSION}/ only." >> "$GITHUB_STEP_SUMMARY"
           fi
 
           # Publish verify.sh wrapper. If the public key is committed under
@@ -260,11 +321,6 @@ jobs:
           else
             cp scripts/verify.sh pages/verify.sh
           fi
-
-          # Serve the installer at the root (curl -fsSL https://get.appstrate.dev | bash).
-          # GitHub Pages serves index.html at /, so we point it at the script content.
-          # Browsers see the script in plain text, same pattern as get.docker.com / sh.rustup.rs.
-          cp out/install.sh pages/index.html
 
           # Custom domain for GitHub Pages
           echo "get.appstrate.dev" > pages/CNAME
