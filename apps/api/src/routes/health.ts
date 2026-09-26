@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { getVersionInfo } from "../lib/version.ts";
 import { realtimeReady } from "../services/realtime.ts";
+import { isAgentRuntimeReady } from "../services/orchestrator/agent-runtime-readiness.ts";
 import { ApiError } from "../lib/errors.ts";
 
 const startedAt = Date.now();
@@ -12,25 +13,20 @@ const startedAt = Date.now();
 // ─── Readiness ───
 
 let serverReady = false;
-let agentsHealthy = false;
 
 /**
  * Flip the process to "ready". Called once from `index.ts` when
  * `bootBackground()` resolves — i.e. when orphan cleanup, the system-package
- * DB sync and every worker are done. Recoverable boot failures are carried in
- * `readiness` so `/health` can report a degraded component without keeping the
- * whole API behind the starting gate. The port is already bound well before
+ * DB sync and every worker are done. The port is already bound well before
  * this; see {@link bootGate}.
  */
-export function markServerReady(readiness: { agentsHealthy: boolean }): void {
-  agentsHealthy = readiness.agentsHealthy;
+export function markServerReady(): void {
   serverReady = true;
 }
 
 /** Test-only reset of the module-level readiness flag. */
 export function _resetServerReadyForTesting(): void {
   serverReady = false;
-  agentsHealthy = false;
 }
 
 /**
@@ -83,11 +79,11 @@ healthRouter.get("/health", async (c) => {
     checks.database = { status: "unhealthy", latency_ms: Date.now() - dbStart };
   }
 
-  // Agent execution readiness comes from the orchestrator's boot handshake.
+  // Agent execution readiness is read live: a failed boot init is retried in the background.
   // System packages are optional catalogue entries and say nothing about
   // whether the platform can launch a run.
   checks.agents = {
-    status: agentsHealthy ? "healthy" : "degraded",
+    status: isAgentRuntimeReady() ? "healthy" : "degraded",
   };
 
   // Advisory, kept OUT of the `status` rollup below: the container HEALTHCHECK
