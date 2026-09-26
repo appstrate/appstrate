@@ -55,10 +55,7 @@ import {
  * (`beforeUsage`, chat context). The hook's status flows through — a metering
  * module returns 402 (payment required) when the org is over its soft cap.
  */
-function usageRejectionResponse(
-  rejection: UsageRejection,
-  ownCredentialAdmitted: boolean,
-): Response {
+function usageRejectionResponse(rejection: UsageRejection): Response {
   const status = rejection.status ?? 403;
   return new Response(
     JSON.stringify({
@@ -67,8 +64,6 @@ function usageRejectionResponse(
       status,
       detail: rejection.message,
       code: rejection.code,
-      // Probed only on a 402; absent reads as false.
-      ...(status === 402 ? { own_credential_admitted: ownCredentialAdmitted } : {}),
     }),
     { status, headers: { "content-type": "application/problem+json" } },
   );
@@ -441,34 +436,17 @@ export async function handleChatStream(
   // resolved and capacity is reserved, so a rejected turn opens no MCP session
   // and persists no user message. (The block's read may already be in flight —
   // see phase B above — but nothing is written until the gate has answered.)
-  const gateArgs = {
+  const rejection = await deps.checkUsageAllowed({
     orgId,
     presetId: chosen.id,
     sessionId: meteringSessionId,
     subscription: isSubscription,
-  };
-  const rejection = await deps.checkUsageAllowed(gateArgs);
+  });
   if (rejection) {
-    // 402: would the org's own credential get through? Best-effort: a failed probe says no.
-    // A BYOK turn is re-asked too: only the platform tells BYOK from system models.
-    const ownCredentialAdmitted =
-      rejection.status === 402 &&
-      !isSubscription &&
-      (await deps.checkUsageAllowed({ ...gateArgs, subscription: true }).then(
-        (probe) => probe === null,
-        (err: unknown) => {
-          logger.warn("chat admission probe failed", {
-            orgId,
-            err: err instanceof Error ? err.message : String(err),
-          });
-          return false;
-        },
-      ));
-    const refused = usageRejectionResponse(rejection, ownCredentialAdmitted);
+    const refused = usageRejectionResponse(rejection);
     logger.info("chat turn refused by admission gate", {
       code: rejection.code,
       status: refused.status,
-      ownCredentialAdmitted,
       orgId,
       model: chosen.id,
     });

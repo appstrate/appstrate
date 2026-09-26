@@ -467,9 +467,7 @@ export interface FirstMatchHooks {
    * Pre-usage admission gate — called before an org spends metered LLM usage on
    * a given surface (an agent run or a chat turn). Return a rejection to block
    * the usage, or null/undefined to allow. The {@link BeforeUsageParams} context
-   * discriminates run vs. chat so a module can apply per-surface policy. It
-   * must be a side-effect-free query: it may be dispatched for usage that never
-   * happens.
+   * discriminates run vs. chat so a module can apply per-surface policy.
    *
    * First-match-wins is deliberate: the admission answer is a single verdict
    * (`UsageRejection | null`) the caller turns into one HTTP status. Two modules
@@ -1489,9 +1487,7 @@ export interface PlatformServices {
   /**
    * Chat admission gate — the chat-surface entry point into the `beforeUsage`
    * hook. The chat module calls this before starting ANY turn, and the platform
-   * dispatches the hook for every one of them. A non-subscription turn refused
-   * with 402 is asked once more, hypothetically, with `subscription: true` — a
-   * turn that will not run — so the hook must answer without side effects. Returns a
+   * dispatches the hook for every one of them. Returns a
    * {@link UsageRejection} to block the turn (the module surfaces it as an RFC
    * 9457 problem response with the hook's status — 402 flows through), or null
    * to allow.

@@ -9891,7 +9891,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. Boolean `own_credential_admitted`: the hook would admit the same turn on a model running on the org's own credential. */
+            /** @description Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;

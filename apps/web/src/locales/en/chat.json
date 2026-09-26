@@ -58,7 +58,6 @@
   "turn.error.quotaExceeded": "Your organization is out of credits.",
   "turn.error.subscriptionBlocked": "Your organization's subscription is no longer active.",
   "turn.error.contactAdmin": "Contact an organization administrator.",
-  "turn.error.otherModel": "You can also choose another model.",
   "turn.error.manageBilling": "Manage billing",
   "turn.error.needsReconnection": "The selected model's connection expired or was revoked. Reconnect it, then try again.",
   "turn.error.orgDeleting": "This organization is being deleted.",

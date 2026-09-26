@@ -90,8 +90,7 @@ export interface ChatPlatformDeps {
    * module reports it rather than deriving the credential source itself — it
    * has no model-registry access by design, so the platform keeps deriving the
    * rest. A subscription turn is NOT exempt: it runs inside the platform's own
-   * process, so the platform funds its compute. A non-subscription turn refused
-   * with 402 is asked once more, hypothetically, with `subscription: true`.
+   * process, so the platform funds its compute.
    */
   checkUsageAllowed(args: {
     orgId: string;

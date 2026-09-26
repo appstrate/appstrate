@@ -5,7 +5,7 @@ import {
   classifyClientTurnError,
   clientTurnErrorFromMarker,
   clientTurnErrorMarker,
-  readRefusal,
+  refusalCode,
 } from "../src/turn-error.ts";
 
 /**
@@ -78,41 +78,48 @@ describe("classifyClientTurnError", () => {
   });
 });
 
-describe("readRefusal", () => {
+describe("refusalCode", () => {
   const problem = (body: Record<string, unknown>) => JSON.stringify(body);
 
-  it("reads whether the gate would admit the turn on the org's own credential", () => {
-    const refusal = { status: 402, code: "quota_exceeded" };
-    expect(readRefusal(problem({ ...refusal, own_credential_admitted: true }))).toEqual({
-      code: "quota_exceeded",
-      ownCredentialAdmitted: true,
-    });
-    // Only a literal `true` counts: absent, false or mistyped all mean "no".
-    for (const own_credential_admitted of [undefined, false, "true", 1]) {
-      expect(readRefusal(problem({ ...refusal, own_credential_admitted }))).toEqual({
-        code: "quota_exceeded",
-        ownCredentialAdmitted: false,
-      });
-    }
+  it("recovers the code from the body the transport throws verbatim", () => {
+    expect(
+      refusalCode(
+        new Error(
+          problem({
+            type: "https://docs.appstrate.dev/errors/usage-not-allowed",
+            title: "Usage not allowed",
+            status: 402,
+            detail: "Credit quota exceeded for org ef820ed9-1db0-4f3c-a4bd-d6941e3b2160",
+            code: "quota_exceeded",
+          }),
+        ),
+      ),
+    ).toBe("quota_exceeded");
+  });
+
+  it("reads the same file off a bare string error", () => {
+    expect(refusalCode(problem({ status: 409, code: "needs_reconnection" }))).toBe(
+      "needs_reconnection",
+    );
   });
 
   it("withholds a non-refusal code, which no user action can clear", () => {
     // `beforeUsage` failing closed rejects with 500 — an internal fault, not
     // something to hand the user a sentence about.
-    expect(readRefusal(problem({ status: 500, code: "unexpected" }))).toBeUndefined();
+    expect(refusalCode(problem({ status: 500, code: "unexpected" }))).toBeUndefined();
   });
 
   it("declines anything that is not a problem document", () => {
-    expect(readRefusal("Upstream model error (status 503)")).toBeUndefined();
-    expect(readRefusal("{not json")).toBeUndefined();
-    expect(readRefusal(undefined)).toBeUndefined();
+    expect(refusalCode("Upstream model error (status 503)")).toBeUndefined();
+    expect(refusalCode("{not json")).toBeUndefined();
+    expect(refusalCode(undefined)).toBeUndefined();
     // Valid JSON that is not an object, or an object without the two fields
     // that make a refusal: the status guard is what rejects these, which is
     // why sniffing the string for a leading brace bought nothing.
-    expect(readRefusal("503")).toBeUndefined();
-    expect(readRefusal("null")).toBeUndefined();
-    expect(readRefusal("[402]")).toBeUndefined();
-    expect(readRefusal(problem({ status: 402 }))).toBeUndefined();
-    expect(readRefusal(problem({ code: "quota_exceeded" }))).toBeUndefined();
+    expect(refusalCode("503")).toBeUndefined();
+    expect(refusalCode("null")).toBeUndefined();
+    expect(refusalCode("[402]")).toBeUndefined();
+    expect(refusalCode(problem({ status: 402 }))).toBeUndefined();
+    expect(refusalCode(problem({ code: "quota_exceeded" }))).toBeUndefined();
   });
 });

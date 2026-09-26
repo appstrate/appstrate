@@ -22,7 +22,7 @@ import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
 import {
   clientTurnErrorFromMarker,
   clientTurnErrorFromRateLimit,
-  readRefusal,
+  refusalCode,
 } from "../turn-error.ts";
 import type { ChatTranslate } from "./runtime-context.ts";
 
@@ -53,9 +53,7 @@ const BILLING_HREF = "/org-settings/billing";
  * A refused turn is not a model failure — "check the model configuration" would
  * send the user to the wrong screen — so each code gets its own copy. Keyed by
  * the wire code, loosely: a code we have no sentence for degrades to the
- * generic failure rather than rendering a missing i18n key. `billing`: a
- * manager gets the billing link, anyone else is told to contact an
- * organization administrator.
+ * generic failure rather than rendering a missing i18n key.
  */
 const REFUSAL: Record<string, { text: string; billing?: true }> = {
   quota_exceeded: { text: "turn.error.quotaExceeded", billing: true },
@@ -63,12 +61,6 @@ const REFUSAL: Record<string, { text: string; billing?: true }> = {
   needs_reconnection: { text: "turn.error.needsReconnection" },
   org_deleting: { text: "turn.error.orgDeleting" },
 };
-
-/** What the reader can do about a refusal, as the host resolved it. */
-export interface RefusalContext {
-  canManageBilling: boolean;
-  hasOwnCredentialModel: boolean;
-}
 
 interface TurnErrorState {
   text: string;
@@ -89,7 +81,7 @@ interface TurnErrorState {
 export function turnErrorState(
   message: AssistantState["message"],
   t: ChatTranslate,
-  context: RefusalContext,
+  canManageBilling: boolean,
 ): TurnErrorState | null {
   const turn = turnMetadataFromMessage(sourceMessage(message));
   // A turn cut by the wall-clock ceiling can ALSO have been failing upstream
@@ -130,42 +122,39 @@ export function turnErrorState(
   if (message.status?.type === "incomplete" && message.status.reason === "error") {
     const err = message.status.error;
     // An in-stream failure carries our marker; a turn refused BEFORE the stream
-    // opened carries the RFC 9457 body the transport throws verbatim: a 429 is
-    // throttling (retryable), any other refusal's `code` we localize here. A
-    // refusal names an action the user must take, so retrying cannot clear it.
+    // opened carries the RFC 9457 body the transport throws verbatim, whose
+    // `code` we localize here. A refusal names an action the user must take, so
+    // retrying cannot clear it.
     const classified = clientTurnErrorFromMarker(err) ?? clientTurnErrorFromRateLimit(err);
-    if (classified) {
-      return {
-        text: t(TURN_ERROR_KEY[classified.category]),
-        retryable: classified.retryable,
-        // The marker carries a category and nothing else; a request id only
-        // ever reaches the client through the persisted turn metadata above.
-        requestId: undefined,
-      };
-    }
-    const read = readRefusal(err);
+    const code = classified ? undefined : refusalCode(err);
     const refusal =
-      read && Object.prototype.hasOwnProperty.call(REFUSAL, read.code)
-        ? REFUSAL[read.code]
-        : undefined;
-    if (!read || !refusal) {
-      return {
-        text: t("turn.error.unknown"),
-        retryable: true,
-        requestId: undefined,
-      };
-    }
-    const manager = refusal.billing && context.canManageBilling;
-    const sentences = [refusal.text];
-    if (refusal.billing && !manager) sentences.push("turn.error.contactAdmin");
-    if (read.ownCredentialAdmitted && context.hasOwnCredentialModel) {
-      sentences.push("turn.error.otherModel");
+      code && Object.prototype.hasOwnProperty.call(REFUSAL, code) ? REFUSAL[code] : undefined;
+    const refusalKey = refusal?.text;
+    if (refusal?.billing) {
+      const text = t(refusal.text);
+      return canManageBilling
+        ? {
+            text,
+            retryable: false,
+            requestId: undefined,
+            action: { label: t("turn.error.manageBilling"), href: BILLING_HREF },
+          }
+        : {
+            text: `${text} ${t("turn.error.contactAdmin")}`,
+            retryable: false,
+            requestId: undefined,
+          };
     }
     return {
-      text: sentences.map((key) => t(key)).join(" "),
-      retryable: false,
+      text: classified
+        ? t(TURN_ERROR_KEY[classified.category])
+        : refusalKey
+          ? t(refusalKey)
+          : t("turn.error.unknown"),
+      retryable: classified?.retryable ?? refusalKey === undefined,
+      // The marker carries a category and nothing else; a request id only ever
+      // reaches the client through the persisted turn metadata above.
       requestId: undefined,
-      action: manager ? { label: t("turn.error.manageBilling"), href: BILLING_HREF } : undefined,
     };
   }
 

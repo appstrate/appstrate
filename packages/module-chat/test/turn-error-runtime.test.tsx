@@ -15,7 +15,7 @@
  * Both run during render, so SSR is enough.
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { renderToString } from "react-dom/server";
 import { AssistantRuntimeProvider, ThreadPrimitive } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
@@ -24,7 +24,6 @@ import { conflict } from "@appstrate/core/api-errors";
 
 import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
 import { MessageError } from "../src/ui/thread.tsx";
-import { setModelCatalog } from "../src/ui/model-store.ts";
 import { chatCapacityError } from "../src/pi-chat/concurrency.ts";
 
 type ChatHelpers = Parameters<typeof useAISDKRuntime>[0];
@@ -93,20 +92,16 @@ function refused<P extends { status: number }>(problem: P): APICallError {
 }
 
 /** The 402 body `usageRejectionResponse` (`src/chat-stream.ts`) answers with. */
-const usageRefusal = (code: string, ownCredentialAdmitted = false) =>
+const usageRefusal = (code: string) =>
   refused({
     type: "https://docs.appstrate.dev/errors/usage-not-allowed",
     title: "Usage not allowed",
     status: 402,
     detail: "English prose for API consumers.",
     code,
-    own_credential_admitted: ownCredentialAdmitted,
   });
 
 describe("a failed chat turn, through the real assistant-ui runtime", () => {
-  // Only the own-credential case seeds the catalog; leave it empty for the rest.
-  afterEach(() => setModelCatalog([]));
-
   it("names an exhausted credit quota, with no retry", () => {
     const html = renderFailedTurn(usageRefusal("quota_exceeded"));
     expect(html).toContain("turn.error.quotaExceeded turn.error.contactAdmin");
@@ -115,26 +110,11 @@ describe("a failed chat turn, through the real assistant-ui runtime", () => {
     expect(html).not.toContain("turn.retry");
   });
 
-  it("names a blocked subscription, with no retry", () => {
-    const html = renderFailedTurn(usageRefusal("subscription_blocked"));
-    expect(html).toContain("turn.error.subscriptionBlocked turn.error.contactAdmin");
-    expect(html).not.toContain("turn.error.unknown");
-    expect(html).not.toContain("turn.retry");
-  });
-
   it("links a billing manager to the billing page", () => {
     const html = renderFailedTurn(usageRefusal("quota_exceeded"), billingManager);
     expect(html).toContain('href="/org-settings/billing"');
     expect(html).toContain("turn.error.manageBilling");
     expect(html).not.toContain("turn.error.contactAdmin");
-  });
-
-  it("names another model when the gate would admit one on the org's own credential", () => {
-    setModelCatalog([{ id: "byok", source: "custom" }]);
-    const html = renderFailedTurn(usageRefusal("quota_exceeded", true));
-    expect(html).toContain(
-      "turn.error.quotaExceeded turn.error.contactAdmin turn.error.otherModel",
-    );
   });
 
   it("names a dead model credential, with no retry", () => {

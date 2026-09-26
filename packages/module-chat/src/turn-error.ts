@@ -17,10 +17,7 @@ export interface ClientTurnError {
 
 const ERROR_MARKER_PREFIX = "appstrate:chat-turn-error:";
 
-/**
- * A string, or any thrown value carrying a string `message` (assistant-ui turns
- * the Error into `{ code, message }`).
- */
+/** assistant-ui hands a thrown Error over as a plain `{ code, message }`. */
 function messageFromError(error: unknown): string {
   if (typeof error === "string") return error;
   if (!error || typeof error !== "object") return "";
@@ -84,7 +81,6 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
     : undefined;
 }
 
-/** The RFC 9457 document a pre-stream failure carries as its message (see {@link readRefusal}). */
 function problemFromError(value: unknown): Record<string, unknown> | undefined {
   try {
     const doc: unknown = JSON.parse(messageFromError(value));
@@ -101,37 +97,29 @@ export function clientTurnErrorFromRateLimit(value: unknown): ClientTurnError | 
     : undefined;
 }
 
-export interface TurnRefusal {
-  code: string;
-  /** The gate would admit the same turn on a model running on the org's own credential. */
-  ownCredentialAdmitted: boolean;
-}
-
 /**
- * The refusal a PRE-STREAM failure carries, if it is one.
+ * The refusal code a PRE-STREAM failure carries, if it is one.
  *
  * A turn refused by the admission gate or by a dead subscription credential
  * never enters the stream, so no `appstrate:chat-turn-error:` marker is ever
- * emitted. Instead the AI SDK's HTTP chat transport throws an `APICallError`
- * whose `message` is the raw response body (`ai/src/ui/create-ui-api-call-error.ts`),
- * on both `sendMessages` and `reconnectToStream`, so the resumed path lands
- * here too; assistant-ui then normalizes it to `{ code, message }`. That body is
- * the `application/problem+json` our refusals answer with (`chat-stream.ts`), so
- * parsing the message recovers the problem document. Its `code` is the stable
- * machine-readable half of the contract; its `detail` is English prose for API
- * consumers (as everywhere else in this API) and must NOT be shown in a
- * localized UI. Return the refusal so the caller can pick its own sentence.
+ * emitted. Instead the AI SDK puts the raw HTTP body in an Error's message and
+ * throws it (`APICallError`, `ai/src/ui/create-ui-api-call-error.ts`) on both
+ * `sendMessages` and `reconnectToStream`, so the resumed path lands here too.
+ * That body is the `application/problem+json` our refusals answer with
+ * (`chat-stream.ts`), so parsing the message back into a problem document
+ * recovers what the transport discarded. Its `code` is the
+ * stable machine-readable half of the contract; its `detail` is English prose
+ * for API consumers (as everywhere else in this API) and must NOT be shown in
+ * a localized UI. Return the code so the caller can pick its own sentence.
  *
  * Only a REFUSAL carries a code worth displaying: 401/402/403/409 mean "you
  * must act". Any other status (a module failing closed with a 500) describes an
- * internal fault the user can do nothing about. A 429 is throttling, read by
- * {@link clientTurnErrorFromRateLimit}.
+ * internal fault the user can do nothing about.
  */
-export function readRefusal(value: unknown): TurnRefusal | undefined {
+export function refusalCode(value: unknown): string | undefined {
   const doc = problemFromError(value);
   if (!doc) return undefined;
-  const { status, code, own_credential_admitted } = doc;
+  const { status, code } = doc;
   if (status !== 401 && status !== 402 && status !== 403 && status !== 409) return undefined;
-  if (typeof code !== "string" || !code) return undefined;
-  return { code, ownCredentialAdmitted: own_credential_admitted === true };
+  return typeof code === "string" && code ? code : undefined;
 }

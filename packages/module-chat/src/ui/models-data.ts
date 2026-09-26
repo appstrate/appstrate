@@ -31,7 +31,6 @@ const orgModelOptionSchema = z.object({
   needs_reconnection: z.boolean().optional(),
   enabled: z.boolean().optional(),
   aliased: z.boolean().optional(),
-  source: z.enum(["built-in", "custom"]).optional(),
   generation: modelGenerationCapabilitiesSchema.nullable().optional(),
 });
 
@@ -61,8 +60,6 @@ export interface OrgModelOption {
   enabled?: boolean;
   /** Model-alias flag — selectable in chat without exposing the backing model. */
   aliased?: boolean;
-  /** `custom` = on the org's own credential; `built-in` = platform-provided. */
-  source?: "built-in" | "custom";
   generation?: ModelGenerationCapabilities | null;
 }
 
