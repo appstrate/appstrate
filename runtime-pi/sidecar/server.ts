@@ -20,7 +20,7 @@ import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
 import { RuntimeEventJournal, journalRuntimeToolDefs } from "./runtime-event-journal.ts";
 import { scrubSecretMaterial } from "./redact.ts";
 import { parseSidecarEnv, type SidecarEnv } from "./env.ts";
-import { admitsAgentProxyPeer, type PeerAttribution } from "./runner-peers.ts";
+import { admitsAgentProxyPeer, noRunnerPeers, type PeerAttribution } from "./runner-peers.ts";
 
 /** Parse the agent-selected runtime tools forwarded as `RUNTIME_TOOLS_JSON`. */
 function readRuntimeToolsFromEnv(): string[] {
@@ -208,12 +208,12 @@ if (connectLoginJson) {
 const cookieJar = new Map<string, string[]>();
 
 // #1458 — the agent's proxy refuses runner peers (they have their own policed
-// listener). Bound once the adapter is prepared; no runner exists before that.
-let peerAttribution: PeerAttribution | null = null;
+// listener). Rebound once the adapter is prepared; no runner exists before that.
+let peerAttribution: PeerAttribution = noRunnerPeers;
 const proxy = createForwardProxy({
   config,
   listenPort: env.forwardProxyPort,
-  isPeerAllowed: (ip) => admitsAgentProxyPeer(peerAttribution, ip),
+  isPeerAllowed: (peer) => admitsAgentProxyPeer(peerAttribution, peer),
 });
 // The platform notices a sidecar that EXITS (#1561), not one alive without its
 // proxy — whose port another process may then be holding for the agent's traffic.

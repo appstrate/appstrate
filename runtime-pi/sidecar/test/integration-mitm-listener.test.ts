@@ -1140,8 +1140,8 @@ describe("MITM listener — egress allowlist (#1458)", () => {
   runIfOpenssl("refuses a peer that is not the owning runner before the CONNECT", async () => {
     const peers: string[] = [];
     const { listener, minter, events, calls } = await setup({
-      isPeerAllowed: async (ip) => {
-        peers.push(ip);
+      isPeerAllowed: async ({ address }) => {
+        peers.push(address);
         return false;
       },
     });

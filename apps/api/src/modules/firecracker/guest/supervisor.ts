@@ -29,11 +29,16 @@ import { constants as osConstants } from "node:os";
 // Wire contract shared with the host-side producer (vm-config.ts's
 // buildGuestConfig). Type-only: erased by `bun build`.
 import type { GuestConfig } from "./guest-config.ts";
-import { buildGuestFirewallScript, GUEST_SIDECAR_UID, MMDS_IPV4_ADDRESS } from "./firewall.ts";
+import {
+  buildGuestFirewallScript,
+  GUEST_RUNNER_UIDS,
+  GUEST_SIDECAR_UID,
+  MMDS_IPV4_ADDRESS,
+} from "./firewall.ts";
 
 const GUEST_AGENT_USER = "pi"; // uid 1001, baked into the rootfs
 const SIDECAR_BIN = "/usr/local/bin/sidecar";
-/** setuid(1002) wrapper the sidecar uses to spawn integration runners. */
+/** Setuid wrapper the sidecar uses to spawn each integration runner under its own pool uid. */
 const RUNNER_EXEC_WRAPPER = "/usr/local/bin/appstrate-runner-exec";
 /** The image's ENTRYPOINT: the launcher hands the secrets to the entrypoint over stdin. */
 const AGENT_ARGV = [
@@ -118,7 +123,7 @@ interface Child {
  * `harden` additionally sets no_new_privs and empties the capability
  * bounding set — the agent must never regain privileges through a setuid
  * exec. The sidecar is NOT hardened: it legitimately execs the setuid
- * runner wrapper to drop its integration runners to uid 1002.
+ * runner wrapper to drop each integration runner to its own pool uid.
  */
 function spawnAs(
   uidOrUser: string,
@@ -261,10 +266,14 @@ async function main(): Promise<void> {
   const sidecar = spawnAs(
     GUEST_SIDECAR_UID,
     [SIDECAR_BIN],
-    // The wrapper path rides the env (not the adapter's own config): the
-    // process adapter is shared with host process-mode, where runners
-    // stay plain children of the sidecar.
-    { ...cfg.sidecar.env, APPSTRATE_RUNNER_EXEC: RUNNER_EXEC_WRAPPER },
+    // The wrapper path and the runner uid pool ride the env (not the
+    // adapter's own config): the process adapter is shared with host
+    // process-mode, where runners stay plain children of the sidecar.
+    {
+      ...cfg.sidecar.env,
+      APPSTRATE_RUNNER_EXEC: RUNNER_EXEC_WRAPPER,
+      APPSTRATE_RUNNER_UIDS: GUEST_RUNNER_UIDS,
+    },
     "/tmp",
     { harden: false },
   );

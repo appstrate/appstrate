@@ -11,7 +11,19 @@ import type { GuestNetworkConfig } from "./guest-config.ts";
 
 export const GUEST_SIDECAR_UID = "1000";
 const GUEST_AGENT_UID = "1001";
-const GUEST_RUNNER_UID = "1002";
+
+/**
+ * Integration runner uid pool: the sidecar gives each runner it spawns its
+ * own uid from this range (through the setuid `appstrate-runner-exec`
+ * wrapper), so the kernel attributes every socket to exactly one runner and
+ * no runner can read a sibling's /proc/<pid>/environ. Mirrored by the
+ * `RUNNER_UID_*` defines in runner-exec.c and the `runner<i>` users baked by
+ * Dockerfile.rootfs — pinned together by runner-uid-contract.test.ts.
+ */
+export const GUEST_RUNNER_UID_FIRST = 1100;
+export const GUEST_RUNNER_UID_COUNT = 64;
+/** The pool as an inclusive `first-last` range — nft syntax and the sidecar's `APPSTRATE_RUNNER_UIDS`. */
+export const GUEST_RUNNER_UIDS = `${GUEST_RUNNER_UID_FIRST}-${GUEST_RUNNER_UID_FIRST + GUEST_RUNNER_UID_COUNT - 1}`;
 
 /**
  * Firecracker MMDS link-local service address (matches the host-side
@@ -29,7 +41,7 @@ export const MMDS_IPV4_ADDRESS = "169.254.169.254";
  *   - loopback: always allowed (agent ↔ sidecar traffic rides 127.0.0.1).
  *   - root (supervisor): allowed — it is the trust anchor of the guest.
  *   - sidecar uid: full egress (it fronts the LLM proxy + forward proxy).
- *   - runner uid: full egress (integration MCP servers call external APIs).
+ *   - runner uid pool: full egress (integration MCP servers call external APIs).
  *   - agent uid: the platform sink only (its sidecar is on loopback, above).
  *   - everything else — any uid, any socketless packet — is dropped.
  *
@@ -53,7 +65,7 @@ export function buildGuestFirewallScript(network: GuestNetworkConfig): string {
     `    oifname "lo" accept`,
     `    meta skuid 0 accept`,
     `    meta skuid ${GUEST_SIDECAR_UID} accept`,
-    `    meta skuid ${GUEST_RUNNER_UID} accept`,
+    `    meta skuid ${GUEST_RUNNER_UIDS} accept`,
     `    meta skuid ${GUEST_AGENT_UID} ip daddr ${network.platform_ip} tcp dport ${network.platform_port} accept`,
     `  }`,
     `}`,

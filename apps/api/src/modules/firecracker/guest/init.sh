@@ -65,8 +65,9 @@ chmod 1777 /tmp
 # /home/pi is baked into the rootfs (adduser in runtime-pi/Dockerfile) and
 # never the effective HOME (the supervisor sets HOME=cwd per workload).
 mkdir -p /workspace
-# Shared workspace: agent (1001) owns it; integration runners (1002) reach
-# it through the `workspace` group (1003, baked into the rootfs). setgid
+# Shared workspace: agent (1001) owns it; integration runners (pool uids
+# 1100-1163) reach it through the `workspace` group (1003, baked into the
+# rootfs). setgid
 # keeps files created by either side group-shared.
 chown 1001:1003 /workspace
 chmod 2775 /workspace

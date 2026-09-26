@@ -20,12 +20,18 @@ import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
 import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
 
+import type { Peer } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import { scrubSecretMaterial, truncateForScrub } from "./redact.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import { createIntegrationDnsResponder } from "./integration-dns-responder.ts";
 import { createTransparentEgressListener } from "./integration-transparent-listener.ts";
-import { createRunnerPeers, policyForRunnerPeer, type RunnerPeers } from "./runner-peers.ts";
+import {
+  createRunnerPeers,
+  noRunnerPeers,
+  policyForRunnerPeer,
+  type RunnerPeers,
+} from "./runner-peers.ts";
 import {
   buildProxyEnvBlock,
   buildCaEnvBlock,
@@ -720,7 +726,7 @@ interface TransparentEgressInfra {
  */
 async function setupTransparentEgress(
   runNetwork: string,
-  policyForPeer: (remoteAddress: string) => Promise<EgressPolicy | null>,
+  policyForPeer: (peer: Peer) => Promise<EgressPolicy | null>,
 ): Promise<TransparentEgressInfra | null> {
   const handles: Array<{ close(): Promise<void> }> = [];
   try {
@@ -793,7 +799,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
         runNetwork && peers
           ? await setupTransparentEgress(
               runNetwork,
-              policyForRunnerPeer(peers, transparentPolicies),
+              policyForRunnerPeer(peers.integrationOf, transparentPolicies),
             )
           : null;
       logger.info("docker integration adapter ready", { runId, runNetwork });
@@ -998,8 +1004,9 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
     },
 
     peerAttribution() {
-      // No per-run network (dev / tests): no member table to attribute from.
-      return peers ? peers.integrationOf : null;
+      // No per-run network (dev / tests): the listeners bind loopback, which no
+      // runner container can reach, so no peer is a runner.
+      return peers ? peers.integrationOf : noRunnerPeers;
     },
 
     async shutdown(): Promise<void> {

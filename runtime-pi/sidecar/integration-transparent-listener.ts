@@ -24,8 +24,8 @@
  *     header (the only place it exists — the wire target IP is ours);
  *   - apply the exact same SSRF floor as the CONNECT listener (literal
  *     layer + resolve-and-pin DNS-rebind layer, fail closed) and the same
- *     egress allowlist, that of the runner at the peer IP (`policyForPeer`,
- *     an unknown peer is refused — #1458);
+ *     egress allowlist, that of the runner the peer belongs to
+ *     (`policyForPeer`, an unknown peer is refused — #1458);
  *   - dial the upstream at the PINNED resolved address — never at the
  *     kernel-level original destination, which is always our own IP and,
  *     more importantly, is attacker-controlled ordering: the hostname the
@@ -50,11 +50,12 @@ import type { Socket } from "node:net";
 
 import {
   isBlockedHost,
-  peerAddress,
   resolveAndCheckHost,
+  socketPeer,
   PREAMBLE_TIMEOUT_MS,
   type AuthorityPolicy,
   type HostResolver,
+  type Peer,
 } from "./helpers.ts";
 import { netConnectWithTimeout, relaySockets } from "./connect-tunnel.ts";
 import { extractSni, collectUntilSniParses } from "./integration-mitm-listener.ts";
@@ -77,8 +78,8 @@ interface CreateTransparentListenerOptions {
   isBlockedHostFn?: typeof isBlockedHost;
   /** Injectable DNS resolver for the rebind guard (tests stub it). */
   resolveHostFn?: HostResolver;
-  /** Egress policy of the runner at `remoteAddress`; `null` = refused. */
-  policyForPeer: (remoteAddress: string) => Promise<AuthorityPolicy | null>;
+  /** Egress policy of the runner `peer` belongs to; `null` = refused. */
+  policyForPeer: (peer: Peer) => Promise<AuthorityPolicy | null>;
 }
 
 export interface TransparentListenerHandle {
@@ -158,7 +159,7 @@ export function createTransparentEgressListener(
 
   server.on("connection", (clientSocket: Socket) => {
     // Peer gate, started at accept.
-    const peer = peerAddress(clientSocket);
+    const peer = socketPeer(clientSocket);
     const peerPolicy = peer ? options.policyForPeer(peer).catch(() => null) : Promise.resolve(null);
     // Upstream is dialed later, after the async SSRF/resolve phase. Track
     // it in the connection scope so ANY client teardown — including the
@@ -205,7 +206,7 @@ export function createTransparentEgressListener(
         const policy = await peerPolicy;
         if (!policy) {
           const target = `<unknown>:${upstreamPort}`;
-          emit({ kind: "tunnel-refused", target, reason: "peer-not-allowed", peer });
+          emit({ kind: "tunnel-refused", target, reason: "peer-not-allowed", peer: peer?.address });
           clientSocket.destroy();
           return;
         }

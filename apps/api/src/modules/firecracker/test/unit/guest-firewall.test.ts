@@ -29,7 +29,7 @@ describe("buildGuestFirewallScript", () => {
       'oifname "lo" accept',
       "meta skuid 0 accept",
       "meta skuid 1000 accept",
-      "meta skuid 1002 accept",
+      "meta skuid 1100-1163 accept",
       "meta skuid 1001 ip daddr 10.231.255.1 tcp dport 3000 accept",
     ]);
   });

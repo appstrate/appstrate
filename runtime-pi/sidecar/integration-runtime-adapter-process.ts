@@ -15,24 +15,32 @@
  *
  * A runner spawned here is a plain child of the sidecar, on the SAME
  * uid, unless the launching supervisor supplies a privilege-dropping
- * exec wrapper (`APPSTRATE_RUNNER_EXEC`). Same uid means the runner can
- * read the sidecar's own environment — on Linux `/proc/<sidecar-pid>/
- * environ` is one open() away for a same-uid process — which holds the
- * platform API key, the run bearer token, the proxy URL's basic-auth,
- * and every connected integration's decrypted credentials. So this
- * adapter REFUSES to spawn when no wrapper is configured; see
- * {@link requirePrivilegeDropWrapper}.
+ * exec wrapper (`APPSTRATE_RUNNER_EXEC`) and a runner uid pool
+ * (`APPSTRATE_RUNNER_UIDS`). Same uid means the runner can read the
+ * sidecar's own environment — on Linux `/proc/<sidecar-pid>/environ` is
+ * one open() away for a same-uid process — which holds the platform API
+ * key, the run token, the proxy URL's basic-auth, and every connected
+ * integration's decrypted credentials. So this adapter REFUSES to spawn
+ * without both; see {@link requireRunnerIsolation}.
+ *
+ * Each runner execs as `<wrapper> <uid> <command> [args...]` on a uid of
+ * its own from the pool, which is also how listener peers are attributed:
+ * every runner shares 127.0.0.1, but the kernel's socket table
+ * (`/proc/net/tcp`) names the uid owning the client end of each
+ * connection a listener accepts ({@link socketOwnerUid}).
  */
 
-import { mkdir, stat, writeFile, chmod, rm } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
 
+import type { Endpoint, Peer } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
+import { noRunnerPeers, type PeerAttribution } from "./runner-peers.ts";
 import {
   buildProxyEnvBlock,
   buildCaEnvBlock,
@@ -72,17 +80,37 @@ const HOST_INTERPRETER_BY_TYPE: Record<
   binary: { command: "", argsBefore: [] },
 };
 
+/** Inclusive uid range the supervisor reserves for runners, one uid per runner. */
+interface RunnerUidPool {
+  first: number;
+  last: number;
+}
+
+/** `APPSTRATE_RUNNER_UIDS` (`"<first>-<last>"`) parsed strictly; a string says why it is unusable. */
+function parseRunnerUidPool(raw: string | undefined): RunnerUidPool | string {
+  if (raw === undefined) return "no APPSTRATE_RUNNER_UIDS runner uid pool";
+  const match = /^(\d+)-(\d+)$/.exec(raw);
+  const first = Number(match?.[1]);
+  const last = Number(match?.[2]);
+  if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || first > last) {
+    return `APPSTRATE_RUNNER_UIDS "${raw}" is not a "<first>-<last>" uid range with first <= last`;
+  }
+  return { first, last };
+}
+
 /**
  * Fail-closed gate on the only thing that makes a host subprocess a
- * boundary: the ability to land the runner on a different uid.
+ * boundary: the ability to land each runner on a uid of its own.
  *
  * The Firecracker guest supervisor sets `APPSTRATE_RUNNER_EXEC` to a
- * setuid wrapper (`spawnAs`, `modules/firecracker/guest/supervisor.ts`),
- * so runners there execute as a dedicated runner uid and the sidecar's
- * environ is unreadable to them. Nothing else sets it — host process
- * mode (the `RUN_ADAPTER=process` default, the zero-install path) has no
- * portable way to drop privilege from Bun, so the runner would be a
- * same-uid child that can read every credential the sidecar holds.
+ * setuid wrapper (`spawnAs`, `modules/firecracker/guest/supervisor.ts`)
+ * and `APPSTRATE_RUNNER_UIDS` to the uid pool that wrapper accepts, so
+ * each runner there executes on its own runner uid: the sidecar's environ
+ * is unreadable to it, and the listeners can tell it from the other
+ * runners. Nothing else sets them — host process mode (the
+ * `RUN_ADAPTER=process` default, the zero-install path) has no portable
+ * way to drop privilege from Bun, so the runner would be a same-uid child
+ * that can read every credential the sidecar holds.
  *
  * The env allowlist in `SubprocessTransport` does not close that: it
  * bounds what we HAND the child, not what the child can go and read out
@@ -96,43 +124,49 @@ const HOST_INTERPRETER_BY_TYPE: Record<
  * and `none` (api_call-only) never reach an adapter, so they are
  * unaffected by this gate.
  *
- * What is checked, and what that proves. The var must name a regular file
- * carrying the SETUID bit (`S_ISUID`) — the shipped wrapper is built
+ * What is checked, and what that proves. The wrapper var must name a regular
+ * file carrying the SETUID bit (`S_ISUID`) — the shipped wrapper is built
  * `chown root:1000` + `chmod 4750`
  * (`apps/api/src/modules/firecracker/scripts/Dockerfile.rootfs`). Presence
  * alone proved nothing: `APPSTRATE_RUNNER_EXEC=/usr/bin/env` satisfied it while
  * exec'ing the runner on the sidecar's own uid, so the gate reported a boundary
  * that did not exist. A file with no setuid bit CANNOT change the child's uid,
- * whatever it does once running, so refusing it is exact.
+ * whatever it does once running, so refusing it is exact. The pool must parse
+ * as a uid range: without one there is no uid to hand the wrapper.
  *
  * It is not checked that the setuid owner is root, or that it is anyone other
  * than the sidecar's own uid: a stat cannot tell a privilege DROP from a
  * same-uid setuid file, and the wrapper's uid layout is the guest image's to
- * declare, not the sidecar's to assume. This is a misconfiguration gate, not an
- * adversary boundary — the party who sets this env var is the orchestrator, and
- * the party it defends against is the third-party runner bytes, which cannot
- * set it.
+ * declare, not the sidecar's to assume (the wrapper itself refuses a uid
+ * outside its compiled pool). This is a misconfiguration gate, not an
+ * adversary boundary — the party who sets these env vars is the orchestrator,
+ * and the party it defends against is the third-party runner bytes, which
+ * cannot set them.
  *
- * Returns the wrapper path so the caller reads the environment exactly
- * once — the check and the value it gates can never disagree.
+ * Returns the wrapper path and the narrowed pool, so the check and the values
+ * it gates can never disagree.
  */
-async function requirePrivilegeDropWrapper(spec: IntegrationSpawnSpec): Promise<string> {
+async function requireRunnerIsolation(
+  spec: IntegrationSpawnSpec,
+  uidPool: RunnerUidPool | string,
+): Promise<{ wrapper: string; pool: RunnerUidPool }> {
   const wrapper = process.env.APPSTRATE_RUNNER_EXEC;
   const serverPackageId = spec.manifest.server?.packageId ?? spec.integrationId;
-  // Explicitly typed so TypeScript narrows `wrapper` past the first refusal:
-  // a `never` return only narrows through an annotated binding.
+  // Explicitly typed so TypeScript narrows past each refusal: a `never`
+  // return only narrows through an annotated binding.
   const refuse: (why: string) => never = (why: string) => {
     throw new Error(
       `${spec.integrationId}: refusing to spawn its mcp-server "${serverPackageId}" — ` +
-        `source.kind "local" runs third-party code, and this adapter cannot drop privilege ` +
-        `(${why}), so the runner would be a same-uid child of the ` +
-        `sidecar and could read the sidecar's environment — platform API key, run token, ` +
-        `proxy credentials, every connected integration's decrypted tokens — straight out ` +
-        `of /proc. Remedies, cheapest first: set INTEGRATION_RUNTIME_ADAPTER=docker to keep ` +
-        `the run itself in process mode while each integration runner gets its own ` +
-        `container; or run under RUN_ADAPTER=docker; or under RUN_ADAPTER=firecracker, ` +
-        `whose guest supervisor execs every runner through a setuid wrapper onto a ` +
-        `dedicated uid. Integrations whose source.kind is "remote" or "none" spawn nothing ` +
+        `source.kind "local" runs third-party code, which this adapter spawns only on a uid ` +
+        `of its own, through a setuid APPSTRATE_RUNNER_EXEC wrapper onto a uid from the ` +
+        `APPSTRATE_RUNNER_UIDS pool (${why}). On the sidecar's uid the runner could read the ` +
+        `sidecar's environment — platform API key, run token, proxy credentials, every ` +
+        `connected integration's decrypted tokens — straight out of /proc; on a shared uid ` +
+        `the egress listeners could not tell it from another runner. Remedies, cheapest ` +
+        `first: set INTEGRATION_RUNTIME_ADAPTER=docker to keep the run itself in process ` +
+        `mode while each integration runner gets its own container; or run under ` +
+        `RUN_ADAPTER=docker; or under RUN_ADAPTER=firecracker, whose guest supervisor ` +
+        `provides both. Integrations whose source.kind is "remote" or "none" spawn nothing ` +
         `and are unaffected.`,
     );
   };
@@ -154,7 +188,45 @@ async function requirePrivilegeDropWrapper(spec: IntegrationSpawnSpec): Promise<
       `APPSTRATE_RUNNER_EXEC "${wrapper}" carries no setuid bit, so exec'ing it leaves the runner on the sidecar's uid`,
     );
   }
-  return wrapper;
+  if (typeof uidPool === "string") refuse(uidPool);
+  return { wrapper, pool: uidPool };
+}
+
+/**
+ * Uid owning the runner-side client socket of the connection a listener
+ * accepted from `peer`, from `/proc/net/tcp` text: the ESTABLISHED row keyed by
+ * that connection's 4-tuple — `local_address` is the peer's end and
+ * `rem_address` the listener's (the accepted socket is the mirror row, and
+ * SO_REUSEADDR sockets sharing the peer's end have another remote). IPv4 only:
+ * process-mode listeners bind 127.0.0.1. The kernel prints each address as the
+ * host-order hex of the network-order u32, read here as little-endian (x86_64
+ * and aarch64 guests both are), and the port as plain hex: 127.0.0.1:8080 is
+ * `0100007F:1F90`.
+ */
+export function socketOwnerUid(procNetTcp: string, peer: Peer): number | undefined {
+  const local = procNetTcpEndpoint(peer);
+  const remote = procNetTcpEndpoint(peer.listener);
+  if (local === undefined || remote === undefined) return undefined;
+  for (const line of procNetTcp.split("\n")) {
+    // sl local_address rem_address st tx:rx tr:when retrnsmt uid …
+    const fields = line.trim().split(/\s+/);
+    if (fields[1] === local && fields[2] === remote && fields[3] === "01") {
+      const uid = Number(fields[7]);
+      return Number.isSafeInteger(uid) ? uid : undefined;
+    }
+  }
+  return undefined;
+}
+
+/** An IPv4 endpoint as `/proc/net/tcp` prints it; undefined for anything else. */
+function procNetTcpEndpoint({ address, port }: Endpoint): string | undefined {
+  const octets = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(address)?.slice(1);
+  if (!octets || !Number.isInteger(port) || port < 0 || port > 0xffff) return undefined;
+  const hex = (n: number, width: number) => n.toString(16).toUpperCase().padStart(width, "0");
+  return `${octets
+    .map((octet) => hex(Number(octet), 2))
+    .reverse()
+    .join("")}:${hex(port, 4)}`;
 }
 
 interface SubprocessPlan {
@@ -316,22 +388,55 @@ export async function materializeFileMountsOnHost(
   return { createdPaths, envOverrides };
 }
 
-export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
+export function createProcessIntegrationRuntimeAdapter({
+  // procfs reports size 0; readFile reads to EOF.
+  readProcNetTcp = () => readFile("/proc/net/tcp", "utf8"),
+}: {
+  /** Kernel TCP socket table; tests inject fixtures. */
+  readProcNetTcp?: () => Promise<string>;
+} = {}): IntegrationRuntimeAdapter {
   /**
    * Files/dirs created for `delivery.files` materialisation, cleaned up on
    * shutdown so per-run credential material doesn't outlive the run.
    */
   const createdPaths: string[] = [];
+  // Read once: admission and attribution judge the same pool.
+  const uidPool = parseRunnerUidPool(process.env.APPSTRATE_RUNNER_UIDS);
+  /** Runner uid → integration id, one uid per `spawn()`, allocated in pool order. */
+  const runnersByUid = new Map<number, string>();
+  let allocatedUids = 0;
+
+  const attribution: PeerAttribution =
+    typeof uidPool === "string"
+      ? // No pool: admission refuses every spawn, so no peer can be a runner.
+        noRunnerPeers
+      : async (peer) => {
+          let table: string;
+          try {
+            table = await readProcNetTcp();
+          } catch (err) {
+            logger.warn("runner peer lookup failed — refusing unattributable peers", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+            return undefined;
+          }
+          const uid = socketOwnerUid(table, peer);
+          if (uid === undefined) return undefined;
+          if (uid < uidPool.first || uid > uidPool.last) return null;
+          return runnersByUid.get(uid);
+        };
 
   return {
     id: "process",
 
     async prepare(runId: string): Promise<RuntimeAdapterRunContext> {
       logger.info("process integration adapter ready", { runId });
-      logger.warn(
-        "runner egress allowlist is not enforced by the process backend: runners share loopback and have direct egress (#1458)",
-        { runId },
-      );
+      if (typeof uidPool !== "string") {
+        logger.warn(
+          "runner egress allowlist is enforced on the sidecar listeners only: process-backend runners still have direct egress (#1547)",
+          { runId },
+        );
+      }
       // Subprocess inherits the parent's NS — loopback reaches the
       // listener directly.
       return {
@@ -345,8 +450,17 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
       // First, before any credential material is rendered: a runner we are
       // going to refuse must not have `delivery.files` secrets written to
       // disk on its behalf.
-      const runnerExec = await requirePrivilegeDropWrapper(spec);
+      const { wrapper, pool } = await requireRunnerIsolation(spec, uidPool);
       const plan = planSubprocess(spec, bundleRoot);
+      const uid = pool.first + allocatedUids;
+      if (uid > pool.last) {
+        throw new Error(
+          `${spec.integrationId}: runner uid pool APPSTRATE_RUNNER_UIDS is exhausted — ` +
+            `all ${pool.last - pool.first + 1} uids are held by this run's other runners`,
+        );
+      }
+      allocatedUids += 1;
+      runnersByUid.set(uid, spec.integrationId);
       const procEnv: Record<string, string> = { ...spec.spawnEnv };
       if (egress) {
         // Proxy routing for BOTH listener kinds (MITM + plain CONNECT).
@@ -398,15 +512,12 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
         createdPaths.push(...paths);
         Object.assign(procEnv, envOverrides);
       }
-      // Privilege-drop wrapper (Firecracker guest): the supervisor provides
-      // APPSTRATE_RUNNER_EXEC, so every runner execs through the setuid
-      // wrapper and lands on the dedicated runner uid instead of inheriting
-      // the sidecar's — the sidecar's environ (credentials) stays
-      // unreadable. Resolved at the top of `spawn` by
-      // `requirePrivilegeDropWrapper`, which refused when it is unset.
+      // The setuid wrapper drops the runner onto its own uid instead of the
+      // sidecar's: the sidecar's environ (credentials) stays unreadable, and
+      // `attribution` maps the runner's sockets back to this integration.
       const transport = new SubprocessTransport({
-        command: runnerExec,
-        args: [plan.command, ...plan.args],
+        command: wrapper,
+        args: [String(uid), plan.command, ...plan.args],
         cwd: plan.cwd,
         env: procEnv,
         envPassthrough: ["PATH", "HOME", "NODE_OPTIONS"],
@@ -416,8 +527,7 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
     },
 
     peerAttribution() {
-      // Runners share the sidecar's 127.0.0.1: a peer IP names no runner.
-      return null;
+      return attribution;
     },
 
     async shutdown(): Promise<void> {

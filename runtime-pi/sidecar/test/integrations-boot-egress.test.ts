@@ -21,6 +21,7 @@ import {
   registerIntegrationRuntimeAdapter,
   type SpawnIntegrationOptions,
 } from "../integration-runtime-adapter.ts";
+import type { Peer } from "../helpers.ts";
 import type { PeerAttribution } from "../runner-peers.ts";
 
 const ADAPTER_ID = `egress-wiring-${Math.random().toString(36).slice(2, 8)}`;
@@ -31,8 +32,8 @@ const EGRESS = { authorizedUris: ["https://api.allowed.test/**"], allowAllUris: 
 let spawnedWith: SpawnIntegrationOptions[] = [];
 /** What the fake adapter attributes every peer to (see {@link PeerAttribution}). */
 let peerOwner: string | null | undefined = INTEGRATION_ID;
-/** `false` = the backend cannot attribute peers at all (`peerAttribution()` → null). */
-let attributes = true;
+/** Every peer the fake adapter was asked to attribute. */
+let askedAbout: Peer[] = [];
 
 registerIntegrationRuntimeAdapter({
   id: ADAPTER_ID,
@@ -45,7 +46,10 @@ registerIntegrationRuntimeAdapter({
       spawnedWith.push(options);
       throw new Error("spawn stopped by test");
     },
-    peerAttribution: (): PeerAttribution | null => (attributes ? async () => peerOwner : null),
+    peerAttribution: (): PeerAttribution => async (peer) => {
+      askedAbout.push(peer);
+      return peerOwner;
+    },
     async shutdown() {},
   }),
 });
@@ -53,7 +57,7 @@ registerIntegrationRuntimeAdapter({
 afterEach(() => {
   spawnedWith = [];
   peerOwner = INTEGRATION_ID;
-  attributes = true;
+  askedAbout = [];
 });
 
 const bundle = zipArtifact({ "server.ts": new TextEncoder().encode("export {};\n") });
@@ -130,17 +134,25 @@ async function boot(s: IntegrationSpawnSpec, resolved: string[]) {
   }
 }
 
-/** Send a CONNECT to the listener behind `proxyUrl`; resolves with the response's first line. */
-function connectVia(proxyUrl: string, target: string): Promise<string> {
+/**
+ * Send a CONNECT to the listener behind `proxyUrl`; resolves with the response's
+ * first line and the client socket's source port.
+ */
+function connectWithPort(
+  proxyUrl: string,
+  target: string,
+): Promise<{ status: string; sourcePort: number | undefined }> {
   const { port } = new URL(proxyUrl);
   return new Promise((resolve) => {
+    let sourcePort: number | undefined;
     const socket = connect(Number(port), "127.0.0.1", () => {
+      sourcePort = socket.localPort;
       socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`);
     });
     let data = "";
     const done = () => {
       socket.destroy();
-      resolve(data.split("\r\n")[0] ?? "");
+      resolve({ status: data.split("\r\n")[0] ?? "", sourcePort });
     };
     socket.on("data", (chunk) => {
       data += chunk.toString("latin1");
@@ -149,6 +161,10 @@ function connectVia(proxyUrl: string, target: string): Promise<string> {
     socket.on("close", done);
     socket.on("error", done);
   });
+}
+
+async function connectVia(proxyUrl: string, target: string): Promise<string> {
+  return (await connectWithPort(proxyUrl, target)).status;
 }
 
 describe("bootIntegrations — runner egress wiring (#1458)", () => {
@@ -183,14 +199,19 @@ describe("bootIntegrations — runner egress wiring (#1458)", () => {
     }
   });
 
-  it("admits every peer when the backend cannot attribute them", async () => {
-    attributes = false;
-    peerOwner = "@tractr/other";
-    const resolved: string[] = [];
-    const result = await boot(spec({ egress: EGRESS }), resolved);
+  it("asks the adapter about the connection's peer and listener ends", async () => {
+    const result = await boot(spec({ egress: EGRESS }), []);
     try {
-      await connectVia(spawnedWith[0]!.egress!.proxyUrl, "api.allowed.test:443");
-      expect(resolved).toEqual(["api.allowed.test"]);
+      const { proxyUrl } = spawnedWith[0]!.egress!;
+      const { sourcePort } = await connectWithPort(proxyUrl, "api.allowed.test:443");
+      expect(sourcePort).toBeGreaterThan(0);
+      expect(askedAbout).toEqual([
+        {
+          address: "127.0.0.1",
+          port: sourcePort!,
+          listener: { address: "127.0.0.1", port: Number(new URL(proxyUrl).port) },
+        },
+      ]);
     } finally {
       await result.shutdown();
     }

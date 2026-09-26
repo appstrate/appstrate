@@ -50,15 +50,21 @@ RUN apk add --no-cache nftables setpriv nodejs \
  # dedicated user otherwise. setpriv addresses it numerically either way.
  && (getent group 1000 > /dev/null || addgroup -g 1000 sidecar) \
  && (getent passwd 1000 > /dev/null || adduser -D -u 1000 -G "$(getent group 1000 | cut -d: -f1)" -s /sbin/nologin sidecar) \
- # uid/gid 1002 runs the integration MCP runners — a dedicated user so
- # the sidecar's /proc/<pid>/environ (credentials) is unreadable to them.
- # Group created explicitly: the runner-exec wrapper hardcodes gid 1002.
+ # Integration MCP runners: one uid per runner from the pool 1100-1163
+ # (runner0..runner63), primary group `runner` (gid 1002) — the kernel
+ # attributes each socket to one runner, and no runner reads the sidecar's
+ # or a sibling's /proc/<pid>/environ (credentials). Passwd entries are
+ # required: tools like OpenSSH refuse a uid without one. The pool bounds
+ # and gids mirror the runner-exec wrapper and firewall.ts (pinned by
+ # runner-uid-contract.test.ts).
  && addgroup -g 1002 runner \
- && adduser -D -u 1002 -G runner -s /sbin/nologin runner \
- # Shared `workspace` group (1003): agent + runner both write /workspace.
+ # Shared `workspace` group (1003): agent + runners all write /workspace.
  && addgroup -g 1003 workspace \
  && addgroup pi workspace \
- && addgroup runner workspace
+ && for i in $(seq 0 63); do \
+      adduser -D -H -u "$((1100 + i))" -G runner -s /sbin/nologin "runner$i" \
+      && addgroup "runner$i" workspace || exit 1; \
+    done
 
 # `server.type: "uv"` runners (uvx alongside, same as the docker runner).
 COPY --from=uv /uv /uvx /usr/local/bin/

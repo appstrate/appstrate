@@ -9,12 +9,14 @@
  * on a different uid (see `integration-runtime-adapter-process.ts`). Any
  * test that wants a REAL host subprocess therefore has to supply one.
  *
- * The fixture wrapper does NOT drop privilege — it is `exec "$@"`, so the
- * runner still runs as the test process. That is deliberate and safe
- * here: these tests assert env propagation, stderr relay, and MCP
- * round-trips, never isolation. It stands in for the supervisor's setuid
- * wrapper so the argv-forwarding path (`wrapper <interpreter> <entry>`)
- * is exercised exactly as in the guest.
+ * The fixture wrapper does NOT drop privilege — it hands its uid argument
+ * to the runner as {@link FIXTURE_UID_ENV} and `exec "$@"`s the rest, so
+ * the runner still runs as the test process. That is
+ * deliberate and safe here: these tests assert env propagation, stderr
+ * relay, and MCP round-trips, never isolation. It stands in for the
+ * supervisor's setuid wrapper so the argv-forwarding path
+ * (`wrapper <uid> <interpreter> <entry>`) is exercised exactly as in the
+ * guest, and it installs the runner uid pool the adapter also requires.
  *
  * It DOES carry the setuid bit, because the adapter now stats for it (a
  * wrapper without one cannot change the child's uid, so it is refused). The
@@ -28,28 +30,43 @@ import { mkdtemp, writeFile, stat, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+/** The runner uid pool the fixture installs on `APPSTRATE_RUNNER_UIDS`. */
+export const FIXTURE_RUNNER_UIDS = { first: 1100, last: 1163 } as const;
+
+/** Env var through which the fixture wrapper shows the runner the uid it was handed. */
+export const FIXTURE_UID_ENV = "APPSTRATE_FIXTURE_RUNNER_UID";
+
 export interface PassthroughRunnerExec {
   /** Absolute path of the wrapper script now on `APPSTRATE_RUNNER_EXEC`. */
   path: string;
-  /** Restore the previous env value and delete the wrapper. */
+  /** Restore the previous env values and delete the wrapper. */
   restore(): Promise<void>;
 }
 
 export async function installPassthroughRunnerExec(): Promise<PassthroughRunnerExec> {
   const dir = await mkdtemp(join(tmpdir(), "appstrate-runner-exec-"));
   const path = join(dir, "runner-exec");
-  await writeFile(path, '#!/bin/sh\nexec "$@"\n');
+  await writeFile(
+    path,
+    `#!/bin/sh\n${FIXTURE_UID_ENV}="$1"\nexport ${FIXTURE_UID_ENV}\nshift\nexec "$@"\n`,
+  );
   await Bun.spawn(["chmod", "4755", path], { stdout: "ignore", stderr: "ignore" }).exited;
   if (((await stat(path)).mode & 0o4000) === 0) {
     throw new Error(`runner-exec fixture: could not set the setuid bit on ${path}`);
   }
-  const previous = process.env.APPSTRATE_RUNNER_EXEC;
+  const previous = {
+    APPSTRATE_RUNNER_EXEC: process.env.APPSTRATE_RUNNER_EXEC,
+    APPSTRATE_RUNNER_UIDS: process.env.APPSTRATE_RUNNER_UIDS,
+  };
   process.env.APPSTRATE_RUNNER_EXEC = path;
+  process.env.APPSTRATE_RUNNER_UIDS = `${FIXTURE_RUNNER_UIDS.first}-${FIXTURE_RUNNER_UIDS.last}`;
   return {
     path,
     async restore() {
-      if (previous === undefined) delete process.env.APPSTRATE_RUNNER_EXEC;
-      else process.env.APPSTRATE_RUNNER_EXEC = previous;
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
       await rm(dir, { recursive: true, force: true });
     },
   };
