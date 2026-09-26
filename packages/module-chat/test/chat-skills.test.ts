@@ -7,9 +7,11 @@ import {
   fetchEnforcedSkills,
   fetchSkills,
   ownPins,
+  pinCapReached,
   skillPickerRows,
   togglePinned,
 } from "../src/ui/chat-skills.ts";
+import { MAX_PINNED_SKILLS } from "../src/skills.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -101,6 +103,20 @@ describe("ownPins", () => {
 
   it("keeps every pin when the space enforces nothing", () => {
     expect(ownPins(["@a/x"], new Set())).toEqual(["@a/x"]);
+  });
+});
+
+describe("pinCapReached", () => {
+  const own = Array.from({ length: MAX_PINNED_SKILLS - 1 }, (_, i) => `@a/own-${i}`);
+
+  it("does not count a stored pin naming an enforced skill", () => {
+    const stored = [...own, "@s/enforced"];
+    expect(stored.length).toBe(MAX_PINNED_SKILLS);
+    expect(pinCapReached(stored, new Set(["@s/enforced"]))).toBe(false);
+  });
+
+  it("CONTROL: the same pins with nothing enforced reach the cap", () => {
+    expect(pinCapReached([...own, "@s/enforced"], new Set())).toBe(true);
   });
 });
 

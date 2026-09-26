@@ -3,7 +3,7 @@
 /** The skill picker's data and pure rules. */
 
 import { z } from "zod";
-import { parseSkillList, type SkillHint } from "../skills.ts";
+import { MAX_PINNED_SKILLS, parseSkillList, type SkillHint } from "../skills.ts";
 import type { GetHeaders } from "./runtime-context.ts";
 
 /** The space's active skills, the ones the picker chooses from. */
@@ -43,6 +43,11 @@ export async function fetchEnforcedSkills(
 /** An enforced skill is injected anyway: a pin naming it is not counted nor re-sent. */
 export function ownPins(pinned: readonly string[], enforced: ReadonlySet<string>): string[] {
   return pinned.filter((id) => !enforced.has(id));
+}
+
+/** The cap counts the user's own pins: enforced skills never spend it. */
+export function pinCapReached(stored: readonly string[], enforced: ReadonlySet<string>): boolean {
+  return ownPins(stored, enforced).length >= MAX_PINNED_SKILLS;
 }
 
 /** Pin/unpin. The picker disables a new pin at the cap; the route refuses one past it. */

@@ -21,7 +21,13 @@ import {
 } from "@appstrate/ui/components/tooltip";
 import { cn } from "@appstrate/ui/cn";
 import { injectsSkills, MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
-import { fetchSkills, ownPins, skillPickerRows, togglePinned } from "./chat-skills.ts";
+import {
+  fetchSkills,
+  ownPins,
+  pinCapReached,
+  skillPickerRows,
+  togglePinned,
+} from "./chat-skills.ts";
 import { useEnforcedSkills } from "./use-enforced-skills.ts";
 import { useChatHost, type GetHeaders } from "./runtime-context.ts";
 import { spaceIdFromHeaders } from "./sessions.ts";
@@ -64,7 +70,7 @@ export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerPr
 
   const pinned = ownPins(selection.pinnedSkills, enforcedIds);
   const pinnedSet = new Set(pinned);
-  const atPinCap = pinned.length >= MAX_PINNED_SKILLS;
+  const atPinCap = pinCapReached(selection.pinnedSkills, enforcedIds);
   const rows = skillPickerRows(skills, pinned, enforcedIds);
   // `auto` keeps the chosen skills but does not use them: the list is inert.
   const choosing = injectsSkills(selection.skillMode);
