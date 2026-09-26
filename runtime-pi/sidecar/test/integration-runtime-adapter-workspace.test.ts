@@ -22,9 +22,9 @@ import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createProcessIntegrationRuntimeAdapter } from "../integration-runtime-adapter-process.ts";
 import { WORKSPACE_ENV_VAR } from "../integration-runtime-adapter.ts";
 import type { IntegrationSpawnSpec } from "../integrations-boot.ts";
+import { createHermeticProcessAdapter } from "./helpers/hermetic-process-adapter.ts";
 import { installPassthroughRunnerExec, type PassthroughRunnerExec } from "./helpers/runner-exec.ts";
 
 /**
@@ -84,7 +84,7 @@ describe("process adapter — workspace env propagation", () => {
   });
 
   it("sets APPSTRATE_WORKSPACE when spec.workspaceMount + directory handle are both present", async () => {
-    const adapter = createProcessIntegrationRuntimeAdapter();
+    const adapter = createHermeticProcessAdapter();
     await adapter.prepare("run-1");
 
     // Capture the env the subprocess would see. We can't easily
@@ -123,7 +123,7 @@ describe("process adapter — workspace env propagation", () => {
   });
 
   it("omits APPSTRATE_WORKSPACE when spec opts in but orchestrator handle is null", async () => {
-    const adapter = createProcessIntegrationRuntimeAdapter();
+    const adapter = createHermeticProcessAdapter();
     await adapter.prepare("run-2");
 
     const envFile = join(bundleRoot, "env.dump");
@@ -153,7 +153,7 @@ describe("process adapter — workspace env propagation", () => {
   });
 
   it("omits APPSTRATE_WORKSPACE when spec didn't opt in (no workspaceMount)", async () => {
-    const adapter = createProcessIntegrationRuntimeAdapter();
+    const adapter = createHermeticProcessAdapter();
     await adapter.prepare("run-3");
 
     const envFile = join(bundleRoot, "env.dump");

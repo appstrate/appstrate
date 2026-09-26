@@ -58,8 +58,10 @@ import {
   type Peer,
 } from "./helpers.ts";
 import { netConnectWithTimeout, relaySockets } from "./connect-tunnel.ts";
+import { createIntegrationDnsResponder } from "./integration-dns-responder.ts";
 import { extractSni, collectUntilSniParses } from "./integration-mitm-listener.ts";
 import type { EgressListenerEvent } from "./integration-egress-listener.ts";
+import { logger } from "./logger.ts";
 
 interface CreateTransparentListenerOptions {
   /** Bind host — 0.0.0.0 on the per-run bridge network. */
@@ -300,4 +302,94 @@ export function createTransparentEgressListener(
       return new Promise<void>((res) => server.close(() => res()));
     },
   };
+}
+
+/** Bind ports of the transparent plane. */
+interface TransparentPlanePorts {
+  dns: number;
+  tls: number;
+  http: number;
+}
+
+export interface TransparentEgressPlaneOptions {
+  /**
+   * IPv4 the plane binds AND the DNS responder answers with — one address, so
+   * every answer lands the runner's `connect(host, 443)` on the splicers.
+   */
+  ipv4: () => Promise<string>;
+  /** Egress policy of the runner a peer belongs to; `null` = refused. */
+  policyForPeer: (peer: Peer) => Promise<AuthorityPolicy | null>;
+  /** Defaults to 53/443/80; tests bind unprivileged ports. */
+  ports?: TransparentPlanePorts;
+  /** Test stubs for both splicers; production passes none. */
+  splicer?: Pick<
+    CreateTransparentListenerOptions,
+    "upstreamPort" | "isBlockedHostFn" | "resolveHostFn"
+  >;
+}
+
+export interface TransparentEgressPlane {
+  /** The address the plane binds and answers with. */
+  readonly ipv4: string;
+  /** Idempotent. */
+  close(): Promise<void>;
+}
+
+/**
+ * Mount the per-run transparent egress plane (#779): the DNS responder that
+ * resolves every external name to `ipv4`, and the SNI-passthrough splicers on
+ * :443/:80 at that same address. Shared by the docker adapter (the sidecar's
+ * IP on the per-run bridge) and the process adapter (127.0.0.1 in the guest).
+ *
+ * Any failure — resolving `ipv4`, a bind — is logged and swallowed (`null`):
+ * degrading to the CONNECT proxy contract removes a route and never widens
+ * one, so it is always safe.
+ *
+ * The splicers resolve with the default DNS resolver — deliberately NOT
+ * `bundleFetchOpts.resolveHostFn`, a test-injection seam (always `undefined` in
+ * production; see the `bootIntegrations` call in server.ts) that isn't threaded
+ * through the adapter interface. If a production resolver override ever lands,
+ * revisit so both egress planes resolve identically.
+ */
+export async function startTransparentEgressPlane(
+  options: TransparentEgressPlaneOptions,
+): Promise<TransparentEgressPlane | null> {
+  const ports = options.ports ?? { dns: 53, tls: 443, http: 80 };
+  const handles: Array<{ close(): Promise<void> }> = [];
+  const close = async () => {
+    for (const h of handles.splice(0)) {
+      await h.close().catch(() => {});
+    }
+  };
+  try {
+    const ip = await options.ipv4();
+    const onEvent = (event: { kind: string; target: string; reason?: string }) => {
+      const log = event.kind === "tunnel-opened" ? logger.info : logger.warn;
+      log.call(logger, "transparent egress event", event);
+    };
+    const splicer = (port: number) =>
+      createTransparentEgressListener({
+        ...options.splicer,
+        host: ip,
+        port,
+        onEvent,
+        policyForPeer: options.policyForPeer,
+      });
+    const dns = createIntegrationDnsResponder({ answerIpv4: ip, host: ip, port: ports.dns });
+    handles.push(dns);
+    const tls = splicer(ports.tls);
+    handles.push(tls);
+    const http = splicer(ports.http);
+    handles.push(http);
+    await Promise.all([dns.ready, tls.ready, http.ready]);
+    logger.info("transparent egress ready", { dnsIp: ip });
+    return { ipv4: ip, close };
+  } catch (err) {
+    await close();
+    logger.warn(
+      "transparent egress unavailable — env-delivery runners fall back to the CONNECT proxy contract (proxy-unaware HTTP clients will fail, #779)",
+      { error: err instanceof Error ? err.message : String(err) },
+    );
+    return null;
+  }
 }

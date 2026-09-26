@@ -3,31 +3,27 @@
 /**
  * In-process integration runtime adapter — the universal fallback.
  *
- * Spawns each integration MCP server as a direct subprocess of the
- * sidecar via `Bun.spawn`. No container isolation, no per-run network.
- * The subprocess inherits the sidecar's network namespace, so the MITM
- * listener stays on 127.0.0.1 and the CA cert lives on shared fs.
+ * Spawns each integration MCP server as a direct subprocess of the sidecar
+ * (`Bun.spawn`): no container, no per-run network. Runners share the sidecar's
+ * network namespace, so every listener binds 127.0.0.1 and the MITM CA is a
+ * path on the shared fs. Used in dev, in tests and inside the Firecracker
+ * guest; on Docker the docker adapter takes precedence.
  *
- * Used in dev (sidecar running as a Bun subprocess on the host), in
- * tests, and inside the Firecracker guest (the sidecar runs in the
- * microVM, so its integration runners are guest subprocesses). In
- * production-on-Docker the docker adapter takes precedence.
+ * A runner on the sidecar's uid could read `/proc/<sidecar-pid>/environ` — the
+ * platform API key, the run token, the proxy basic-auth, every connected
+ * integration's decrypted credentials. So this adapter REFUSES to spawn without
+ * a setuid exec wrapper (`APPSTRATE_RUNNER_EXEC`) and a runner uid pool
+ * (`APPSTRATE_RUNNER_UIDS`), which only the Firecracker guest supervisor
+ * provides; see {@link requireRunnerIsolation}.
  *
- * A runner spawned here is a plain child of the sidecar, on the SAME
- * uid, unless the launching supervisor supplies a privilege-dropping
- * exec wrapper (`APPSTRATE_RUNNER_EXEC`) and a runner uid pool
- * (`APPSTRATE_RUNNER_UIDS`). Same uid means the runner can read the
- * sidecar's own environment — on Linux `/proc/<sidecar-pid>/environ` is
- * one open() away for a same-uid process — which holds the platform API
- * key, the run token, the proxy URL's basic-auth, and every connected
- * integration's decrypted credentials. So this adapter REFUSES to spawn
- * without both; see {@link requireRunnerIsolation}.
- *
- * Each runner execs as `<wrapper> <uid> <command> [args...]` on a uid of
- * its own from the pool, which is also how listener peers are attributed:
- * every runner shares 127.0.0.1, but the kernel's socket table
- * (`/proc/net/tcp`) names the uid owning the client end of each
- * connection a listener accepts ({@link socketOwnerUid}).
+ * Each runner execs as `<wrapper> <uid> <command> [args...]` on a pool uid of
+ * its own, which is how listener peers are attributed: the kernel's socket
+ * table (`/proc/net/tcp`) names the uid owning the client end of each
+ * connection a listener accepts ({@link socketOwnerUid}). The guest gives a
+ * runner uid loopback-only egress and redirects its DNS to 127.0.0.1:53, so
+ * every route out crosses a sidecar listener: the runner's own CONNECT/MITM
+ * listener, or the transparent plane (#779) this adapter mounts on 127.0.0.1
+ * for proxy-unaware clients.
  */
 
 import { mkdir, readFile, stat, writeFile, chmod, rm } from "node:fs/promises";
@@ -36,11 +32,17 @@ import { dirname, join } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
+import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
 
 import type { Endpoint, Peer } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
-import { noRunnerPeers, type PeerAttribution } from "./runner-peers.ts";
+import {
+  startTransparentEgressPlane,
+  type TransparentEgressPlane,
+  type TransparentEgressPlaneOptions,
+} from "./integration-transparent-listener.ts";
+import { noRunnerPeers, policyForRunnerPeer, type PeerAttribution } from "./runner-peers.ts";
 import {
   buildProxyEnvBlock,
   buildCaEnvBlock,
@@ -391,9 +393,12 @@ export async function materializeFileMountsOnHost(
 export function createProcessIntegrationRuntimeAdapter({
   // procfs reports size 0; readFile reads to EOF.
   readProcNetTcp = () => readFile("/proc/net/tcp", "utf8"),
+  transparentPlane = {},
 }: {
   /** Kernel TCP socket table; tests inject fixtures. */
   readProcNetTcp?: () => Promise<string>;
+  /** Transparent plane ports and splicer stubs; tests cannot bind 53/443/80. */
+  transparentPlane?: Pick<TransparentEgressPlaneOptions, "ports" | "splicer">;
 } = {}): IntegrationRuntimeAdapter {
   /**
    * Files/dirs created for `delivery.files` materialisation, cleaned up on
@@ -405,6 +410,9 @@ export function createProcessIntegrationRuntimeAdapter({
   /** Runner uid → integration id, one uid per `spawn()`, allocated in pool order. */
   const runnersByUid = new Map<number, string>();
   let allocatedUids = 0;
+  /** Integration id → policy the transparent plane serves that runner. */
+  const transparentPolicies = new Map<string, EgressPolicy>();
+  let plane: TransparentEgressPlane | null = null;
 
   const attribution: PeerAttribution =
     typeof uidPool === "string"
@@ -431,11 +439,14 @@ export function createProcessIntegrationRuntimeAdapter({
 
     async prepare(runId: string): Promise<RuntimeAdapterRunContext> {
       logger.info("process integration adapter ready", { runId });
+      // #779 — runners exist only with a pool. Their DNS lands on 127.0.0.1:53,
+      // so the plane binds and answers with 127.0.0.1.
       if (typeof uidPool !== "string") {
-        logger.warn(
-          "runner egress allowlist is enforced on the sidecar listeners only: process-backend runners still have direct egress (#1547)",
-          { runId },
-        );
+        plane = await startTransparentEgressPlane({
+          ipv4: async () => "127.0.0.1",
+          policyForPeer: policyForRunnerPeer(attribution, transparentPolicies),
+          ...transparentPlane,
+        });
       }
       // Subprocess inherits the parent's NS — loopback reaches the
       // listener directly.
@@ -461,6 +472,13 @@ export function createProcessIntegrationRuntimeAdapter({
       }
       allocatedUids += 1;
       runnersByUid.set(uid, spec.integrationId);
+      // The plane serves the runners docker gives `--dns`: plain-CONNECT egress.
+      // A MITM-delivery runner's DNS lands on 127.0.0.1 too (the guest redirect
+      // is per uid, not per kind) and the plane refuses it: splicing would
+      // bypass credential injection.
+      if (egress && egress.caCertHostPath === null) {
+        transparentPolicies.set(spec.integrationId, egress.policy);
+      }
       const procEnv: Record<string, string> = { ...spec.spawnEnv };
       if (egress) {
         // Proxy routing for BOTH listener kinds (MITM + plain CONNECT).
@@ -542,6 +560,9 @@ export function createProcessIntegrationRuntimeAdapter({
         await rm(path, { force: true }).catch(() => {});
       }
       createdPaths.length = 0;
+      await plane?.close();
+      plane = null;
+      transparentPolicies.clear();
     },
   };
 }

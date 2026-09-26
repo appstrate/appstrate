@@ -27,8 +27,8 @@ import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
-import { createProcessIntegrationRuntimeAdapter } from "../integration-runtime-adapter-process.ts";
 import type { IntegrationSpawnSpec } from "../integrations-boot.ts";
+import { createHermeticProcessAdapter } from "./helpers/hermetic-process-adapter.ts";
 import {
   FIXTURE_RUNNER_UIDS,
   FIXTURE_UID_ENV,
@@ -71,7 +71,7 @@ describe("process adapter — privilege-drop gate", () => {
 
   it("refuses to spawn a local runner when no privilege-drop wrapper is configured", async () => {
     delete process.env.APPSTRATE_RUNNER_EXEC;
-    const adapter = createProcessIntegrationRuntimeAdapter();
+    const adapter = createHermeticProcessAdapter();
     await adapter.prepare("run-refuse");
 
     const spawn = adapter.spawn({
@@ -109,7 +109,7 @@ describe("process adapter — privilege-drop gate", () => {
     const wrapper = join(dir, "runner-exec");
     await writeFile(wrapper, '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
     process.env.APPSTRATE_RUNNER_EXEC = wrapper;
-    const adapter = createProcessIntegrationRuntimeAdapter();
+    const adapter = createHermeticProcessAdapter();
     await adapter.prepare("run-nosuid");
     try {
       const spawn = adapter.spawn({
@@ -134,7 +134,7 @@ describe("process adapter — privilege-drop gate", () => {
 
   it("refuses a wrapper that does not exist", async () => {
     process.env.APPSTRATE_RUNNER_EXEC = join(bundleRoot, "no-such-wrapper");
-    const adapter = createProcessIntegrationRuntimeAdapter();
+    const adapter = createHermeticProcessAdapter();
     await adapter.prepare("run-missing");
     try {
       await expect(
@@ -166,7 +166,7 @@ describe("process adapter — privilege-drop gate", () => {
       ]) {
         if (pool === undefined) delete process.env.APPSTRATE_RUNNER_UIDS;
         else process.env.APPSTRATE_RUNNER_UIDS = pool;
-        const adapter = createProcessIntegrationRuntimeAdapter();
+        const adapter = createHermeticProcessAdapter();
         await adapter.prepare("run-pool");
         const error = (await adapter
           .spawn({
@@ -194,7 +194,7 @@ describe("process adapter — privilege-drop gate", () => {
 
   it("spawns through the wrapper when the supervisor supplied one", async () => {
     const wrapper = await installPassthroughRunnerExec();
-    const adapter = createProcessIntegrationRuntimeAdapter();
+    const adapter = createHermeticProcessAdapter();
     await adapter.prepare("run-allow");
 
     // The runner dumps its argv + env and exits: proof the wrapper exec'd

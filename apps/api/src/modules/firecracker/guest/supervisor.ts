@@ -7,9 +7,9 @@
  * Responsibilities, in order:
  *
  *   1. Read the launch spec from the read-only config drive (/config).
- *   2. Apply the in-guest firewall that isolates the agent's egress from
- *      the sidecar's — the microVM-internal counterpart of the Docker
- *      credential-isolation boundary.
+ *   2. Apply the in-guest firewall that confines the agent's and the
+ *      integration runners' egress to the sidecar — the microVM-internal
+ *      counterpart of the Docker credential-isolation boundary.
  *   3. Launch the sidecar (uid 1000) and the agent (uid 1001) as separate
  *      unprivileged users, so the agent cannot read the sidecar's
  *      environment (credentials) via /proc.
@@ -124,19 +124,26 @@ interface Child {
  * bounding set — the agent must never regain privileges through a setuid
  * exec. The sidecar is NOT hardened: it legitimately execs the setuid
  * runner wrapper to drop each integration runner to its own pool uid.
+ *
+ * `ambientCap` keeps one capability across the uid change: setpriv sets
+ * PR_SET_KEEPCAPS itself, raises the cap in the inheritable then the ambient
+ * set, and the kernel carries an ambient cap over the (non-setuid) exec.
  */
 function spawnAs(
   uidOrUser: string,
   argv: string[],
   env: Record<string, string>,
   cwd: string,
-  opts: { harden: boolean } = { harden: true },
+  opts: { harden: boolean; ambientCap?: string } = { harden: true },
 ): Child {
   const isNumeric = /^\d+$/.test(uidOrUser);
   const privArgs = isNumeric
     ? ["--reuid", uidOrUser, "--regid", uidOrUser, "--clear-groups"]
     : ["--reuid", uidOrUser, "--regid", uidOrUser, "--init-groups"];
   if (opts.harden) privArgs.push("--no-new-privs", "--bounding-set", "-all");
+  if (opts.ambientCap) {
+    privArgs.push("--inh-caps", `+${opts.ambientCap}`, "--ambient-caps", `+${opts.ambientCap}`);
+  }
   const proc: ChildProcess = spawn("setpriv", [...privArgs, "--", ...argv], {
     cwd,
     // The platform-built env maps don't carry PATH; inherit the guest's
@@ -275,7 +282,12 @@ async function main(): Promise<void> {
       APPSTRATE_RUNNER_UIDS: GUEST_RUNNER_UIDS,
     },
     "/tmp",
-    { harden: false },
+    // The runners' transparent plane (DNS responder on 127.0.0.1:53, SNI/Host
+    // splicers on :443/:80) sits on low ports only the sidecar may hold, so
+    // neither the agent nor a runner can squat them first. The runners
+    // inherit nothing: the setuid wrapper clears the ambient set, and its
+    // drop to the pool uid clears every capability.
+    { harden: false, ambientCap: "net_bind_service" },
   );
   log(`sidecar pid ${sidecar.pid}`);
 

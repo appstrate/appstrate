@@ -66,6 +66,23 @@ const CONTRACT_BY_PROTOCOL: Record<number, string[]> = {
     "sidecar.env",
     "sidecar.env.RUN_TOKEN",
   ],
+  // Same drive shape: protocol 4 changed the kernel/rootfs contract only.
+  4: [
+    "agent",
+    "agent.argv",
+    "agent.env",
+    "agent.env.MODEL_API_KEY",
+    "credentials",
+    "credentials.source",
+    "exit_marker_nonce",
+    "network",
+    "network.platform_ip",
+    "network.platform_port",
+    "run_id",
+    "sidecar",
+    "sidecar.env",
+    "sidecar.env.RUN_TOKEN",
+  ],
 };
 
 describe("guest config ↔ GUEST_PROTOCOL_VERSION pin", () => {

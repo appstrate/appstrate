@@ -68,6 +68,11 @@ import { logger as defaultLogger } from "./logger.ts";
  * with the daemon that speaks N.
  *
  * History:
+ *   4 — integration runners run on their own uids (pool 1100-1163) with no
+ *       direct egress: the guest firewall confines them to loopback and
+ *       redirects their DNS to the sidecar, which needs nftables NAT +
+ *       redirect in the guest kernel (NF_CONNTRACK, NF_NAT, NFT_NAT,
+ *       NFT_REDIR). A protocol-3 kernel rejects the ruleset.
  *   3 — `agent.unrestricted_egress` and `sidecar.enabled` removed: every VM
  *       boots its sidecar, and the supervisor confines the agent to loopback
  *       + the platform sink.
@@ -77,7 +82,7 @@ import { logger as defaultLogger } from "./logger.ts";
  *       run without credentials).
  *   1 — initial config-drive contract.
  */
-export const GUEST_PROTOCOL_VERSION = 3;
+export const GUEST_PROTOCOL_VERSION = 4;
 
 /** GitHub Release download base for this repo (versioned + `latest`). */
 const DEFAULT_ARTIFACTS_BASE_URL = "https://github.com/appstrate/appstrate/releases";
