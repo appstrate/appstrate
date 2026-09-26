@@ -425,12 +425,16 @@ function TurnLimitNotice() {
  * survives reload; the transient assistant-ui marker covers failures that have
  * not reached a finish chunk yet.
  */
-function MessageError() {
-  const { t } = useChatHost();
+export function MessageError() {
+  const { t, can } = useChatHost();
   // Select a plain field, never a derived object: this selector IS
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
   const message = useAuiState((s) => s.message);
-  const errorState = React.useMemo(() => turnErrorState(message, t), [message, t]);
+  const canManageBilling = can("billing:manage");
+  const errorState = React.useMemo(
+    () => turnErrorState(message, t, canManageBilling),
+    [message, t, canManageBilling],
+  );
   if (!errorState) return null;
   return (
     <div
@@ -445,6 +449,11 @@ function MessageError() {
           </span>
         ) : null}
       </span>
+      {errorState.action ? (
+        <Button asChild variant="outline" size="sm" className="shrink-0">
+          <a href={errorState.action.href}>{errorState.action.label}</a>
+        </Button>
+      ) : null}
       {errorState.retryable ? (
         <ThreadPrimitive.If running={false}>
           <ThreadPrimitive.Suggestion

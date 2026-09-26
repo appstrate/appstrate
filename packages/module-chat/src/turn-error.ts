@@ -17,9 +17,12 @@ export interface ClientTurnError {
 
 const ERROR_MARKER_PREFIX = "appstrate:chat-turn-error:";
 
+/** assistant-ui hands a thrown Error over as a plain `{ code, message }`. */
 function messageFromError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return typeof error === "string" ? error : "";
+  if (typeof error === "string") return error;
+  if (!error || typeof error !== "object") return "";
+  const { message } = error as { message?: unknown };
+  return typeof message === "string" ? message : "";
 }
 
 /**
@@ -70,10 +73,27 @@ export function clientTurnErrorMarker(error: ClientTurnError): string {
 
 /** Recover a safe category from a transient stream marker. */
 export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | undefined {
-  if (typeof value !== "string" || !value.startsWith(ERROR_MARKER_PREFIX)) return undefined;
-  const category = value.slice(ERROR_MARKER_PREFIX.length) as ChatTurnErrorCategory;
+  const marker = messageFromError(value);
+  if (!marker.startsWith(ERROR_MARKER_PREFIX)) return undefined;
+  const category = marker.slice(ERROR_MARKER_PREFIX.length) as ChatTurnErrorCategory;
   return Object.prototype.hasOwnProperty.call(MODEL_ERROR_RETRYABLE_BY_CATEGORY, category)
     ? clientTurnErrorForCategory(category)
+    : undefined;
+}
+
+function problemFromError(value: unknown): Record<string, unknown> | undefined {
+  try {
+    const doc: unknown = JSON.parse(messageFromError(value));
+    return doc && typeof doc === "object" ? (doc as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A pre-stream 429 (route rate limit, chat capacity), whatever its code: retryable. */
+export function clientTurnErrorFromRateLimit(value: unknown): ClientTurnError | undefined {
+  return problemFromError(value)?.status === 429
+    ? clientTurnErrorForCategory("rate_limited")
     : undefined;
 }
 
@@ -83,11 +103,11 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
  * A turn refused by the admission gate or by a dead subscription credential
  * never enters the stream, so no `appstrate:chat-turn-error:` marker is ever
  * emitted. Instead the AI SDK puts the raw HTTP body in an Error's message and
- * throws it — `ai/src/ui/http-chat-transport.ts`: `throw new Error(await
- * response.text())`, on both `sendMessages` and `reconnectToStream`, so the
- * resumed path lands here too. That body is the `application/problem+json` our
- * refusals answer with (`chat-stream.ts`), so parsing the message back into a
- * problem document recovers what the transport discarded. Its `code` is the
+ * throws it (`APICallError`, `ai/src/ui/create-ui-api-call-error.ts`) on both
+ * `sendMessages` and `reconnectToStream`, so the resumed path lands here too.
+ * That body is the `application/problem+json` our refusals answer with
+ * (`chat-stream.ts`), so parsing the message back into a problem document
+ * recovers what the transport discarded. Its `code` is the
  * stable machine-readable half of the contract; its `detail` is English prose
  * for API consumers (as everywhere else in this API) and must NOT be shown in
  * a localized UI. Return the code so the caller can pick its own sentence.
@@ -97,14 +117,9 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
  * internal fault the user can do nothing about.
  */
 export function refusalCode(value: unknown): string | undefined {
-  let doc: unknown;
-  try {
-    doc = JSON.parse(messageFromError(value));
-  } catch {
-    return undefined;
-  }
-  if (!doc || typeof doc !== "object") return undefined;
-  const { status, code } = doc as { status?: unknown; code?: unknown };
+  const doc = problemFromError(value);
+  if (!doc) return undefined;
+  const { status, code } = doc;
   if (status !== 401 && status !== 402 && status !== 403 && status !== 409) return undefined;
   return typeof code === "string" && code ? code : undefined;
 }
