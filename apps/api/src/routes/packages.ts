@@ -59,6 +59,8 @@ import { isValidVersion } from "@appstrate/core/semver";
 import {
   getVersionDetail,
   getVersionRow,
+  loadPublishedDefinition,
+  type PublishedDefinition,
   readVersionArchive,
   requirePublishedArchive,
   versionArtifactUnavailable,
@@ -873,48 +875,6 @@ async function loadOrgItemOr404(rcfg: PackageRouteConfig, orgId: string, itemId:
 }
 
 /**
- * The manifest-derived half of a package detail, read from a PUBLISHED
- * snapshot instead of the draft columns — `getOrgItem`'s projection applied to
- * a version's own manifest and archive, so the two halves of a detail response
- * never come from two different definitions.
- *
- * The manifest is the `package_versions.manifest` column: authoritative, one
- * DB read, and immune to an archive that will not open. The CONTENT is the
- * archive entry this type is authored around ({@link PACKAGE_CONTENT_ENTRY}),
- * and the fallbacks below are the exact inverse of `applyDraftOverlay`: a type
- * with no content entry at all (`mcp-server`, whose content IS its manifest)
- * and an `integration` published without its optional `INTEGRATION.md` both
- * store the manifest TEXT in `draft_content`, so the published projection
- * reproduces that rather than handing back a `null` the editor would render as
- * an empty file.
- *
- * That fallback stands only for an entry missing from an archive that opened:
- * an unreadable archive, or one without a REQUIRED entry, is refused by
- * {@link requirePublishedArchive} — the same 422 the run and restore paths answer.
- */
-async function loadPublishedDefinition(
-  type: PackageType,
-  packageId: string,
-  spec: string,
-): Promise<Record<string, unknown>> {
-  const detail = await getVersionDetail(packageId, spec);
-  if (!detail) throw notFound(`Version '${spec}' not found`);
-  const m = asRecord(detail.manifest);
-  const { entry } = requirePublishedArchive(type, packageId, detail);
-  return {
-    // Same projection `getOrgItem` runs over the draft manifest, field for
-    // field: a reader must not be able to tell which definition answered by
-    // the SHAPE of what came back.
-    name: typeof m.display_name === "string" ? m.display_name : packageId,
-    description: typeof m.description === "string" ? m.description : null,
-    version: typeof m.version === "string" ? m.version : null,
-    manifest_name: typeof m.name === "string" ? m.name : null,
-    manifest: m,
-    content: entry ? decodeSkillMarkdown(entry) : JSON.stringify(m, null, 2),
-  };
-}
-
-/**
  * Build the canonical package detail DTO for skills / integrations / mcp-servers
  * — the exact object the `GET` detail endpoint serializes (`OrgPackageItemDetail`).
  * Org-scoped (no space activation gate): the GET handler applies that gate before
@@ -967,9 +927,11 @@ async function buildPackageDetailDto(
   // differs, and a system package must never be labelled `draft` or the SPA
   // renders "never published" over something that cannot be published at all.
   const definition = rendersStoredTree && item.source !== "system" ? "draft" : "published";
-  const published = rendersStoredTree
-    ? null
-    : await loadPublishedDefinition(rcfg.cfg.type, item.id, spec);
+  let published: PublishedDefinition | null = null;
+  if (!rendersStoredTree) {
+    published = await loadPublishedDefinition(rcfg.cfg.type, item.id, spec);
+    if (!published) throw notFound(`Version '${spec}' not found`);
+  }
 
   const { homeSpaceId, lockVersion, ...rest } = item;
   const body = {

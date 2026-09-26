@@ -20,6 +20,7 @@
  */
 
 import { eq, and, exists, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { spacePackages, packages, packageShares, packageDistTags } from "@appstrate/db/schema";
 import { notFound, parseBody } from "../lib/errors.ts";
@@ -256,6 +257,7 @@ function spacePackageWire(
     modelId: row.modelId,
     proxyId: row.proxyId,
     enabled: row.enabled,
+    chat_enforced: row.chatEnforced,
     installed_at: row.installedAt,
     updatedAt: row.updatedAt,
     package_type: pkg.type,
@@ -530,6 +532,7 @@ const spacePackageSelect = {
   modelId: spacePackages.modelId,
   proxyId: spacePackages.proxyId,
   enabled: spacePackages.enabled,
+  chat_enforced: spacePackages.chatEnforced,
   installed_at: spacePackages.installedAt,
   updatedAt: spacePackages.updatedAt,
   package_type: packages.type,
@@ -597,7 +600,7 @@ export async function getSpacePackage(scope: SpaceScope, packageId: string) {
  * listings, so what an index page shows, what the caller-context hints tell the
  * model it may invoke, and what the run gate lets through are one set.
  */
-function activePackagesFilter(scope: SpaceScope, type: PackageType) {
+export function activePackagesFilter(scope: SpaceScope, type: PackageType) {
   return and(
     eq(packages.type, type),
     orgOrSystemFilter(scope.orgId),
@@ -694,6 +697,20 @@ interface PackageHint {
   home_writable: boolean;
 }
 
+/** ON clause for the package's `latest` dist-tag — at most one row per package. */
+export function latestTagJoin(packageIdColumn: AnyPgColumn) {
+  return and(eq(packageDistTags.packageId, packageIdColumn), eq(packageDistTags.tag, "latest"));
+}
+
+/**
+ * Whether a package has a published version to run: a `latest` dist-tag
+ * ({@link latestTagJoin}'s `versionId`), or a system package, published by
+ * construction.
+ */
+export function isPublished(row: { source: string | null; latestVersionId: number | null }) {
+  return row.source === "system" || row.latestVersionId != null;
+}
+
 const DEFAULT_PACKAGE_HINT_LIMIT = 15;
 
 /**
@@ -757,10 +774,7 @@ async function listActivePackageHints<T extends PackageHint>(
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
-    .leftJoin(
-      packageDistTags,
-      and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
-    )
+    .leftJoin(packageDistTags, latestTagJoin(packages.id))
     .where(activePackagesFilter(scope, type))
     .orderBy(...packageListingOrder())
     .limit(limit);
@@ -774,7 +788,7 @@ async function listActivePackageHints<T extends PackageHint>(
       display_name: typeof manifest.display_name === "string" ? manifest.display_name : "",
       description: typeof manifest.description === "string" ? manifest.description : "",
       source: row.source ?? "local",
-      published: row.source === "system" || row.latestVersionId != null,
+      published: isPublished(row),
       // Decided by the CALLER's authority over the package's home, which this
       // service has no context to read — the route resolves it and hands the
       // verdict down. Absent resolver (no HTTP caller) ⇒ nobody authors here.
@@ -1043,7 +1057,9 @@ export async function getResolvedRunConfig(
 
 /**
  * Update the per-space settings row for `(spaceId, packageId)` — the model, the
- * proxy, the generation settings and the stored input values, and nothing else.
+ * proxy, the generation settings, the stored input values and the chat
+ * enforcement flag, and nothing else. `chatEnforcedChanged` says whether the
+ * write moved that flag.
  *
  * `enabled` is NOT here: activation has its own pair of doors
  * ({@link activatePackage} / {@link deactivatePackage}), which keeps the
@@ -1075,15 +1091,18 @@ export async function updateSpacePackage(
     modelId?: string | null;
     generationConfig?: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId?: string | null;
+    chatEnforced?: boolean;
   },
-  opts?: { requirePlacement?: boolean },
-): Promise<void> {
+  /** `tx`: join the caller's transaction instead of opening one. */
+  opts?: { requirePlacement?: boolean; tx?: Tx },
+): Promise<{ chatEnforcedChanged: boolean }> {
   const set: Partial<{
     updatedAt: Date;
     inputSettings: { values: Record<string, unknown>; locked: string[] };
     modelId: string | null;
     generationConfig: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId: string | null;
+    chatEnforced: boolean;
   }> = { updatedAt: new Date() };
   // `space_packages.input_settings` has exactly ONE write path, and it is
   // this function — the public input-settings route and every internal caller
@@ -1099,8 +1118,13 @@ export async function updateSpacePackage(
   if (updates.modelId !== undefined) set.modelId = updates.modelId;
   if (updates.generationConfig !== undefined) set.generationConfig = updates.generationConfig;
   if (updates.proxyId !== undefined) set.proxyId = updates.proxyId;
+  if (updates.chatEnforced !== undefined) set.chatEnforced = updates.chatEnforced;
+  // Read against the row as it stood under the lock, so the audit the caller
+  // writes off this names an act that happened.
+  const chatEnforcedMoved = (before: { chatEnforced: boolean } | null) =>
+    updates.chatEnforced !== undefined && (before?.chatEnforced ?? false) !== updates.chatEnforced;
 
-  await db.transaction(async (tx) => {
+  const work = async (tx: Tx) => {
     // Tenant boundary, atomic with the write: the target package must be
     // visible to the org (own or system) and not an ephemeral shadow row.
     const [pkg] = await tx
@@ -1119,6 +1143,10 @@ export async function updateSpacePackage(
       // landed and the 200 body was `{"object":"space_package"}`. The
       // `EXISTS` makes the UPDATE match nothing instead, so the refusal below
       // states the truth.
+      const before =
+        updates.chatEnforced === undefined
+          ? null
+          : await currentPlacement(tx, packageId, scope.spaceId);
       const updated = await tx
         .update(spacePackages)
         .set(set)
@@ -1133,7 +1161,7 @@ export async function updateSpacePackage(
       if (updated.length === 0) {
         throw notFound(`Package '${packageId}' is not placed in this space`);
       }
-      return;
+      return { chatEnforcedChanged: chatEnforcedMoved(before) };
     }
 
     // Create-on-first-write, and only where it changes no verdict. Without this
@@ -1156,11 +1184,14 @@ export async function updateSpacePackage(
           ? { generationConfig: updates.generationConfig }
           : {}),
         ...(updates.proxyId !== undefined ? { proxyId: updates.proxyId } : {}),
+        ...(updates.chatEnforced !== undefined ? { chatEnforced: updates.chatEnforced } : {}),
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
         target: [spacePackages.spaceId, spacePackages.packageId],
         set,
       });
-  });
+    return { chatEnforcedChanged: chatEnforcedMoved(existing) };
+  };
+  return opts?.tx ? work(opts.tx) : db.transaction(work);
 }

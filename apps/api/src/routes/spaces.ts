@@ -65,6 +65,10 @@ import {
 } from "../services/space-packages.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
 import {
+  assertChatEnforceable,
+  withChatEnforcementLock,
+} from "../services/chat-enforced-skills.ts";
+import {
   assertCatalogPackageAccess,
   assertPackageShareAccess,
   isPackageReadableInSpace,
@@ -231,6 +235,8 @@ export const updatePackageSchema = z
     generation_config: modelGenerationSettingsSchema.nullable().optional(),
     modelId: z.string().nullable().optional(),
     proxyId: z.string().nullable().optional(),
+    // Skills only: inject the published SKILL.md in every chat turn held here.
+    chat_enforced: z.boolean().optional(),
   })
   .strict();
 
@@ -907,8 +913,17 @@ export function createSpacesRouter() {
     // package runs, and nothing else. Activation left it when it got its own
     // pair of doors, so an empty body is gated exactly like a full one and can
     // never be a free existence probe.
-    await gateSpacePackageWrite(c, orgId, packageId, "configure");
+    const type = await gateSpacePackageWrite(c, orgId, packageId, "configure");
     const data = await readJsonBody(c, updatePackageSchema);
+    if (data.chat_enforced !== undefined && type !== "skill") {
+      throw new ApiError({
+        status: 400,
+        code: "chat_enforced_not_skill",
+        title: "Not A Skill",
+        detail: `Only a skill can be enforced in the chat; '${packageId}' is a ${type}`,
+        param: "chat_enforced",
+      });
+    }
 
     const placement = await getSpacePackage(scope, packageId);
     let generationConfig = data.generation_config;
@@ -943,17 +958,38 @@ export function createSpacesRouter() {
       }
     }
 
-    const { generation_config: _generationConfig, ...rest } = data;
+    const { generation_config: _generationConfig, chat_enforced: chatEnforced, ...rest } = data;
     void _generationConfig;
+    const updates = {
+      ...rest,
+      ...(generationConfig !== undefined ? { generationConfig } : {}),
+      ...(chatEnforced !== undefined ? { chatEnforced } : {}),
+    };
     // `requirePlacement` — this route updates an EXISTING placement; a
     // packageId that is not placed here (or not visible to the org) is a 404,
     // never an implicit activation via upsert.
-    await updateSpacePackage(
-      scope,
-      packageId,
-      { ...rest, ...(generationConfig !== undefined ? { generationConfig } : {}) },
-      { requirePlacement: true },
-    );
+    //
+    // Enforcing writes first and checks after, under the space's lock and in
+    // the same transaction: the 404 comes before any 409, and a refusal rolls
+    // the whole patch back.
+    const { chatEnforcedChanged } = chatEnforced
+      ? await withChatEnforcementLock(spaceId, async (tx) => {
+          const result = await updateSpacePackage(scope, packageId, updates, {
+            requirePlacement: true,
+            tx,
+          });
+          if (result.chatEnforcedChanged) await assertChatEnforceable(scope, packageId, tx);
+          return result;
+        })
+      : await updateSpacePackage(scope, packageId, updates, { requirePlacement: true });
+    if (chatEnforcedChanged) {
+      await recordAuditFromContext(c, {
+        action: chatEnforced ? "package.chat_enforced" : "package.chat_released",
+        resourceType: "package",
+        resourceId: packageId,
+        after: { spaceId },
+      });
+    }
     const updated = await getSpacePackage(scope, packageId);
     return c.json({ object: "space_package", ...updated });
   });

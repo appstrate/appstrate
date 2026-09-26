@@ -52,6 +52,10 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.cleanupSessionFiles).toBe("function");
   });
 
+  it("wires the space-enforced chat skills read (loadEnforcedChatSkills)", () => {
+    expect(typeof services.loadEnforcedChatSkills).toBe("function");
+  });
+
   it("wires the audit trail (audit.record — module mutations reach audit_events)", () => {
     expect(typeof services.audit.record).toBe("function");
   });

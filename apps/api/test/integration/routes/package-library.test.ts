@@ -32,6 +32,7 @@ import {
   seedApiKey,
   seedPackage,
   seedPackageShare,
+  seedPublishedVersion,
   seedSpace,
   seedSpaceMember,
   seedSpacePackage,
@@ -48,6 +49,7 @@ interface Placement {
   space_id: string;
   via: "home" | "shared" | "system";
   state: "active" | "inactive" | "none";
+  chat_enforced: boolean;
   shared_by: { user_id: string; name: string } | null;
 }
 
@@ -56,6 +58,7 @@ interface LibraryRow {
   home_space_id: string | null;
   home_writable: boolean;
   home_shareable: boolean;
+  published: boolean;
   placements: Placement[];
 }
 
@@ -136,6 +139,7 @@ describe("GET /api/library — the organization map", () => {
       space_id: alphaId,
       via: "home",
       state: "active",
+      chat_enforced: false,
       // A home places the package by owning it — nobody offered it.
       shared_by: null,
     });
@@ -183,8 +187,12 @@ describe("GET /api/library — the organization map", () => {
     // Homed, never switched on: `via: "home"`, `state: "none"` — the same two
     // axes as any other row.
     expect(row!.placements).toEqual([
-      { space_id: alphaId, via: "home", state: "none", shared_by: null },
+      { space_id: alphaId, via: "home", state: "none", chat_enforced: false, shared_by: null },
     ]);
+    // Draft-only until a `latest` version exists — the fact the enforce switch reads.
+    expect(row!.published).toBe(false);
+    await seedPublishedVersion(TEAMLESS, "0.1.0");
+    expect(rowOf(await orgLibrary(owner(alphaId)), "skill", TEAMLESS)?.published).toBe(true);
   });
 
   it("is refused to a member, a guest and an API key", async () => {

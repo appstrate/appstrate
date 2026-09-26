@@ -32,9 +32,11 @@ import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import { dropRetiredRuntimeTools, type PackageType } from "@appstrate/core/validation";
 import { parsePackageZip, zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
+import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { downloadPackageFiles } from "./package-items/storage.ts";
 import { storageFolderForType, assertArchiveContentConforms } from "./package-items/config.ts";
 import { toISO } from "../lib/date-helpers.ts";
+import type { DbOrTx } from "../lib/db-helpers.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
 import { withPackageDraftLock } from "./package-draft-lock.ts";
@@ -257,8 +259,12 @@ export async function getExactVersionManifest(
 }
 
 /** 3-step version resolution: exact → dist-tag → semver range. */
-export async function resolveVersion(packageId: string, query: string): Promise<number | null> {
-  const allVersions: CatalogVersion[] = await db
+export async function resolveVersion(
+  packageId: string,
+  query: string,
+  executor: DbOrTx = db,
+): Promise<number | null> {
+  const allVersions: CatalogVersion[] = await executor
     .select({
       id: packageVersions.id,
       version: packageVersions.version,
@@ -267,7 +273,7 @@ export async function resolveVersion(packageId: string, query: string): Promise<
     .from(packageVersions)
     .where(eq(packageVersions.packageId, packageId));
 
-  const allDistTags: DistTagEntry[] = await db
+  const allDistTags: DistTagEntry[] = await executor
     .select({ tag: packageDistTags.tag, versionId: packageDistTags.versionId })
     .from(packageDistTags)
     .where(eq(packageDistTags.packageId, packageId));
@@ -327,10 +333,13 @@ export interface VersionDetail {
 export async function getVersionDetail(
   packageId: string,
   versionSpec: string,
-  /** The version will run: apply the AFPS signature policy to its bytes. */
-  opts: { forExecution?: boolean } = {},
+  /**
+   * `forExecution`: the version will run — apply the AFPS signature policy to its
+   * bytes. `executor`: read the catalog inside the caller's transaction.
+   */
+  opts: { forExecution?: boolean; executor?: DbOrTx } = {},
 ): Promise<VersionDetail | null> {
-  const row = await getVersionRow(packageId, versionSpec);
+  const row = await getVersionRow(packageId, versionSpec, opts.executor);
   if (!row) return null;
   return { ...row, content: await readVersionArchive(packageId, row.version, opts) };
 }
@@ -339,11 +348,12 @@ export async function getVersionDetail(
 export async function getVersionRow(
   packageId: string,
   versionSpec: string,
+  executor: DbOrTx = db,
 ): Promise<Omit<VersionDetail, "content"> | null> {
-  const versionId = await resolveVersion(packageId, versionSpec);
+  const versionId = await resolveVersion(packageId, versionSpec, executor);
   if (!versionId) return null;
 
-  const [row] = await db
+  const [row] = await executor
     .select({
       id: packageVersions.id,
       version: packageVersions.version,
@@ -450,6 +460,60 @@ export function requirePublishedPrompt(
   detail: Pick<VersionDetail, "version" | "content">,
 ): string {
   return new TextDecoder().decode(requirePublishedArchive("agent", packageId, detail).entry);
+}
+
+/** {@link loadPublishedDefinition}'s projection — `getOrgItem`'s fields, from a snapshot. */
+export interface PublishedDefinition {
+  name: string;
+  description: string | null;
+  version: string | null;
+  manifest_name: string | null;
+  manifest: Record<string, unknown>;
+  content: string;
+}
+
+/**
+ * The manifest-derived half of a package detail, read from a PUBLISHED
+ * snapshot instead of the draft columns — `getOrgItem`'s projection applied to
+ * a version's own manifest and archive, so the two halves of a detail response
+ * never come from two different definitions. `null` when `spec` resolves to no
+ * version.
+ *
+ * The manifest is the `package_versions.manifest` column: authoritative, one
+ * DB read, and immune to an archive that will not open. The CONTENT is the
+ * archive entry this type is authored around ({@link PACKAGE_CONTENT_ENTRY}),
+ * and the fallbacks below are the exact inverse of `applyDraftOverlay`: a type
+ * with no content entry at all (`mcp-server`, whose content IS its manifest)
+ * and an `integration` published without its optional `INTEGRATION.md` both
+ * store the manifest TEXT in `draft_content`, so the published projection
+ * reproduces that rather than handing back a `null` the editor would render as
+ * an empty file.
+ *
+ * That fallback stands only for an entry missing from an archive that opened:
+ * an unreadable archive, or one without a REQUIRED entry, is refused by
+ * {@link requirePublishedArchive} — the same 422 the run and restore paths answer.
+ */
+export async function loadPublishedDefinition(
+  type: PackageType,
+  packageId: string,
+  spec: string,
+  executor?: DbOrTx,
+): Promise<PublishedDefinition | null> {
+  const detail = await getVersionDetail(packageId, spec, { executor });
+  if (!detail) return null;
+  const m = asRecord(detail.manifest);
+  const { entry } = requirePublishedArchive(type, packageId, detail);
+  return {
+    // Same projection `getOrgItem` runs over the draft manifest, field for
+    // field: a reader must not be able to tell which definition answered by
+    // the SHAPE of what came back.
+    name: typeof m.display_name === "string" ? m.display_name : packageId,
+    description: typeof m.description === "string" ? m.description : null,
+    version: typeof m.version === "string" ? m.version : null,
+    manifest_name: typeof m.name === "string" ? m.name : null,
+    manifest: m,
+    content: entry ? decodeSkillMarkdown(entry) : JSON.stringify(m, null, 2),
+  };
 }
 
 /** Count the number of published versions for a package. */
