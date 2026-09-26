@@ -369,8 +369,7 @@ export async function bootBackground(): Promise<void> {
     // is unavailable; otherwise a transient ledger write failure after
     // provider spend could be lost permanently.
     initLlmUsageRetryWorker(),
-    // Never throws: a failed handshake is retried in the background, and
-    // `/health` reports `agents: degraded` until one attempt succeeds.
+    // Never throws: a failed attempt is retried in the background.
     initializeAgentRuntime(orchestrator),
     initScheduleWorker().catch((err) => {
       logger.warn("Could not initialize schedule worker", {

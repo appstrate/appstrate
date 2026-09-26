@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Agent-runtime readiness — whether the run orchestrator has come up.
- *
- * A transient failure of `initialize()` at boot (Docker daemon restarting, a
- * GHCR pull hiccup, the Firecracker runner not up yet) must not pin `/health`
- * degraded for the process lifetime, so a failed first attempt is retried in
- * the background with capped exponential backoff. Readiness means
- * "`initialize()` has succeeded at least once"; a backend that stays broken
- * keeps throwing and therefore stays degraded.
- */
+// Readiness = orchestrator `initialize()` has succeeded once. A transient boot failure must not
+// pin `/health` degraded for the process lifetime, so it is retried with capped backoff; a
+// backend that stays broken keeps throwing and stays degraded.
 
 import type { RunOrchestrator } from "@appstrate/core/platform-types";
 import { logger } from "../../lib/logger.ts";
@@ -19,9 +12,7 @@ const DEFAULT_INITIAL_DELAY_MS = 5_000;
 const DEFAULT_MAX_DELAY_MS = 60_000;
 
 export interface AgentRuntimeRecoveryOptions {
-  /** Delay before the first retry. Default 5_000. */
   initialDelayMs?: number;
-  /** Backoff ceiling. Default 60_000. */
   maxDelayMs?: number;
 }
 
@@ -33,7 +24,7 @@ interface RecoveryChain {
 let ready = false;
 let chain: RecoveryChain | null = null;
 
-/** Awaits the first initialize() attempt. Never throws. On failure, schedules background retries. */
+/** Awaits the first initialize() attempt; never throws. On failure, retries in the background. */
 export function initializeAgentRuntime(
   orchestrator: Pick<RunOrchestrator, "initialize">,
   options: AgentRuntimeRecoveryOptions = {},
@@ -71,15 +62,11 @@ export function initializeAgentRuntime(
   return attempt();
 }
 
-/** True once any initialize() attempt has succeeded. */
 export function isAgentRuntimeReady(): boolean {
   return ready;
 }
 
-/**
- * Cancels the pending retry; an attempt still in flight is ignored when it
- * settles. Does not wait for it. Idempotent.
- */
+/** Does not wait for an in-flight attempt; its outcome is ignored when it settles. */
 export function stopAgentRuntimeRecovery(): void {
   if (!chain) return;
   chain.stopped = true;
@@ -87,7 +74,6 @@ export function stopAgentRuntimeRecovery(): void {
   chain = null;
 }
 
-/** Test-only: clear timer + all module state. */
 export function _resetAgentRuntimeReadinessForTesting(): void {
   stopAgentRuntimeRecovery();
   ready = false;

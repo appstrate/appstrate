@@ -17,9 +17,8 @@ let serverReady = false;
 /**
  * Flip the process to "ready". Called once from `index.ts` when
  * `bootBackground()` resolves — i.e. when orphan cleanup, the system-package
- * DB sync and every worker are done. Recoverable component failures are read
- * live by `/health`, so they never keep the API behind the starting gate. The
- * port is already bound well before this; see {@link bootGate}.
+ * DB sync and every worker are done. The port is already bound well before
+ * this; see {@link bootGate}.
  */
 export function markServerReady(): void {
   serverReady = true;
@@ -80,8 +79,7 @@ healthRouter.get("/health", async (c) => {
     checks.database = { status: "unhealthy", latency_ms: Date.now() - dbStart };
   }
 
-  // Agent execution readiness: whether the orchestrator's initialization has
-  // succeeded, retried in the background after a failed boot handshake.
+  // Agent execution readiness is read live: a failed boot init is retried in the background.
   // System packages are optional catalogue entries and say nothing about
   // whether the platform can launch a run.
   checks.agents = {
