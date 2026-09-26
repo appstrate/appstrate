@@ -34,6 +34,10 @@ import {
   seedSpaceRole,
 } from "../../helpers/seed.ts";
 
+import * as storage from "@appstrate/db/storage";
+import { AGENT_PACKAGES_BUCKET, versionZipKey } from "../../../src/services/package-storage.ts";
+import { loadEnforcedChatSkills } from "../../../src/services/chat-enforced-skills.ts";
+
 const app = getTestApp();
 
 let ctx: TestContext;
@@ -235,6 +239,15 @@ describe("enforcing a skill in the chat", () => {
     expect((await patch("@enforce/also-big", { chat_enforced: true })).status).toBe(200);
   });
 
+  it("422s when the skill's latest archive cannot be read, and writes nothing", async () => {
+    await seedSkill("@enforce/broken");
+    await storage.deleteFile(AGENT_PACKAGES_BUCKET, versionZipKey("@enforce/broken", "1.0.0"));
+    await expectProblem(await patch("@enforce/broken", { chat_enforced: true }), 422, {
+      code: "version_artifact_unavailable",
+    });
+    expect(await storedFlag("@enforce/broken")).toBe(false);
+  });
+
   it("lets exactly one of two concurrent enforcements at cap − 1 through", async () => {
     for (let i = 0; i < MAX_ENFORCED_CHAT_SKILLS - 1; i++) {
       await seedSkill(`@enforce/on-${i}`, { enforced: true });
@@ -258,6 +271,32 @@ describe("enforcing a skill in the chat", () => {
         and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.chatEnforced, true)),
       );
     expect(flagged).toHaveLength(MAX_ENFORCED_CHAT_SKILLS);
+  });
+});
+
+describe("the flag lives on the placement row", () => {
+  it("survives a deactivation and a re-activation through the real doors", async () => {
+    await seedSkill("@enforce/tone");
+    expect((await patch("@enforce/tone", { chat_enforced: true })).status).toBe(200);
+    const enforcedIds = async () =>
+      (await loadEnforcedChatSkills(ctx.orgId, ctx.defaultSpaceId)).map((s) => s.packageId);
+
+    const off = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages/@enforce/tone`, {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(off.status, await off.clone().text()).toBe(204);
+    expect(await enforcedIds()).toEqual([]);
+    expect(await storedFlag("@enforce/tone")).toBe(true);
+
+    const on = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages`, {
+      method: "POST",
+      headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+      body: JSON.stringify({ packageId: "@enforce/tone" }),
+    });
+    expect(on.status, await on.clone().text()).toBe(201);
+    expect(((await on.json()) as { chat_enforced: boolean }).chat_enforced).toBe(true);
+    expect(await enforcedIds()).toEqual(["@enforce/tone"]);
   });
 });
 

@@ -702,11 +702,7 @@ export function latestTagJoin(packageIdColumn: AnyPgColumn) {
   return and(eq(packageDistTags.packageId, packageIdColumn), eq(packageDistTags.tag, "latest"));
 }
 
-/**
- * Whether a package has a published version to run: a `latest` dist-tag
- * ({@link latestTagJoin}'s `versionId`), or a system package, published by
- * construction.
- */
+/** A `latest` dist-tag ({@link latestTagJoin}), or a system package — published by construction. */
 export function isPublished(row: { source: string | null; latestVersionId: number | null }) {
   return row.source === "system" || row.latestVersionId != null;
 }
@@ -1119,8 +1115,7 @@ export async function updateSpacePackage(
   if (updates.generationConfig !== undefined) set.generationConfig = updates.generationConfig;
   if (updates.proxyId !== undefined) set.proxyId = updates.proxyId;
   if (updates.chatEnforced !== undefined) set.chatEnforced = updates.chatEnforced;
-  // Read against the row as it stood under the lock, so the audit the caller
-  // writes off this names an act that happened.
+  // Against the row as read under its lock, so the caller's audit names a real change.
   const chatEnforcedMoved = (before: { chatEnforced: boolean } | null) =>
     updates.chatEnforced !== undefined && (before?.chatEnforced ?? false) !== updates.chatEnforced;
 

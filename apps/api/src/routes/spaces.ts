@@ -60,14 +60,10 @@ import {
   deactivatePackage,
   listSpacePackages,
   getSpacePackage,
-  updateSpacePackage,
   getResolvedRunConfig,
 } from "../services/space-packages.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
-import {
-  assertChatEnforceable,
-  withChatEnforcementLock,
-} from "../services/chat-enforced-skills.ts";
+import { updatePlacementSettings } from "../services/chat-enforced-skills.ts";
 import {
   assertCatalogPackageAccess,
   assertPackageShareAccess,
@@ -965,23 +961,9 @@ export function createSpacesRouter() {
       ...(generationConfig !== undefined ? { generationConfig } : {}),
       ...(chatEnforced !== undefined ? { chatEnforced } : {}),
     };
-    // `requirePlacement` — this route updates an EXISTING placement; a
-    // packageId that is not placed here (or not visible to the org) is a 404,
-    // never an implicit activation via upsert.
-    //
-    // Enforcing writes first and checks after, under the space's lock and in
-    // the same transaction: the 404 comes before any 409, and a refusal rolls
-    // the whole patch back.
-    const { chatEnforcedChanged } = chatEnforced
-      ? await withChatEnforcementLock(spaceId, async (tx) => {
-          const result = await updateSpacePackage(scope, packageId, updates, {
-            requirePlacement: true,
-            tx,
-          });
-          if (result.chatEnforcedChanged) await assertChatEnforceable(scope, packageId, tx);
-          return result;
-        })
-      : await updateSpacePackage(scope, packageId, updates, { requirePlacement: true });
+    // An EXISTING placement only: a package not placed here (or not visible
+    // to the org) is a 404, never an implicit activation via upsert.
+    const { chatEnforcedChanged } = await updatePlacementSettings(scope, packageId, updates);
     if (chatEnforcedChanged) {
       await recordAuditFromContext(c, {
         action: chatEnforced ? "package.chat_enforced" : "package.chat_released",

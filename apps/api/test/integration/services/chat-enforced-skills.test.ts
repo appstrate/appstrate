@@ -4,8 +4,8 @@
  * `loadEnforcedChatSkills` — what the chat injects as the space's policy.
  *
  * Active ∧ flagged, sorted by id, at the latest PUBLISHED version whatever the
- * draft says, and `content: null` rather than a throw when nothing published is
- * readable any more.
+ * draft says: `content: null` when no version resolves, a rejection when the
+ * archive cannot be read.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -15,6 +15,8 @@ import { loadEnforcedChatSkills } from "../../../src/services/chat-enforced-skil
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPublishedVersion, seedSpacePackage } from "../../helpers/seed.ts";
+import * as storage from "@appstrate/db/storage";
+import { AGENT_PACKAGES_BUCKET, versionZipKey } from "../../../src/services/package-storage.ts";
 
 let ctx: TestContext;
 
@@ -88,8 +90,14 @@ describe("loadEnforcedChatSkills", () => {
     await db.delete(packageVersions).where(eq(packageVersions.packageId, "@policy/tone"));
 
     expect(await load()).toEqual([
-      { packageId: "@policy/tone", name: "Name @policy/tone", version: null, content: null },
+      { packageId: "@policy/tone", name: "@policy/tone", version: null, content: null },
     ]);
+  });
+
+  it("rejects when a published archive cannot be read — the policy fails closed", async () => {
+    await seedSkill("@policy/tone");
+    await storage.deleteFile(AGENT_PACKAGES_BUCKET, versionZipKey("@policy/tone", "1.0.0"));
+    await expect(load()).rejects.toMatchObject({ code: "version_artifact_unavailable" });
   });
 
   it("does not read another space's flags", async () => {

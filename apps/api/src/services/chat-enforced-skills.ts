@@ -1,14 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Space-enforced chat skills (issue #1586): the skills a space imposes on every
- * chat conversation held in it, flagged on their placement row
- * (`space_packages.chat_enforced`).
- *
- * Read with PLATFORM authority — the chat injects them for every member,
- * whatever their `skills:*` grants — and always at the `latest` published
- * version, never the draft: what a space imposes is the same for everyone.
- */
+// Skills a space imposes on its chat (#1586): platform authority, since members
+// without `skills:*` are bound too; `latest` published, never the draft.
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -18,57 +11,38 @@ import {
   MAX_ENFORCED_CHAT_SKILLS,
   type EnforcedChatSkill,
 } from "@appstrate/core/chat-contract";
-import { asRecord } from "@appstrate/core/safe-json";
-import { ApiError, conflict } from "../lib/errors.ts";
-import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
+import { conflict } from "../lib/errors.ts";
+import type { Tx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
-import { activePackagesFilter } from "./space-packages.ts";
-import { loadPublishedDefinition, type PublishedDefinition } from "./package-versions.ts";
+import { activePackagesFilter, updateSpacePackage } from "./space-packages.ts";
+import { loadPublishedDefinition } from "./package-versions.ts";
 
 /**
- * The `latest` published SKILL.md of a skill, or `null` when nothing is
- * published (deleted, yanked) or the archive is unreadable — an enforced skill
- * in that state renders a notice rather than failing the turn. Any other
- * failure (database, storage outage) propagates.
- */
-async function readPublishedSkill(
-  packageId: string,
-  executor?: DbOrTx,
-): Promise<PublishedDefinition | null> {
-  try {
-    return await loadPublishedDefinition("skill", packageId, "latest", executor);
-  } catch (err) {
-    if (err instanceof ApiError && err.code === "version_artifact_unavailable") return null;
-    throw err;
-  }
-}
-
-/**
- * The space's ACTIVE skills whose placement is chat-enforced, sorted by id,
- * each at its latest published version. A skill switched off here keeps its
- * flag but is not returned, and comes back when switched on again.
+ * The space's ACTIVE flagged skills, sorted by id. `content: null` only when no
+ * version resolves any more; an unreadable archive rejects, so a storage fault
+ * never drops the policy silently.
  */
 export async function loadEnforcedChatSkills(
   orgId: string,
   spaceId: string,
 ): Promise<EnforcedChatSkill[]> {
-  const scope: SpaceScope = { orgId, spaceId };
   const rows = await db
-    .select({ id: packages.id, draftManifest: packages.draftManifest })
+    .select({ id: packages.id })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
     .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
-    .where(and(activePackagesFilter(scope, "skill"), eq(spacePackages.chatEnforced, true)))
+    .where(
+      and(activePackagesFilter({ orgId, spaceId }, "skill"), eq(spacePackages.chatEnforced, true)),
+    )
     .orderBy(packages.id);
 
   return Promise.all(
-    rows.map(async ({ id, draftManifest }) => {
-      const published = await readPublishedSkill(id);
-      const draftName = asRecord(draftManifest).display_name;
+    rows.map(async ({ id }) => {
+      const published = await loadPublishedDefinition("skill", id, "latest");
       return {
         packageId: id,
-        name: published?.name ?? (typeof draftName === "string" ? draftName : id),
+        name: published?.name ?? id,
         version: published?.version ?? null,
         content: published?.content ?? null,
       };
@@ -76,38 +50,37 @@ export async function loadEnforcedChatSkills(
   );
 }
 
+type PlacementSettings = Parameters<typeof updateSpacePackage>[2];
+
 /**
- * Serialize the enforcement writes of one space: the cap and budget checks
- * below must see every concurrent enforcement, or two could both pass.
+ * Enforcing writes first and checks after, under a per-space lock: concurrent
+ * enforcements cannot both pass the cap, an unplaced 404 precedes any 409, and
+ * a refusal rolls the whole patch back.
  */
-export function withChatEnforcementLock<T>(
-  spaceId: string,
-  work: (tx: Tx) => Promise<T>,
-): Promise<T> {
+export async function updatePlacementSettings(
+  scope: SpaceScope,
+  packageId: string,
+  updates: PlacementSettings,
+): Promise<{ chatEnforcedChanged: boolean }> {
+  if (!updates.chatEnforced) {
+    return updateSpacePackage(scope, packageId, updates, { requirePlacement: true });
+  }
   return db.transaction(async (tx) => {
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`space-chat-enforced:${spaceId}`})::bigint)`,
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`space-chat-enforced:${scope.spaceId}`})::bigint)`,
     );
-    return work(tx);
+    const result = await updateSpacePackage(scope, packageId, updates, {
+      requirePlacement: true,
+      tx,
+    });
+    if (result.chatEnforcedChanged) await assertChatEnforceable(scope, packageId, tx);
+    return result;
   });
 }
 
-/**
- * Refuse enforcing `packageId` here, AFTER its flag was written in `tx` under
- * {@link withChatEnforcementLock}, so a throw rolls the write back: 409 when it
- * has no published version, when the space's flagged skills exceed
- * {@link MAX_ENFORCED_CHAT_SKILLS}, or when their published SKILL.md bodies
- * exceed {@link CHAT_SKILLS_CONTENT_BUDGET_CHARS}. Every flagged row counts,
- * enabled or not: re-activating a skill brings its flag back unchecked.
- *
- * Every read goes through `tx`: a query on the root `db` would wait on this
- * very transaction under PGlite's single connection.
- */
-export async function assertChatEnforceable(
-  scope: SpaceScope,
-  packageId: string,
-  tx: Tx,
-): Promise<void> {
+// Every read goes through `tx`: under PGlite's single connection a query on
+// the root `db` would wait on this very transaction.
+async function assertChatEnforceable(scope: SpaceScope, packageId: string, tx: Tx) {
   const own = await loadPublishedDefinition("skill", packageId, "latest", tx);
   if (!own) {
     throw conflict(
@@ -116,6 +89,7 @@ export async function assertChatEnforceable(
     );
   }
 
+  // Every flagged row counts, enabled or not: re-activation brings the flag back unchecked.
   const flagged = await tx
     .select({ packageId: spacePackages.packageId })
     .from(spacePackages)
@@ -131,7 +105,7 @@ export async function assertChatEnforceable(
   const others = await Promise.all(
     flagged
       .filter((row) => row.packageId !== packageId)
-      .map((row) => readPublishedSkill(row.packageId, tx)),
+      .map((row) => loadPublishedDefinition("skill", row.packageId, "latest", tx)),
   );
   const total = others.reduce(
     (sum, skill) => sum + (skill?.content.length ?? 0),
