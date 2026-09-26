@@ -182,6 +182,21 @@ function connectViaProxy(
   });
 }
 
+// --- Listen failure ---
+
+describe("listen failure", () => {
+  it("rejects ready when the port is taken, and never reports ready", async () => {
+    const holder = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+    try {
+      const proxy = makeProxy({ listenPort: holder.port });
+      await expect(proxy.ready).rejects.toMatchObject({ code: "EADDRINUSE" });
+      expect(proxy.readySync).toBe(false);
+    } finally {
+      holder.stop(true);
+    }
+  });
+});
+
 // --- HTTP forwarding ---
 
 describe("HTTP forwarding", () => {
