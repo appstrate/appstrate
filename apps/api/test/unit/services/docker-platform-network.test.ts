@@ -70,6 +70,13 @@ describe("detectPlatformNetwork", () => {
     expect(fetches).toBe(1);
   });
 
+  it("caches null on a 403 (socket proxy denies inspecting ourselves)", async () => {
+    stubInspect(() => new Response("forbidden", { status: 403 }));
+    expect(await detectPlatformNetwork()).toBeNull();
+    expect(await detectPlatformNetwork()).toBeNull();
+    expect(fetches).toBe(1);
+  });
+
   it("caches the first non-default network with its first alias", async () => {
     stubInspect(() => Response.json(inspectBody));
     const expected = { networkId: "net-platform", hostname: "appstrate" };

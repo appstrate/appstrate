@@ -1071,10 +1071,10 @@ let platformNetworkCache: { networkId: string; hostname: string } | null | undef
  * Uses os.hostname() (Docker sets hostname = container ID prefix) to inspect
  * ourselves and find the first non-default-bridge network.
  * Returns null when running outside Docker (local dev).
- * Only definitive answers from a live daemon are cached (a parsed inspect, or
- * 404 = not a container). Any other status or a transport error throws
- * uncached, so a daemon outage at boot is retried rather than pinning every
- * sidecar to `host.docker.internal` for the process lifetime (#1129).
+ * Only a 5xx or a transport error (daemon/proxy unavailable) throws uncached,
+ * so an outage at boot is retried rather than pinning every sidecar to
+ * `host.docker.internal` for the process lifetime (#1129). Any other status is
+ * definitive (404 = not a container, 401/403 = proxy ACL): null is cached.
  */
 export async function detectPlatformNetwork(): Promise<{
   networkId: string;
@@ -1085,12 +1085,18 @@ export async function detectPlatformNetwork(): Promise<{
   const containerName = hostname();
   const res = await dockerFetch(`/containers/${containerName}/json`);
 
-  if (res.status === 404) {
-    platformNetworkCache = null;
-    return null;
+  if (res.status >= 500) {
+    throw new Error(`Docker inspect of the platform container failed: HTTP ${res.status}`);
   }
   if (!res.ok) {
-    throw new Error(`Docker inspect of the platform container failed: HTTP ${res.status}`);
+    if (res.status !== 404) {
+      logger.warn(
+        "Could not inspect the platform container — falling back to PLATFORM_API_URL / host-gateway",
+        { status: res.status },
+      );
+    }
+    platformNetworkCache = null;
+    return null;
   }
 
   const data = (await res.json()) as {
