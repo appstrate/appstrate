@@ -34,8 +34,8 @@
  * Tenant isolation lives at the token layer (per-connection encrypted tokens),
  * not at the client_id — a shared client only identifies the space to the IdP.
  *
- * An org that registers its OWN per-space client (`integration_oauth_clients`,
- * "BYO-app") overrides the system client at connect time. Whichever client mints
+ * A custom client (`integration_oauth_clients`, "BYO-app", space > org) overrides
+ * the system client at connect time. Whichever client mints
  * a connection is pinned on the row via `client_ref` so token refresh resolves
  * the same credentials.
  *
@@ -62,7 +62,7 @@ import {
 
 /**
  * The RFC 7591 §2 methods a system entry may declare — the same set the API's
- * per-space client body accepts (`oauthClientSchema`,
+ * custom client body accepts (`oauthClientSchema`,
  * `routes/integrations.ts`), so the env-sourced and DB-sourced halves of the
  * same credential surface stay declarable in exactly the same terms.
  *
@@ -121,7 +121,7 @@ const rawSystemIntegrationClientSchema = z
     client_id: z.string().min(1),
     /**
      * OPTIONAL and never defaulted. `z.string().default("")` used to live here,
-     * and it is exactly the inference the per-space client body deleted
+     * and it is exactly the inference the custom client body deleted
      * (`oauthClientSchema`, `routes/integrations.ts`): a blank secret cannot tell
      * "declared public" from "operator forgot the secret", so an entry missing
      * its `client_secret` became a silently PUBLIC client whose token request the

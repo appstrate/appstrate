@@ -224,6 +224,7 @@ describe("CoreResources ↔ runtime catalog drift", () => {
       "credential-proxy": true,
       "llm-proxy": true,
       integrations: true,
+      "org-integrations": true,
     };
     const interfaceNames = Object.keys(allCoreResources);
     for (const name of interfaceNames) {

@@ -7,7 +7,8 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
  * OpenAPI paths for the AFPS integration marketplace.
  *
  * Endpoints are space-scoped — `X-Space-Id` is enforced by the
- * platform-level `requireSpaceContext()` middleware.
+ * platform-level `requireSpaceContext()` middleware. The org-level OAuth
+ * client routes (`paths/org-integrations.ts`) reuse the exported shapes.
  */
 
 const packageIdParam = {
@@ -18,7 +19,7 @@ const packageIdParam = {
   schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
 } as const;
 
-const authKeyParam = {
+export const authKeyParam = {
   name: "authKey",
   in: "path",
   required: true,
@@ -34,7 +35,7 @@ const connectionIdParam = {
   schema: { type: "string", format: "uuid" },
 } as const;
 
-const clientIdParam = {
+export const clientIdParam = {
   name: "clientId",
   in: "path",
   required: true,
@@ -150,9 +151,10 @@ const integrationConnectionSchema = {
   },
 } as const;
 
-// Shared by GET .../clients and PUT .../default-client — both return the
-// available-clients list so the UI re-badges the default in one round-trip.
-const integrationClientsListSchema = {
+// Shared by GET .../clients and PUT .../default-client (space and org tiers) —
+// both return the available-clients list so the UI re-badges the default in one
+// round-trip.
+export const integrationClientsListSchema = {
   type: "object",
   required: ["object", "data", "hasMore"],
   properties: {
@@ -174,13 +176,22 @@ const integrationClientsListSchema = {
         ],
         properties: {
           client_ref: { type: "string" },
-          source: { type: "string", enum: ["built-in", "custom"] },
+          source: {
+            type: "string",
+            enum: ["built-in", "org", "custom"],
+            description:
+              "`custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.",
+          },
           client_id: {
             type: "string",
             description:
-              "For `custom` clients, the org's OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`.",
+              "For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`.",
           },
-          is_default: { type: "boolean" },
+          is_default: {
+            type: "boolean",
+            description:
+              "True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client.",
+          },
           auto_provisioned: { type: "boolean" },
           has_client_secret: { type: "boolean" },
           token_endpoint_auth_method: {
@@ -196,7 +207,7 @@ const integrationClientsListSchema = {
   },
 } as const;
 
-const oauthClientSchema = {
+export const oauthClientSchema = {
   type: "object",
   required: [
     "id",
@@ -217,7 +228,10 @@ const oauthClientSchema = {
       description:
         "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.",
     },
-    spaceId: { type: "string" },
+    spaceId: {
+      type: ["string", "null"],
+      description: "Owning space; `null` for an org-level client, inherited by every space.",
+    },
     integration_package_id: { type: "string" },
     auth_key: { type: "string" },
     client_id: { type: "string" },
@@ -232,6 +246,61 @@ const oauthClientSchema = {
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
   },
+} as const;
+
+export const oauthClientCreateBodySchema = {
+  type: "object",
+  required: ["client_id"],
+  properties: {
+    client_id: { type: "string", minLength: 1 },
+    client_secret: {
+      type: "string",
+      minLength: 1,
+      description:
+        "REQUIRED unless `token_endpoint_auth_method` is `none`. A public client is declared, never inferred: omitting the secret under any other method is rejected with 400 rather than silently registering a public client.",
+    },
+    token_endpoint_auth_method: {
+      type: "string",
+      enum: ["client_secret_post", "client_secret_basic", "none"],
+      description:
+        "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider), and then send no `client_secret`. Omit to leave it undeclared, in which case the manifest's value applies — and a `client_secret` is then mandatory.",
+    },
+    redirect_uri: { type: "string", format: "uri" },
+  },
+  additionalProperties: false,
+} as const;
+
+export const oauthClientUpdateBodySchema = {
+  type: "object",
+  required: ["client_id"],
+  properties: {
+    client_id: { type: "string", minLength: 1 },
+    client_secret: {
+      type: "string",
+      description:
+        "OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable.",
+    },
+    token_endpoint_auth_method: {
+      type: "string",
+      enum: ["client_secret_post", "client_secret_basic", "none"],
+      description:
+        "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies.",
+    },
+    redirect_uri: { type: "string", format: "uri" },
+  },
+  additionalProperties: false,
+} as const;
+
+export const setDefaultClientBodySchema = {
+  type: "object",
+  required: ["client_ref"],
+  properties: {
+    client_ref: {
+      type: "string",
+      description: "Client to make default — a `client_ref` from GET .../clients.",
+    },
+  },
+  additionalProperties: false,
 } as const;
 
 const authStatusSchema = {
@@ -269,11 +338,15 @@ const authStatusSchema = {
       description:
         "Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun.",
     },
-    has_oauth_client: { type: "boolean" },
+    has_oauth_client: {
+      type: "boolean",
+      description:
+        "True when a custom OAuth client is registered for this auth, in this space or at the org level (inherited).",
+    },
     has_system_client: {
       type: "boolean",
       description:
-        "True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client.",
+        "True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when neither the space nor the org has flagged a default client of its own, so the auth is connectable without a pre-registered client.",
     },
     client_auto_provisioned: {
       type: "boolean",
@@ -548,8 +621,9 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Register a custom OAuth client for an integration auth",
       description:
-        "Registers a NEW custom (BYO-app) client for this auth. Repeatable — an " +
-        "org may hold N clients per auth (model-provider pattern). The first " +
+        "Registers a NEW custom (BYO-app) client for this auth, in this space — " +
+        "it overrides the org-level clients here. Repeatable — a " +
+        "space may hold N clients per auth (model-provider pattern). The first " +
         "registered client becomes the default; later ones are non-default until " +
         "promoted via PUT .../default-client. Rejected for auto-provisioned " +
         "(DCR/CIMD) auths. Requires `integrations:configure`, which is never granted to an API key.",
@@ -563,27 +637,7 @@ export const integrationsPaths = {
         required: true,
         content: {
           "application/json": {
-            schema: {
-              type: "object",
-              required: ["client_id"],
-              properties: {
-                client_id: { type: "string", minLength: 1 },
-                client_secret: {
-                  type: "string",
-                  minLength: 1,
-                  description:
-                    "REQUIRED unless `token_endpoint_auth_method` is `none`. A public client is declared, never inferred: omitting the secret under any other method is rejected with 400 rather than silently registering a public client.",
-                },
-                token_endpoint_auth_method: {
-                  type: "string",
-                  enum: ["client_secret_post", "client_secret_basic", "none"],
-                  description:
-                    "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider), and then send no `client_secret`. Omit to leave it undeclared, in which case the manifest's value applies — and a `client_secret` is then mandatory.",
-                },
-                redirect_uri: { type: "string", format: "uri" },
-              },
-              additionalProperties: false,
-            },
+            schema: oauthClientCreateBodySchema,
           },
         },
       },
@@ -605,7 +659,8 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Rotate a custom OAuth client's credentials",
       description:
-        "Rotates one custom client in place, by its id. Auto-provisioned " +
+        "Rotates one of this space's custom clients in place, by its id (an " +
+        "org-level client id is a 404 here). Auto-provisioned " +
         "(DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -617,26 +672,7 @@ export const integrationsPaths = {
         required: true,
         content: {
           "application/json": {
-            schema: {
-              type: "object",
-              required: ["client_id"],
-              properties: {
-                client_id: { type: "string", minLength: 1 },
-                client_secret: {
-                  type: "string",
-                  description:
-                    "OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable.",
-                },
-                token_endpoint_auth_method: {
-                  type: "string",
-                  enum: ["client_secret_post", "client_secret_basic", "none"],
-                  description:
-                    "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies.",
-                },
-                redirect_uri: { type: "string", format: "uri" },
-              },
-              additionalProperties: false,
-            },
+            schema: oauthClientUpdateBodySchema,
           },
         },
       },
@@ -656,8 +692,10 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Delete a custom OAuth client",
       description:
-        "Deletes one custom client by id. If it was the default, the cascade " +
-        "falls to the system client (no auto-promotion). Requires `integrations:configure`, which is never granted to an API key.",
+        "Deletes one of this space's custom clients by id (an org-level client " +
+        "id is a 404 here), with the connections it minted. If it was the " +
+        "default, the cascade re-resolves (org default, else system client) " +
+        "with no auto-promotion. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -674,16 +712,49 @@ export const integrationsPaths = {
       },
     },
   },
+  "/api/integrations/{packageId}/oauth-clients/{clientId}/promote": {
+    post: {
+      operationId: "promoteIntegrationOAuthClient",
+      tags: ["Integrations"],
+      summary: "Promote a space OAuth client to the org level",
+      description:
+        "Moves one of this space's custom clients to the org level (`spaceId: " +
+        "null`), inherited by every space of the org. It keeps its id and secret, " +
+        "so the connections it minted keep working; it becomes the org default " +
+        "when the org has none. Auto-provisioned (DCR/CIMD) clients stay per " +
+        "space (400). Requires both `integrations:configure` and " +
+        "`org-integrations:configure`, which are never granted to an API key.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+        clientIdParam,
+      ],
+      responses: {
+        "200": {
+          description: "Promoted; the client, now org-level",
+          headers: STD_RESPONSE_HEADERS,
+          content: { "application/json": { schema: oauthClientSchema } },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/integrations/{packageId}/auths/{authKey}/clients": {
     get: {
       operationId: "listIntegrationClients",
       tags: ["Integrations"],
       summary: "List the OAuth clients registered for an integration auth",
       description:
-        "Returns the org's custom (BYO-app) clients plus any platform-provided " +
-        "system clients, with `source` and which is the default. Secrets are " +
-        "never returned. Drives the admin clients CRUD table; new connections " +
-        "always use the default (no per-connect picker).",
+        "Returns this space's own custom (BYO-app) clients (`custom`, oldest " +
+        "first) plus the ONE default it inherits — the org default (`org`), else " +
+        "the system client (`built-in`) — when that is not one of its own. Other " +
+        "org and system clients are not listed: a space either uses its own " +
+        "clients or inherits the org's choice. `is_default` marks the client new " +
+        "connections use (no per-connect picker). Secrets are never returned. " +
+        "Org-level clients are managed on `/api/org-integrations`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -708,9 +779,11 @@ export const integrationsPaths = {
       summary: "Set the default OAuth client for an integration auth",
       description:
         "Choose which client mints NEW connections when none is picked explicitly " +
-        "(the model-provider `setDefaultModel` analogue). Selecting the org's custom " +
-        "client flags it default; selecting a system client un-flags the custom one " +
-        "so the cascade falls to the system client. Existing connections are bound " +
+        "(the model-provider `setDefaultModel` analogue). Selecting one of the " +
+        "space's own clients flags it default; selecting the default the space " +
+        "inherits (the org default, else the system client) un-flags the space's " +
+        "clients so the space inherits it again. Any other `client_ref` is a 400. " +
+        "Existing connections are bound " +
         "to the client that minted them and are unaffected. Returns the refreshed " +
         "clients list. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
@@ -723,17 +796,7 @@ export const integrationsPaths = {
         required: true,
         content: {
           "application/json": {
-            schema: {
-              type: "object",
-              required: ["client_ref"],
-              properties: {
-                client_ref: {
-                  type: "string",
-                  description: "Client to make default — a `client_ref` from GET .../clients.",
-                },
-              },
-              additionalProperties: false,
-            },
+            schema: setDefaultClientBodySchema,
           },
         },
       },

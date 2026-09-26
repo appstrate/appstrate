@@ -115,7 +115,7 @@ export function toSupportedTokenEndpointAuthMethod(
 /**
  * The two rejection messages guarding the public/confidential client
  * declaration, shared by BOTH surfaces an OAuth client can be declared on:
- * the per-space API body (`oauthClientCreateSchema`,
+ * the API body, space or org tier (`oauthClientCreateSchema`,
  * `routes/integrations.ts`) and the env-sourced system entry
  * (`rawSystemIntegrationClientSchema`, `integration-client-registry.ts`).
  *

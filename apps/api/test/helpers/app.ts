@@ -79,6 +79,7 @@ import { LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT } from "@appstrate/runner-pi";
 import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
+import { createOrgIntegrationsRouter } from "../../src/routes/org-integrations.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
 import { ORG_PATH_MIDDLEWARE } from "../../src/middleware/org-path-context.ts";
 import meRouter from "../../src/routes/me.ts";
@@ -313,6 +314,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/integrations", createIntegrationsRouter());
+  app.route("/api/org-integrations", createOrgIntegrationsRouter());
   app.route("/api/credential-proxy", createCredentialProxyRouter());
   app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
   app.route("/invite", invitationsRouter);

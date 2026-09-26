@@ -438,8 +438,8 @@ export async function resolveLiveIntegrationCredentials(
       }
     } else if (options.forceRefresh === true) {
       // OAuth2 but `buildIntegrationOAuthRefreshContext` returned null — no
-      // per-space OAuth client (DCR / system-wide / shared) or no token_endpoint,
-      // so the token can never be refreshed. Terminal.
+      // resolvable pinned OAuth client or no token_endpoint, so the token can
+      // never be refreshed. Terminal.
       await rejectUnrefreshable("no OAuth client or token endpoint");
     }
   } else if (options.forceRefresh === true) {

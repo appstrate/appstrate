@@ -157,6 +157,28 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     sharedTypeName: "IntegrationOAuthClient",
     description: "PUT .../oauth-clients/{clientId} 200 ↔ IntegrationOAuthClient",
   },
+  {
+    path: "/api/integrations/{packageId}/oauth-clients/{clientId}/promote",
+    method: "post",
+    status: "200",
+    sharedTypeName: "IntegrationOAuthClient",
+    description: "POST .../oauth-clients/{clientId}/promote 200 ↔ IntegrationOAuthClient",
+  },
+  {
+    path: "/api/org-integrations/{scope}/{name}/auths/{authKey}/oauth-clients",
+    method: "post",
+    status: "201",
+    sharedTypeName: "IntegrationOAuthClient",
+    description: "POST /api/org-integrations/.../oauth-clients 201 ↔ IntegrationOAuthClient",
+  },
+  {
+    path: "/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}",
+    method: "put",
+    status: "200",
+    sharedTypeName: "IntegrationOAuthClient",
+    description:
+      "PUT /api/org-integrations/.../oauth-clients/{clientId} 200 ↔ IntegrationOAuthClient",
+  },
   // Inline connection response (import-connection 200) — the PR added `client_ref`
   // to both the schema and the type; register so they stay locked together.
   {

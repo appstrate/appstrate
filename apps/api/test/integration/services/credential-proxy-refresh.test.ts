@@ -86,6 +86,7 @@ async function setup(
   const [customClient] = await db
     .insert(integrationOauthClients)
     .values({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       integrationId: packageId,
       authKey: "google",

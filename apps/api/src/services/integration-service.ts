@@ -637,7 +637,7 @@ export async function getIntegration(
  *
  * Returns `null` when the id names no integration of this organization, or
  * when its manifest does not parse — both mean "nothing to judge against" to
- * the one caller (`services/integration-scope-validation.ts`).
+ * its callers (scope validation, and the org tier of OAuth clients).
  */
 export async function getOrgWideIntegrationManifest(
   orgId: string,
