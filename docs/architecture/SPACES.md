@@ -205,7 +205,7 @@ Everything else follows the FK — except the last row, which since `0055` no lo
 | `uploads`                               | NOT NULL      | cascade (+ storage job)                  |
 | `notifications`                         | NOT NULL      | cascade                                  |
 | `integration_connections`               | NOT NULL      | cascade                                  |
-| `integration_oauth_clients`             | NOT NULL      | cascade                                  |
+| `integration_oauth_clients`             | nullable      | cascade                                  |
 | `integration_pins`                      | NOT NULL      | cascade                                  |
 | `integration_org_defaults`              | NOT NULL      | cascade                                  |
 | `space_smtp_configs`                    | NOT NULL (PK) | cascade                                  |
@@ -214,7 +214,7 @@ Everything else follows the FK — except the last row, which since `0055` no lo
 | `oauth_clients` (`referenced_space_id`) | nullable      | cascade                                  |
 | `audit_events`                          | nullable      | **no FK** — the value outlives the space |
 
-Two of those columns are nullable because the row can be scoped at either level, and a CHECK ties the discriminator to the id: `webhooks` requires `(level = 'org' AND space_id IS NULL) OR (level = 'space' AND space_id IS NOT NULL)` (`packages/db/src/schema/webhooks.ts`), and `oauth_clients` carries the three-way `org` / `space` / `instance` version of the same rule (`packages/db/src/schema/oidc.ts`). `audit_events.space_id` is nullable for a different reason: it is not a foreign key at all (`packages/db/src/schema/audit.ts`), the same denormalised posture `org_id` has always had. It used to be one, with `ON DELETE SET NULL`, and that blanked the attribution of every historical row for a space the instant the space was deleted — the failure the table's own doc argues against, applied to the other tenancy column. `0055` dropped the constraint; the value now survives the delete, naming a space that no longer exists. Deleting a space must not erase the record that it was deleted.
+Three of those columns are nullable because the row can be scoped at either level. `webhooks` and `oauth_clients` tie a discriminator to the id with a CHECK: `webhooks` requires `(level = 'org' AND space_id IS NULL) OR (level = 'space' AND space_id IS NOT NULL)` (`packages/db/src/schema/webhooks.ts`), and `oauth_clients` carries the three-way `org` / `space` / `instance` version of the same rule (`packages/db/src/schema/oidc.ts`). `integration_oauth_clients` has no discriminator: `org_id` is NOT NULL and `space_id IS NULL` is the org-level row, inherited by every space of the org; a space row's `(space_id, org_id)` FK keeps it inside its own org (`packages/db/src/schema/integrations.ts`). `audit_events.space_id` is nullable for a different reason: it is not a foreign key at all (`packages/db/src/schema/audit.ts`), the same denormalised posture `org_id` has always had. It used to be one, with `ON DELETE SET NULL`, and that blanked the attribution of every historical row for a space the instant the space was deleted — the failure the table's own doc argues against, applied to the other tenancy column. `0055` dropped the constraint; the value now survives the delete, naming a space that no longer exists. Deleting a space must not erase the record that it was deleted.
 
 ## Deploying the rename
 

@@ -62,6 +62,9 @@ export const spaces = pgTable(
   },
   (table) => [
     index("idx_spaces_org_id").on(table.orgId),
+    // Target of composite `(space_id, org_id)` tenant-integrity FKs. `id` alone
+    // is the PK, so `(id, org_id)` can never collide.
+    uniqueIndex("uq_spaces_id_org_id").on(table.id, table.orgId),
     uniqueIndex("idx_spaces_one_default")
       .on(table.orgId)
       .where(sql`${table.isDefault} = true`),
