@@ -13,11 +13,12 @@ import { Badge } from "@appstrate/ui/components/badge";
 export function SourceBadge({
   source,
   autoProvisioned = false,
-  spaceTier = false,
+  customLabel = "custom",
 }: {
   source: "built-in" | "org" | "custom";
   autoProvisioned?: boolean;
-  spaceTier?: boolean;
+  /** How an owner's own row reads: `custom`, or `space` where org rows sit beside it. */
+  customLabel?: "custom" | "space";
 }) {
   const { t } = useTranslation("settings");
   if (source === "built-in") {
@@ -29,5 +30,7 @@ export function SourceBadge({
   if (autoProvisioned) {
     return <Badge variant="outline">{t("source.autoProvisioned")}</Badge>;
   }
-  return <Badge variant="outline">{t(spaceTier ? "source.space" : "source.custom")}</Badge>;
+  return (
+    <Badge variant="outline">{t(customLabel === "space" ? "source.space" : "source.custom")}</Badge>
+  );
 }

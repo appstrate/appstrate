@@ -507,7 +507,7 @@ function ClientsTable({
                       <SourceBadge
                         source={client.source}
                         autoProvisioned={client.auto_provisioned}
-                        spaceTier
+                        customLabel="space"
                       />
                     </TableCell>
                     <TableCell className="font-mono text-xs">{client.client_id}</TableCell>

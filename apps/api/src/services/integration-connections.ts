@@ -710,7 +710,15 @@ function pickDefault<C extends { isDefault: boolean }, S>(
   );
 }
 
-/** The {@link pickDefault} of `owner`'s tier when none of its own clients is flagged. */
+/** Copies of `clients` with no flag — the tier as if none of its clients were flagged. */
+function unflagged<C extends { isDefault: boolean }>(clients: readonly C[]): C[] {
+  return clients.map((c) => ({ ...c, isDefault: false }));
+}
+
+/**
+ * The {@link pickDefault} of `owner`'s tier when none of its own clients is flagged
+ * (an org owner sees no space tier). Compare by `.id`: own clients come back as copies.
+ */
 function inheritedDefault<C extends { isDefault: boolean }, S>(
   owner: ClientOwner,
   space: readonly C[],
@@ -718,8 +726,8 @@ function inheritedDefault<C extends { isDefault: boolean }, S>(
   system: S | null,
 ): C | S | null {
   return isSpaceOwner(owner)
-    ? (org.find((c) => c.isDefault) ?? system ?? space[0] ?? org[0] ?? null)
-    : (system ?? org[0] ?? null);
+    ? pickDefault(unflagged(space), org, system)
+    : pickDefault([], unflagged(org), system);
 }
 
 /**
@@ -1495,7 +1503,7 @@ export interface ResolvedOAuthConnect {
    * The space's custom (BYO-app) clients for this auth — N for an oauth2-classic
    * auth, 0..1 for an auto-provisioned (DCR/CIMD) auth. Empty when none is
    * registered and dynamic registration is either not opted-in or unavailable —
-   * the caller surfaces the "register an OAuth client" / provisioning error.
+   * the caller then falls back to the org and system clients.
    */
   spaceClients: IntegrationOAuthClientWithSecret[];
   /** The org's clients the space inherits — empty for an auto-provisioned auth. */
