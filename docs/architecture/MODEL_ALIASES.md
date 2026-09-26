@@ -86,7 +86,9 @@ The **sidecar** is the `pi-messages` backend. An aliased run's inference call is
 the same `/llm/*` handler the surface allowlist already guards — deserialises `{model, context,
 options}`, rebuilds the REAL backing's pi-ai `Model` record from the private
 swap descriptor and Pi's registry record for it (`backing.providerId` is the
-Pi provider key, `null` for a gateway), calls pi-ai's own `streamSimple`, and projects the resulting
+Pi provider key, `null` for a gateway), dispatches it through pi-ai's built-in provider for that key
+(the raw per-API `streamSimple` for a gateway, or a provider whose catalog lacks the shape) — so
+provider-layer quirks such as OpenCode's `x-opencode-session` apply too (#1583) — and projects the resulting
 `AssistantMessageEvent`s down to `PiMessagesEvent`s. Everything else in that
 handler (header swap, body forward, response passthrough) serves non-aliased
 runs only. **No quirk table is mirrored anywhere**: Pi's registry, `detectCompat`

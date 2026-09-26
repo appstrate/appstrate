@@ -174,7 +174,7 @@ describe("supply-chain: pi-sdk barrel completeness", () => {
     ] as const) {
       let thrown: unknown;
       try {
-        sidecarPiBarrel.streamBacking({ api } as never, {} as never, {} as never);
+        sidecarPiBarrel.streamBacking(null, { api } as never, {} as never, {} as never);
       } catch (error) {
         // A vendor stream rejecting the empty stub context is expected and
         // irrelevant here; only the barrel's own "no implementation" error is.
