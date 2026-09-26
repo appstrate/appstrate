@@ -18,6 +18,7 @@ import {
   type TransparentListenerHandle,
 } from "../integration-transparent-listener.ts";
 import type { EgressListenerEvent } from "../integration-egress-listener.ts";
+import type { Peer } from "../helpers.ts";
 import { buildClientHello } from "./helpers/tls-client-hello.ts";
 
 const openListeners: TransparentListenerHandle[] = [];
@@ -57,7 +58,7 @@ async function makeListener(
     onEvent?: (e: EgressListenerEvent) => void;
     isBlockedHostFn?: (host: string) => boolean;
     resolveHostFn?: (host: string) => Promise<string[]>;
-    policyForPeer?: (remoteAddress: string) => Promise<PeerPolicy | null>;
+    policyForPeer?: (peer: Peer) => Promise<PeerPolicy | null>;
   } = {},
 ): Promise<TransparentListenerHandle> {
   const listener = createTransparentEgressListener({
@@ -271,8 +272,8 @@ describe("transparent egress listener — TLS SNI path", () => {
     const resolved: string[] = [];
     const listener = await makeListener({
       upstreamPort: upstream.port,
-      policyForPeer: async (ip) => {
-        peers.push(ip);
+      policyForPeer: async ({ address }) => {
+        peers.push(address);
         return null;
       },
       resolveHostFn: async (host) => {

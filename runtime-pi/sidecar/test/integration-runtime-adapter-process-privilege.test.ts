@@ -13,20 +13,28 @@
  * supervisor supplies and host process mode has no portable way to
  * provide.
  *
- * So the adapter refuses the spawn when the wrapper is absent. These
- * tests pin both halves: the refusal (and that it TELLS the operator what
- * to do), and that a supplied wrapper still spawns through the same argv
- * path.
+ * Each runner also needs a uid of its own from the `APPSTRATE_RUNNER_UIDS`
+ * pool, handed to the wrapper as its first argument.
+ *
+ * So the adapter refuses the spawn when the wrapper or the pool is missing.
+ * These tests pin both halves: the refusal (and that it TELLS the operator
+ * what to do), and that a supplied wrapper still spawns through the same
+ * argv path, uid first.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
-import { createProcessIntegrationRuntimeAdapter } from "../integration-runtime-adapter-process.ts";
+import type { RuntimeEgressContext } from "../integration-runtime-adapter.ts";
 import type { IntegrationSpawnSpec } from "../integrations-boot.ts";
-import { installPassthroughRunnerExec } from "./helpers/runner-exec.ts";
+import { createHermeticProcessAdapter } from "./helpers/hermetic-process-adapter.ts";
+import {
+  FIXTURE_RUNNER_UIDS,
+  FIXTURE_UID_ENV,
+  installPassthroughRunnerExec,
+} from "./helpers/runner-exec.ts";
 
 function localSpec(): IntegrationSpawnSpec {
   return {
@@ -45,22 +53,26 @@ function localSpec(): IntegrationSpawnSpec {
 describe("process adapter — privilege-drop gate", () => {
   let bundleRoot: string;
   let previousRunnerExec: string | undefined;
+  let previousRunnerUids: string | undefined;
 
   beforeEach(async () => {
     bundleRoot = await mkdtemp(join(tmpdir(), "appstrate-privdrop-"));
     await writeFile(join(bundleRoot, "server.ts"), "process.exit(0);\n");
     previousRunnerExec = process.env.APPSTRATE_RUNNER_EXEC;
+    previousRunnerUids = process.env.APPSTRATE_RUNNER_UIDS;
   });
 
   afterEach(async () => {
     if (previousRunnerExec === undefined) delete process.env.APPSTRATE_RUNNER_EXEC;
     else process.env.APPSTRATE_RUNNER_EXEC = previousRunnerExec;
+    if (previousRunnerUids === undefined) delete process.env.APPSTRATE_RUNNER_UIDS;
+    else process.env.APPSTRATE_RUNNER_UIDS = previousRunnerUids;
     await rm(bundleRoot, { recursive: true, force: true });
   });
 
   it("refuses to spawn a local runner when no privilege-drop wrapper is configured", async () => {
     delete process.env.APPSTRATE_RUNNER_EXEC;
-    const adapter = createProcessIntegrationRuntimeAdapter();
+    const adapter = createHermeticProcessAdapter();
     await adapter.prepare("run-refuse");
 
     const spawn = adapter.spawn({
@@ -98,7 +110,7 @@ describe("process adapter — privilege-drop gate", () => {
     const wrapper = join(dir, "runner-exec");
     await writeFile(wrapper, '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
     process.env.APPSTRATE_RUNNER_EXEC = wrapper;
-    const adapter = createProcessIntegrationRuntimeAdapter();
+    const adapter = createHermeticProcessAdapter();
     await adapter.prepare("run-nosuid");
     try {
       const spawn = adapter.spawn({
@@ -123,7 +135,7 @@ describe("process adapter — privilege-drop gate", () => {
 
   it("refuses a wrapper that does not exist", async () => {
     process.env.APPSTRATE_RUNNER_EXEC = join(bundleRoot, "no-such-wrapper");
-    const adapter = createProcessIntegrationRuntimeAdapter();
+    const adapter = createHermeticProcessAdapter();
     await adapter.prepare("run-missing");
     try {
       await expect(
@@ -141,9 +153,49 @@ describe("process adapter — privilege-drop gate", () => {
     }
   });
 
+  it("refuses a missing or malformed runner uid pool, even with a setuid wrapper", async () => {
+    const wrapper = await installPassthroughRunnerExec();
+    try {
+      for (const pool of [
+        undefined,
+        "",
+        "1100",
+        "1100-",
+        "abc-1163",
+        "1100-1163-1200",
+        "1163-1100",
+      ]) {
+        if (pool === undefined) delete process.env.APPSTRATE_RUNNER_UIDS;
+        else process.env.APPSTRATE_RUNNER_UIDS = pool;
+        const adapter = createHermeticProcessAdapter();
+        await adapter.prepare("run-pool");
+        const error = (await adapter
+          .spawn({
+            runId: "run-pool",
+            spec: localSpec(),
+            bundleRoot,
+            egress: null,
+            workspaceHandle: null,
+            onStderrLine: () => {},
+          })
+          .then(
+            () => null,
+            (err: unknown) => err,
+          )) as Error | null;
+        expect(error?.message).toContain("refusing to spawn");
+        expect(error?.message).toContain("APPSTRATE_RUNNER_UIDS");
+        if (pool !== undefined) expect(error?.message).toContain(`"${pool}"`);
+        expect(error?.message).toContain("RUN_ADAPTER=firecracker");
+        await adapter.shutdown();
+      }
+    } finally {
+      await wrapper.restore();
+    }
+  });
+
   it("spawns through the wrapper when the supervisor supplied one", async () => {
     const wrapper = await installPassthroughRunnerExec();
-    const adapter = createProcessIntegrationRuntimeAdapter();
+    const adapter = createHermeticProcessAdapter();
     await adapter.prepare("run-allow");
 
     // The runner dumps its argv + env and exits: proof the wrapper exec'd
@@ -151,7 +203,7 @@ describe("process adapter — privilege-drop gate", () => {
     const dump = join(bundleRoot, "argv.json");
     await writeFile(
       join(bundleRoot, "server.ts"),
-      `import {writeFileSync} from "node:fs"; writeFileSync(${JSON.stringify(dump)}, JSON.stringify({argv: process.argv, marker: process.env.MARKER})); process.exit(0);\n`,
+      `import {writeFileSync} from "node:fs"; writeFileSync(${JSON.stringify(dump)}, JSON.stringify({argv: process.argv, marker: process.env.MARKER, uid: process.env.${FIXTURE_UID_ENV}})); process.exit(0);\n`,
     );
 
     try {
@@ -168,10 +220,11 @@ describe("process adapter — privilege-drop gate", () => {
       await spawned.transport.start();
 
       const deadline = Date.now() + 2_000;
-      let parsed: { argv: string[]; marker?: string } | null = null;
+      type Dump = { argv: string[]; marker?: string; uid?: string };
+      let parsed: Dump | null = null;
       for (;;) {
         try {
-          parsed = JSON.parse(await readFile(dump, "utf8")) as { argv: string[]; marker?: string };
+          parsed = JSON.parse(await readFile(dump, "utf8")) as Dump;
           break;
         } catch {
           if (Date.now() > deadline) throw new Error("runner never flushed its argv dump");
@@ -183,11 +236,60 @@ describe("process adapter — privilege-drop gate", () => {
       // prefix even when they name the same file.
       expect(parsed.argv[1]).toEndWith(`${basename(bundleRoot)}/server.ts`);
       expect(parsed.marker).toBe("handed-over");
+      // The wrapper was handed the pool's first uid ahead of the argv.
+      expect(parsed.uid).toBe(String(FIXTURE_RUNNER_UIDS.first));
 
       await spawned.transport.close().catch(() => {});
       await adapter.shutdown();
     } finally {
       await wrapper.restore();
+    }
+  });
+
+  it("opens the bundle root and the run CA's directory to the runner uid only once admitted", async () => {
+    // The run CA sits in a 0700 mkdtemp directory of its own, like `prepareRunCa`'s.
+    const caDir = await mkdtemp(join(tmpdir(), "appstrate-privdrop-ca-"));
+    const caCertHostPath = join(caDir, "ca.pem");
+    await writeFile(caCertHostPath, "-----BEGIN CERTIFICATE-----\n", { mode: 0o444 });
+    const egress: RuntimeEgressContext = {
+      proxyUrl: "http://127.0.0.1:1",
+      caCertHostPath,
+      policy: { allowsAuthority: () => true, allowsUrl: () => true },
+    };
+    const mode = async (path: string) => (await stat(path)).mode & 0o777;
+    const spawnOnce = (adapter: ReturnType<typeof createHermeticProcessAdapter>) =>
+      adapter.spawn({
+        runId: "run-bundle-mode",
+        spec: localSpec(),
+        bundleRoot,
+        egress,
+        workspaceHandle: null,
+        onStderrLine: () => {},
+      });
+    // `mkdtemp` makes the root 0700, like `extractBundle`'s.
+    expect(await mode(bundleRoot)).toBe(0o700);
+    expect(await mode(caDir)).toBe(0o700);
+
+    delete process.env.APPSTRATE_RUNNER_EXEC;
+    const refusing = createHermeticProcessAdapter();
+    await refusing.prepare("run-bundle-mode");
+    await expect(spawnOnce(refusing)).rejects.toThrow(/refusing to spawn/);
+    await refusing.shutdown();
+    expect(await mode(bundleRoot)).toBe(0o700);
+    expect(await mode(caDir)).toBe(0o700);
+
+    const wrapper = await installPassthroughRunnerExec();
+    const adapter = createHermeticProcessAdapter();
+    await adapter.prepare("run-bundle-mode");
+    try {
+      // SubprocessTransport spawns on `start()`, so nothing is launched here.
+      await spawnOnce(adapter);
+      expect(await mode(bundleRoot)).toBe(0o755);
+      expect(await mode(caDir)).toBe(0o755);
+    } finally {
+      await adapter.shutdown();
+      await wrapper.restore();
+      await rm(caDir, { recursive: true, force: true });
     }
   });
 });

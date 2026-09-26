@@ -1955,7 +1955,8 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
    * `debugfs` (unprivileged — it edits the image file, not a mount).
    * `mkfs -d` would otherwise preserve the staging files' owner = this
    * API process's uid, and if that uid collides with an in-guest workload
-   * uid (1000/1001/1002) the workload could read the whole launch spec.
+   * uid (1000, 1001, the 1100-1163 runner pool) the workload could read
+   * the whole launch spec.
    * Belt-and-suspenders with the supervisor's unmount-before-workloads.
    */
   private async buildConfigDrive(

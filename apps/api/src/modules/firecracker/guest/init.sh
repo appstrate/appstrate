@@ -65,11 +65,12 @@ chmod 1777 /tmp
 # /home/pi is baked into the rootfs (adduser in runtime-pi/Dockerfile) and
 # never the effective HOME (the supervisor sets HOME=cwd per workload).
 mkdir -p /workspace
-# Shared workspace: agent (1001) owns it; integration runners (1002) reach
-# it through the `workspace` group (1003, baked into the rootfs). setgid
-# keeps files created by either side group-shared.
+# Shared workspace: agent (1001) owns it; an integration runner reaches it
+# only when the runner-exec wrapper grants it the `workspace` group (1003).
+# No "other" bits: any other uid (a runner without the group, the sidecar)
+# cannot even list it. setgid keeps files created by either side group-shared.
 chown 1001:1003 /workspace
-chmod 2775 /workspace
+chmod 2770 /workspace
 
 # --- Config drive (second virtio-block device, read-only ext4) --------------
 mkdir -p /config
