@@ -18,6 +18,7 @@ import {
   editGenerationSettings,
   getCompatibleGenerationSettings,
   getSelectedModel,
+  hasCreditFreeModel,
   setModelCatalog,
   setSelectedModel,
   subscribeModel,
@@ -183,6 +184,20 @@ describe("a pre-selection is always a live model", () => {
     attachConversation("chs_a", "deleted-model");
 
     expect(getSelectedModel()).toBe("model-b");
+  });
+});
+
+describe("a credit-free model", () => {
+  it("is a live custom model: never a built-in one, nor a custom one whose credential is dead", () => {
+    // Disabled rows never reach the store: `fetchModels` drops them.
+    const builtIn = { id: "platform", source: "built-in" as const };
+    const deadCustom = { id: "byok-dead", source: "custom" as const, needs_reconnection: true };
+
+    setModelCatalog([builtIn, deadCustom]);
+    expect(hasCreditFreeModel()).toBe(false);
+
+    setModelCatalog([builtIn, deadCustom, { id: "byok", source: "custom" }]);
+    expect(hasCreditFreeModel()).toBe(true);
   });
 });
 

@@ -47,6 +47,7 @@ import { resolveAttachmentContent, UNNAMED_FILE } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
+import { hasCreditFreeModel, subscribeModel } from "./model-store.ts";
 import { turnModelLabel } from "./turn-model.ts";
 import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
 import { isImageMime } from "@appstrate/core/mime";
@@ -423,14 +424,24 @@ function TurnLimitNotice() {
  * THE failure display for a turn — one component, one visual, live or
  * reloaded. The persisted provider-neutral category is localized here and
  * survives reload; the transient assistant-ui marker covers failures that have
- * not reached a finish chunk yet.
+ * not reached a finish chunk yet. A refusal never offers Retry; a billing one
+ * links whoever can manage billing to the billing page.
  */
 function MessageError() {
-  const { t } = useChatHost();
+  const { t, can } = useChatHost();
   // Select a plain field, never a derived object: this selector IS
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
   const message = useAuiState((s) => s.message);
-  const errorState = React.useMemo(() => turnErrorState(message, t), [message, t]);
+  const canManageBilling = can("billing:manage");
+  const creditFree = React.useSyncExternalStore(
+    subscribeModel,
+    hasCreditFreeModel,
+    hasCreditFreeModel,
+  );
+  const errorState = React.useMemo(
+    () => turnErrorState(message, t, { canManageBilling, hasCreditFreeModel: creditFree }),
+    [message, t, canManageBilling, creditFree],
+  );
   if (!errorState) return null;
   return (
     <div
@@ -445,6 +456,11 @@ function MessageError() {
           </span>
         ) : null}
       </span>
+      {errorState.action ? (
+        <Button asChild variant="outline" size="sm" className="shrink-0">
+          <a href={errorState.action.href}>{errorState.action.label}</a>
+        </Button>
+      ) : null}
       {errorState.retryable ? (
         <ThreadPrimitive.If running={false}>
           <ThreadPrimitive.Suggestion

@@ -38,6 +38,8 @@ const generationListeners = new Set<() => void>();
 let generationCapabilities = new Map<string, ModelGenerationCapabilities>();
 /** Ids of the live catalog models; `null` until the catalog has loaded once. */
 let liveModelIds: ReadonlySet<string> | null = null;
+/** A live catalog model runs on the org's own credential (`source: "custom"`). */
+let creditFreeModelAvailable = false;
 let generationCache: ModelGenerationSettings = (() => {
   if (typeof localStorage === "undefined") return {};
   try {
@@ -125,6 +127,7 @@ export function setModelCatalog(
     id: string;
     is_default?: boolean;
     needs_reconnection?: boolean;
+    source?: "built-in" | "custom";
     generation?: ModelGenerationCapabilities | null;
   }>,
 ): void {
@@ -133,6 +136,7 @@ export function setModelCatalog(
   );
   const live = models.filter(isModelLive);
   liveModelIds = new Set(live.map((m) => m.id));
+  creditFreeModelAvailable = live.some((m) => m.source === "custom");
 
   if (activeModelId !== null && !liveModelIds.has(activeModelId)) activeModelId = null;
   if (cache === null || !liveModelIds.has(cache)) {
@@ -142,6 +146,11 @@ export function setModelCatalog(
   const reconciled = reconcileModelGenerationSettings(generationCache, defaultCapabilities());
   if (reconciled !== generationCache) setGenerationSettings(reconciled);
   notifyModel();
+}
+
+/** Snapshot for `useSyncExternalStore(subscribeModel, …)`: a pick that spends no platform credits exists. */
+export function hasCreditFreeModel(): boolean {
+  return creditFreeModelAvailable;
 }
 
 function defaultCapabilities(): ModelGenerationCapabilities | undefined {
