@@ -20,6 +20,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 // barrel guard, and asking pi-ai's OWN classifier is the point — a copy of its
 // regex here would pass forever after the upstream one changed.
 import { isRetryableAssistantError } from "@earendil-works/pi-ai";
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
 import type { ModelSwap } from "../helpers.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
@@ -1626,9 +1627,16 @@ describe("pi-ai version drift", () => {
  * Read off the request that reached the socket, so the whole dispatch counts.
  */
 describe("provider-layer quirks", () => {
-  const OPENCODE = BACKINGS.find((b) => b.name === "opencode-go")!;
-
-  async function upstreamRequest(backing: Backing, sessionId?: string): Promise<Request> {
+  /**
+   * Every request the handler sends upstream, then — with `reference` — the one
+   * pi-ai's own `Models` dispatch sends for the SAME model, context and options,
+   * through the same redirecting transport.
+   */
+  async function upstreamRequests(
+    backing: Backing,
+    sessionId?: string,
+    reference = false,
+  ): Promise<Request[]> {
     const requests: Request[] = [];
     const fetchImpl = asFetch(async (input, init) => {
       requests.push(
@@ -1636,30 +1644,44 @@ describe("provider-layer quirks", () => {
       );
       return new Response("{}", { status: 400, headers: { "content-type": "application/json" } });
     });
+    let call: Parameters<BackingStreamFn> | undefined;
+    const capture: BackingStreamFn = (...args) => {
+      call = args;
+      return streamBacking(...args);
+    };
     const res = handlePiMessagesRequest(
-      { ...depsFor(backing), fetchImpl },
+      { ...depsFor(backing, capture), fetchImpl },
       new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
       JSON.stringify({ model: "appstrate-medium", context: CONTEXT, options: { sessionId } }),
     );
     await res.text();
     expect(requests).toHaveLength(1);
-    return requests[0]!;
+    if (reference) {
+      const [model, context, options] = call!;
+      // The handler's signal is spent once its stream ends; the transport is not.
+      await builtinModels()
+        .streamSimple(model, context, { ...options, signal: undefined })
+        .result();
+      expect(requests).toHaveLength(2);
+    }
+    return requests;
   }
 
   it("sends the container's session id as `x-opencode-session` to an OpenCode backing", async () => {
-    const request = await upstreamRequest(OPENCODE, "session-1583");
-    expect(request.headers.get("x-opencode-session")).toBe("session-1583");
+    const [request] = await upstreamRequests(
+      BACKINGS.find((b) => b.name === "opencode-go")!,
+      "session-1583",
+    );
+    expect(request!.headers.get("x-opencode-session")).toBe("session-1583");
   });
 
-  it("adds no session header to an OpenCode backing when the request carries none", async () => {
-    const request = await upstreamRequest(OPENCODE);
-    expect(request.headers.has("x-opencode-session")).toBe(false);
-  });
-
-  it("adds no OpenCode header to another vendor's backing", async () => {
-    const request = await upstreamRequest(BACKINGS[0]!, "session-1583");
-    expect(request.headers.has("x-opencode-session")).toBe(false);
-  });
+  for (const backing of BACKINGS) {
+    it(`sends ${backing.name} the request pi-ai's own dispatch sends`, async () => {
+      const [sidecar, direct] = await upstreamRequests(backing, "session-1583", true);
+      expect(sidecar!.url).toBe(direct!.url);
+      expect(Object.fromEntries(sidecar!.headers)).toEqual(Object.fromEntries(direct!.headers));
+    });
+  }
 
   // A gateway's derived `model.provider` is `openai`, a Responses-only provider:
   // without the catalog guard its dispatch would send completions to `/responses`.
@@ -1671,8 +1693,8 @@ describe("provider-layer quirks", () => {
       modelId: "house-model",
       baseUrl: "https://llm.gateway.test/v1",
     };
-    const request = await upstreamRequest(gateway);
-    expect(new URL(request.url).pathname).toBe("/internal/llm-proxy/x/chat/completions");
+    const [request] = await upstreamRequests(gateway);
+    expect(new URL(request!.url).pathname).toBe("/internal/llm-proxy/x/chat/completions");
   });
 });
 

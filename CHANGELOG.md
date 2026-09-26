@@ -8,8 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **Runs on an aliased model backed by OpenCode no longer fail with
-  `400 MissingSessionID`** (#1583). The sidecar now re-originates an aliased
+- **Runs on an aliased model backed by the OpenCode Go provider no longer fail
+  with `400 MissingSessionID`** (#1583). The sidecar now re-originates an aliased
   call through the backing's pi-ai provider, so provider-level headers such as
   `x-opencode-session` reach the upstream call. A deployment that set
   `"aliased": false` on its system model in `SYSTEM_PROVIDER_KEYS` as a

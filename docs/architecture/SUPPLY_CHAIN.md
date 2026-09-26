@@ -49,7 +49,9 @@ Pi's model registry (`pi-ai/providers/all`) and the root `calculateCost` /
 record. It stays off the barrel so only `@appstrate/runner-pi/pi-model` consumers
 load the registry: the agent container, the sidecar, the CLI and the API process
 on every boot (model catalog, ledger pricing). Measured cost: ~14 ms to import;
-the sidecar bundle grows 1.55 → 2.15 MB.
+the sidecar bundle grows 1.55 → 2.15 MB. The sidecar barrel is the one exception: it
+imports `pi-ai/providers/all` itself to dispatch through the registry's providers,
+at no extra load cost since the sidecar already loads `pi-model`.
 
 > `examples/custom-skill/skill.ts` intentionally imports
 > `@earendil-works/pi-coding-agent` directly — it is user-facing documentation that
