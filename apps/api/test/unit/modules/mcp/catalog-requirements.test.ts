@@ -482,6 +482,8 @@ describe("hand-written predicates agree with the guards they stand for", () => {
       "compose over MCP on read-all",
       new Set(["mcp:read", "mcp:invoke", "agents:write", "agents:run", "runs:read-all"]),
     ],
+    ["skills over MCP", new Set(["mcp:read", "mcp:invoke", "skills:read"])],
+    ["skills:read without mcp:invoke", new Set(["mcp:read", "skills:read"])],
   ];
   const sets = [...roleSets, ...edgeSets];
 
@@ -517,6 +519,12 @@ describe("hand-written predicates agree with the guards they stand for", () => {
       name: "turnCapabilities.authors ↔ invokes ∧ createAgent",
       predicate: (set) => turnCapabilities((p) => set.has(p)).authors,
       guards: (set) => invokes(set) && granted("createAgent", set),
+    },
+    {
+      // The persona teaches `getSkill`, and `listSkills` when the list is truncated.
+      name: "turnCapabilities.readsSkills ↔ invokes ∧ getSkill ∧ listSkills",
+      predicate: (set) => turnCapabilities((p) => set.has(p)).readsSkills,
+      guards: (set) => invokes(set) && granted("getSkill", set) && granted("listSkills", set),
     },
     {
       name: "turnCapabilities reaches read ↔ invokes ∧ getRun",

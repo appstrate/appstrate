@@ -199,6 +199,17 @@ async function collectUiChunks(
   return chunks;
 }
 
+/** The permission set the turn's platform-MCP bearer actually carries. */
+async function tokenPermissions(input: PiChatInput): Promise<string[]> {
+  const authorization = input.platformMcp?.headers?.Authorization;
+  expect(typeof authorization).toBe("string");
+  const resolved = await chatLoopbackStrategy.authenticate({
+    headers: new Headers({ authorization: authorization as string }),
+  } as never);
+  expect(resolved).not.toBeNull();
+  return [...(resolved!.permissions ?? [])].sort();
+}
+
 describe("handleChatStream", () => {
   let ctx: TestContext;
   /** What `app.onError` saw, so a thrown invariant can be asserted on its message. */
@@ -266,6 +277,8 @@ describe("handleChatStream", () => {
       agentAuthoring?: boolean;
       /** Earlier turns replayed ahead of the new user message. */
       history?: unknown[];
+      /** Extra body fields, e.g. the picker's `skill_mode` / `pinned_skills`. */
+      body?: Record<string, unknown>;
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
@@ -300,6 +313,7 @@ describe("handleChatStream", () => {
         ...(overrides?.agentAuthoring === undefined
           ? {}
           : { agent_authoring: overrides.agentAuthoring }),
+        ...overrides?.body,
       }),
     });
     return res;
@@ -512,6 +526,200 @@ describe("handleChatStream", () => {
     }
   });
 
+  it("without a selection in the body, keeps the stored one: strict injects and withholds `skills:read`", async () => {
+    // Persona, context block and token must agree within one turn; all three
+    // are wired from the one session-row read, which only this test can prove.
+    const sessionId = mintSessionId();
+    const PIN = "@acme/pinned-skill";
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      spaceId: ctx.defaultSpaceId,
+      title: null,
+      skillMode: "strict",
+      pinnedSkills: [PIN],
+    });
+
+    // The chosen skill is in the space's active listing; record which contents
+    // are read, so the rendered block is a function of what the handler read.
+    const read: string[] = [];
+    const dispatch = async (req: Request): Promise<Response> => {
+      const url = new URL(req.url);
+      if (url.pathname === "/api/packages/skills") {
+        return Response.json({
+          data: [{ id: PIN, name: "Pinned", description: null, version: "1.0.0" }],
+        });
+      }
+      if (url.pathname.startsWith("/api/packages/skills/")) {
+        read.push(url.pathname.replace("/api/packages/skills/", ""));
+        return Response.json({ content: "Always answer in haiku.", version: "1.0.0" });
+      }
+      if (url.pathname !== "/api/me/context") return scriptedDispatch()(req);
+      return Response.json({
+        user: { name: "Chat Tester", email: "chat-tester@test.com" },
+        org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
+        connections: [],
+        agents: [],
+        // Non-empty on purpose: strict lists no skill, so it must not render.
+        skills: [{ packageId: "@acme/catalogued", display_name: "Catalogued" }],
+      });
+    };
+
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      dispatch,
+      // Every `skills:*` is withheld, not only `skills:read`: a write echoes the SKILL.md.
+      permissions: new Set([
+        "mcp:read",
+        "mcp:invoke",
+        "skills:read",
+        "skills:write",
+        "skills:delete",
+      ]),
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+
+    expect(read).toEqual([PIN]);
+    const input = calls[0]!;
+    expect(input.system).toContain(
+      `<skill id="${PIN}" version="1.0.0">\nAlways answer in haiku.\n</skill>`,
+    );
+    expect(input.system).not.toContain("@acme/catalogued");
+    // No skill tool is taught, and the token cannot reach one.
+    expect(input.system).not.toContain("getSkill");
+    expect(input.system).not.toContain("listSkills");
+    expect(input.system).toContain(
+      "The user restricted this conversation to the skills they chose",
+    );
+    expect(await tokenPermissions(input)).toEqual(["mcp:invoke", "mcp:read"]);
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("writes the body's selection on the row it creates, and runs the turn on it", async () => {
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      permissions: new Set(["mcp:read", "mcp:invoke", "skills:read"]),
+      body: { skill_mode: "strict", pinned_skills: ["@acme/z", "@acme/a", "@acme/z"] },
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+
+    const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+    expect(row?.skillMode).toBe("strict");
+    expect(row?.pinnedSkills).toEqual(["@acme/a", "@acme/z"]);
+    expect(await tokenPermissions(calls[0]!)).toEqual(["mcp:invoke", "mcp:read"]);
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("lets the body's selection replace the stored one", async () => {
+    const sessionId = mintSessionId();
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      spaceId: ctx.defaultSpaceId,
+      title: null,
+      skillMode: "strict",
+      pinnedSkills: ["@acme/a"],
+    });
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      permissions: new Set(["mcp:read", "mcp:invoke", "skills:read"]),
+      body: { skill_mode: "auto", pinned_skills: [] },
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+
+    const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+    expect(row?.skillMode).toBe("auto");
+    expect(row?.pinnedSkills).toEqual([]);
+    expect(await tokenPermissions(calls[0]!)).toContain("skills:read");
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("refuses a skill mode without its skills, and the reverse", async () => {
+    for (const body of [{ skill_mode: "manual" }, { pinned_skills: ["@acme/a"] }]) {
+      const res = await postChat(mintSessionId(), undefined, scriptedEngine().engine, { body });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("keeps `skills:read` on the token in manual, where the model may look for more", async () => {
+    const sessionId = mintSessionId();
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      spaceId: ctx.defaultSpaceId,
+      title: null,
+      skillMode: "manual",
+      pinnedSkills: [],
+    });
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      permissions: new Set(["mcp:read", "mcp:invoke", "skills:read"]),
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    expect(await tokenPermissions(calls[0]!)).toEqual(["mcp:invoke", "mcp:read", "skills:read"]);
+    expect(calls[0]!.system).toContain("listSkills");
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("teaches no skill on a turn without `skills:read`", async () => {
+    // The payload below DOES carry skills, so every absence asserted is the
+    // turn's own gate, not an empty fixture: neither the persona nor the
+    // block names a skill.
+    const sessionId = mintSessionId();
+    const PIN = "@acme/pinned-skill";
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      spaceId: ctx.defaultSpaceId,
+      title: null,
+      pinnedSkills: [PIN],
+    });
+    const skillReads: string[] = [];
+    const withSkills = () =>
+      Response.json({
+        user: { name: "Chat Tester", email: "chat-tester@test.com" },
+        org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
+        connections: [],
+        agents: [],
+        skills: [{ packageId: "@acme/catalogued", display_name: "Catalogued" }],
+      });
+    const dispatch = async (req: Request): Promise<Response> => {
+      const url = new URL(req.url);
+      if (url.pathname.startsWith("/api/packages/skills")) skillReads.push(url.pathname);
+      return scriptedDispatch(undefined, withSkills)(req);
+    };
+
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      dispatch,
+      permissions: new Set(["mcp:read", "mcp:invoke", "agents:read", "agents:run"]),
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+
+    expect(skillReads).toEqual([]);
+    const system = calls[0]!.system;
+    expect(system).toContain(CONTEXT_ORG_MARKER);
+    for (const absent of ["## Skills", PIN, "@acme/catalogued", "getSkill", "listSkills"]) {
+      expect(system).not.toContain(absent);
+    }
+
+    await waitForAssistantPersist(sessionId);
+  });
+
   it("streams start → text → finish, hands the engine a proxy binding, and persists the turn", async () => {
     const sessionId = mintSessionId();
     const { engine, calls } = scriptedEngine();
@@ -705,17 +913,6 @@ describe("handleChatStream", () => {
   }, 20_000);
 
   describe("the composer's agent-authoring switch", () => {
-    /** The permission set the turn's platform-MCP bearer actually carries. */
-    async function tokenPermissions(input: PiChatInput): Promise<string[]> {
-      const authorization = input.platformMcp?.headers?.Authorization;
-      expect(typeof authorization).toBe("string");
-      const resolved = await chatLoopbackStrategy.authenticate({
-        headers: new Headers({ authorization: authorization as string }),
-      } as never);
-      expect(resolved).not.toBeNull();
-      return [...(resolved!.permissions ?? [])].sort();
-    }
-
     /** The one argument a model needs to compose an inline agent, whatever the prose. */
     const INLINE_MARKER = 'kind:"inline"';
     const REDUCED_MARKER = "Do not create or modify an agent in this turn";
@@ -723,7 +920,7 @@ describe("handleChatStream", () => {
     const RUN_MARKER = "run_and_wait";
     /** The one authoring rule that needs no run — taught on `agents:write` ∧ invoke. */
     const SKILLS_MARKER = "Skills are not run on their own";
-    /** A skill the context block lists only to a turn that may author an agent. */
+    /** A skill the context block lists only to a turn that reads skills (`readsSkills`). */
     const SKILL_ID = "@acme/research";
 
     // A builder as the platform grants it: running needs the MCP pair
@@ -841,8 +1038,8 @@ describe("handleChatStream", () => {
     });
 
     it("teaches no authoring without `mcp:invoke` — `createAgent` dispatches through it", async () => {
-      // `agents:write` without `mcp:invoke` is a grant the turn cannot
-      // dispatch, so neither the skill teaching nor the skill list is rendered.
+      // `agents:write` and `skills:read` without `mcp:invoke` are grants the
+      // turn cannot dispatch, so neither the skill teaching nor the list renders.
       const withSkill = () =>
         Response.json({
           user: { name: "Chat Tester", email: "chat-tester@test.com" },
@@ -852,13 +1049,17 @@ describe("handleChatStream", () => {
           skills: [{ packageId: SKILL_ID, display_name: "Research", version: "1.2.0" }],
           recent_runs: [],
         });
-      const { system } = await turn(new Set(["mcp:read", "agents:write"]), true, withSkill);
+      const { system } = await turn(
+        new Set(["mcp:read", "agents:write", "skills:read"]),
+        true,
+        withSkill,
+      );
       expect(system).not.toContain(SKILLS_MARKER);
       expect(system).not.toContain(SKILL_ID);
-      expect(system).not.toContain("## Skills you can attach to an agent");
+      expect(system).not.toContain("## Skills");
       // Control: the same set plus `mcp:invoke` IS taught both.
       const { system: invoking } = await turn(
-        new Set(["mcp:read", "mcp:invoke", "agents:write"]),
+        new Set(["mcp:read", "mcp:invoke", "agents:write", "skills:read"]),
         true,
         withSkill,
       );

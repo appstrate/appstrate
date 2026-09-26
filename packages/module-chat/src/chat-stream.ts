@@ -35,6 +35,9 @@ import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
 import { turnPermissions } from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
+import { chatSkillModeValues } from "@appstrate/db/schema";
+import { scopedNameRegex } from "@appstrate/core/validation";
+import { DEFAULT_SKILL_SELECTION, MAX_PINNED_SKILLS, type ChatSkillSelection } from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
 import { ensureSession, persistUserMessage, persistAssistantMessage } from "./persistence.ts";
@@ -106,6 +109,8 @@ export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
 //   - any `file` part MUST reference an `upload://` or `appfile://` URI. That
 //     rejects inline `data:` bytes and arbitrary URLs in the chat channel
 //     (attachments flow only through the file store, never inline).
+//   - `skill_mode` and `pinned_skills` come together or not at all: the
+//     picker's selection, written onto the session row by this turn.
 //   - `.strict()`: an unknown field is a 400, never silently dropped.
 export const chatStreamSchema = z
   .object({
@@ -145,8 +150,20 @@ export const chatStreamSchema = z
     generation: modelGenerationSettingsSchema.optional(),
     /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
     agent_authoring: z.boolean().optional(),
+    /** The conversation's skill selection; absent = the one stored on the session. */
+    skill_mode: z.enum(chatSkillModeValues).optional(),
+    pinned_skills: z
+      .array(
+        z.string().regex(scopedNameRegex, { error: "Must be a package id in @scope/name form" }),
+      )
+      .max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} chosen skills` })
+      .optional(),
   })
-  .strict();
+  .strict()
+  .refine((body) => (body.skill_mode === undefined) === (body.pinned_skills === undefined), {
+    error: "skill_mode and pinned_skills are sent together",
+    path: ["pinned_skills"],
+  });
 
 function clientErrorMessage(error: unknown): string {
   return clientTurnErrorMarker(classifyClientTurnError(error));
@@ -258,10 +275,17 @@ export async function handleChatStream(
   // `Promise.all` — a foreign-tenant 404 still surfaces before anything is
   // materialized into the session, and attaching the join in the same tick is
   // what keeps a rejection from ever going unhandled.
-  const sessionReady: Promise<void> =
+  //
+  // The picker's selection rides the turn and is written in the same upsert, so
+  // nothing is stored before the first message; without one the row's stands.
+  const bodySkills: ChatSkillSelection | undefined =
+    body.skill_mode && body.pinned_skills
+      ? { skillMode: body.skill_mode, pinnedSkills: [...new Set(body.pinned_skills)].sort() }
+      : undefined;
+  const sessionSkills: Promise<ChatSkillSelection> =
     sessionId && lastMessage?.id
-      ? ensureSession(sessionId, orgId, user.id, spaceId)
-      : Promise.resolve();
+      ? ensureSession(sessionId, orgId, user.id, spaceId, bodySkills)
+      : Promise.resolve(bodySkills ?? DEFAULT_SKILL_SELECTION);
 
   const origin = selfOrigin();
   const headers = forwardedHeaders(c);
@@ -310,17 +334,24 @@ export async function handleChatStream(
   // answer (it also ignored an API key's pinned space).
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
 
-  // Flipping the switch changes the system prompt and, through the narrowed token, the
-  // MCP `run_and_wait` descriptor on the same turn: one prompt-cache miss.
-  const permissions = turnPermissions(c.get("permissions"), body.agent_authoring !== false);
-  const capabilities = turnCapabilities((permission) => permissions.includes(permission));
+  // Flipping a switch changes the system prompt and, through the narrowed token, the
+  // MCP tool descriptors on the same turn: one prompt-cache miss. The skill mode
+  // lives on the session row, so the turn's grants follow its upsert.
+  const turn = sessionSkills.then((skills) => {
+    const permissions = turnPermissions(c.get("permissions"), {
+      authoring: body.agent_authoring !== false,
+      skillMode: skills.skillMode,
+    });
+    const capabilities = turnCapabilities((permission) => permissions.includes(permission));
+    return { skills, permissions, capabilities };
+  });
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
   // Only the caller-context block. It depends on the space id and the caller's
-  // headers — never on the chosen model or the admission gate — so it is chained
-  // on the space id and starts the moment that resolves (immediately when
-  // pinned), overlapping the model list, the attachment materialization, the
+  // headers and the session row (the turn's grants and its skills) — never on the
+  // chosen model or the admission gate — so it starts the moment the row
+  // resolves, overlapping the model list, the attachment materialization, the
   // credential resolution and the gate rather than waiting behind them. It is a
   // READ (`/api/me/context`); a turn the gate rejects has dispatched it for
   // nothing, which is acceptable — what a rejected turn must not do is persist
@@ -341,29 +372,31 @@ export async function handleChatStream(
   const phaseBStart = Date.now();
   let phaseBMs = 0;
   const contextBlockPromise: Promise<{ ok: true; block: string } | { ok: false; error: unknown }> =
-    buildCallerContextBlock(c, {
-      origin,
-      headers,
-      spaceId,
-      user,
-      deps,
-      // UI language forwarded by the client; validated/defaulted in the builder.
-      locale: c.req.header("X-Chat-Locale"),
-      capabilities,
-      permissions,
-    })
-      .finally(() => {
-        // Wall time of the block itself.
-        phaseBMs = Date.now() - phaseBStart;
-      })
+    turn
+      .then(({ skills, permissions, capabilities }) =>
+        buildCallerContextBlock(c, {
+          origin,
+          headers,
+          spaceId,
+          user,
+          deps,
+          // UI language forwarded by the client; validated/defaulted in the builder.
+          locale: c.req.header("X-Chat-Locale"),
+          capabilities,
+          permissions,
+          skills,
+        }).finally(() => {
+          phaseBMs = Date.now() - phaseBStart;
+        }),
+      )
       .then(
         (block) => ({ ok: true as const, block }),
         (error: unknown) => ({ ok: false as const, error }),
       );
 
-  const [models] = await Promise.all([
+  const [models, { permissions, capabilities }] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
-    sessionReady,
+    turn,
   ]);
   const chosen = pickModel(models, modelId);
   let generationSettings;
@@ -530,7 +563,7 @@ export async function handleChatStream(
   }
 
   // Everything before generation, for an ADMITTED turn: the two overlapped
-  // phases (their wall times, not a sum — `phaseBMs` runs under `phaseAMs`),
+  // phases (their wall times, not a sum — phase B may outlast phase A),
   // the claim/persist round trips, and the whole span since the request was
   // parsed. A rejected turn (gate, dead credential, unsupported family,
   // saturated capacity) returns above and is not measured here.

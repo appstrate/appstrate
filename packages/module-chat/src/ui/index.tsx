@@ -83,7 +83,9 @@ import {
 import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
-import { canAuthorAgents } from "../capabilities.ts";
+import { SkillsPicker } from "./skills-picker.tsx";
+import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
+import { canAuthorAgents, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -371,6 +373,7 @@ export function ChatPage({
                   onConversationChange={onConversationChange}
                   attachments={attachments}
                   composerSlot={composerSlot}
+                  canPinSkills={canPinSkills(can)}
                   serverGenerating={serverGenerating}
                   serverUpdatedAt={serverUpdatedAt}
                 />
@@ -391,6 +394,7 @@ interface ConversationProps {
   /** Composer attachment adapter, built once by `ChatPage` from the host props. */
   attachments: AttachmentAdapter;
   composerSlot?: React.ReactNode;
+  canPinSkills: boolean;
   /** Server session row `generating`, from the shared list; `undefined` = no row. */
   serverGenerating: boolean | undefined;
   /** Server session row `updatedAt`, from the shared list; `undefined` = no row. */
@@ -416,6 +420,8 @@ const Conversation = memo(function Conversation({
   id,
   getHeaders,
   isPersisted,
+  composerSlot,
+  canPinSkills,
   ...rest
 }: ConversationProps) {
   // Freeze persistence at mount. The runtime key (`id`) is stable across the
@@ -438,7 +444,33 @@ const Conversation = memo(function Conversation({
   });
 
   // Stable identity: `ConversationInner` keys its store-attach effect on it.
-  const initialMessages = useMemo(() => history.data ?? [], [history.data]);
+  const initialMessages = useMemo(() => history.data?.messages ?? [], [history.data?.messages]);
+
+  // No picker on a failed read: it would show the defaults, and a change would
+  // send them over the stored choice.
+  const showPicker = canPinSkills && !history.isError;
+  // What the user changed, sent with every turn (which writes it); nothing
+  // changed = nothing sent, and the stored selection stands. The ref is the
+  // transport's request-time read of the same value.
+  const [chosenSkills, setChosenSkills] = useState<ChatSkillSelection>();
+  const chosenSkillsRef = useRef<ChatSkillSelection>(undefined);
+  const chooseSkills = useCallback((selection: ChatSkillSelection) => {
+    chosenSkillsRef.current = selection;
+    setChosenSkills(selection);
+  }, []);
+  const getChosenSkills = useCallback(() => chosenSkillsRef.current, []);
+  const skills = chosenSkills ?? history.data?.skills ?? DEFAULT_SKILL_SELECTION;
+  const slot = useMemo(
+    () => (
+      <div className="flex items-center gap-2">
+        {showPicker && (
+          <SkillsPicker getHeaders={getHeaders} selection={skills} onChange={chooseSkills} />
+        )}
+        {composerSlot}
+      </div>
+    ),
+    [getHeaders, skills, chooseSkills, showPicker, composerSlot],
+  );
 
   if (persistedAtMount && history.isPending) {
     return (
@@ -453,6 +485,8 @@ const Conversation = memo(function Conversation({
       getHeaders={getHeaders}
       isPersisted={persistedAtMount}
       initialMessages={initialMessages}
+      composerSlot={slot}
+      getChosenSkills={getChosenSkills}
       {...rest}
     />
   );
@@ -468,7 +502,11 @@ function ConversationInner({
   composerSlot,
   serverGenerating,
   serverUpdatedAt,
-}: ConversationProps & { initialMessages: UIMessage[] }) {
+  getChosenSkills,
+}: Omit<ConversationProps, "canPinSkills"> & {
+  initialMessages: UIMessage[];
+  getChosenSkills: () => ChatSkillSelection | undefined;
+}) {
   const queryClient = useQueryClient();
   const spaceId = spaceIdFromHeaders(getHeaders);
 
@@ -501,23 +539,30 @@ function ConversationInner({
         api: "/api/chat",
         credentials: "include",
         headers: buildHeaders,
-        prepareSendMessagesRequest: ({ id: chatId, messages, body }) => ({
-          body: {
-            ...body,
-            id: chatId,
-            messages,
-            generation: getCompatibleGenerationSettings(),
-            // Read at request time, like the model above, for the same reason.
-            agent_authoring: getAgentAuthoringEnabled(),
-          },
-        }),
+        prepareSendMessagesRequest: ({ id: chatId, messages, body }) => {
+          const skills = getChosenSkills();
+          return {
+            body: {
+              ...body,
+              id: chatId,
+              messages,
+              generation: getCompatibleGenerationSettings(),
+              // Read at request time, like the model above, for the same reason.
+              agent_authoring: getAgentAuthoringEnabled(),
+              ...(skills && {
+                skill_mode: skills.skillMode,
+                pinned_skills: skills.pinnedSkills,
+              }),
+            },
+          };
+        },
         // Native resume targets our per-session stream endpoint (the chat id is
         // the conversation id = the URL).
         prepareReconnectToStreamRequest: ({ id: chatId }) => ({
           api: `/api/chat/sessions/${chatId}/stream`,
         }),
       }),
-    [buildHeaders],
+    [buildHeaders, getChosenSkills],
   );
 
   const chat = useChat({
@@ -584,8 +629,8 @@ function ConversationInner({
         staleTime: 0,
       })
       .then((fetched) => {
-        if (cancelled || fetched.length <= chatMessages.length) return;
-        setMessages(fetched);
+        if (cancelled || fetched.messages.length <= chatMessages.length) return;
+        setMessages(fetched.messages);
       })
       .catch(() => {
         // Best-effort: the next server change re-arms the rule.

@@ -78,6 +78,8 @@ function toSessionDto(row: SessionRow) {
     unread:
       row.lastAssistantSeq != null &&
       (row.lastReadSeq == null || row.lastReadSeq < row.lastAssistantSeq),
+    skill_mode: row.skillMode,
+    pinned_skills: row.pinnedSkills,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

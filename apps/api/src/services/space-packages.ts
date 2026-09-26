@@ -839,8 +839,8 @@ interface ActiveSkillsResult {
 /**
  * Active-skill hint for the caller context. Skills are not run directly: the
  * model declares them under an agent manifest's `dependencies.skills`, and the
- * inline-run preflight validates they exist at invoke time. Same `agents:run`
- * caller gate as agents. See {@link listActivePackageHints}.
+ * inline-run preflight validates they exist at invoke time. The route gates it
+ * on `skills:read`. See {@link listActivePackageHints}.
  */
 export async function listActiveSkills(
   scope: SpaceScope,

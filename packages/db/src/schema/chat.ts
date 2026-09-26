@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   text,
@@ -15,6 +16,7 @@ import {
 import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
 import { user } from "./auth.ts";
+import { chatSkillModeEnum } from "./enums.ts";
 
 // Chat tables — owned by the core schema (modules own no tables), consumed by
 // the `@appstrate/module-chat` workspace module. Created by the system
@@ -60,6 +62,12 @@ export const chatSessions = pgTable(
     // DTO so only a boolean crosses the wire.
     lastAssistantSeq: bigint("last_assistant_seq", { mode: "number" }),
     lastReadSeq: bigint("last_read_seq", { mode: "number" }),
+    skillMode: chatSkillModeEnum("skill_mode").notNull().default("auto"),
+    // No FK: re-resolved every turn, a missing package becomes a notice.
+    pinnedSkills: text("pinned_skills")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

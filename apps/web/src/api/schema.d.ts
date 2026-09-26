@@ -5380,6 +5380,13 @@ export interface components {
             generating: boolean;
             /** @description Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read. */
             unread: boolean;
+            /**
+             * @description How turns use skills. `auto`: the space's skills are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. Written by the turn that carries it (POST /api/chat).
+             * @enum {string}
+             */
+            skill_mode: "auto" | "manual" | "strict";
+            /** @description Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`. */
+            pinned_skills: string[];
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -9867,6 +9874,13 @@ export interface operations {
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Lets the assistant author agents (create, edit, compose inline) this turn; absent = on. Narrows the caller's own grants, never widens them. */
                     agent_authoring?: boolean;
+                    /**
+                     * @description The conversation's skill mode (see ChatSession `skill_mode`), written onto the session by this turn. Sent with `pinned_skills` or not at all; absent = the stored selection (`auto` for a new conversation).
+                     * @enum {string}
+                     */
+                    skill_mode?: "auto" | "manual" | "strict";
+                    /** @description The skills chosen for the conversation, written with `skill_mode`. Deduped server-side; the cap applies to the array as sent. */
+                    pinned_skills?: string[];
                     /** @description Session id (the assistant-ui thread id) */
                     id?: string;
                 };
@@ -13538,7 +13552,7 @@ export interface operations {
                         agents_truncated: boolean;
                         /** @description Total runnable agents before the cap. */
                         agents_total: number;
-                        /** @description Skills the caller could attach to an agent in the current space (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation. */
+                        /** @description Skills the caller could attach to an agent in the current space (capped). A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation. */
                         skills: {
                             /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
                             packageId: string;

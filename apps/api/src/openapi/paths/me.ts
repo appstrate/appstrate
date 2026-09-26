@@ -578,8 +578,8 @@ export const mePaths = {
                     type: "array",
                     description:
                       "Skills the caller could attach to an agent in the current space " +
-                      "(capped). Only present when the caller holds the `agents:run` permission; " +
-                      "empty otherwise. Skills are not run directly — declare them under an agent " +
+                      "(capped). A catalogue read, not a runnable hint: only present when the " +
+                      "caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent " +
                       "manifest's `dependencies.skills`. When `skills_truncated` is true, the " +
                       "full list is reachable via the `listSkills` operation.",
                     items: {

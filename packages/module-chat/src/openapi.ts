@@ -7,6 +7,10 @@
  * clients automatically (search/describe/invoke_operation).
  */
 
+import { scopedNameRegex } from "@appstrate/core/validation";
+import { chatSkillModeValues } from "@appstrate/db/schema";
+import { MAX_PINNED_SKILLS } from "./skills.ts";
+
 const stdHeaders = {
   "Request-Id": { $ref: "#/components/headers/RequestId" },
   "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -15,7 +19,16 @@ const stdHeaders = {
 export const chatComponentSchemas = {
   ChatSession: {
     type: "object",
-    required: ["object", "id", "generating", "unread", "createdAt", "updatedAt"],
+    required: [
+      "object",
+      "id",
+      "generating",
+      "unread",
+      "skill_mode",
+      "pinned_skills",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
       object: { type: "string", enum: ["chat_session"] },
       id: { type: "string", description: "Session ID (chs_ prefix)" },
@@ -28,6 +41,18 @@ export const chatComponentSchemas = {
         type: "boolean",
         description:
           "Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read.",
+      },
+      skill_mode: {
+        type: "string",
+        enum: [...chatSkillModeValues],
+        description:
+          "How turns use skills. `auto`: the space's skills are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. Written by the turn that carries it (POST /api/chat).",
+      },
+      pinned_skills: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`.",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -306,6 +331,23 @@ export const chatPaths = {
                   type: "boolean",
                   description:
                     "Lets the assistant author agents (create, edit, compose inline) this turn; absent = on. Narrows the caller's own grants, never widens them.",
+                },
+                skill_mode: {
+                  type: "string",
+                  enum: [...chatSkillModeValues],
+                  description:
+                    "The conversation's skill mode (see ChatSession `skill_mode`), written onto the session by this turn. Sent with `pinned_skills` or not at all; absent = the stored selection (`auto` for a new conversation).",
+                },
+                pinned_skills: {
+                  type: "array",
+                  maxItems: MAX_PINNED_SKILLS,
+                  items: {
+                    type: "string",
+                    pattern: scopedNameRegex.source,
+                    description: "`@scope/name` package id",
+                  },
+                  description:
+                    "The skills chosen for the conversation, written with `skill_mode`. Deduped server-side; the cap applies to the array as sent.",
                 },
                 id: { type: "string", description: "Session id (the assistant-ui thread id)" },
               },
