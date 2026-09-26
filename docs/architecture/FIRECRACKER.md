@@ -307,9 +307,11 @@ host (Linux + /dev/kvm)                    guest (one Firecracker microVM per ru
 platform API (:PORT)                       /sbin/appstrate-init  (PID 1, overlay + mounts,
 ├─ lo alias 10.231.255.1/32   ◄── sink ──  │                      /proc hidepid=2)
 ├─ TAP afc<n> 10.231.x.y/30   ◄── eth0 ──  └─ guest supervisor    (root, bun)
-├─ nft table appstrate_fc                     ├─ sidecar   uid 1000 — full egress
-│  (guest↔host/internet policy)               │   └─ integration runners uid 1002
-└─ firecracker process (VMM)                  │       (setuid wrapper, own uid, egress)
+├─ nft table appstrate_fc                     ├─ sidecar   uid 1000 — full egress,
+│  (guest↔host/internet policy)               │   │         CAP_NET_BIND_SERVICE (:53/:80/:443)
+└─ firecracker process (VMM)                  │   └─ integration runners uid 1100-1163
+                                              │       (setuid wrapper, one uid per runner,
+                                              │        lo only, UDP/53 → 127.0.0.1:53)
                                               └─ agent     uid 1001 — lo + sink only
                                                   cwd /workspace, MCP → 127.0.0.1:8080
 ```
@@ -344,11 +346,30 @@ the Docker socket, etc.). Guest→guest is dropped; guest egress to cloud
 metadata (169.254.0.0/16) and RFC1918 ranges is dropped in the host `forward`
 chain (`FIRECRACKER_EGRESS_DENY_CIDRS`) — "egress" means the internet, never
 the host's private neighbourhood. Everything else guest→internet is
-masqueraded and reserved, inside the guest, to the sidecar/runner uids
+masqueraded and reserved, inside the guest, to the sidecar uid
 (default-deny `output` chain; IPv6 is disabled in the guest entirely).
-Because the runner uid egresses directly, the sidecar's per-connection
-runner allowlist (#1458, `SIDECAR.md` → "Runner egress allowlist") does not
-bind a guest runner: only the host `forward` chain does.
+
+**Guest firewall** (`guest/firewall.ts`, applied by the supervisor before
+any workload starts): the `output` chain drops MMDS for every uid, then
+accepts loopback, root, the sidecar uid (full egress), the runner uid
+pool's redirected DNS, and the agent uid to the platform sink only;
+everything else is dropped. The runner pool (1100-1163) has no direct
+egress: its only exits are the sidecar's per-runner listeners, so the
+per-connection runner allowlist (#1458, `SIDECAR.md` → "Runner egress
+allowlist") binds every guest runner, with the host `forward` chain on top. A
+proxy-unaware runner reaches them through the sidecar's transparent plane on
+`127.0.0.1` (`SIDECAR.md` → "Transparent egress"). The runners share
+`/etc/resolv.conf` with the sidecar, which needs real resolvers, so their
+lookups are steered per uid in the kernel instead: an `output_nat` chain
+redirects the pool's UDP/53 to the sidecar's responder on `127.0.0.1:53`,
+which answers with `127.0.0.1` and never forwards a query, so DNS is no
+exfiltration channel; runner TCP/53 is dropped. The redirected flow keeps
+the output interface it was first routed to (eth0), hence its own accept
+rule in the filter chain. The supervisor starts the sidecar with ambient
+`CAP_NET_BIND_SERVICE` (`setpriv --ambient-caps`), so only the sidecar can
+hold :53/:80/:443 — the unprivileged port floor is untouched, and the
+runners inherit nothing (the setuid wrapper clears the ambient set).
+
 The `appstrate_fc` table also carries a host-side `output`-hook chain:
 host-originated traffic whose socket uid falls in the jailed-VMM range
 (`FIRECRACKER_JAIL_UID_BASE` … base + cap) is dropped toward the
@@ -384,8 +405,19 @@ host↔guest isolation.
    drive** (no workload can ever read the launch spec) → `setpriv` spawns
    sidecar (1000; not hardened — it execs the setuid runner wrapper) then
    agent (1001, `--no-new-privs --bounding-set -all`). Integration runners
-   exec through `appstrate-runner-exec` (setuid root, group-1000-only) and
-   land on uid 1002.
+   exec as `appstrate-runner-exec [--workspace] <uid> <command…>` (setuid
+   root, group-1000-only): the sidecar allocates each runner its own uid from
+   the pool 1100-1163 and hands it to the wrapper, which refuses any uid
+   outside the pool or without a pool user. Each pool user `runner<i>` has a
+   private primary group (gid == uid) and a 0700 home `/home/runner<i>`; the
+   wrapper sets `HOME` to it and applies `umask 007`. Its only supplementary
+   group is `workspace` (1003, access to `/workspace`), granted on
+   `--workspace`, which the process adapter passes only when the integration
+   opted into the workspace and the run carries a directory handle; otherwise
+   the runner has none. The supervisor passes the pool to the sidecar as
+   `APPSTRATE_RUNNER_UIDS`. One uid per runner lets the sidecar attribute
+   every loopback connection to one runner and keeps each runner's HOME,
+   files and `/proc/<pid>/environ` out of its siblings' and the agent's reach.
 5. Agent exits → supervisor kills sidecar, prints
    `APPSTRATE_EXIT:<nonce>:<code>` on the console, powers off (`reboot=k` →
    VMM exit). The nonce is a per-run random value from the config drive —
@@ -422,7 +454,9 @@ Two artifacts, shared by all runs, validated at `initialize()`:
 - **kernel** (`FIRECRACKER_KERNEL_PATH`) — built by
   `apps/api/src/modules/firecracker/scripts/build-kernel.sh` (Docker, no host toolchain): pinned
   6.1 kernel with the Firecracker project's own CI config as base, plus
-  `NF_TABLES`/`NF_TABLES_INET`/`NETFILTER_XT_MATCH_OWNER`. The stock
+  `NF_TABLES`/`NF_TABLES_INET`/`NETFILTER_XT_MATCH_OWNER`, and
+  `NF_CONNTRACK`/`NF_NAT`/`NFT_NAT`/`NFT_REDIR` for the runner DNS redirect
+  (a kernel without them rejects the guest ruleset). The stock
   Firecracker CI kernels canNOT be used as-is — runtime-verified to lack
   nftables AND the iptables owner match entirely (everything `=y`, nothing
   loadable), which would break the in-guest uid firewall.
@@ -463,7 +497,8 @@ pinned constant is still the build placeholder — a dev/source build; set
 `FIRECRACKER_ARTIFACTS_PUBKEY` or use `FIRECRACKER_ARTIFACTS_LOCAL=1`). The
 daemon never boots artifacts it cannot drive, nor a corrupt/tampered/
 unauthenticated asset. The `guest_protocol` couples the daemon engine (config
-drive, exit-marker protocol, rootfs layout) to the artifacts; its bump rules
+drive, exit-marker protocol, rootfs layout, the guest kernel options the
+guest firewall needs) to the artifacts; its bump rules
 are documented beside the constant.
 
 **Manifest signing & key provisioning**: the private key is the
