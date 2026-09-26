@@ -6,7 +6,9 @@
  * APPSTRATE_RUNNER_UIDS), the setuid runner-exec wrapper (the only uids it
  * will drop to) and the rootfs Dockerfile (the passwd entries). A drift
  * would let the wrapper hand out a uid the firewall does not know, or one
- * without a passwd entry — so the three are pinned together here.
+ * without a passwd entry and private group (the wrapper refuses it) — so the
+ * three are pinned together here, along with the group layout: a private
+ * group per runner, `workspace` only through the wrapper's --workspace.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -42,18 +44,22 @@ describe("runner uid pool contract", () => {
     expect(cDefine("RUNNER_UID_COUNT")).toBe(GUEST_RUNNER_UID_COUNT);
   });
 
-  it("runner-exec.c drops to the runner and workspace groups", () => {
-    expect(cDefine("RUNNER_GID")).toBe(1002);
+  it("runner-exec.c grants only the workspace group, and no shared runner group", () => {
     expect(cDefine("WORKSPACE_GID")).toBe(1003);
+    expect(wrapperSource).not.toMatch(/RUNNER_GID/);
   });
 
-  it("Dockerfile.rootfs bakes a passwd entry for every pool uid", () => {
+  it("Dockerfile.rootfs bakes each pool uid a private group and a 0700 home", () => {
+    const upgGroup = /addgroup -g "\$\(\((\d+) \+ i\)\)" "runner\$i"/;
+    const upgUser = /adduser -D -u "\$\(\((\d+) \+ i\)\)" -G "runner\$i" /;
     expect(capture(dockerfile, /for i in \$\(seq 0 (\d+)\)/)).toBe(GUEST_RUNNER_UID_COUNT - 1);
-    expect(capture(dockerfile, /-u "\$\(\((\d+) \+ i\)\)"/)).toBe(GUEST_RUNNER_UID_FIRST);
+    expect(capture(dockerfile, upgGroup)).toBe(GUEST_RUNNER_UID_FIRST);
+    expect(capture(dockerfile, upgUser)).toBe(GUEST_RUNNER_UID_FIRST);
+    expect(dockerfile).toMatch(/chmod 700 "\/home\/runner\$i"/);
   });
 
-  it("Dockerfile.rootfs creates the groups the wrapper drops to", () => {
-    expect(capture(dockerfile, /addgroup -g (\d+) runner\b/)).toBe(1002);
+  it("Dockerfile.rootfs creates the workspace group and no shared runner group", () => {
     expect(capture(dockerfile, /addgroup -g (\d+) workspace\b/)).toBe(1003);
+    expect(dockerfile).not.toMatch(/addgroup -g 1002\b|addgroup "runner\$i" workspace/);
   });
 });

@@ -16,10 +16,10 @@
  * (`APPSTRATE_RUNNER_UIDS`), which only the Firecracker guest supervisor
  * provides; see {@link requireRunnerIsolation}.
  *
- * Each runner execs as `<wrapper> <uid> <command> [args...]` on a pool uid of
- * its own, which is how listener peers are attributed: the kernel's socket
- * table (`/proc/net/tcp`) names the uid owning the client end of each
- * connection a listener accepts ({@link socketOwnerUid}). The guest gives a
+ * Each runner execs as `<wrapper> [--workspace] <uid> <command> [args...]` on
+ * a pool uid of its own, which is how listener peers are attributed: the
+ * kernel's socket table (`/proc/net/tcp`) names the uid owning the client end
+ * of each connection a listener accepts ({@link socketOwnerUid}). The guest gives a
  * runner uid loopback-only egress and redirects its DNS to 127.0.0.1:53, so
  * every route out crosses a sidecar listener: the runner's own CONNECT/MITM
  * listener, or the transparent plane (#779) this adapter mounts on 127.0.0.1
@@ -463,6 +463,8 @@ export function createProcessIntegrationRuntimeAdapter({
       // disk on its behalf.
       const { wrapper, pool } = await requireRunnerIsolation(spec, uidPool);
       const plan = planSubprocess(spec, bundleRoot);
+      // Reserved in one synchronous block, before any further await, so two
+      // concurrent spawns can never be handed the same uid.
       const uid = pool.first + allocatedUids;
       if (uid > pool.last) {
         throw new Error(
@@ -472,6 +474,16 @@ export function createProcessIntegrationRuntimeAdapter({
       }
       allocatedUids += 1;
       runnersByUid.set(uid, spec.integrationId);
+      // The runner reads its bundle and, when MITM-delivered, the run CA in place,
+      // on its own uid, and both sit under a 0700 mkdtemp root; the entries inside
+      // are written under the sidecar's umask (022 — nothing sets another), so only
+      // the roots need widening. Neither is credential material (package code, a
+      // public CA certificate — the CA key is staged in the minter's own 0700
+      // dir), and both stay owned by the sidecar: no runner can write into them.
+      await chmod(bundleRoot, 0o755);
+      if (egress && egress.caCertHostPath !== null) {
+        await chmod(dirname(egress.caCertHostPath), 0o755);
+      }
       // The plane serves the runners docker gives `--dns`: plain-CONNECT egress.
       // A MITM-delivery runner's DNS lands on 127.0.0.1 too (the guest redirect
       // is per uid, not per kind) and the plane refuses it: splicing would
@@ -500,25 +512,25 @@ export function createProcessIntegrationRuntimeAdapter({
       // there is no kernel-enforced read-only bind. Servers that need
       // hard enforcement should run in docker mode where the bind
       // mount's `:ro` flag denies writes at the syscall layer.
-      if (spec.workspaceMount) {
-        if (workspaceHandle?.kind === "directory") {
-          procEnv[WORKSPACE_ENV_VAR] = workspaceHandle.path;
-        } else {
-          // ERROR-level (symmetry with the docker adapter): an opt-in
-          // mcp-server whose runtime env lacks the workspace will
-          // either crash on first tool call or silently misbehave —
-          // operators need to see this on the first run, not buried
-          // in a debug log.
-          logger.error(
-            "spec declares workspaceMount but launching orchestrator carried no directory handle; runner spawned WITHOUT workspace — opt-in mcp-server tools will fail",
-            {
-              integrationId: spec.integrationId,
-              haveHandle: workspaceHandle?.kind ?? "none",
-              declaredMount: spec.workspaceMount.mount,
-              declaredAccess: spec.workspaceMount.access,
-            },
-          );
-        }
+      const workspaceDir =
+        spec.workspaceMount && workspaceHandle?.kind === "directory" ? workspaceHandle.path : null;
+      if (workspaceDir !== null) {
+        procEnv[WORKSPACE_ENV_VAR] = workspaceDir;
+      } else if (spec.workspaceMount) {
+        // ERROR-level (symmetry with the docker adapter): an opt-in
+        // mcp-server whose runtime env lacks the workspace will
+        // either crash on first tool call or silently misbehave —
+        // operators need to see this on the first run, not buried
+        // in a debug log.
+        logger.error(
+          "spec declares workspaceMount but launching orchestrator carried no directory handle; runner spawned WITHOUT workspace — opt-in mcp-server tools will fail",
+          {
+            integrationId: spec.integrationId,
+            haveHandle: workspaceHandle?.kind ?? "none",
+            declaredMount: spec.workspaceMount.mount,
+            declaredAccess: spec.workspaceMount.access,
+          },
+        );
       }
       // AFPS §7.6 (CC-5) — materialise `delivery.files` entries
       // before the subprocess starts so the entrypoint sees them at boot.
@@ -532,13 +544,21 @@ export function createProcessIntegrationRuntimeAdapter({
       }
       // The setuid wrapper drops the runner onto its own uid instead of the
       // sidecar's: the sidecar's environ (credentials) stays unreadable, and
-      // `attribution` maps the runner's sockets back to this integration.
+      // `attribution` maps the runner's sockets back to this integration. It
+      // sets the runner's HOME to that uid's private home, and grants the
+      // `workspace` group only on `--workspace`, so a runner reaches /workspace
+      // only when handed it.
       const transport = new SubprocessTransport({
         command: wrapper,
-        args: [String(uid), plan.command, ...plan.args],
+        args: [
+          ...(workspaceDir !== null ? ["--workspace"] : []),
+          String(uid),
+          plan.command,
+          ...plan.args,
+        ],
         cwd: plan.cwd,
         env: procEnv,
-        envPassthrough: ["PATH", "HOME", "NODE_OPTIONS"],
+        envPassthrough: ["PATH", "NODE_OPTIONS"],
         onStderrLine,
       });
       return { transport, diagnosticId: null };

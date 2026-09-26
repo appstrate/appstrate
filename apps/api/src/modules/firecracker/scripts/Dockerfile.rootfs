@@ -39,8 +39,10 @@ USER root
 #   setpriv   drop root → sidecar (1000) / pi (1001) without a login shell
 #   nodejs    `server.type: "node"` integration runners (parity with the
 #             docker node runner image — bun is NOT a drop-in for them)
+#   openssl   the sidecar mints the per-run MITM CA + leaf certs with it
+#             (credential-injected `delivery.http` integrations)
 # busybox (base) already provides ip / mount / pivot_root / poweroff.
-RUN apk add --no-cache nftables setpriv nodejs \
+RUN apk add --no-cache nftables setpriv nodejs openssl \
  # Mount points the init script depends on (the rootfs is read-only at
  # boot, so they must pre-exist): /overlay (tmpfs upper), /rom (old root
  # after pivot), /config (config drive).
@@ -50,20 +52,21 @@ RUN apk add --no-cache nftables setpriv nodejs \
  # dedicated user otherwise. setpriv addresses it numerically either way.
  && (getent group 1000 > /dev/null || addgroup -g 1000 sidecar) \
  && (getent passwd 1000 > /dev/null || adduser -D -u 1000 -G "$(getent group 1000 | cut -d: -f1)" -s /sbin/nologin sidecar) \
- # Integration MCP runners: one uid per runner from the pool 1100-1163
- # (runner0..runner63), primary group `runner` (gid 1002) — the kernel
- # attributes each socket to one runner, and no runner reads the sidecar's
- # or a sibling's /proc/<pid>/environ (credentials). Passwd entries are
- # required: tools like OpenSSH refuse a uid without one. The pool bounds
- # and gids mirror the runner-exec wrapper and firewall.ts (pinned by
- # runner-uid-contract.test.ts).
- && addgroup -g 1002 runner \
- # Shared `workspace` group (1003): agent + runners all write /workspace.
+ # `workspace` group (1003): the agent's, and a runner's only when the
+ # runner-exec wrapper grants it (the integration opted into /workspace).
  && addgroup -g 1003 workspace \
  && addgroup pi workspace \
+ # Integration MCP runners: one uid per runner from the pool 1100-1163
+ # (runner0..runner63), each with a private primary group (gid == uid, the
+ # wrapper refuses anything else) and a 0700 home — the kernel attributes
+ # each socket to one runner, and no runner reads a sibling's files, HOME
+ # or /proc/<pid>/environ (credentials). Passwd entries are required: tools
+ # like OpenSSH refuse a uid without one. The pool bounds mirror the
+ # runner-exec wrapper and firewall.ts (pinned by runner-uid-contract.test.ts).
  && for i in $(seq 0 63); do \
-      adduser -D -H -u "$((1100 + i))" -G runner -s /sbin/nologin "runner$i" \
-      && addgroup "runner$i" workspace || exit 1; \
+      addgroup -g "$((1100 + i))" "runner$i" \
+      && adduser -D -u "$((1100 + i))" -G "runner$i" -s /sbin/nologin "runner$i" \
+      && chmod 700 "/home/runner$i" || exit 1; \
     done
 
 # `server.type: "uv"` runners (uvx alongside, same as the docker runner).

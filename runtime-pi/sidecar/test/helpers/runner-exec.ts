@@ -10,13 +10,15 @@
  * test that wants a REAL host subprocess therefore has to supply one.
  *
  * The fixture wrapper does NOT drop privilege — it hands its uid argument
- * to the runner as {@link FIXTURE_UID_ENV} and `exec "$@"`s the rest, so
- * the runner still runs as the test process. That is
+ * to the runner as {@link FIXTURE_UID_ENV} (and an optional leading
+ * `--workspace` as {@link FIXTURE_WORKSPACE_ENV}) and `exec "$@"`s the rest,
+ * so the runner still runs as the test process. That is
  * deliberate and safe here: these tests assert env propagation, stderr
  * relay, and MCP round-trips, never isolation. It stands in for the
  * supervisor's setuid wrapper so the argv-forwarding path
- * (`wrapper <uid> <interpreter> <entry>`) is exercised exactly as in the
- * guest, and it installs the runner uid pool the adapter also requires.
+ * (`wrapper [--workspace] <uid> <interpreter> <entry>`) is exercised exactly
+ * as in the guest, and it installs the runner uid pool the adapter also
+ * requires.
  *
  * It DOES carry the setuid bit, because the adapter now stats for it (a
  * wrapper without one cannot change the child's uid, so it is refused). The
@@ -36,6 +38,9 @@ export const FIXTURE_RUNNER_UIDS = { first: 1100, last: 1163 } as const;
 /** Env var through which the fixture wrapper shows the runner the uid it was handed. */
 export const FIXTURE_UID_ENV = "APPSTRATE_FIXTURE_RUNNER_UID";
 
+/** Set to `"1"` by the fixture wrapper when it was handed `--workspace`. */
+export const FIXTURE_WORKSPACE_ENV = "APPSTRATE_FIXTURE_RUNNER_WORKSPACE";
+
 export interface PassthroughRunnerExec {
   /** Absolute path of the wrapper script now on `APPSTRATE_RUNNER_EXEC`. */
   path: string;
@@ -48,7 +53,15 @@ export async function installPassthroughRunnerExec(): Promise<PassthroughRunnerE
   const path = join(dir, "runner-exec");
   await writeFile(
     path,
-    `#!/bin/sh\n${FIXTURE_UID_ENV}="$1"\nexport ${FIXTURE_UID_ENV}\nshift\nexec "$@"\n`,
+    [
+      "#!/bin/sh",
+      `if [ "$1" = "--workspace" ]; then ${FIXTURE_WORKSPACE_ENV}=1; export ${FIXTURE_WORKSPACE_ENV}; shift; fi`,
+      `${FIXTURE_UID_ENV}="$1"`,
+      `export ${FIXTURE_UID_ENV}`,
+      "shift",
+      'exec "$@"',
+      "",
+    ].join("\n"),
   );
   await Bun.spawn(["chmod", "4755", path], { stdout: "ignore", stderr: "ignore" }).exited;
   if (((await stat(path)).mode & 0o4000) === 0) {

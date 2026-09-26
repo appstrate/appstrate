@@ -23,10 +23,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
+import type { RuntimeEgressContext } from "../integration-runtime-adapter.ts";
 import type { IntegrationSpawnSpec } from "../integrations-boot.ts";
 import { createHermeticProcessAdapter } from "./helpers/hermetic-process-adapter.ts";
 import {
@@ -242,6 +243,53 @@ describe("process adapter — privilege-drop gate", () => {
       await adapter.shutdown();
     } finally {
       await wrapper.restore();
+    }
+  });
+
+  it("opens the bundle root and the run CA's directory to the runner uid only once admitted", async () => {
+    // The run CA sits in a 0700 mkdtemp directory of its own, like `prepareRunCa`'s.
+    const caDir = await mkdtemp(join(tmpdir(), "appstrate-privdrop-ca-"));
+    const caCertHostPath = join(caDir, "ca.pem");
+    await writeFile(caCertHostPath, "-----BEGIN CERTIFICATE-----\n", { mode: 0o444 });
+    const egress: RuntimeEgressContext = {
+      proxyUrl: "http://127.0.0.1:1",
+      caCertHostPath,
+      policy: { allowsAuthority: () => true, allowsUrl: () => true },
+    };
+    const mode = async (path: string) => (await stat(path)).mode & 0o777;
+    const spawnOnce = (adapter: ReturnType<typeof createHermeticProcessAdapter>) =>
+      adapter.spawn({
+        runId: "run-bundle-mode",
+        spec: localSpec(),
+        bundleRoot,
+        egress,
+        workspaceHandle: null,
+        onStderrLine: () => {},
+      });
+    // `mkdtemp` makes the root 0700, like `extractBundle`'s.
+    expect(await mode(bundleRoot)).toBe(0o700);
+    expect(await mode(caDir)).toBe(0o700);
+
+    delete process.env.APPSTRATE_RUNNER_EXEC;
+    const refusing = createHermeticProcessAdapter();
+    await refusing.prepare("run-bundle-mode");
+    await expect(spawnOnce(refusing)).rejects.toThrow(/refusing to spawn/);
+    await refusing.shutdown();
+    expect(await mode(bundleRoot)).toBe(0o700);
+    expect(await mode(caDir)).toBe(0o700);
+
+    const wrapper = await installPassthroughRunnerExec();
+    const adapter = createHermeticProcessAdapter();
+    await adapter.prepare("run-bundle-mode");
+    try {
+      // SubprocessTransport spawns on `start()`, so nothing is launched here.
+      await spawnOnce(adapter);
+      expect(await mode(bundleRoot)).toBe(0o755);
+      expect(await mode(caDir)).toBe(0o755);
+    } finally {
+      await adapter.shutdown();
+      await wrapper.restore();
+      await rm(caDir, { recursive: true, force: true });
     }
   });
 });

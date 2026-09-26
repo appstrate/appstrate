@@ -255,6 +255,19 @@ describe("process adapter — runner uids and peer attribution", () => {
     table = [HEADER, row(0, loopback(40000), loopback(LISTENER), "01", FIRST)].join("\n");
     expect(await adapter.peerAttribution()(peer(40000))).toBe("@orga/a");
   });
+
+  it("hands concurrent spawns distinct uids", async () => {
+    const adapter = await newAdapter();
+    await Promise.all([spawn(adapter, "@orga/a"), spawn(adapter, "@orga/b")]);
+    table = [
+      HEADER,
+      row(0, loopback(40000), loopback(LISTENER), "01", FIRST),
+      row(1, loopback(40001), loopback(LISTENER), "01", FIRST + 1),
+    ].join("\n");
+    const attribute = adapter.peerAttribution();
+    const owners = [await attribute(peer(40000)), await attribute(peer(40001))];
+    expect(owners.sort()).toEqual(["@orga/a", "@orga/b"]);
+  });
 });
 
 /** Whether `port` on 127.0.0.1 can be bound right now (nothing holds it). */
@@ -305,7 +318,6 @@ describe("process adapter — transparent egress plane (#779)", () => {
     caCertHostPath: null,
     policy,
   };
-  const mitmEgress: RuntimeEgressContext = { ...connectEgress, caCertHostPath: "/run/ca.pem" };
 
   let bundleRoot: string;
   let runnerExec: PassthroughRunnerExec;
@@ -441,7 +453,11 @@ describe("process adapter — transparent egress plane (#779)", () => {
   it("refuses a MITM-delivery runner, a non-runner peer and a host outside the policy", async () => {
     const adapter = await newAdapter();
     await spawn(adapter, "@orga/connect", connectEgress);
-    await spawn(adapter, "@orga/mitm", mitmEgress);
+    // The adapter opens the CA's directory to the runner, so it must be a real one.
+    await spawn(adapter, "@orga/mitm", {
+      ...connectEgress,
+      caCertHostPath: join(bundleRoot, "ca.pem"),
+    });
     const hello = buildClientHello(ALLOWED);
     expect(await sendAs(FIRST + 1, ports.tls, hello)).toHaveLength(0);
     expect(await sendAs(1000, ports.tls, hello)).toHaveLength(0);

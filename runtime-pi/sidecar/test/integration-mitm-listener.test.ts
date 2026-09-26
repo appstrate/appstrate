@@ -1316,3 +1316,84 @@ describe("MITM listener — egress allowlist (#1458)", () => {
     },
   );
 });
+
+describe("MITM listener — per-SNI inner servers are off the loopback", () => {
+  /**
+   * Inodes of the TCP sockets this process holds in LISTEN (Linux only): an
+   * inner server on a loopback port would add one, reachable by every runner
+   * and the agent sharing the loopback, with this integration's credentials
+   * injected into whatever it relays.
+   */
+  async function ownTcpListenInodes(): Promise<Set<string>> {
+    const own = new Set<string>();
+    for (const fd of await fs.readdir("/proc/self/fd")) {
+      const target = await fs.readlink(`/proc/self/fd/${fd}`).catch(() => "");
+      const inode = /^socket:\[(\d+)\]$/.exec(target)?.[1];
+      if (inode) own.add(inode);
+    }
+    const listening = new Set<string>();
+    for (const table of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+      const text = await fs.readFile(table, "utf8").catch(() => "");
+      for (const line of text.split("\n").slice(1)) {
+        const fields = line.trim().split(/\s+/);
+        if (fields[3] === "0A" && own.has(fields[9] ?? "")) listening.add(fields[9]!);
+      }
+    }
+    return listening;
+  }
+
+  runIfOpenssl(
+    "serves each SNI on a unix socket in a 0700 directory, removed on close",
+    async () => {
+      const root = await fs.mkdtemp(path.join(tmpdir(), "mitm-t-"));
+      const bundle = await makeCaBundle();
+      const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter: createCertMinter({
+          caCertPem: bundle.pems.caCertPem,
+          caKeyPem: bundle.pems.caKeyPem,
+        }),
+        credentials: {
+          current: () =>
+            payload("v", "oauth2", { access_token: "t" }, ["https://api.test.local/**"]),
+          deliveryPlans: () => ({ v: plan("Authorization", "t") }),
+        },
+        resolveHostFn: stubResolveHost,
+        fetch: recorded.fetch,
+        socketRoot: root,
+        ...permissiveEgress,
+      });
+      await listener.ready;
+      try {
+        const [dirName, ...others] = await fs.readdir(root);
+        expect(others).toEqual([]);
+        const dir = path.join(root, dirName!);
+        expect((await fs.stat(dir)).mode & 0o777).toBe(0o700);
+        const linux = process.platform === "linux";
+        const listenersBefore = linux ? await ownTcpListenInodes() : new Set<string>();
+
+        const out = await drivenFetch({
+          listenerPort: listener.address().port,
+          sni: "api.test.local",
+          caCertPem: bundle.pems.caCertPem,
+          method: "GET",
+          path: "/items",
+          headers: {},
+        });
+        // Relayed through the inner server, credential injected.
+        expect(out.status).toBe(200);
+        expect((recorded.calls[0]!.init.headers as Headers).get("Authorization")).toBe("Bearer t");
+
+        const [socketName, ...moreSockets] = await fs.readdir(dir);
+        expect(moreSockets).toEqual([]);
+        expect((await fs.stat(path.join(dir, socketName!))).isSocket()).toBe(true);
+        if (linux) expect(await ownTcpListenInodes()).toEqual(listenersBefore);
+      } finally {
+        await listener.close();
+      }
+      expect(await fs.readdir(root)).toEqual([]);
+      await fs.rm(root, { recursive: true, force: true });
+    },
+  );
+});
