@@ -257,7 +257,7 @@ wait_for_docker_health "$negative_id" unhealthy
 # the whole script. Invisible while the container logged at `warn` (too little
 # output to still be writing), fatal the moment EE mode raised it to `info`.
 negative_logs=$(compose logs --no-color appstrate)
-grep -q 'Could not initialize container orchestrator' <<<"$negative_logs"
+grep -q 'Container orchestrator initialize failed' <<<"$negative_logs"
 echo "$negative_body" | jq -c '{status, checks}'
 echo "docker_health=unhealthy"
 

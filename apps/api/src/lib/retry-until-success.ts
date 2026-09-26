@@ -3,7 +3,7 @@
 import { logger } from "./logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-export interface RetryInBackgroundOptions {
+export interface RetryUntilSuccessOptions {
   initialDelayMs: number;
   maxDelayMs?: number;
   level?: "warn" | "error";
@@ -11,18 +11,26 @@ export interface RetryInBackgroundOptions {
 }
 
 /**
- * Retries `attempt` until it resolves once: sleeps initialDelayMs, doubling up to maxDelayMs,
- * with unref'd timers. The caller has already made (and logged) the first attempt. Never throws.
+ * Awaits the first attempt; on failure retries in the background (delay doubling up to maxDelayMs,
+ * unref'd timers) until one succeeds or `signal` aborts before a retry. Never throws.
  */
-export function retryInBackground(
+export async function retryUntilSuccess(
   what: string,
   attempt: () => Promise<void>,
-  options: RetryInBackgroundOptions,
-): void {
+  options: RetryUntilSuccessOptions,
+): Promise<void> {
   const { initialDelayMs, maxDelayMs = 60_000, level = "warn", signal } = options;
+  try {
+    await attempt();
+    return;
+  } catch (err) {
+    logger[level](`${what} failed — retrying in background`, {
+      error: getErrorMessage(err),
+      retryInMs: initialDelayMs,
+    });
+  }
   void (async () => {
     for (let n = 1, delayMs = initialDelayMs; ; n++, delayMs = Math.min(delayMs * 2, maxDelayMs)) {
-      // Unref'd: a pending retry must never hold the process (or a test run) open.
       await new Promise<void>((resolve) => {
         setTimeout(resolve, delayMs).unref?.();
       });

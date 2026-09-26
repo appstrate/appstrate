@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for agent-runtime readiness — a transient orchestrator
- * `initialize()` failure at boot recovers in the background (#1129) instead of
- * pinning `agents: degraded` until a restart, while a backend that stays
- * broken stays degraded. Backoff itself is covered by the retry helper's suite.
+ * Unit tests for agent-runtime readiness: the flag tracks a successful orchestrator
+ * `initialize()` (#1129). Retry mechanics are covered by the retry helper's suite.
  */
 
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
@@ -15,12 +13,11 @@ import {
   isAgentRuntimeReady,
 } from "../../../src/services/orchestrator/agent-runtime-readiness.ts";
 
-/** Wait until `predicate` holds or the budget expires (keeps tests fast). */
-async function waitFor(predicate: () => boolean, budgetMs = 500): Promise<void> {
-  const deadline = Date.now() + budgetMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await Bun.sleep(1);
+async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error("waitFor timed out");
+    await Bun.sleep(2);
   }
 }
 
@@ -58,58 +55,22 @@ describe("agent runtime readiness", () => {
     info.mockRestore();
   });
 
-  it("is ready after a successful first attempt and never retries", async () => {
-    const orchestrator = flakyOrchestrator(0);
-
-    await initializeAgentRuntime(orchestrator, fast);
-
-    expect(isAgentRuntimeReady()).toBe(true);
-    await Bun.sleep(20);
-    expect(orchestrator.calls).toBe(1);
-    expect(warn).not.toHaveBeenCalled();
-  });
-
-  it("recovers from a failed boot attempt without a restart (#1129)", async () => {
+  it("becomes ready once initialize() succeeds", async () => {
     const orchestrator = flakyOrchestrator(1);
 
     await initializeAgentRuntime(orchestrator, fast);
     expect(isAgentRuntimeReady()).toBe(false);
-    expect(warn.mock.calls[0]?.[0]).toStartWith("Could not initialize container orchestrator");
 
     await waitFor(isAgentRuntimeReady);
-    expect(isAgentRuntimeReady()).toBe(true);
-    expect(orchestrator.calls).toBe(2);
-
-    // Recovered: no further attempts.
-    await Bun.sleep(20);
     expect(orchestrator.calls).toBe(2);
   });
 
-  it("stays not ready while the backend keeps failing (fail-closed)", async () => {
+  it("stays not ready while initialize() keeps failing (fail-closed)", async () => {
     const orchestrator = flakyOrchestrator(Infinity);
 
     await initializeAgentRuntime(orchestrator, fast);
     await waitFor(() => orchestrator.calls >= 4);
 
-    expect(orchestrator.calls).toBeGreaterThanOrEqual(4);
-    expect(isAgentRuntimeReady()).toBe(false);
-  });
-
-  it("never rejects, whether initialize() throws synchronously or rejects", async () => {
-    await expect(
-      initializeAgentRuntime(
-        {
-          initialize: () => {
-            throw new Error("sync failure");
-          },
-        },
-        fast,
-      ),
-    ).resolves.toBeUndefined();
-
-    await expect(
-      initializeAgentRuntime({ initialize: () => Promise.reject(new Error("async")) }, fast),
-    ).resolves.toBeUndefined();
     expect(isAgentRuntimeReady()).toBe(false);
   });
 });

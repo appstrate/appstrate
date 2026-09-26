@@ -1072,8 +1072,8 @@ let platformNetworkCache: { networkId: string; hostname: string } | null | undef
  * ourselves and find the first non-default-bridge network.
  * Returns null when running outside Docker (local dev).
  * A 5xx, a transport error or an unreadable body throws uncached,
- * so an outage at boot is retried rather than pinning every sidecar to
- * `host.docker.internal` for the process lifetime (#1129). Any other status is
+ * so an outage at boot is retried rather than falling back to `PLATFORM_API_URL`
+ * / host-gateway for the process lifetime (#1129). Any other status is
  * definitive (404 = not a container, 401/403 = proxy ACL): null is cached.
  */
 export async function detectPlatformNetwork(): Promise<{

@@ -150,8 +150,8 @@ export type StopResult = "stopped" | "not_found" | "already_stopped";
  */
 export interface RunOrchestrator {
   /**
-   * Pool init, platform detection, etc. The platform retries it in the background
-   * after a rejection until it resolves once, so it must be safe to call again.
+   * Pool init, platform detection, etc. Retried after a rejection until it resolves once,
+   * so it must be safe to call again.
    */
   initialize(): Promise<void>;
 

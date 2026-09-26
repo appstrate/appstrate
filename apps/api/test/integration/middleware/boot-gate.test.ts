@@ -60,6 +60,14 @@ async function getHealth(app: Hono<AppEnv>): Promise<{ httpStatus: number; body:
   return { httpStatus: res.status, body: (await res.json()) as HealthBody };
 }
 
+async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error("waitFor timed out");
+    await Bun.sleep(2);
+  }
+}
+
 /** An orchestrator whose boot handshake fails, as on a runtime-image pull error. */
 const failingOrchestrator = {
   initialize: async (): Promise<void> => {
@@ -204,8 +212,7 @@ describe("boot gate", () => {
 
     // The transient failure clears; the background retry must pick it up.
     dependencyUp = true;
-    const deadline = Date.now() + 2_000;
-    while (!isAgentRuntimeReady() && Date.now() < deadline) await Bun.sleep(5);
+    await waitFor(isAgentRuntimeReady);
 
     const after = await getHealth(app);
     expect(after.httpStatus).toBe(200);

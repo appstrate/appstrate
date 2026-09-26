@@ -33,7 +33,7 @@ import { CLIENT_IP_HEADER } from "./client-ip.ts";
 import { triggerPostBootstrapOrg } from "./post-bootstrap-hook.ts";
 import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
-import { retryInBackground } from "./retry-in-background.ts";
+import { retryUntilSuccess } from "./retry-until-success.ts";
 import { initCacheBus } from "./cache-bus.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../services/model-registry.ts";
@@ -257,8 +257,8 @@ export async function bootBackground(): Promise<void> {
 
   // Parallel init: NOTIFY triggers and realtime are independent
   await Promise.all([
-    // `error`, not `warn`: without the triggers or without the LISTEN install
-    // every dashboard SSE is silent for the life of the process.
+    // `error`, not `warn`: without the triggers every dashboard SSE is silent
+    // for the life of the process, and without LISTEN until a retry succeeds.
     createNotifyTriggers(db)
       .then(() => logger.info("NOTIFY triggers installed"))
       .catch((err) => {
@@ -266,15 +266,9 @@ export async function bootBackground(): Promise<void> {
           error: getErrorMessage(err),
         });
       }),
-    initRealtime().catch((err) => {
-      logger.error("Could not initialize realtime LISTEN", {
-        error: getErrorMessage(err),
-      });
-      // Retry forever: giving up leaves every dashboard SSE silent for the process lifetime.
-      retryInBackground("Realtime LISTEN", () => initRealtime(), {
-        initialDelayMs: 1_000,
-        level: "error",
-      });
+    retryUntilSuccess("Realtime LISTEN", () => initRealtime(), {
+      initialDelayMs: 1_000,
+      level: "error",
     }),
     // Cross-replica cache invalidation rides the same LISTEN client. Without
     // it every `@appstrate/core/cache` invalidation stays process-local and
@@ -374,7 +368,6 @@ export async function bootBackground(): Promise<void> {
     // is unavailable; otherwise a transient ledger write failure after
     // provider spend could be lost permanently.
     initLlmUsageRetryWorker(),
-    // Never throws: a failed attempt is retried in the background.
     initializeAgentRuntime(orchestrator),
     initScheduleWorker().catch((err) => {
       logger.warn("Could not initialize schedule worker", {
