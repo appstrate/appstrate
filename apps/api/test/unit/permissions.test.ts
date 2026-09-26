@@ -44,6 +44,7 @@ describe("effective permissions in an open space", () => {
     expect(perms.has("org:delete")).toBe(true);
     expect(perms.has("members:change-role")).toBe(true);
     expect(perms.has("agents:write")).toBe(true);
+    expect(perms.has("org-integrations:configure")).toBe(true);
   });
 
   it("admin manages members and settings but never the org's identity", () => {
@@ -55,6 +56,7 @@ describe("effective permissions in an open space", () => {
     expect(perms.has("members:change-role")).toBe(true);
     expect(perms.has("agents:write")).toBe(true);
     expect(perms.has("members:invite")).toBe(true);
+    expect(perms.has("org-integrations:configure")).toBe(true);
   });
 
   it("member can read + run agents + manage own connections", () => {
@@ -98,6 +100,8 @@ describe("effective permissions in an open space", () => {
     // Model-provider-keys and webhooks stay admin-only
     expect(perms.has("model-provider-credentials:read")).toBe(false);
     expect(perms.has("webhooks:read")).toBe(false);
+    // Org-wide OAuth clients are admin work.
+    expect(perms.has("org-integrations:configure")).toBe(false);
   });
 
   it("guest reaches nothing in a space it was not added to", () => {
@@ -112,6 +116,7 @@ describe("effective permissions in an open space", () => {
     // collaborator, and roles are the org's own vocabulary.
     expect(perms.has("members:read")).toBe(false);
     expect(perms.has("roles:read")).toBe(false);
+    expect(perms.has("org-integrations:configure")).toBe(false);
     // No space slice whatsoever.
     expect(perms.has("agents:read")).toBe(false);
     expect(perms.has("runs:read")).toBe(false);
@@ -462,6 +467,9 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "model-provider-credentials:read",
       "model-provider-credentials:write",
       "model-provider-credentials:delete",
+      // Decides which OAuth app every space mints with — session-only like `integrations:configure`.
+      "integrations:configure",
+      "org-integrations:configure",
     ];
     for (const perm of excluded) {
       expect(API_KEY_ALLOWED_SCOPES.has(perm as never)).toBe(false);

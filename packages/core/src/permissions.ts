@@ -133,6 +133,9 @@ export interface CoreResources {
     | "connect"
     | "disconnect"
     | "share";
+  // Org-wide integration OAuth clients (+ the org-tier default), inherited by every
+  // space; the org half of `integrations:configure`, session-only for the same reason.
+  "org-integrations": "configure";
 }
 
 /** Core resource names. */
@@ -292,6 +295,7 @@ export const CORE_RESOURCE_ACTIONS = {
     "disconnect",
     "share",
   ],
+  "org-integrations": ["configure"],
 } as const satisfies { readonly [R in CoreResource]: readonly CoreResources[R][] };
 
 /** Read by the module loader at boot to refuse a module re-declaring a core resource name. */
@@ -319,6 +323,7 @@ export const CORE_RESOURCE_LEVELS = {
   proxies: "org",
   // `/api/llm-proxy` is not space-scoped — usage is metered per org.
   "llm-proxy": "org",
+  "org-integrations": "org",
   "space-settings": "space",
   "space-members": "space",
   agents: "space",

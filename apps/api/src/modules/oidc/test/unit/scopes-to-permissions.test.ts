@@ -6,6 +6,7 @@ import { logger } from "../../../../lib/logger.ts";
 import { orgPermissions, presetPermissions } from "../../../../lib/permissions.ts";
 import {
   getAppstrateScopes,
+  getAppstrateScopeSet,
   getEndUserScopeSet,
   getSelfServiceScopes,
   OIDC_ALLOWED_SCOPES,
@@ -46,6 +47,12 @@ describe("scopesToPermissions — end_user flow", () => {
     } finally {
       debugSpy.mockRestore();
     }
+  });
+
+  it("never advertises the session-only integration governance permissions", () => {
+    const vocabulary = getAppstrateScopeSet();
+    expect(vocabulary.has("integrations:configure")).toBe(false);
+    expect(vocabulary.has("org-integrations:configure")).toBe(false);
   });
 
   it("drops unknown scopes with debug log carrying module + scope metadata", () => {
