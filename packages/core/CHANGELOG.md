@@ -26,6 +26,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failure rejects), the characters the SKILL.md bodies of one chat turn share
   (64 000, enforced first), and the number of skills a space may enforce (3).
 
+- **`versionEtag`** and **`parseVersionEtag`** (`@appstrate/core/etag`, new
+  subpath, #1586) — the strong `"<n>"` entity-tag the platform stamps on a
+  package draft's `lock_version`, and its parser, which accepts exactly the tags
+  `versionEtag` produces (`null` for any other, leading zeros and weak tags
+  included).
+
+- **`CHAT_LOOPBACK_AUTH_METHOD`**, **`injectedSkillsSchema`**, **`InjectedSkills`**,
+  **`InjectedSkill`** and **`INJECTED_SKILLS_AUTH_EXTRA`**
+  (`@appstrate/core/chat-contract`, #1586) — the chat loopback's auth method
+  (moved from the chat module) and the claim its turn bearer carries under that
+  `authExtra` key: the turn's `spaceId` and, per skill, the published `version`
+  or the draft's `lockVersion` it injected (types inferred from the Zod schema).
+  The platform's `read_skill` honours it only from that auth method, in that
+  space, while the caller holds `chat:write` there, and serves a draft only at
+  the `lockVersion` injected (409 `injected_draft_changed` once it moved).
+
 ### Changed
 
 - **`RunOrchestrator.initialize()` may be called again after it rejects**

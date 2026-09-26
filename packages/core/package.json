@@ -44,6 +44,7 @@
     "./ajv": "./src/ajv.ts",
     "./api-errors": "./src/api-errors.ts",
     "./request-body": "./src/request-body.ts",
+    "./etag": "./src/etag.ts",
     "./pagination-link": "./src/pagination-link.ts",
     "./safe-json": "./src/safe-json.ts",
     "./storage": "./src/storage.ts",

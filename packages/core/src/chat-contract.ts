@@ -18,6 +18,7 @@
  * apps/api ↔ module-chat through `ctx.services` only.
  */
 
+import { z } from "zod";
 // Type-only imports (erased at emit), so the `module.ts` ↔ `chat-contract.ts`
 // pair carries no runtime cycle. Both symbols are the canonical, already
 // published ones — re-declaring them here is what let the chat surface drift
@@ -168,6 +169,33 @@ export interface EnforcedChatSkillRef {
   /** The `latest` published version; null when none resolves. */
   version: string | null;
 }
+
+/** The chat loopback strategy's auth method — the only source `read_skill` trusts for an injected-skills claim. */
+export const CHAT_LOOPBACK_AUTH_METHOD = "chat-loopback";
+
+/**
+ * The skills a chat turn injected, as served, in the turn's space: a published
+ * version, or the draft at the `lockVersion` it had. Parsed when the chat
+ * strategy verifies the signed bearer, and again where the platform reads it.
+ */
+export const injectedSkillsSchema = z.strictObject({
+  spaceId: z.string(),
+  skills: z.record(
+    z.string(),
+    z.discriminatedUnion("definition", [
+      z.strictObject({ definition: z.literal("published"), version: z.string().nullable() }),
+      z.strictObject({ definition: z.literal("draft"), lockVersion: z.number().int() }),
+    ]),
+  ),
+});
+
+export type InjectedSkills = z.infer<typeof injectedSkillsSchema>;
+
+/** One skill of {@link InjectedSkills}. */
+export type InjectedSkill = InjectedSkills["skills"][string];
+
+/** `authExtra` key of the turn's MCP bearer carrying {@link InjectedSkills}. */
+export const INJECTED_SKILLS_AUTH_EXTRA = "injectedSkills";
 
 /** An enforced skill with its SKILL.md, read with platform authority at its latest published version. */
 export interface EnforcedChatSkill extends EnforcedChatSkillRef {
