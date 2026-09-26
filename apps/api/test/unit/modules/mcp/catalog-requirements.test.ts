@@ -484,12 +484,22 @@ describe("hand-written predicates agree with the guards they stand for", () => {
     ],
     ["skills over MCP", new Set(["mcp:read", "mcp:invoke", "skills:read"])],
     ["skills:read without mcp:invoke", new Set(["mcp:read", "skills:read"])],
+    ["skills:read without the transport", new Set(["skills:read", "mcp:invoke"])],
   ];
   const sets = [...roleSets, ...edgeSets];
 
   const granted = (operationId: string, set: ReadonlySet<string>) =>
     isGranted(op(operationId).requirement, set);
-  const invokes = (set: ReadonlySet<string>) => set.has("mcp:read") && set.has("mcp:invoke");
+  // The MCP endpoint is not a catalog operation (the catalog leaves its own
+  // transport out), so its guard is read off the mounted route table.
+  const mcpEndpoint = deriveRouteRequirements(getTestApp().routes)("POST", "/api/mcp/o/{org}");
+  const transport = (set: ReadonlySet<string>) =>
+    mcpEndpoint !== undefined && isGranted(mcpEndpoint, set);
+  const invokes = (set: ReadonlySet<string>) => transport(set) && set.has("mcp:invoke");
+
+  it("reads the MCP endpoint's guard from its mounted route", () => {
+    expect(mcpEndpoint?.requirements).toContain("mcp:read");
+  });
 
   /** Predicate ↔ guard pairs; `guards` is the conjunction the predicate claims. */
   const pairs: Array<{
@@ -521,10 +531,17 @@ describe("hand-written predicates agree with the guards they stand for", () => {
       guards: (set) => invokes(set) && granted("createAgent", set),
     },
     {
-      // The persona teaches `getSkill`, and `listSkills` when the list is truncated.
-      name: "turnCapabilities.readsSkills ↔ invokes ∧ getSkill ∧ listSkills",
+      name: "turnCapabilities.transport ↔ the MCP endpoint's guard",
+      predicate: (set) => turnCapabilities((p) => set.has(p)).transport,
+      guards: transport,
+    },
+    {
+      // `read_skill` is declared on every connection, so the transport is the
+      // only MCP half; a skill the space does not enforce is served on
+      // `getSkill`'s guard, and `listSkills` names the rest.
+      name: "turnCapabilities.readsSkills ↔ mcp:read ∧ getSkill ∧ listSkills",
       predicate: (set) => turnCapabilities((p) => set.has(p)).readsSkills,
-      guards: (set) => invokes(set) && granted("getSkill", set) && granted("listSkills", set),
+      guards: (set) => transport(set) && granted("getSkill", set) && granted("listSkills", set),
     },
     {
       name: "turnCapabilities reaches read ↔ invokes ∧ getRun",

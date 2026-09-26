@@ -7,8 +7,8 @@
  *   - `chat_sessions` / `chat_messages` persistence (tables live in the core
  *     schema per the "modules own no tables" rule — this module only reads
  *     and writes them).
- *   - REST surface under `/api/chat/*`: session CRUD, history READ, resume and
- *     stop — none of which writes a message. Persistence is server-authoritative
+ *   - REST surface under `/api/chat/*`: session CRUD, history READ, resume,
+ *     stop and the space's enforced-skill names — none of which writes a message. Persistence is server-authoritative
  *     and its two writers both live in `persistence.ts`; exactly ONE route
  *     reaches them, `POST /api/chat` (the conversational loop below), which
  *     stores the user turn before inference and the assistant turn when the

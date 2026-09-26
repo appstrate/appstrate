@@ -74,6 +74,8 @@ function makeTools(
     scope: { orgId: "org_1", spaceId: "spc_1" },
     authorizeBundle: async () => {},
     mayShareRoot: async () => false,
+    readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
+    requestId: "req_test",
     contextInjected,
   });
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
@@ -151,6 +153,7 @@ describe("buildMcpTools declarations", () => {
     "get_me",
     "get_runtime_capabilities",
     "read_file",
+    "read_skill",
     "search_operations",
     "validate_package_file",
   ];
@@ -486,6 +489,8 @@ describe("describe_operation", () => {
             scope: { orgId: "org_1", spaceId: "spc_1" },
             authorizeBundle: async () => {},
             mayShareRoot: async () => false,
+            readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
+            requestId: "req_test",
           }).map((t) => [t.descriptor.name, t]),
         );
       const granted = async (ceiling: ReadonlySet<string> | undefined) =>
@@ -1024,6 +1029,8 @@ describe("buildMcpTools contextInjected", () => {
       scope: { orgId: "org_1", spaceId: "spc_1" },
       authorizeBundle: async () => {},
       mayShareRoot: async () => false,
+      readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
+      requestId: "req_test",
     });
     // The whole registered surface IS the advertised surface: no retired name
     // is registered, listed or hidden — see "registers no retired name, listed
@@ -1037,6 +1044,7 @@ describe("buildMcpTools contextInjected", () => {
       "invoke_operation",
       "list_files",
       "read_file",
+      "read_skill",
       "run_and_wait",
       "search_operations",
       "validate_package_file",

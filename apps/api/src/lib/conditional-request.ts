@@ -7,6 +7,7 @@
 
 import type { Context } from "hono";
 import { ApiError } from "@appstrate/core/api-errors";
+import { versionEtag } from "@appstrate/core/etag";
 
 interface IfNoneMatchOptions {
   /**
@@ -33,11 +34,6 @@ export function ifNoneMatchSatisfied(
     .split(",")
     .map((tag) => tag.trim())
     .some((tag) => (tag === "*" ? allowWildcard : strip(tag) === target));
-}
-
-/** The strong entity-tag of a draft's `lock_version`. */
-function versionEtag(version: number): string {
-  return `"${version}"`;
 }
 
 /** Stamp the response with the draft's `ETag`. */

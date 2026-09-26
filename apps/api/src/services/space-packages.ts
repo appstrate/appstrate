@@ -20,9 +20,20 @@
  */
 
 import { eq, and, exists, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packages, packageShares, packageDistTags } from "@appstrate/db/schema";
-import { notFound, parseBody } from "../lib/errors.ts";
+import {
+  spacePackages,
+  packages,
+  packageShares,
+  packageDistTags,
+  packageVersions,
+} from "@appstrate/db/schema";
+import {
+  CHAT_SKILLS_CONTENT_BUDGET_CHARS,
+  MAX_ENFORCED_CHAT_SKILLS,
+} from "@appstrate/core/chat-contract";
+import { conflict, notFound, parseBody } from "../lib/errors.ts";
 import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
@@ -35,7 +46,7 @@ import { ApiError } from "../lib/errors.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { parsePackageZip } from "@appstrate/core/zip";
 import { placementReadFilter, placementRowJoin, placementShareJoin } from "./package-placement.ts";
-import { getVersionForDownload } from "./package-versions.ts";
+import { getVersionForDownload, loadPublishedDefinition } from "./package-versions.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import {
   activeHereSql,
@@ -256,6 +267,7 @@ function spacePackageWire(
     modelId: row.modelId,
     proxyId: row.proxyId,
     enabled: row.enabled,
+    chat_enforced: row.chatEnforced,
     installed_at: row.installedAt,
     updatedAt: row.updatedAt,
     package_type: pkg.type,
@@ -530,6 +542,7 @@ const spacePackageSelect = {
   modelId: spacePackages.modelId,
   proxyId: spacePackages.proxyId,
   enabled: spacePackages.enabled,
+  chat_enforced: spacePackages.chatEnforced,
   installed_at: spacePackages.installedAt,
   updatedAt: spacePackages.updatedAt,
   package_type: packages.type,
@@ -597,7 +610,7 @@ export async function getSpacePackage(scope: SpaceScope, packageId: string) {
  * listings, so what an index page shows, what the caller-context hints tell the
  * model it may invoke, and what the run gate lets through are one set.
  */
-function activePackagesFilter(scope: SpaceScope, type: PackageType) {
+export function activePackagesFilter(scope: SpaceScope, type: PackageType) {
   return and(
     eq(packages.type, type),
     orgOrSystemFilter(scope.orgId),
@@ -694,6 +707,28 @@ interface PackageHint {
   home_writable: boolean;
 }
 
+/** ON clause for the package's non-yanked `latest` dist-tag — at most one row per package. */
+export function latestTagJoin(packageIdColumn: AnyPgColumn) {
+  return and(
+    eq(packageDistTags.packageId, packageIdColumn),
+    eq(packageDistTags.tag, "latest"),
+    // A yanked target does not resolve as `latest` (`resolveVersionFromCatalog`).
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(packageVersions)
+        .where(
+          and(eq(packageVersions.id, packageDistTags.versionId), eq(packageVersions.yanked, false)),
+        ),
+    ),
+  );
+}
+
+/** A `latest` dist-tag ({@link latestTagJoin}), or a system package — published by construction. */
+export function isPublished(row: { source: string | null; latestVersionId: number | null }) {
+  return row.source === "system" || row.latestVersionId != null;
+}
+
 const DEFAULT_PACKAGE_HINT_LIMIT = 15;
 
 /**
@@ -757,10 +792,7 @@ async function listActivePackageHints<T extends PackageHint>(
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
-    .leftJoin(
-      packageDistTags,
-      and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
-    )
+    .leftJoin(packageDistTags, latestTagJoin(packages.id))
     .where(activePackagesFilter(scope, type))
     .orderBy(...packageListingOrder())
     .limit(limit);
@@ -774,7 +806,7 @@ async function listActivePackageHints<T extends PackageHint>(
       display_name: typeof manifest.display_name === "string" ? manifest.display_name : "",
       description: typeof manifest.description === "string" ? manifest.description : "",
       source: row.source ?? "local",
-      published: row.source === "system" || row.latestVersionId != null,
+      published: isPublished(row),
       // Decided by the CALLER's authority over the package's home, which this
       // service has no context to read — the route resolves it and hands the
       // verdict down. Absent resolver (no HTTP caller) ⇒ nobody authors here.
@@ -1043,7 +1075,9 @@ export async function getResolvedRunConfig(
 
 /**
  * Update the per-space settings row for `(spaceId, packageId)` — the model, the
- * proxy, the generation settings and the stored input values, and nothing else.
+ * proxy, the generation settings, the stored input values and — with
+ * `requirePlacement` only, never on a create — the chat enforcement flag, and
+ * nothing else. `chatEnforcedChanged` says whether the write moved that flag.
  *
  * `enabled` is NOT here: activation has its own pair of doors
  * ({@link activatePackage} / {@link deactivatePackage}), which keeps the
@@ -1075,9 +1109,11 @@ export async function updateSpacePackage(
     modelId?: string | null;
     generationConfig?: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId?: string | null;
+    chatEnforced?: boolean;
   },
-  opts?: { requirePlacement?: boolean },
-): Promise<void> {
+  /** `tx`: join the caller's transaction instead of opening one. */
+  opts?: { requirePlacement?: boolean; tx?: Tx },
+): Promise<{ chatEnforcedChanged: boolean }> {
   const set: Partial<{
     updatedAt: Date;
     inputSettings: { values: Record<string, unknown>; locked: string[] };
@@ -1100,7 +1136,7 @@ export async function updateSpacePackage(
   if (updates.generationConfig !== undefined) set.generationConfig = updates.generationConfig;
   if (updates.proxyId !== undefined) set.proxyId = updates.proxyId;
 
-  await db.transaction(async (tx) => {
+  const work = async (tx: Tx) => {
     // Tenant boundary, atomic with the write: the target package must be
     // visible to the org (own or system) and not an ephemeral shadow row.
     const [pkg] = await tx
@@ -1119,9 +1155,13 @@ export async function updateSpacePackage(
       // landed and the 200 body was `{"object":"space_package"}`. The
       // `EXISTS` makes the UPDATE match nothing instead, so the refusal below
       // states the truth.
+      const { chatEnforced } = updates;
+      // Read under the row lock, so the caller's audit names a real change.
+      const before =
+        chatEnforced === undefined ? null : await currentPlacement(tx, packageId, scope.spaceId);
       const updated = await tx
         .update(spacePackages)
-        .set(set)
+        .set(chatEnforced === undefined ? set : { ...set, chatEnforced })
         .where(
           and(
             eq(spacePackages.spaceId, scope.spaceId),
@@ -1133,7 +1173,9 @@ export async function updateSpacePackage(
       if (updated.length === 0) {
         throw notFound(`Package '${packageId}' is not placed in this space`);
       }
-      return;
+      return {
+        chatEnforcedChanged: chatEnforced !== undefined && before?.chatEnforced !== chatEnforced,
+      };
     }
 
     // Create-on-first-write, and only where it changes no verdict. Without this
@@ -1162,5 +1204,77 @@ export async function updateSpacePackage(
         target: [spacePackages.spaceId, spacePackages.packageId],
         set,
       });
+    return { chatEnforcedChanged: false };
+  };
+  return opts?.tx ? work(opts.tx) : db.transaction(work);
+}
+
+type PlacementSettings = Parameters<typeof updateSpacePackage>[2];
+
+/**
+ * Enforcing writes first and checks after, under a per-space lock: concurrent
+ * enforcements cannot both pass the cap, an unplaced 404 precedes any 409, and
+ * a refusal rolls the whole patch back.
+ */
+export async function updatePlacementSettings(
+  scope: SpaceScope,
+  packageId: string,
+  updates: PlacementSettings,
+): Promise<{ chatEnforcedChanged: boolean }> {
+  if (!updates.chatEnforced) {
+    return updateSpacePackage(scope, packageId, updates, { requirePlacement: true });
+  }
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`space-chat-enforced:${scope.spaceId}`})::bigint)`,
+    );
+    const result = await updateSpacePackage(scope, packageId, updates, {
+      requirePlacement: true,
+      tx,
+    });
+    if (result.chatEnforcedChanged) await assertChatEnforceable(scope, packageId, tx);
+    return result;
   });
+}
+
+// Every read goes through `tx`: under PGlite's single connection a query on
+// the root `db` would wait on this very transaction.
+async function assertChatEnforceable(scope: SpaceScope, packageId: string, tx: Tx) {
+  const own = await loadPublishedDefinition("skill", packageId, "latest", tx);
+  if (!own) {
+    throw conflict(
+      "no_published_version",
+      `Skill '${packageId}' has no published version to enforce — publish it first`,
+    );
+  }
+
+  // Every flagged row counts, enabled or not: re-activation brings the flag back unchecked.
+  const flagged = await tx
+    .select({ packageId: spacePackages.packageId })
+    .from(spacePackages)
+    .where(and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.chatEnforced, true)));
+  if (flagged.length > MAX_ENFORCED_CHAT_SKILLS) {
+    throw conflict(
+      "enforced_skills_limit",
+      `A space enforces at most ${MAX_ENFORCED_CHAT_SKILLS} skills in its chat`,
+      { limit: MAX_ENFORCED_CHAT_SKILLS },
+    );
+  }
+
+  const others = await Promise.all(
+    flagged
+      .filter((row) => row.packageId !== packageId)
+      .map((row) => loadPublishedDefinition("skill", row.packageId, "latest", tx)),
+  );
+  const total = others.reduce(
+    (sum, skill) => sum + (skill?.content.length ?? 0),
+    own.content.length,
+  );
+  if (total > CHAT_SKILLS_CONTENT_BUDGET_CHARS) {
+    throw conflict(
+      "enforced_skills_budget",
+      `The enforced skills would total ${total} characters; the chat budget is ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}`,
+      { budget: CHAT_SKILLS_CONTENT_BUDGET_CHARS, total },
+    );
+  }
 }

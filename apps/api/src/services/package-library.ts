@@ -5,6 +5,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   organizationMembers,
+  packageDistTags,
   packages,
   packageShares,
   spacePackages,
@@ -15,6 +16,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { packagePermission } from "@appstrate/core/permissions";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { isActiveHere } from "./package-activation.ts";
+import { isPublished, latestTagJoin } from "./space-packages.ts";
 import { sharerView } from "./package-shares.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
@@ -36,6 +38,8 @@ interface Placement {
   space_id: string;
   via: PlacementVia;
   state: PlacementState;
+  /** Whether this space enforces the skill in its chat; `false` with no row. */
+  chat_enforced: boolean;
   /**
    * Who offered it — on `shared` placements only, and `null` there when the
    * offer came from a home MOVE rather than from a person (`shared_by` is NULL
@@ -54,6 +58,8 @@ interface LibraryPackage {
   home_writable: boolean;
   home_deletable: boolean;
   home_shareable: boolean;
+  /** A `latest` published version exists (or a system package) — what enforcing a skill needs. */
+  published: boolean;
   placements: Placement[];
 }
 
@@ -136,8 +142,10 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
         source: packages.source,
         homeSpaceId: packages.homeSpaceId,
         draftManifest: packages.draftManifest,
+        latestVersionId: packageDistTags.versionId,
         spaceId: spacePackages.spaceId,
         enabled: spacePackages.enabled,
+        chatEnforced: spacePackages.chatEnforced,
       })
       .from(packages)
       .leftJoin(
@@ -148,6 +156,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
           inArray(spacePackages.spaceId, accessibleIds),
         ),
       )
+      .leftJoin(packageDistTags, latestTagJoin(packages.id))
       .where(and(orgOrSystemFilter(orgId), notEphemeralFilter()))
       .orderBy(packages.id),
     // The sharer is named only while they are still a MEMBER of this
@@ -185,13 +194,13 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     bySpace.set(row.spaceId, sharerView(row));
   }
 
-  /** packageId → spaceId → `enabled`, for the rows the caller's spaces hold. */
-  const placementRows = new Map<string, Map<string, boolean>>();
+  /** packageId → spaceId → the row's switches, for the rows the caller's spaces hold. */
+  const placementRows = new Map<string, Map<string, { enabled: boolean; chatEnforced: boolean }>>();
   for (const row of rows) {
     if (!row.spaceId) continue;
     let bySpace = placementRows.get(row.id);
     if (!bySpace) placementRows.set(row.id, (bySpace = new Map()));
-    bySpace.set(row.spaceId, row.enabled!);
+    bySpace.set(row.spaceId, { enabled: row.enabled!, chatEnforced: row.chatEnforced! });
   }
 
   // One row per package: the join above repeats a package once per placement
@@ -243,7 +252,8 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       placements.push({
         space_id: space,
         via,
-        state: placementState({ id: row.id, type, source: row.source }, placementRow),
+        state: placementState({ id: row.id, type, source: row.source }, placementRow?.enabled),
+        chat_enforced: placementRow?.chatEnforced ?? false,
         // Only an OFFER names an author. A home places the package by owning
         // it, and a system package by being shipped.
         shared_by: via === "shared" ? (offeredIn?.get(space) ?? null) : null,
@@ -274,6 +284,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       ...home,
       name: typeof m.display_name === "string" ? m.display_name : row.id,
       description: typeof m.description === "string" ? m.description : "",
+      published: isPublished(row),
       placements,
     });
   }

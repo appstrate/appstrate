@@ -64,8 +64,9 @@ import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { filePurposeValues } from "@appstrate/db/schema";
-import { asString, textResult } from "./tool-results.ts";
+import { asString, RESOURCE_BLOB_MAX_BYTES, textResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
+import { buildReadSkillTool, type SkillToolContext } from "./skill-tools.ts";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
@@ -78,6 +79,7 @@ export type McpToolName =
   | "run_and_wait"
   | "list_files"
   | "read_file"
+  | "read_skill"
   | "validate_package_file"
   | "import_package_file"
   | "get_runtime_capabilities"
@@ -135,6 +137,10 @@ export interface McpToolContext {
   scope: SpaceScope;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
   mayShareRoot: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];
+  /** `read_skill`'s read, bound to the caller and space (`skillReaderFor`). */
+  readSkill: SkillToolContext["readSkill"];
+  /** The inbound request's id, for the problem bodies a tool builds itself. */
+  requestId: string;
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
   /**
@@ -238,14 +244,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
  * no partial-content standard, so we keep it simple.
  */
 const RESOURCE_TEXT_MAX_BYTES = 1024 * 1024;
-
-/**
- * Ceiling on inlining a NON-textual file's RAW bytes as a base64 `blob` in a
- * `resources/read` result. Base64 inflates 4/3, so a 700 KiB raw cap keeps the
- * encoded payload (~933 KiB) under the ~1 MB practical MCP response limit. Above
- * it (either kind) the read returns metadata only.
- */
-const RESOURCE_BLOB_MAX_BYTES = 700 * 1024;
 
 /** A published run file → the MCP `resource_link` content block (spec 2025-06-18). */
 function fileResourceLink(doc: RunAndWaitFile): {
@@ -1597,6 +1595,11 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     ...(surface.runs ? [buildRunAndWaitTool(ctx, surface.composes)] : []),
     ...(surface.listsFiles ? [buildListFilesTool(ctx)] : []),
     buildReadFileTool(ctx),
+    buildReadSkillTool({
+      readSkill: ctx.readSkill,
+      requestId: ctx.requestId,
+      observe: (event) => emit(ctx, event),
+    }),
     ...buildPackageFileTools(ctx, surface.importsPackages),
     // Redundant for a context-injecting caller; search_operations stays for `best_match`.
     ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),

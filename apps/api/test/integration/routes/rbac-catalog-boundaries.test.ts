@@ -35,6 +35,7 @@ interface Placement {
   space_id: string;
   via: "home" | "shared" | "system";
   state: "active" | "inactive" | "none";
+  chat_enforced: boolean;
   shared_by: { user_id: string; name: string } | null;
 }
 interface Library {
@@ -278,7 +279,13 @@ describe("organization library administration", () => {
     // row — one row, one switch. Nothing about the SOURCE space leaks with it:
     // the only space id named is the caller's own.
     expect(body.packages.skill[0]?.placements).toEqual([
-      { space_id: ctx.defaultSpaceId, via: "shared", state: "none", shared_by: null },
+      {
+        space_id: ctx.defaultSpaceId,
+        via: "shared",
+        state: "none",
+        chat_enforced: false,
+        shared_by: null,
+      },
     ]);
     const activated = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages`, {
       method: "POST",

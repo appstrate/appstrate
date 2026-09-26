@@ -107,5 +107,11 @@
   "skills.loading": "Loading skills…",
   "skills.empty": "No skill is available in this space.",
   "skills.error": "Skills could not be loaded.",
-  "skills.unavailable": "Unavailable in this space — uncheck to remove it."
+  "skills.unavailable": "Unavailable in this space — uncheck to remove it.",
+  "skills.enforcedBadge": "Required by the space",
+  "skills.enforcedCount": "Required: {{n}}",
+  "skills.enforcedError": "The skills required by the space could not be loaded.",
+  "skills.emptyBesidesEnforced": "No other skill is available in this space.",
+  "skills.enforcedTitle": "Skills required by the space",
+  "skills.enforcedIndicator": "Skills required by the space: {{names}}"
 }

@@ -28,6 +28,7 @@ import { logger } from "./logger.ts";
 import { listModels, pickModel } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
+import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments } from "./attachments.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
@@ -348,7 +349,11 @@ export async function handleChatStream(
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
-  // Only the caller-context block. It depends on the space id and the caller's
+  // The space's enforced skills depend on nothing but the ids, so they start
+  // now; phase A's join awaits them, so their 503 refuses the turn before any
+  // file is materialized.
+  const enforcedSkills = deps.loadEnforcedSkills(orgId, spaceId);
+  // Then the caller-context block. It depends on the space id and the caller's
   // headers and the session row (the turn's grants and its skills) — never on the
   // chosen model or the admission gate — so it starts the moment the row
   // resolves, overlapping the model list, the attachment materialization, the
@@ -371,32 +376,35 @@ export async function handleChatStream(
   // handler. The error is rethrown where the block is consumed.
   const phaseBStart = Date.now();
   let phaseBMs = 0;
-  const contextBlockPromise: Promise<{ ok: true; block: string } | { ok: false; error: unknown }> =
-    turn
-      .then(({ skills, permissions, capabilities }) =>
-        buildCallerContextBlock(c, {
-          origin,
-          headers,
-          spaceId,
-          user,
-          deps,
-          // UI language forwarded by the client; validated/defaulted in the builder.
-          locale: c.req.header("X-Chat-Locale"),
-          capabilities,
-          permissions,
-          skills,
-        }).finally(() => {
-          phaseBMs = Date.now() - phaseBStart;
-        }),
-      )
-      .then(
-        (block) => ({ ok: true as const, block }),
-        (error: unknown) => ({ ok: false as const, error }),
-      );
+  const contextBlockPromise: Promise<
+    { ok: true; block: string; injectedSkills: InjectedSkills } | { ok: false; error: unknown }
+  > = turn
+    .then(({ skills, permissions, capabilities }) =>
+      buildCallerContextBlock(c, {
+        origin,
+        headers,
+        spaceId,
+        user,
+        deps,
+        // UI language forwarded by the client; validated/defaulted in the builder.
+        locale: c.req.header("X-Chat-Locale"),
+        capabilities,
+        permissions,
+        skills,
+        enforced: enforcedSkills,
+      }).finally(() => {
+        phaseBMs = Date.now() - phaseBStart;
+      }),
+    )
+    .then(
+      ({ text, injected }) => ({ ok: true as const, block: text, injectedSkills: injected }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
 
   const [models, { permissions, capabilities }] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
     turn,
+    enforcedSkills,
   ]);
   const chosen = pickModel(models, modelId);
   let generationSettings;
@@ -489,7 +497,7 @@ export async function handleChatStream(
   // Join phase B. This is the one place its failure is allowed to surface.
   const contextResult = await contextBlockPromise;
   if (!contextResult.ok) throw contextResult.error;
-  const contextBlock = contextResult.block;
+  const { block: contextBlock, injectedSkills } = contextResult;
 
   // Assemble the system prompt: the tool-grounding prompt, with no inline MCP
   // instructions — the engine's own MCP handshake delivers them.
@@ -636,6 +644,8 @@ export async function handleChatStream(
       // The re-entered request carries no header, so without this the hop would
       // answer with the caller's real authority while a preview is on screen.
       viewAs: persona,
+      // What `read_skill` serves without `skills:*`: the definitions this prompt injected.
+      injectedSkills,
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },
   );

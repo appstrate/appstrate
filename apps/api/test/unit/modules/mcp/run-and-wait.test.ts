@@ -122,6 +122,8 @@ function makeRunAndWait(opts: {
     scope: { orgId: "org_1", spaceId: "spc_1" },
     authorizeBundle: async () => {},
     mayShareRoot: async () => false,
+    readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
+    requestId: "req_test",
   };
   const tools = toolsFor(ctx);
   const tool = tools.find((t) => t.descriptor.name === "run_and_wait");

@@ -107,5 +107,11 @@
   "skills.loading": "Chargement des compétences…",
   "skills.empty": "Aucune compétence disponible dans cet espace.",
   "skills.error": "Les compétences n'ont pas pu être chargées.",
-  "skills.unavailable": "Indisponible dans cet espace — décochez pour la retirer."
+  "skills.unavailable": "Indisponible dans cet espace — décochez pour la retirer.",
+  "skills.enforcedBadge": "Imposée par l'espace",
+  "skills.enforcedCount": "Imposées : {{n}}",
+  "skills.enforcedError": "Les compétences imposées par l'espace n'ont pas pu être chargées.",
+  "skills.emptyBesidesEnforced": "Aucune autre compétence disponible dans cet espace.",
+  "skills.enforcedTitle": "Compétences imposées par l'espace",
+  "skills.enforcedIndicator": "Compétences imposées par l'espace : {{names}}"
 }

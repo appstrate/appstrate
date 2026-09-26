@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`PlatformServices.loadEnforcedChatSkills`** and
+  **`PlatformServices.listEnforcedChatSkills`** (`@appstrate/core/module`, #1586) —
+  the skills a space enforces on its chat conversations: its active skills whose
+  placement is chat-enforced, sorted by id, at their latest published version,
+  read with platform authority whatever the caller's `skills:*` grants. `load`
+  returns each SKILL.md; `list` returns names only, from the database. Both reject
+  on failure, so the chat refuses the turn instead of running it without the
+  space's policy. New required members: the platform implements them, modules
+  only call them.
+
+- **`EnforcedChatSkillRef`**, **`EnforcedChatSkill`**,
+  **`CHAT_SKILLS_CONTENT_BUDGET_CHARS`** and **`MAX_ENFORCED_CHAT_SKILLS`**
+  (`@appstrate/core/chat-contract`, #1586) — an enforced skill without and with
+  its content (`content` is null only when no published version resolves; a read
+  failure rejects), the characters the SKILL.md bodies of one chat turn share
+  (64 000, enforced first), and the number of skills a space may enforce (3).
+
+- **`versionEtag`** and **`parseVersionEtag`** (`@appstrate/core/etag`, new
+  subpath, #1586) — the strong `"<n>"` entity-tag the platform stamps on a
+  package draft's `lock_version`, and its parser, which accepts exactly the tags
+  `versionEtag` produces (`null` for any other, leading zeros and weak tags
+  included).
+
+- **`CHAT_LOOPBACK_AUTH_METHOD`**, **`injectedSkillsSchema`**, **`InjectedSkills`**,
+  **`InjectedSkill`** and **`INJECTED_SKILLS_AUTH_EXTRA`**
+  (`@appstrate/core/chat-contract`, #1586) — the chat loopback's auth method
+  (moved from the chat module) and the claim its turn bearer carries under that
+  `authExtra` key: the turn's `spaceId` and, per skill, the published `version`
+  or the draft's `lockVersion` it injected (types inferred from the Zod schema).
+  The platform's `read_skill` honours it only from that auth method, in that
+  space, while the caller holds `chat:write` there, and serves a draft only at
+  the `lockVersion` injected (409 `injected_draft_changed` once it moved).
+
 - **`org-integrations:configure`** (`@appstrate/core/permissions`, #1264) — a new
   org-level core resource: managing the org-wide integration OAuth clients (and the
   org-tier default among them) that every space inherits. The org half of

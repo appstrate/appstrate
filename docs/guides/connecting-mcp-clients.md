@@ -41,7 +41,7 @@ The `<orgId>` in the URL must be the key's own organization (the dashboard gives
 you the matching command).
 
 - `mcp:read` — connect, `search_operations`, `describe_operation`, and the
-  read-only helpers `read_file`, `validate_package_file`,
+  read-only helpers `read_file`, `read_skill`, `validate_package_file`,
   `get_runtime_capabilities` and `get_me`.
 - `mcp:invoke` — `invoke_operation` (call an operation). Defence in depth: the
   dispatched operation still enforces its own permission, so an MCP call can
@@ -158,12 +158,20 @@ guards require today. The package `:write` permissions are `agents:write`,
 | `search_operations`        | `mcp:read`                                                   | Find operations by keyword/tag → operationIds. A keyword search also returns `best_match` with its full input schema.                                                       |
 | `describe_operation`       | `mcp:read`                                                   | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                                                        |
 | `read_file`                | `mcp:read`                                                   | Read one `appfile://` URI; the file's own ACL decides on the row.                                                                                                           |
+| `read_skill`               | `mcp:read`                                                   | A skill's `SKILL.md` and files; `skills:read`, or a skill the chat turn injected (see below).                                                                               |
 | `validate_package_file`    | `mcp:read`                                                   | Check an `.afps`/ZIP archive before importing it.                                                                                                                           |
 | `get_runtime_capabilities` | `mcp:read`                                                   | The MCP-server runtimes and manifest templates package authoring works from.                                                                                                |
 | `invoke_operation`         | `mcp:invoke`                                                 | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                                         |
 | `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status.                                 |
 | `list_files`               | `files:read`                                                 | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
 | `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users  | Import a validated archive as a package.                                                                                                                                    |
+
+`read_skill` needs `skills:read`, except for a skill a chat turn injected:
+that turn's own bearer reads it at the definition injected (a draft only at the
+`lock_version` injected, else 409 `injected_draft_changed`), in the turn's
+space and while the caller holds `chat:write` there — even if the skill is
+switched off or `skills:read` is withdrawn mid-turn, since its `SKILL.md` is
+already in context.
 
 `run_and_wait` needs both halves because it launches AND polls the run back
 under your own credentials: `agents:run` without a run-read permission would
