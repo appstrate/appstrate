@@ -210,7 +210,7 @@ export async function codeSyncCommand(
         }
 
         if (opts.dryRun) {
-          reportPlans(plans, io.stdout);
+          reportPlans(plans, catalogue.bySlug, io.stdout);
           return;
         }
         const fixedFiles = pluginFixedFiles({
@@ -229,7 +229,7 @@ export async function codeSyncCommand(
           context,
           validate,
         );
-        if (!printPath) reportPlans(plans, io.stdout);
+        if (!printPath) reportPlans(plans, catalogue.bySlug, io.stdout);
       },
       { io },
     );
@@ -607,7 +607,8 @@ function ledgerEntry(entry: PlannedEntry): ManagedSkill {
   return { packageId: entry.packageId, version: entry.version, integrity: entry.integrity };
 }
 
-function reportPlans(plans: TargetPlan[], sink: LineSink): void {
+/** Versions come from the ledger (before) and the catalogue (after): the only place to read them. */
+function reportPlans(plans: TargetPlan[], bySlug: EntriesBySlug, sink: LineSink): void {
   for (const plan of plans) {
     // New versus refreshed comes from the ledger, where that fact already lives.
     const glyph = (slug: string): string => (plan.ledger.managed[slug] ? "~" : "+");
@@ -616,8 +617,15 @@ function reportPlans(plans: TargetPlan[], sink: LineSink): void {
       `${plan.target.padEnd(14)} ${targetRoot(plan.target)}` +
         `  +${added} ~${plan.write.length - added} =${plan.keep.length} -${plan.removed.length}\n`,
     );
-    for (const slug of plan.write) sink.write(`  ${glyph(slug)} ${slug}\n`);
-    for (const slug of plan.removed) sink.write(`  - ${slug}\n`);
+    for (const slug of plan.write) {
+      const before = plan.ledger.managed[slug]?.version;
+      const after = bySlug.get(slug)!.version;
+      const version = before && before !== after ? `${before} → ${after}` : after;
+      sink.write(`  ${glyph(slug)} ${slug} ${version}\n`);
+    }
+    for (const slug of plan.removed) {
+      sink.write(`  - ${slug} ${plan.ledger.managed[slug]!.version}\n`);
+    }
   }
 }
 
