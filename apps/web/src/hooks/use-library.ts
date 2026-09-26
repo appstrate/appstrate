@@ -106,6 +106,8 @@ function applyActivation(
                 via: "shared" as const,
                 state: active ? ("active" as const) : ("inactive" as const),
                 shared_by: null,
+                // A placement this click creates was imposed on nothing yet.
+                chat_enforced: false,
               },
             ],
       };
@@ -191,6 +193,42 @@ export function useInvalidatePackageActivation() {
     void qc.invalidateQueries({ queryKey: agentsKeys.all });
     void invalidateIntegrationQueries(qc);
   };
+}
+
+/**
+ * Impose a skill on every chat conversation of one space, or release it
+ * (`PATCH /api/spaces/{id}/packages/{scope}/{name}` with `chat_enforced`).
+ *
+ * No optimistic patch: imposing is refused for reasons only the server can
+ * judge (a published version, the per-space cap, the shared content budget), so
+ * the box moves when the library says it did. The invalidation is awaited, so
+ * the mutation stays pending — and the box disabled — until the refetch lands.
+ */
+export function useSetChatEnforced() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      spaceId,
+      packageId,
+      enforced,
+    }: {
+      spaceId: string;
+      packageId: string;
+      enforced: boolean;
+    }) => {
+      const parsed = parseScopedName(packageId);
+      if (!parsed) throw new Error(`Invalid packageId: ${packageId}`);
+      await client.PATCH("/api/spaces/{spaceId}/packages/{scope}/{name}", {
+        params: { path: { spaceId, scope: `@${parsed.scope}`, name: parsed.name } },
+        body: { chat_enforced: enforced },
+      });
+    },
+    onSettled: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["get", "/api/library"] }),
+        qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{spaceId}/library"] }),
+      ]),
+  });
 }
 
 /**

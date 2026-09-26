@@ -27,7 +27,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import type { PackageType } from "@appstrate/core/validation";
 import { PageHeader } from "../components/page-header";
 import { EmptyState } from "./page-states";
-import { placementIn, useSetPackageActive } from "../hooks/use-library";
+import { placementIn, useSetChatEnforced, useSetPackageActive } from "../hooks/use-library";
 import type {
   LibraryPackageItem,
   LibraryPlacement,
@@ -37,7 +37,12 @@ import type {
 import { useSpaces } from "../hooks/use-spaces";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useRevokePackageShare } from "../hooks/use-package-shares";
-import { maySetPackageActive, type SpaceGrant } from "../lib/package-permissions";
+import {
+  mayConfigurePackage,
+  maySetPackageActive,
+  type SpaceGrant,
+} from "../lib/package-permissions";
+import { chatEnforceErrorKey } from "../lib/chat-enforce-errors";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import {
@@ -54,6 +59,7 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
 import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
 import { SharePackageDialog } from "./package-detail/share-package-dialog";
+import { ConfirmModal } from "./confirm-modal";
 
 const TABS = ["agents", "skills", "mcpServers", "integrations"] as const;
 type Tab = (typeof TABS)[number];
@@ -267,6 +273,82 @@ function ActivationCheckbox({
           {
             onError: (err) => toast.error(getErrorMessage(err) || t("error.generic")),
           },
+        );
+      }}
+    />
+  );
+}
+
+/**
+ * Whether a skill placed in this space is imposed on every chat conversation
+ * held here, for one placement ROW (`state` active or inactive — an untaken
+ * offer has no row to carry the flag).
+ *
+ * The flag lives on the row and survives deactivation, so a switched-off skill
+ * still shows it; it only applies again once the skill is back on. Hence the
+ * asymmetry: releasing is open to whoever may configure the skill here,
+ * imposing also needs it ON and published — what is imposed is the latest
+ * published version, never the draft. A version deleted between the read and
+ * the click still gets the server's 409 `no_published_version`.
+ *
+ * Imposing is not applied from here: `onEnforce` asks for the confirmation that
+ * states what it discloses, and the table owns that one dialog.
+ */
+function ChatEnforceCheckbox({
+  pkg,
+  space,
+  placement,
+  grants,
+  setChatEnforced,
+  onEnforce,
+  onError,
+}: {
+  pkg: LibraryPackageItem;
+  space: LibrarySpace;
+  placement: LibraryPlacement;
+  grants: Map<string, SpaceGrant> | undefined;
+  setChatEnforced: ReturnType<typeof useSetChatEnforced>;
+  onEnforce: (pkg: LibraryPackageItem) => void;
+  onError: (err: unknown) => void;
+}) {
+  const { t } = useTranslation();
+  const enforced = placement.chat_enforced;
+  const mayConfigure = mayConfigurePackage(grants?.get(space.id), "skill");
+  const needsActivation = !enforced && placement.state !== "active";
+  const needsPublication = !enforced && !pkg.published;
+  const blocked = !mayConfigure || needsActivation || needsPublication;
+  const pending =
+    setChatEnforced.isPending &&
+    setChatEnforced.variables?.packageId === pkg.id &&
+    setChatEnforced.variables.spaceId === space.id;
+
+  const title =
+    grants === undefined
+      ? undefined
+      : !mayConfigure
+        ? t("library.chatEnforce.cannot")
+        : needsActivation
+          ? t("library.chatEnforce.activateFirst")
+          : needsPublication
+            ? t("library.chatEnforce.publishFirst")
+            : undefined;
+
+  return (
+    <Checkbox
+      checked={enforced}
+      disabled={blocked || pending}
+      aria-label={t("library.chatEnforce.toggle", { space: space.name, package: pkg.name })}
+      title={title}
+      onCheckedChange={() => {
+        if (blocked) return;
+        if (!enforced) {
+          onEnforce(pkg);
+          return;
+        }
+        // Releasing discloses nothing: no confirmation.
+        setChatEnforced.mutate(
+          { spaceId: space.id, packageId: pkg.id, enforced: false },
+          { onError },
         );
       }}
     />
@@ -522,83 +604,138 @@ function SpacePlacements({
   const { t } = useTranslation();
   const grants = useSpaceGrants();
   const setActive = useSetPackageActive();
+  const setChatEnforced = useSetChatEnforced();
+  // Only a skill can be imposed on the chat; the column exists on that tab alone.
+  const enforceable = type === "skill";
+  // ONE confirmation for the table: imposing discloses the skill's content to
+  // every member who chats here, and the reader says yes to that, not to a box.
+  const [confirming, setConfirming] = useState<LibraryPackageItem | null>(null);
+
+  const notifyChatEnforceError = (err: unknown) => {
+    const key = chatEnforceErrorKey(err);
+    toast.error(key ? t(key) : getErrorMessage(err) || t("error.generic"));
+  };
 
   if (pkgs.length === 0) {
     return <EmptyState message={t("library.empty")} icon={Package} />;
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="min-w-[200px]">{t("library.column.package")}</TableHead>
-          <TableHead>{t("library.column.origin")}</TableHead>
-          <TableHead className="text-center">{t("library.column.active")}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {pkgs.map((pkg) => {
-          const placement = placementIn(pkg, space.id);
-          return (
-            <TableRow key={pkg.id}>
-              <TableCell>
-                <PackageName pkg={pkg} type={type} spaceId={space.id} />
-              </TableCell>
-              <TableCell>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-muted-foreground text-xs">
-                    {placement?.via === "home"
-                      ? t("library.origin.home")
-                      : placement?.via === "shared"
-                        ? placement.shared_by
-                          ? // A person offered it. Naming them is the whole
-                            // point: activating it runs it with the reader's
-                            // own credentials, so they get to know whose work
-                            // they are about to take on.
-                            t("library.origin.sharedBy", { name: placement.shared_by.name })
-                          : // No author: the share was minted by a home move,
-                            // which leaves the source space reading a package
-                            // it no longer homes.
-                            t("library.origin.shared")
-                        : placement || pkg.source === "system"
-                          ? t("library.origin.system")
-                          : // No placement at all, and not a system package: the
-                            // route lists it here because this caller could put
-                            // it here in one click (they administer the
-                            // organization's packages, or hold `share` in its
-                            // home). It is a candidate, not an inhabitant.
-                            t("library.origin.notPlaced")}
-                  </span>
-                  {isUntakenOffer(placement) && (
-                    <Badge
-                      variant="outline"
-                      className="px-1.5 py-0 text-[0.65rem]"
-                      title={t("library.offerHint")}
-                    >
-                      {t("library.badge.offered")}
-                    </Badge>
-                  )}
-                  {placement?.state === "inactive" && (
-                    <Badge variant="outline" className="px-1.5 py-0 text-[0.65rem]">
-                      {t("library.badge.inactive")}
-                    </Badge>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell className="text-center">
-                <ActivationCheckbox
-                  pkg={pkg}
-                  type={type}
-                  space={space}
-                  grants={grants}
-                  setActive={setActive}
-                  consentHint={t("library.offerHint")}
-                />
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+    <>
+      {enforceable && (
+        <ConfirmModal
+          open={confirming !== null}
+          onClose={() => setConfirming(null)}
+          title={t("library.chatEnforce.confirmTitle")}
+          description={t("library.chatEnforce.confirmDescription", {
+            package: confirming?.name ?? "",
+            space: space.name,
+          })}
+          confirmLabel={t("library.chatEnforce.confirm")}
+          variant="default"
+          isPending={setChatEnforced.isPending}
+          onConfirm={() => {
+            if (!confirming) return;
+            setChatEnforced.mutate(
+              { spaceId: space.id, packageId: confirming.id, enforced: true },
+              {
+                onError: notifyChatEnforceError,
+                onSettled: () => setConfirming(null),
+              },
+            );
+          }}
+        />
+      )}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="min-w-[200px]">{t("library.column.package")}</TableHead>
+            <TableHead>{t("library.column.origin")}</TableHead>
+            <TableHead className="text-center">{t("library.column.active")}</TableHead>
+            {enforceable && (
+              <TableHead className="text-center">{t("library.column.chatEnforced")}</TableHead>
+            )}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {pkgs.map((pkg) => {
+            const placement = placementIn(pkg, space.id);
+            return (
+              <TableRow key={pkg.id}>
+                <TableCell>
+                  <PackageName pkg={pkg} type={type} spaceId={space.id} />
+                </TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-muted-foreground text-xs">
+                      {placement?.via === "home"
+                        ? t("library.origin.home")
+                        : placement?.via === "shared"
+                          ? placement.shared_by
+                            ? // A person offered it. Naming them is the whole
+                              // point: activating it runs it with the reader's
+                              // own credentials, so they get to know whose work
+                              // they are about to take on.
+                              t("library.origin.sharedBy", { name: placement.shared_by.name })
+                            : // No author: the share was minted by a home move,
+                              // which leaves the source space reading a package
+                              // it no longer homes.
+                              t("library.origin.shared")
+                          : placement || pkg.source === "system"
+                            ? t("library.origin.system")
+                            : // No placement at all, and not a system package: the
+                              // route lists it here because this caller could put
+                              // it here in one click (they administer the
+                              // organization's packages, or hold `share` in its
+                              // home). It is a candidate, not an inhabitant.
+                              t("library.origin.notPlaced")}
+                    </span>
+                    {isUntakenOffer(placement) && (
+                      <Badge
+                        variant="outline"
+                        className="px-1.5 py-0 text-[0.65rem]"
+                        title={t("library.offerHint")}
+                      >
+                        {t("library.badge.offered")}
+                      </Badge>
+                    )}
+                    {placement?.state === "inactive" && (
+                      <Badge variant="outline" className="px-1.5 py-0 text-[0.65rem]">
+                        {t("library.badge.inactive")}
+                      </Badge>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell className="text-center">
+                  <ActivationCheckbox
+                    pkg={pkg}
+                    type={type}
+                    space={space}
+                    grants={grants}
+                    setActive={setActive}
+                    consentHint={t("library.offerHint")}
+                  />
+                </TableCell>
+                {enforceable && (
+                  <TableCell className="text-center">
+                    {placement && placement.state !== "none" && (
+                      <ChatEnforceCheckbox
+                        pkg={pkg}
+                        space={space}
+                        placement={placement}
+                        grants={grants}
+                        setChatEnforced={setChatEnforced}
+                        onEnforce={setConfirming}
+                        onError={notifyChatEnforceError}
+                      />
+                    )}
+                  </TableCell>
+                )}
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </>
   );
 }

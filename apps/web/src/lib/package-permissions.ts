@@ -38,6 +38,18 @@ export function maySetPackageActive(
 }
 
 /**
+ * May this caller change how THIS space runs a placed package — the PATCH's
+ * `configure` gate (for a skill, `skills:write` in the space)?
+ *
+ * Unlike activation there is no personal-space exemption: the server's coarse
+ * gate waives the grant for the owner on `activate`/`deactivate` only, so the
+ * owner of a personal space answers by their grants like anyone else.
+ */
+export function mayConfigurePackage(space: SpaceGrant | undefined, type: PackageType): boolean {
+  return !!space && space.permissions.includes(spacePackagePermission(type, "configure"));
+}
+
+/**
  * What co-authoring a package means for the caller, given their standing in its
  * HOME space (#1440).
  *

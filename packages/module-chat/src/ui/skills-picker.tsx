@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Skill picker: the conversation's skill mode and chosen skills. Controlled;
-// nothing is written here — the next turn carries the selection.
+// nothing is written here — the next turn carries the selection. The skills the
+// space imposes are listed first, locked: no selection removes them.
 
 import { useState } from "react";
 import type { ChatSkillMode } from "@appstrate/db/schema";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpenIcon } from "lucide-react";
+import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
@@ -19,7 +21,8 @@ import {
 } from "@appstrate/ui/components/tooltip";
 import { cn } from "@appstrate/ui/cn";
 import { injectsSkills, MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
-import { fetchSkills, skillPickerRows, togglePinned } from "./chat-skills.ts";
+import { fetchSkills, ownPins, skillPickerRows, togglePinned } from "./chat-skills.ts";
+import { useEnforcedSkills } from "./enforced-skills.tsx";
 import { useChatHost, type GetHeaders } from "./runtime-context.ts";
 import { spaceIdFromHeaders } from "./sessions.ts";
 
@@ -52,16 +55,23 @@ export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerPr
     staleTime: 60_000,
   });
   const skills = catalogue.data ?? [];
+  const enforcedQuery = useEnforcedSkills(getHeaders);
+  const enforced = enforcedQuery.data ?? [];
+  const enforcedIds = new Set(enforced.map((skill) => skill.packageId));
   // A disabled query stays `isPending` forever; unreadable reads as "nothing".
-  const loading = readable && catalogue.isPending;
+  // Both reads gate the list: before the enforced one lands, an imposed skill
+  // would briefly render as choosable.
+  const loading = (readable && catalogue.isPending) || (!!spaceId && enforcedQuery.isPending);
 
-  const pinned = selection.pinnedSkills;
+  // An enforced skill is injected whatever the selection: a pin naming it is
+  // not the user's, not counted against the cap, and dropped on the next change.
+  const pinned = ownPins(selection.pinnedSkills, enforcedIds);
   const pinnedSet = new Set(pinned);
   const atPinCap = pinned.length >= MAX_PINNED_SKILLS;
-  const rows = skillPickerRows(skills, pinned);
+  const rows = skillPickerRows(skills, pinned, enforcedIds);
   // `auto` keeps the chosen skills but does not use them: the list is inert.
   const choosing = injectsSkills(selection.skillMode);
-  const inUse = choosing ? pinned.length : 0;
+  const inUse = enforced.length + (choosing ? pinned.length : 0);
 
   const togglePin = (packageId: string) => {
     onChange({ ...selection, pinnedSkills: togglePinned(pinned, packageId) });
@@ -82,7 +92,7 @@ export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerPr
                 aria-label={inUse > 0 ? t("skills.labelCount", { n: inUse }) : t("skills.label")}
                 className={cn(
                   "relative size-8 shrink-0 rounded-lg",
-                  choosing ? "text-primary hover:text-primary" : "text-muted-foreground",
+                  inUse > 0 ? "text-primary hover:text-primary" : "text-muted-foreground",
                 )}
               >
                 <BookOpenIcon />
@@ -101,7 +111,8 @@ export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerPr
             <p className="font-medium">{t("skills.title")}</p>
             <p className="text-muted-foreground mt-0.5">
               {t(MODE_COPY[selection.skillMode].label)}
-              {inUse > 0 && ` · ${t("skills.chosen", { n: inUse })}`}
+              {enforced.length > 0 && ` · ${t("skills.enforcedCount", { n: enforced.length })}`}
+              {choosing && pinned.length > 0 && ` · ${t("skills.chosen", { n: pinned.length })}`}
             </p>
           </TooltipContent>
         </Tooltip>
@@ -146,6 +157,37 @@ export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerPr
         </p>
 
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t pt-2">
+          {enforced.map((skill) => (
+            // Checked and locked: the space injects it in every mode, and no
+            // selection sent from here can take it out.
+            <div key={skill.packageId} className="flex items-start gap-2 rounded-md p-1">
+              <Checkbox
+                data-testid={`skill-enforced-${skill.packageId}`}
+                checked
+                disabled
+                aria-label={skill.display_name ?? skill.packageId}
+                className="mt-0.5 shrink-0"
+              />
+              <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-1.5">
+                <span className="truncate text-xs font-medium">
+                  {skill.display_name ?? skill.packageId}
+                </span>
+                {skill.version && (
+                  <span className="text-muted-foreground shrink-0 text-[0.65rem]">
+                    v{skill.version}
+                  </span>
+                )}
+                <Badge variant="secondary" className="px-1.5 py-0 text-[0.6rem]">
+                  {t("skills.enforcedBadge")}
+                </Badge>
+              </span>
+            </div>
+          ))}
+          {enforcedQuery.isError && (
+            <p className="text-destructive px-1 pb-1 text-[0.7rem] leading-snug">
+              {t("skills.enforcedError")}
+            </p>
+          )}
           <div className="text-muted-foreground px-1 py-1 text-[0.65rem] font-semibold tracking-wider uppercase">
             {t("skills.chooseHeading")}
           </div>
@@ -168,7 +210,7 @@ export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerPr
             <p className="text-destructive px-1 py-3 text-center text-xs">{t("skills.error")}</p>
           ) : rows.length === 0 ? (
             <p className="text-muted-foreground px-1 py-3 text-center text-xs">
-              {t("skills.empty")}
+              {t(enforced.length > 0 ? "skills.emptyBesidesEnforced" : "skills.empty")}
             </p>
           ) : (
             rows.map(({ skill, available }, index) => {
