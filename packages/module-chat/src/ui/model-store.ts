@@ -38,7 +38,6 @@ const generationListeners = new Set<() => void>();
 let generationCapabilities = new Map<string, ModelGenerationCapabilities>();
 /** Ids of the live catalog models; `null` until the catalog has loaded once. */
 let liveModelIds: ReadonlySet<string> | null = null;
-/** A live catalog model runs on the org's own credential (`source: "custom"`). */
 let ownCredentialModelAvailable = false;
 let generationCache: ModelGenerationSettings = (() => {
   if (typeof localStorage === "undefined") return {};
@@ -148,7 +147,7 @@ export function setModelCatalog(
   notifyModel();
 }
 
-/** Snapshot for `useSyncExternalStore(subscribeModel, …)`: a live pick runs on the org's own credential. */
+/** `useSyncExternalStore` snapshot: a live model runs on the org's own credential. */
 export function hasOwnCredentialModel(): boolean {
   return ownCredentialModelAvailable;
 }

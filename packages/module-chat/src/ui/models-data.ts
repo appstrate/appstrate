@@ -61,10 +61,7 @@ export interface OrgModelOption {
   enabled?: boolean;
   /** Model-alias flag — selectable in chat without exposing the backing model. */
   aliased?: boolean;
-  /**
-   * `built-in` = a platform-provided model; `custom` = a model on the org's own
-   * credential (API key, BYOK, subscription).
-   */
+  /** `custom` = on the org's own credential; `built-in` = platform-provided. */
   source?: "built-in" | "custom";
   generation?: ModelGenerationCapabilities | null;
 }

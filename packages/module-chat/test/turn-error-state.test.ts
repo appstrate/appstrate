@@ -124,7 +124,6 @@ describe("turnErrorState", () => {
       text: "turn.error.rateLimited",
       retryable: true,
       requestId: undefined,
-      action: undefined,
     });
     expect(
       turnErrorState(
@@ -201,7 +200,6 @@ describe("turnErrorState", () => {
       text: "turn.error.unknown",
       retryable: true,
       requestId: undefined,
-      action: undefined,
     });
     // Nor may a code that happens to name an Object.prototype member.
     expect(
@@ -230,7 +228,6 @@ describe("turnErrorState", () => {
       text: "turn.error.unknown",
       retryable: true,
       requestId: undefined,
-      action: undefined,
     });
   });
 });

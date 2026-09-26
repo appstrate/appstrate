@@ -10,10 +10,10 @@
  * Locked here:
  *   - a gate rejection short-circuits to 402 with NO user message and NO usage
  *     row written (an ephemeral turn writes nothing at all);
- *   - a refused turn asks the gate once more, as funded by the org's own
- *     credential, and reports the answer as `own_credential_admitted` — the
+ *   - a turn refused with 402 asks the gate once more, as funded by the org's
+ *     own credential, and reports the answer as `own_credential_admitted` — the
  *     module owns what is chargeable, so the client must not guess it; an
- *     admitted turn asks exactly once;
+ *     admitted turn, or any other refusal, asks exactly once;
  *   - the SUBSCRIPTION branch is gated too, reporting `subscription: true`. It
  *     used to skip admission entirely on the reasoning that it spends the
  *     user's own credential — but the turn is driven by the in-process Pi
@@ -244,7 +244,7 @@ describe("chat admission gate (handleChatStream)", () => {
     expect(await res.json()).toMatchObject({ code: "over_cap", own_credential_admitted: true });
   });
 
-  it("does not probe a turn already on the org's own credential", async () => {
+  it("does not probe a subscription turn", async () => {
     // The probe would ask the identical question: its answer is the refusal.
     const gateArgs: GateArgs[] = [];
     const c = fakeContext({
@@ -270,6 +270,32 @@ describe("chat admission gate (handleChatStream)", () => {
     expect(res.status).toBe(402);
     expect(await res.json()).toMatchObject({ own_credential_admitted: false });
     expect(gateArgs.map((a) => a.subscription)).toEqual([true]);
+  });
+
+  it.each([
+    { status: 409, code: "org_deleting" },
+    { status: 500, code: "admission_failed" },
+  ])("a $status refusal asks the gate exactly once", async (refusal) => {
+    const gateArgs: GateArgs[] = [];
+    const c = fakeContext({
+      orgId: ctx.orgId,
+      user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
+      spaceId: ctx.defaultSpaceId,
+      body: { messages: [userTurn("u1", "hello")] },
+    });
+    const res = await handleChatStream(
+      c,
+      fakeDeps({
+        checkUsageAllowed: async (args) => {
+          gateArgs.push(args);
+          return { ...refusal, message: "refused" };
+        },
+      }),
+    );
+
+    expect(res.status).toBe(refusal.status);
+    expect(await res.json()).toMatchObject({ code: refusal.code, own_credential_admitted: false });
+    expect(gateArgs.map((a) => a.subscription)).toEqual([false]);
   });
 
   it("an admitted turn asks the gate exactly once", async () => {

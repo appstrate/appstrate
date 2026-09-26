@@ -45,11 +45,12 @@ const TURN_ERROR_KEY = {
 const BILLING_HREF = "/org-settings/billing";
 
 /**
- * Refusals a turn can be denied with BEFORE the stream opens. A refused turn is
- * not a model failure — "check the model configuration" would send the user to
- * the wrong screen — so each code states its cause. `billing`: the org fixes it
- * in billing, so a manager gets the link and anyone else is sent to them. Keyed
- * by the wire code, loosely: an unknown code degrades to the generic failure.
+ * Sentences for the refusals a turn can be denied with BEFORE the stream opens.
+ * A refused turn is not a model failure — "check the model configuration" would
+ * send the user to the wrong screen — so each code gets its own copy. Keyed by
+ * the wire code, loosely: a code we have no sentence for degrades to the
+ * generic failure rather than rendering a missing i18n key. `billing`: a
+ * manager gets the billing link, anyone else is told to ask one.
  */
 const REFUSAL: Record<string, { text: string; billing?: true }> = {
   quota_exceeded: { text: "turn.error.quotaExceeded", billing: true },
@@ -59,9 +60,7 @@ const REFUSAL: Record<string, { text: string; billing?: true }> = {
 
 /** What the reader can do about a refusal, as the host resolved it. */
 export interface RefusalContext {
-  /** The caller holds `billing:manage`. */
   canManageBilling: boolean;
-  /** A selectable model runs on the org's own credential (see `hasOwnCredentialModel`). */
   hasOwnCredentialModel: boolean;
 }
 
@@ -69,7 +68,7 @@ interface TurnErrorState {
   text: string;
   retryable: boolean;
   requestId: string | undefined;
-  action: { label: string; href: string } | undefined;
+  action?: { label: string; href: string };
 }
 
 /**
@@ -119,7 +118,6 @@ export function turnErrorState(
       // dead is not. Read the persisted verdict either way.
       retryable: turn.errorRetryable !== false,
       requestId: turn.requestId,
-      action: undefined,
     };
   }
 
@@ -137,7 +135,6 @@ export function turnErrorState(
         // The marker carries a category and nothing else; a request id only
         // ever reaches the client through the persisted turn metadata above.
         requestId: undefined,
-        action: undefined,
       };
     }
     const read = readRefusal(err);
@@ -150,14 +147,12 @@ export function turnErrorState(
         text: t("turn.error.unknown"),
         retryable: true,
         requestId: undefined,
-        action: undefined,
       };
     }
     const manager = refusal.billing && context.canManageBilling;
     const sentences = [
       refusal.text,
       refusal.billing && !manager && "turn.error.contactAdmin",
-      // The gate, not the client, knows whether another model gets through.
       read.ownCredentialAdmitted && context.hasOwnCredentialModel && "turn.error.otherModel",
     ].filter((key): key is string => typeof key === "string");
     return {

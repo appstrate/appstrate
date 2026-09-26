@@ -17,11 +17,7 @@ export interface ClientTurnError {
 
 const ERROR_MARKER_PREFIX = "appstrate:chat-turn-error:";
 
-/**
- * The message of a failure: a string, or any object carrying a string
- * `message` — an Error, or the `{ code, message }` assistant-ui normalizes
- * the thrown Error into before it reaches `message.status.error`.
- */
+/** A string or an object's `message`: assistant-ui turns the Error into `{ code, message }`. */
 function messageFromError(error: unknown): string {
   if (typeof error === "string") return error;
   if (!error || typeof error !== "object") return "";
@@ -75,7 +71,7 @@ export function clientTurnErrorMarker(error: ClientTurnError): string {
   return `${ERROR_MARKER_PREFIX}${error.category}`;
 }
 
-/** Recover a safe category from a transient stream marker, bare or as an error's message. */
+/** Recover a safe category from a transient stream marker. */
 export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | undefined {
   const marker = messageFromError(value);
   if (!marker.startsWith(ERROR_MARKER_PREFIX)) return undefined;
@@ -85,7 +81,6 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
     : undefined;
 }
 
-/** A turn refused before the stream opened, as the client may act on it. */
 export interface TurnRefusal {
   code: string;
   /** The gate would admit the same turn on a model running on the org's own credential. */
@@ -100,14 +95,12 @@ export interface TurnRefusal {
  * emitted. Instead the AI SDK puts the raw HTTP body in an Error's message and
  * throws it — `ai/src/ui/http-chat-transport.ts`: `throw new Error(await
  * response.text())`, on both `sendMessages` and `reconnectToStream`, so the
- * resumed path lands here too. assistant-ui then normalizes that Error to
- * `{ code: "unknown", message }` before it reaches the message status; either
- * way the body is the message. It is the `application/problem+json` our
+ * resumed path lands here too. That body is the `application/problem+json` our
  * refusals answer with (`chat-stream.ts`), so parsing the message back into a
- * problem document recovers what the transport discarded: the stable `code`
- * and the `own_credential_admitted` member. Its `detail` is English prose for
- * API consumers (as everywhere else in this API) and must NOT be shown in a
- * localized UI — the caller picks its own sentence from the code.
+ * problem document recovers what the transport discarded. Its `code` is the
+ * stable machine-readable half of the contract; its `detail` is English prose
+ * for API consumers (as everywhere else in this API) and must NOT be shown in
+ * a localized UI. Return the code so the caller can pick its own sentence.
  *
  * Only a REFUSAL carries a code worth displaying: 401/402/403/409 mean "you
  * must act". Any other status (a module failing closed with a 500) describes an

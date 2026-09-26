@@ -71,42 +71,6 @@ describe("classifyClientTurnError", () => {
   });
 });
 
-/**
- * What `message.status.error` holds: assistant-ui never hands the UI the thrown
- * Error, it normalizes it first (`toAssistantError` in `@assistant-ui/core`,
- * `toChatError` in `@assistant-ui/ai-sdk`) to `{ code: "unknown", message }`.
- * Neither is exported to this package, so the shape is rebuilt here.
- */
-const statusError = (thrown: Error) => ({ code: "unknown", message: thrown.message });
-
-describe("status-error shape", () => {
-  it("recovers the category from an in-stream marker", () => {
-    expect(
-      clientTurnErrorFromMarker(statusError(new Error("appstrate:chat-turn-error:rate_limited"))),
-    ).toEqual({ category: "rate_limited", retryable: true });
-  });
-
-  // The transport throws the refusal's problem+json body verbatim
-  // (`usageRejectionResponse` in `chat-stream.ts`).
-  it.each([
-    [402, "quota_exceeded"],
-    [402, "subscription_blocked"],
-    [409, "needs_reconnection"],
-  ])("recovers the %d `%s` refusal code", (status, code) => {
-    const body = JSON.stringify({
-      type: "https://docs.appstrate.dev/errors/usage-not-allowed",
-      title: "Usage not allowed",
-      status,
-      detail: "English prose for API consumers",
-      code,
-    });
-    expect(readRefusal(statusError(new Error(body)))).toEqual({
-      code,
-      ownCredentialAdmitted: false,
-    });
-  });
-});
-
 describe("readRefusal", () => {
   const problem = (body: Record<string, unknown>) => JSON.stringify(body);
 

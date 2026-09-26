@@ -424,8 +424,7 @@ function TurnLimitNotice() {
  * THE failure display for a turn — one component, one visual, live or
  * reloaded. The persisted provider-neutral category is localized here and
  * survives reload; the transient assistant-ui marker covers failures that have
- * not reached a finish chunk yet. A refusal never offers Retry; a billing one
- * links whoever can manage billing to the billing page.
+ * not reached a finish chunk yet.
  */
 export function MessageError() {
   const { t, can } = useChatHost();

@@ -54,8 +54,6 @@ import {
  * RFC 9457 response for a turn blocked by the platform admission gate
  * (`beforeUsage`, chat context). The hook's status flows through — a metering
  * module returns 402 (payment required) when the org is over its soft cap.
- * `own_credential_admitted`: the gate would admit the same turn on a model
- * running on the org's own credential.
  */
 function usageRejectionResponse(
   rejection: UsageRejection,
@@ -450,11 +448,9 @@ export async function handleChatStream(
   };
   const rejection = await deps.checkUsageAllowed(gateArgs);
   if (rejection) {
-    // Would another model get through? Only the module knows what it charges,
-    // so ask it rather than guess from the catalog: `subscription: true` quotes
-    // the same turn as funded by the org's own credential. A turn already on
-    // that credential would ask the identical question.
+    // 402: would the org's own credential get through? A subscription turn just asked that.
     const ownCredentialAdmitted =
+      rejection.status === 402 &&
       !isSubscription &&
       (await deps.checkUsageAllowed({ ...gateArgs, subscription: true })) === null;
     const refused = usageRejectionResponse(rejection, ownCredentialAdmitted);
