@@ -88,7 +88,7 @@ _appstrate_runner_bootstrap() {
   # two in step. Verifies the manifest signature before reading it, then
   # validates schema/channel/tag strictly. Tag on stdout, errors on stderr.
   resolve_latest_tag() {
-    local manifest="$TMPDIR/latest.json" schema channel tag
+    local manifest="$TMPDIR/latest.json" json schema channel tag
     local tag_re='^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$'
     if ! curl -fsSL "$CHANNEL_URL" -o "$manifest" ||
       ! curl -fsSL "$CHANNEL_URL.minisig" -o "$manifest.minisig"; then
@@ -99,9 +99,17 @@ _appstrate_runner_bootstrap() {
       err "Channel manifest signature verification FAILED — it was NOT signed by the Appstrate key."
       return 1
     fi
-    schema=$(grep -oE '"schema"[[:space:]]*:[[:space:]]*[0-9]+' "$manifest" | sed -E 's/.*:[[:space:]]*//')
-    channel=$(grep -oE '"channel"[[:space:]]*:[[:space:]]*"[^"]*"' "$manifest" | sed -E 's/.*:[[:space:]]*"//; s/"$//')
-    tag=$(grep -oE '"tag"[[:space:]]*:[[:space:]]*"[^"]*"' "$manifest" | sed -E 's/.*:[[:space:]]*"//; s/"$//')
+    # One line, then a field is read only if its key occurs exactly once and
+    # its value ends at `,` or `}` (rejects `1.5`, `\"` inside a tag, dupes).
+    json=$(tr '\r\n\t' '   ' <"$manifest")
+    field() {
+      [ "$(grep -o "\"$1\"" <<<"$json" | wc -l)" -eq 1 ] &&
+        grep -oE "\"$1\"[[:space:]]*:[[:space:]]*$2[[:space:]]*[,}]" <<<"$json" |
+        sed -E 's/^[^:]*:[[:space:]]*"?//; s/"?[[:space:]]*[,}]$//'
+    }
+    schema=$(field schema '[0-9]+')
+    channel=$(field channel '"[^"\\]*"')
+    tag=$(field tag '"[^"\\]*"')
     if [ "$schema" != "1" ] || [ "$channel" != "latest" ] || ! [[ "$tag" =~ $tag_re ]]; then
       err "Channel manifest is malformed (expected schema 1, channel \"latest\", one vX.Y.Z tag)."
       return 1

@@ -96,12 +96,14 @@ export async function resolveDaemonReleaseVersion(
     return await resolveLatestRelease(deps);
   } catch (err) {
     // Only a dev CLI gets here: a release CLI pins the daemon to its own
-    // version, so the escape hatch is running one.
+    // version, so the escape hatch is running one. The bootstrap uses the tag
+    // verbatim (hence the `v`) and elevates with `sudo -E` itself — no outer sudo.
     throw new Error(
       `${(err as Error).message}\n` +
         `A dev CLI resolves the runner daemon to the latest release; a release CLI pins it ` +
         `to its own version. Use a release CLI instead, e.g. ` +
-        `\`curl -fsSL https://get.appstrate.dev/runner | APPSTRATE_VERSION=X.Y.Z bash\`.`,
+        `\`curl -fsSL https://get.appstrate.dev/runner | APPSTRATE_VERSION=vX.Y.Z bash -s -- ` +
+        `--platform-url <url> --token <token>\`.`,
       { cause: err },
     );
   }
@@ -247,7 +249,7 @@ function asRunnerAssetError(err: unknown, version: string, asset: string): Error
         `from the core release (release.yml) and likely failed for this tag. The daemon ` +
         `version is locked to the CLI version, so pin a CLI release that shipped runner ` +
         `assets and retry: \`appstrate self-update --release <previous-version>\` (or ` +
-        `re-bootstrap with APPSTRATE_VERSION=<previous-version>), then re-run ` +
+        `re-bootstrap with APPSTRATE_VERSION=v<previous-version>), then re-run ` +
         `\`appstrate runner install\`. Releases: https://github.com/appstrate/appstrate/releases`,
     );
   }

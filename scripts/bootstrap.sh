@@ -139,10 +139,9 @@ _appstrate_bootstrap() {
   # "latest" = the tag in the signed channel manifest, not a GitHub API lookup:
   # no rate limit, and the tag is authenticated by the checksums.txt key.
   # Signature first, content second. No jq on the host: fields are grepped
-  # whitespace-tolerantly, then validated strictly (a duplicated key yields a
-  # multi-line value that fails the exact comparisons).
+  # whitespace-tolerantly, then validated strictly.
   resolve_latest_tag() {
-    local manifest="$TMPDIR/latest.json" schema channel tag
+    local manifest="$TMPDIR/latest.json" json schema channel tag
     local tag_re='^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$'
     # shellcheck disable=SC2086 # CURL_OPTS is word-split on purpose (see its definition)
     if ! curl $CURL_OPTS "$CHANNEL_URL" -o "$manifest" ||
@@ -154,9 +153,17 @@ _appstrate_bootstrap() {
       err "Channel manifest signature verification FAILED — it was NOT signed by the Appstrate key."
       return 1
     fi
-    schema=$(grep -oE '"schema"[[:space:]]*:[[:space:]]*[0-9]+' "$manifest" | sed -E 's/.*:[[:space:]]*//')
-    channel=$(grep -oE '"channel"[[:space:]]*:[[:space:]]*"[^"]*"' "$manifest" | sed -E 's/.*:[[:space:]]*"//; s/"$//')
-    tag=$(grep -oE '"tag"[[:space:]]*:[[:space:]]*"[^"]*"' "$manifest" | sed -E 's/.*:[[:space:]]*"//; s/"$//')
+    # One line, then a field is read only if its key occurs exactly once and
+    # its value ends at `,` or `}` (rejects `1.5`, `\"` inside a tag, dupes).
+    json=$(tr '\r\n\t' '   ' <"$manifest")
+    field() {
+      [ "$(grep -o "\"$1\"" <<<"$json" | wc -l)" -eq 1 ] &&
+        grep -oE "\"$1\"[[:space:]]*:[[:space:]]*$2[[:space:]]*[,}]" <<<"$json" |
+        sed -E 's/^[^:]*:[[:space:]]*"?//; s/"?[[:space:]]*[,}]$//'
+    }
+    schema=$(field schema '[0-9]+')
+    channel=$(field channel '"[^"\\]*"')
+    tag=$(field tag '"[^"\\]*"')
     if [ "$schema" != "1" ] || [ "$channel" != "latest" ] || ! [[ "$tag" =~ $tag_re ]]; then
       err "Channel manifest is malformed (expected schema 1, channel \"latest\", one vX.Y.Z tag)."
       return 1

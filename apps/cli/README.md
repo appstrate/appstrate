@@ -14,7 +14,7 @@ Lives at [`apps/cli/`](./) in the monorepo; versioned in lockstep with the platf
 curl -fsSL https://get.appstrate.dev | bash
 ```
 
-Detects your OS/arch, downloads the matching binary of the newest release — the tag named by the minisign-signed channel manifest `https://get.appstrate.dev/channels/latest.json` — from [GitHub Releases](https://github.com/appstrate/appstrate/releases), drops it at `/usr/local/bin/appstrate`, and immediately execs `appstrate install`.
+Detects your OS/arch, downloads the matching binary of the release the served installer is pinned to (with `APPSTRATE_VERSION=latest`, the tag named by the minisign-signed channel manifest `https://get.appstrate.dev/channels/latest.json`) from [GitHub Releases](https://github.com/appstrate/appstrate/releases), drops it at `/usr/local/bin/appstrate`, and immediately execs `appstrate install`.
 
 Supported: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. **Windows is not a v1 target** — run the one-liner inside WSL2 (which reuses the `linux-x64` binary), or invoke `bunx appstrate install` natively if you already have Bun on Windows.
 

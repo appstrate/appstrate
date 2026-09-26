@@ -575,7 +575,7 @@ describe("url builders", () => {
       await expect(
         resolveDaemonReleaseVersion("latest", fakeChannelDeps(opts).deps),
       ).rejects.toThrow(
-        /(not a platform v<semver>|Signature verification FAILED)[\s\S]*APPSTRATE_VERSION=X\.Y\.Z/,
+        /(not a platform v<semver>|Signature verification FAILED)[\s\S]*APPSTRATE_VERSION=vX\.Y\.Z bash -s -- --platform-url <url> --token <token>/,
       );
     }
   });

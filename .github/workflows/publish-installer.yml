@@ -18,13 +18,16 @@ name: Publish Installer
 # Besides the installers, it publishes the signed channel manifest
 # `channels/latest.json` (+ .minisig) that `self-update` and the bootstrap
 # scripts read to resolve "latest" without the rate-limited GitHub API.
-# `pages/<tag>/` is always written; the root pointers and the manifest are
-# promoted only when the tag is >= the current manifest's tag (SemVer), so
-# a re-dispatched old tag or out-of-order runs never move "latest" back.
-# The first manifest ships with the first `v*` tag built by this workflow (a
-# re-dispatched, already-published tag fails at the immutable pages/<tag>/ guard,
-# by design). Roll "latest" back = `git revert` the bad `publish: <tag>` commit on
-# `installer-pages`; the guard then compares against the restored manifest.
+# `pages/<tag>/` is written once and never overwritten; the root pointers and
+# the manifest are promoted only when the tag is >= the current manifest's tag
+# (scripts/semver-lt.sh), so an old tag or out-of-order runs never move
+# "latest" back. Re-dispatching an already-published tag is channel-only: every
+# installer file stays untouched and only the manifest is (re)published, under
+# the same guard — how the first manifest is seeded and how the channel is
+# re-pointed forward. That logic is scripts/sync-installer-pages.sh, fixture-
+# tested in test-install.yml. Roll "latest" back = `git revert` the bad
+# `publish: <tag>` commit on `installer-pages`; the guard then compares against
+# the restored manifest.
 on:
   push:
     tags:
@@ -257,68 +260,9 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          # Versioned (immutable — refuse overwrite). Always written, even
-          # when the root pointers are not promoted below.
-          if [ -e "pages/${VERSION}/install.sh" ]; then
-            echo "::error::Version ${VERSION} already published — refusing to overwrite"
-            exit 1
-          fi
-          if [ -e "pages/${VERSION}/runner" ]; then
-            echo "::error::Version ${VERSION} runner already published — refusing to overwrite"
-            exit 1
-          fi
-          mkdir -p "pages/${VERSION}"
-          cp "out/${VERSION}/install.sh"        "pages/${VERSION}/install.sh"
-          cp "out/${VERSION}/install.sh.sha256" "pages/${VERSION}/install.sh.sha256"
-          cp "out/${VERSION}/runner"            "pages/${VERSION}/runner"
-          cp "out/${VERSION}/runner.sha256"     "pages/${VERSION}/runner.sha256"
-
-          # One signature per installer (both copies are byte-identical);
-          # fanned out to the versioned and root locations.
-          cp out/install.sh.minisig "pages/${VERSION}/install.sh.minisig"
-          cp out/runner.minisig     "pages/${VERSION}/runner.minisig"
-
-          # Monotonic promotion: the root pointers and the channel manifest
-          # only move forward (SemVer precedence, see scripts/semver-lt.sh).
-          PROMOTE=true
-          CURRENT=""
-          if [ -f pages/channels/latest.json ]; then
-            CURRENT=$(jq -r .tag pages/channels/latest.json)
-            # 0 = older, 1 = not older; anything else (malformed tag) must
-            # abort, never fall through to promotion.
-            rc=0
-            scripts/semver-lt.sh "$VERSION" "$CURRENT" || rc=$?
-            case "$rc" in
-              0) PROMOTE=false ;;
-              1) ;;
-              *)
-                echo "::error::Cannot compare ${VERSION} with pages/channels/latest.json tag '${CURRENT}' — fix the branch by hand."
-                exit 1
-                ;;
-            esac
-          fi
-
-          if [ "$PROMOTE" = true ]; then
-            # Latest (overwrite)
-            cp out/install.sh        pages/install.sh
-            cp out/install.sh.sha256 pages/install.sh.sha256
-            # Runner installer (served at get.appstrate.dev/runner).
-            cp out/runner            pages/runner
-            cp out/runner.sha256     pages/runner.sha256
-            cp out/install.sh.minisig pages/install.sh.minisig
-            cp out/runner.minisig     pages/runner.minisig
-            # Serve the installer at the root (curl -fsSL https://get.appstrate.dev | bash).
-            # GitHub Pages serves index.html at /, so we point it at the script content.
-            # Browsers see the script in plain text, same pattern as get.docker.com / sh.rustup.rs.
-            cp out/install.sh pages/index.html
-            mkdir -p pages/channels
-            cp out/channels/latest.json         pages/channels/latest.json
-            cp out/channels/latest.json.minisig pages/channels/latest.json.minisig
-            echo "Channel latest promoted to ${VERSION} (was: ${CURRENT:-none})." | tee -a "$GITHUB_STEP_SUMMARY"
-          else
-            echo "::warning::Channel latest stays at ${CURRENT}: ${VERSION} is older. Published under /${VERSION}/ only."
-            echo "Channel latest NOT promoted: ${VERSION} < ${CURRENT}; published under /${VERSION}/ only." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          # Versioned dir, already-published (channel-only) case and monotonic
+          # promotion of the root pointers + channel manifest.
+          scripts/sync-installer-pages.sh "$VERSION" out pages
 
           # Publish verify.sh with the committed public key substituted in, so
           # users don't need a second round-trip (earlier steps already fail

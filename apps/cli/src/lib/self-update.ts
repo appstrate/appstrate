@@ -242,7 +242,7 @@ export interface ReleaseChannelDeps {
   writeFile(path: string, data: Uint8Array | string): Promise<void>;
   /** Working directory for downloaded artefacts (signed file + sig). */
   makeWorkDir(): Promise<string>;
-  /** Best-effort `rm -rf` — cleans the work dir and the staged download. */
+  /** Best-effort `rm -rf` — cleans the work dir (and, for self-update, the staged download). */
   removeDir(path: string): Promise<void>;
 }
 

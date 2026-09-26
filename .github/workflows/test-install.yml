@@ -15,6 +15,7 @@ name: Test Installer
 #   - `scripts/appstrate.pub`        the minisign public key they verify against
 #   - `scripts/semver-lt.sh`         the SemVer guard that keeps the signed
 #                                    "latest" channel manifest monotonic
+#   - `scripts/sync-installer-pages.sh` the copy/promotion logic that applies it
 #
 # Adding a file to `publish-installer.yml` means adding it to BOTH lists here.
 on:
@@ -25,6 +26,7 @@ on:
       - "scripts/verify.sh"
       - "scripts/appstrate.pub"
       - "scripts/semver-lt.sh"
+      - "scripts/sync-installer-pages.sh"
       - ".github/workflows/test-install.yml"
       - ".github/workflows/publish-installer.yml"
   push:
@@ -35,6 +37,7 @@ on:
       - "scripts/verify.sh"
       - "scripts/appstrate.pub"
       - "scripts/semver-lt.sh"
+      - "scripts/sync-installer-pages.sh"
       - ".github/workflows/test-install.yml"
       - ".github/workflows/publish-installer.yml"
   workflow_dispatch:
@@ -64,7 +67,8 @@ jobs:
             "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
           echo "${SHFMT_SHA256}  /tmp/shfmt" | sha256sum --check --strict
           chmod +x /tmp/shfmt
-          /tmp/shfmt -d -i 2 -ci scripts/bootstrap.sh scripts/bootstrap-runner.sh scripts/verify.sh scripts/semver-lt.sh
+          /tmp/shfmt -d -i 2 -ci scripts/bootstrap.sh scripts/bootstrap-runner.sh scripts/verify.sh scripts/semver-lt.sh \
+            scripts/sync-installer-pages.sh
 
       - name: semver-lt.sh table
         # publish-installer.yml's monotonic "latest" guard rests on this
@@ -98,6 +102,79 @@ jobs:
           check 2 v1.0.0-beta-1 v1.0.0
           check 2 v1.0.0
           exit "$fail"
+
+      - name: sync-installer-pages.sh fixtures
+        # publish-installer.yml's copy/promotion step, against a scratch
+        # installer-pages tree. Rendered files carry their tag so every copy
+        # is traceable; `snap` hashes every installer file (all but channels/).
+        run: |
+          set -euo pipefail
+          W=$(mktemp -d)
+          P="$W/pages"
+          mkdir -p "$P"
+          fail() { echo "::error::$*"; exit 1; }
+          render() { # TAG [MARK]: fake publish-installer.yml output
+            local o="$W/out-$1" f
+            rm -rf "$o"
+            mkdir -p "$o/$1" "$o/channels"
+            for f in install.sh install.sh.sha256 install.sh.minisig runner runner.sha256 runner.minisig; do
+              echo "$f $1${2:-}" >"$o/$f"
+            done
+            for f in install.sh install.sh.sha256 runner runner.sha256; do cp "$o/$f" "$o/$1/"; done
+            jq -n --arg tag "$1" '{schema: 1, channel: "latest", tag: $tag}' >"$o/channels/latest.json"
+            echo "sig $1${2:-}" >"$o/channels/latest.json.minisig"
+          }
+          publish() { scripts/sync-installer-pages.sh "$1" "$W/out-$1" "$P"; }
+          channel_is() { # TAG [MARK]
+            if [ "$(jq -r .tag "$P/channels/latest.json")" != "$1" ] ||
+              ! grep -qx "sig $1${2:-}" "$P/channels/latest.json.minisig"; then
+              fail "channel is $(cat "$P/channels/latest.json"), want $1${2:-}"
+            fi
+          }
+          root_is() {
+            for f in install.sh install.sh.sha256 install.sh.minisig runner runner.sha256 runner.minisig; do
+              grep -qx "$f $1" "$P/$f" || fail "root $f is '$(cat "$P/$f")', want $1"
+            done
+            grep -qx "install.sh $1" "$P/index.html" || fail "index.html is not $1"
+          }
+          versioned_is() {
+            for f in install.sh install.sh.sha256 install.sh.minisig runner runner.sha256 runner.minisig; do
+              grep -qx "$f $1" "$P/$1/$f" || fail "$1/$f missing or wrong"
+            done
+          }
+          snap() { (cd "$P" && find . -type f ! -path './channels/*' | LC_ALL=C sort | xargs sha256sum); }
+
+          # First publish: no manifest yet → versioned, root and channel written.
+          render v1.0.0; publish v1.0.0
+          versioned_is v1.0.0; root_is v1.0.0; channel_is v1.0.0
+          # Newer tag → promoted, the older versioned dir kept.
+          render v1.1.0; publish v1.1.0
+          versioned_is v1.1.0; versioned_is v1.0.0; root_is v1.1.0; channel_is v1.1.0
+          # Older tag → versioned only; root and channel stay put, exit 0.
+          render v1.0.5; publish v1.0.5
+          versioned_is v1.0.5; root_is v1.1.0; channel_is v1.1.0
+
+          # Already published: re-rendered bytes differ (`-rerun`), yet every
+          # installer file must stay byte-identical. Seeding (no manifest) and
+          # re-pointing the current tag rewrite the channel; an older tag doesn't.
+          before=$(snap)
+          rm -r "$P/channels"
+          render v1.1.0 -rerun; publish v1.1.0
+          channel_is v1.1.0 -rerun
+          render v1.0.5 -rerun; publish v1.0.5
+          channel_is v1.1.0 -rerun
+          render v1.1.0 -again; publish v1.1.0
+          channel_is v1.1.0 -again
+          [ "$(snap)" = "$before" ] || fail "an already-published tag rewrote installer files"
+
+          # Malformed current tag → non-zero, nothing written at all.
+          echo '{"schema":1,"channel":"latest","tag":"core@1.0.0"}' >"$P/channels/latest.json"
+          render v2.0.0
+          if publish v2.0.0; then fail "promoted over a malformed channel tag"; fi
+          [ ! -e "$P/v2.0.0" ] || fail "versioned dir written despite the abort"
+          [ "$(snap)" = "$before" ] || fail "installer files changed despite the abort"
+          grep -q core@1.0.0 "$P/channels/latest.json" || fail "malformed manifest overwritten"
+          echo "✓ sync-installer-pages.sh fixtures OK"
 
   workflow-lint:
     runs-on: ubuntu-latest
@@ -735,6 +812,52 @@ jobs:
             || { echo "::error::bootstrap-runner installed despite a tampered manifest"; exit 1; }
           echo "::endgroup::"
           echo "✓ runner tampered-manifest path OK"
+
+          # Run "$@" expecting a refusal: non-zero exit, $1 in the output, no
+          # CLI exec'd.
+          expect_refused() {
+            local want=$1 out rc=0
+            shift
+            out=$("$@" 2>&1) || rc=$?
+            echo "$out"
+            [ "$rc" -ne 0 ] || { echo "::error::accepted, want a refusal: $*"; exit 1; }
+            grep -qF -- "$want" <<<"$out" || { echo "::error::no '$want' in the output of: $*"; exit 1; }
+            if grep -q FAKE_CLI_RAN <<<"$out"; then echo "::error::CLI ran despite the refusal: $*"; exit 1; fi
+          }
+
+          # ── Scenario 7g: validly SIGNED but malformed manifest (both scripts) ─
+          # The signature gate passes; the content check must still refuse.
+          echo "::group::signed malformed channel manifest"
+          cp "$ROOT/channels/latest.json" "$ROOT/channels/latest.json.bak"
+          cp "$ROOT/channels/latest.json.minisig" "$ROOT/channels/latest.json.minisig.bak"
+          for bad in '{schema: 2, channel: "latest", tag: "v1.0.0-dry"}' \
+            '{schema: 1, channel: "latest", tag: "core@1.0.0"}'; do
+            jq -n "$bad" >"$ROOT/channels/latest.json"
+            minisign -S -s /tmp/dry.key -t "malformed channel" -m "$ROOT/channels/latest.json"
+            expect_refused "Channel manifest is malformed" env \
+              APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-chan-malformed" \
+              APPSTRATE_VERSION=latest APPSTRATE_FORCE_DUAL=1 bash /tmp/bootstrap.sh
+            expect_refused "Channel manifest is malformed" env \
+              APPSTRATE_BIN_DIR="$RUNNER_TEMP/bin-runner-malformed" \
+              APPSTRATE_VERSION=latest bash /tmp/bootstrap-runner.sh --platform-url http://127.0.0.1:3000 --token dry
+          done
+          mv "$ROOT/channels/latest.json.bak" "$ROOT/channels/latest.json"
+          mv "$ROOT/channels/latest.json.minisig.bak" "$ROOT/channels/latest.json.minisig"
+          test ! -e "$GITHUB_WORKSPACE/bin-chan-malformed/appstrate" \
+            || { echo "::error::bootstrap installed from a malformed manifest"; exit 1; }
+          test ! -e "$RUNNER_TEMP/bin-runner-malformed/appstrate" \
+            || { echo "::error::bootstrap-runner installed from a malformed manifest"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ signed malformed manifest refused"
+
+          # ── Scenario 7h: runner + skip-verify cannot resolve latest ────
+          echo "::group::runner: skip-verify + latest"
+          expect_refused 'cannot resolve "latest"' env \
+            APPSTRATE_BIN_DIR="$RUNNER_TEMP/bin-runner-skip-latest" \
+            APPSTRATE_VERSION=latest APPSTRATE_SKIP_VERIFY=1 CI=true \
+            bash /tmp/bootstrap-runner.sh --platform-url http://127.0.0.1:3000 --token dry
+          echo "::endgroup::"
+          echo "✓ runner skip-verify + latest refused"
 
           # ── Scenario 8a: dual-install pre-check (issue #249) ─────────
           # When `appstrate` already exists on PATH at a different path
