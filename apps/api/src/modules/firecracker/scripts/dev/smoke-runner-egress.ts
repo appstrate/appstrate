@@ -12,14 +12,17 @@
  * (`runner-egress-probes/agent.js`).
  *
  * Each runner must land on its own pool uid with a private group, HOME and
- * umask; list /workspace only when it opted in; have no direct egress, TCP or
- * UDP; reach only its `authorized_uris` through its own listener and — for a
+ * umask, no permitted/effective/ambient capability and no_new_privs set; list
+ * /workspace only when it opted in; have no direct egress, TCP or UDP; reach
+ * only its `authorized_uris` through its own listener and — for a
  * plain-CONNECT runner only, under ITS policy — through the transparent plane;
  * and be refused by the agent's forward proxy and by a sibling's listener. The
  * agent must keep its forward proxy once runners exist, be refused by the
- * runners' listeners and the transparent plane, be unable to reach the MITM
- * listener's inner unix sockets, and see no sidecar TCP listener beyond the
- * known set.
+ * runners' listeners and the transparent plane, be unable to list the MITM
+ * listener's private socket dir, and see no sidecar TCP listener beyond the
+ * known set. A refusal is judged by its SHAPE, not merely as a failure: a
+ * CONNECT listener's policy answers `403`, the transparent plane and the MITM
+ * listener reset the TLS handshake — a timeout is never a refusal.
  *
  * Every probe prints a raw observation — `RUNNER_EGRESS_1547 <reporter>.<probe>=
  * <value>`, on the serial console, by the agent only — and every verdict is
@@ -130,12 +133,12 @@ const SIDECAR_AUTH_TOKEN = "smoke-sidecar-auth-1547-5EC0DE";
 const CREDENTIALS_PATH = `/internal/integration-credentials/${MITM_INTEGRATION}`;
 /** Loopback port of the agent's report channel. */
 const DONE_PORT = 18547;
-/** Stub UDP port on the platform alias the runners' datagrams aim at (not 53: no redirect). */
+/** UDP port on the platform alias the runners' datagrams aim at (not 53: no redirect). */
 const UDP_PORT = 18548;
-/** The host's own datagram to the stub's UDP counter: proves the counter counts. */
+/** The host's own datagram to that port: proves the smoke's UDP counter counts. */
 const UDP_CONTROL_PAYLOAD = "runner-egress-1547 host-control";
-/** The orchestrator's host nftables table (host-net.ts `buildNftScript`). */
-const HOST_TABLE = "appstrate_fc";
+/** The smoke's own host nftables table (inet), counting UDP_PORT datagrams at prerouting. */
+const UDP_TABLE = "smoke1547";
 /**
  * Reporter ids, in spawn order (the sidecar boots specs sequentially):
  *   r1   plain-CONNECT runner allowed https://example.com (the #1458 probes)
@@ -210,8 +213,6 @@ interface StubHits {
   direct: number;
   control: number;
   credentials: number;
-  udpControl: number;
-  udpOther: number;
 }
 
 interface RunnerEgressVmOptions {
@@ -248,6 +249,8 @@ interface RunnerEgressContext {
 }
 
 interface UdpCounter {
+  /** Guest datagrams to UDP_PORT counted so far. */
+  readGuest(): Promise<number>;
   close(): Promise<void>;
 }
 
@@ -341,9 +344,16 @@ function probeIntegrations(aliasIp: string, platformPort: number): IntegrationSp
   ];
 }
 
-/** Run `nft` on the host (the smoke runs as root, like the orchestrator). */
-async function nft(args: string[]): Promise<{ code: number; out: string; err: string }> {
-  const proc = Bun.spawn(["nft", ...args], { stdout: "pipe", stderr: "pipe" });
+/** Run `nft` on the host (the smoke runs as root, like the orchestrator), `script` on stdin. */
+async function nft(
+  args: string[],
+  script?: string,
+): Promise<{ code: number; out: string; err: string }> {
+  const proc = Bun.spawn(["nft", ...args], {
+    stdin: script === undefined ? "ignore" : new Blob([script]),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   const [out, err, code] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -352,62 +362,80 @@ async function nft(args: string[]): Promise<{ code: number; out: string; err: st
   return { code, out, err };
 }
 
+/** A named counter's packet count in the smoke's table, or `undefined` if unreadable. */
+async function udpCounterPackets(name: string): Promise<number | undefined> {
+  const listed = await nft(["list", "counter", "inet", UDP_TABLE, name]);
+  const packets = /packets (\d+)/.exec(listed.out)?.[1];
+  return listed.code === 0 && packets !== undefined ? Number(packets) : undefined;
+}
+
 /**
- * The stub's UDP half, live for the VM's lifetime: a socket on the platform
- * alias counting datagrams, and a host `input` accept for exactly that port
- * from the guest TAPs. The orchestrator's host table otherwise drops every
- * guest packet to the alias but TCP to the platform port, which would make a
- * zero count say nothing about the GUEST firewall; with the accept, a datagram
- * the guest let out is counted. The host's own datagram (over `lo`, which the
- * table does not filter) proves the counter counts. If deleting the accept by
- * handle fails, it dies with the table at `orch.shutdown()`.
+ * The guest-UDP counter, live for the VM's lifetime: a dedicated inet table
+ * whose prerouting chain, at priority raw (ahead of conntrack and of any
+ * filter chain that could drop the packet first, the orchestrator's
+ * `appstrate_fc` included), counts every datagram to UDP_PORT arriving on a
+ * guest TAP. It accepts nothing and nothing listens on the port: the count is
+ * taken before any host verdict, so a zero says the GUEST firewall kept the
+ * datagram in. The host's own datagram to the platform alias loops back over
+ * `lo` through the same hook into a twin counter — the control that this
+ * table counts on this host. The caller deletes the table in its `finally`;
+ * a table left by a crashed run is replaced (with its counts) here.
  */
-async function openUdpCounter(aliasIp: string, hits: StubHits, fail: Fail): Promise<UdpCounter> {
-  const binding = Bun.udpSocket({
-    hostname: aliasIp,
-    port: UDP_PORT,
-    binaryType: "buffer",
-    socket: {
-      data(_socket, data) {
-        if (String(data) === UDP_CONTROL_PAYLOAD) hits.udpControl++;
-        else hits.udpOther++;
-      },
-    },
-  });
-  const counter = await binding.catch((err: unknown) =>
-    fail(`could not bind the stub's UDP counter on ${aliasIp}:${UDP_PORT}: ${String(err)}`),
-  );
-  const rule = `iifname "${TAP_DEVICE_PREFIX}*" ip daddr ${aliasIp} udp dport ${UDP_PORT} accept`;
-  const insertArgs = ["--echo", "--handle", "insert", "rule", "ip", HOST_TABLE, "input", rule];
-  const inserted = await nft(insertArgs);
-  if (inserted.code !== 0) {
-    counter.close();
+async function openUdpCounter(aliasIp: string, fail: Fail): Promise<UdpCounter> {
+  const script = [
+    `add table inet ${UDP_TABLE}`,
+    `delete table inet ${UDP_TABLE}`,
+    `table inet ${UDP_TABLE} {`,
+    "  counter guest {}",
+    "  counter host_control {}",
+    "  chain pre {",
+    "    type filter hook prerouting priority raw; policy accept;",
+    `    iifname "${TAP_DEVICE_PREFIX}*" udp dport ${UDP_PORT} counter name guest`,
+    `    iifname "lo" ip daddr ${aliasIp} udp dport ${UDP_PORT} counter name host_control`,
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+  const created = await nft(["-f", "/dev/stdin"], script);
+  if (created.code !== 0) {
     fail(
-      `could not open the host input for the stub's UDP counter (nft exit ${inserted.code}): ` +
-        inserted.err.trim(),
+      `could not create the smoke's UDP counter table inet ${UDP_TABLE} (nft exit ` +
+        `${created.code}): ${created.err.trim()}`,
     );
   }
-  const handle = /# handle (\d+)/.exec(inserted.out)?.[1];
+  const close = async () => {
+    await nft(["delete", "table", "inet", UDP_TABLE]);
+  };
 
-  const client = await Bun.udpSocket({});
-  client.send(UDP_CONTROL_PAYLOAD, UDP_PORT, aliasIp);
-  for (let i = 0; i < 40 && hits.udpControl === 0; i++) await Bun.sleep(50);
-  client.close();
-  if (hits.udpControl === 0) {
-    counter.close();
-    fail(
-      `the stub's UDP counter on ${aliasIp}:${UDP_PORT} never saw the host's own datagram — ` +
-        "a zero runner count below would be vacuous",
-    );
+  try {
+    const client = await Bun.udpSocket({});
+    client.send(UDP_CONTROL_PAYLOAD, UDP_PORT, aliasIp);
+    let control = 0;
+    for (let i = 0; i < 40 && control === 0; i++) {
+      await Bun.sleep(50);
+      control = (await udpCounterPackets("host_control")) ?? 0;
+    }
+    client.close();
+    if (control === 0) {
+      fail(
+        `the smoke's prerouting counter (table inet ${UDP_TABLE}) never counted the host's own ` +
+          `datagram to ${aliasIp}:${UDP_PORT} — a zero guest count below would be vacuous`,
+      );
+    }
+  } catch (err) {
+    await close();
+    throw err;
   }
 
   return {
-    async close() {
-      counter.close();
-      if (handle !== undefined) {
-        await nft(["delete", "rule", "ip", HOST_TABLE, "input", "handle", handle]);
+    async readGuest() {
+      const guest = await udpCounterPackets("guest");
+      if (guest === undefined) {
+        fail(`could not read the guest UDP counter in table inet ${UDP_TABLE}`);
       }
+      return guest;
     },
+    close,
   };
 }
 
@@ -421,7 +449,7 @@ function marker(log: string, key: string): string | undefined {
 }
 
 /** Every probe verdict, taken host-side from the raw observations on the console. */
-function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
+function assertRunnerEgress(log: string, ctx: RunnerEgressContext, udpGuest: number): void {
   const fail: Fail = ctx.fail;
   const { aliasIp, hits } = ctx;
   const need = (key: string): string => {
@@ -431,16 +459,29 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
     }
     return value;
   };
+  // Allowed and refused, each next to its twin. A refusal must be the policy's
+  // own answer, not any failure: a timeout or an unrelated error could be a
+  // broken route that proves nothing.
   const isSuccess = (v: string) => /^[23]\d\d$/.test(v);
-  const isRefusal = (v: string) => v.startsWith("error:") || /^[45]\d\d$/.test(v);
+  /**
+   * A fetch through a plain-CONNECT listener its policy refused: the
+   * listener's `403 Forbidden` to the CONNECT (integration-egress-listener.ts),
+   * surfaced by Bun's fetch as the status.
+   */
+  const isProxy403 = (v: string) => v === "403";
+  /**
+   * The transparent plane's refusal: it drops a denied peer or SNI after
+   * reading the ClientHello (integration-transparent-listener.ts). A
+   * reset-class error — ECONNRESET, or the verification error Bun's fetch
+   * reports for a reset during its handshake. Never a timeout.
+   */
+  const isResetRefusal = (v: string) =>
+    /^error:(ECONNRESET|UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)$/.test(v);
   /** A raw CONNECT exchange: the status it got, if any. */
   const connectStatus = (v: string) => /^HTTP\/1\.[01]_(\d{3})/.exec(v)?.[1];
-  /** Refused = a non-200 status, or no tunnel at all. */
-  const isConnectRefusal = (v: string) => {
-    const status = connectStatus(v);
-    return status !== undefined ? status !== "200" : /^(error:|timeout|closed)/.test(v);
-  };
   const isConnect200 = (v: string) => connectStatus(v) === "200";
+  /** A raw CONNECT refused by the listener's peer attribution: exactly `403`. */
+  const isConnect403 = (v: string) => connectStatus(v) === "403";
   /** A probe's diagnostic markers, for a failure message: ` [ms=… lookup=… detail=…]`. */
   const diag = (key: string): string => {
     const extras = ["ms", "fetchms", "lookup", "detail"]
@@ -521,6 +562,8 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
   const lastUid = GUEST_RUNNER_UID_FIRST + GUEST_RUNNER_UID_COUNT - 1;
   const uids = new Map<RunnerId, number>();
   const listenerPorts = new Map<RunnerId, number>();
+  /** Each runner's unjudged capability sets (inheritable, bounding), for the summary. */
+  const capReport: string[] = [];
   for (const id of live) {
     const uid = Number(need(`${id}.uid`));
     if (!(uid >= GUEST_RUNNER_UID_FIRST && uid <= lastUid)) {
@@ -536,6 +579,24 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
         fail(`runner ${id} (uid ${uid}) has ${probe} ${gid} — expected its private group ${uid}`);
       }
     }
+    // Capabilities: the sidecar runs with ambient CAP_NET_BIND_SERVICE +
+    // CAP_KILL, and none may follow a runner across the setuid wrapper.
+    // CapInh may keep bits (inert under no_new_privs), so it is reported, not
+    // judged; CapBnd likewise.
+    for (const probe of ["cap-prm", "cap-eff", "cap-amb"]) {
+      const set = need(`${id}.${probe}`);
+      if (!/^0+$/.test(set)) {
+        fail(
+          `runner ${id} (uid ${uid}) holds capabilities ${probe}=${set} — expected none ` +
+            "(the sidecar's ambient set leaked across the wrapper)",
+        );
+      }
+    }
+    const noNewPrivs = need(`${id}.no-new-privs`);
+    if (noNewPrivs !== "1") {
+      fail(`runner ${id} (uid ${uid}) has NoNewPrivs=${noNewPrivs}, expected 1`);
+    }
+    capReport.push(`${id}=inh:${need(`${id}.cap-inh`)}/bnd:${need(`${id}.cap-bnd`)}`);
     const groups = need(`${id}.groups`);
     const groupSet = new Set(groups === "none" ? [] : groups.split(",").map(Number));
     const allowed = new Set([uid, ...(id === "r2" ? [GUEST_WORKSPACE_GID] : [])]);
@@ -664,10 +725,10 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
     );
   }
 
-  // --- Every runner: no direct UDP egress. Nothing but the host's own
-  //     datagram reached the stub's UDP counter (host input opened for that
-  //     port), while each runner's same-socket DNS query to the same address
-  //     was answered through the per-uid port-53 redirect.
+  // --- Every runner: no direct UDP egress. The host's prerouting counter
+  //     (proven live by the host's own datagram) saw no guest datagram to
+  //     UDP_PORT, while each runner's same-socket DNS query to the same
+  //     address was answered through the per-uid port-53 redirect.
   const udpSends: string[] = [];
   for (const id of live) {
     const dnsControl = need(`${id}.udp-dns-control`);
@@ -679,11 +740,10 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
     }
     udpSends.push(`${id}=${need(`${id}.udp-platform`)}`);
   }
-  if (hits.udpOther !== 0) {
+  if (udpGuest !== 0) {
     fail(
-      `the stub's UDP counter on ${aliasIp}:${UDP_PORT} received ${hits.udpOther} guest ` +
-        `datagram(s) (runner send outcomes: ${udpSends.join(" ")}) — runner uids keep direct ` +
-        "UDP egress",
+      `the host counted ${udpGuest} guest datagram(s) to UDP port ${UDP_PORT} at prerouting ` +
+        `(runner send outcomes: ${udpSends.join(" ")}) — runner uids keep direct UDP egress`,
     );
   }
 
@@ -716,8 +776,11 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
       );
     }
     const r1Denied = need("r1.proxy-denied");
-    if (!isRefusal(r1Denied)) {
-      fail(`runner r1 reached https://example.org through its CONNECT listener (${r1Denied})`);
+    if (!isProxy403(r1Denied)) {
+      fail(
+        `runner r1's fetch of https://example.org through its CONNECT listener got ` +
+          `${r1Denied}${diag("r1.proxy-denied")}, expected the listener's policy 403`,
+      );
     }
     // The transparent plane for proxy-unaware clients, same policy.
     if (!isSuccess(plainAllowed)) {
@@ -728,10 +791,11 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
       );
     }
     const plainDenied = need("r1.transparent-denied");
-    if (!isRefusal(plainDenied)) {
+    if (!isResetRefusal(plainDenied)) {
       fail(
-        `proxy-unaware runner client reached https://example.org (${plainDenied}) — ` +
-          "the transparent plane ignores the allowlist",
+        `proxy-unaware runner client got ${plainDenied}${diag("r1.transparent-denied")} for ` +
+          "https://example.org, expected the transparent plane's reset — it ignores the " +
+          "allowlist, or the refusal is not the plane's",
       );
     }
     const dns = need("r1.dns");
@@ -751,27 +815,27 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
       );
     }
     const agentTls = need("agent.transparent-tls");
-    if (agentTls === "secure" || !/^(error:|timeout|closed)/.test(agentTls)) {
+    if (!isResetRefusal(agentTls)) {
       fail(
-        `the agent completed a TLS handshake through the transparent plane (${agentTls}) — ` +
-          "the splicer serves non-runner peers",
+        `the agent's TLS handshake through the transparent plane got ${agentTls}` +
+          `${diag("agent.transparent-tls")}, expected the plane's reset — the splicer serves ` +
+          "non-runner peers, or the refusal is not the plane's",
       );
     }
     // r1 through the agent's forward proxy: refused (the agent's own 200s above).
     const runnerViaAgentProxy = need("r1.agent-proxy");
-    const status = connectStatus(runnerViaAgentProxy);
-    if (status === undefined || status === "200") {
+    if (!isConnect403(runnerViaAgentProxy)) {
       fail(
-        `runner's CONNECT through the agent's forward proxy got ${runnerViaAgentProxy} — ` +
-          "expected the proxy to answer with a refusal status",
+        `runner's CONNECT through the agent's forward proxy got ${runnerViaAgentProxy}` +
+          `${diag("r1.agent-proxy")}, expected the proxy's 403 refusal`,
       );
     }
     // 2. r1's listener refuses the agent, next to its owner's success.
     const viaR1 = need("agent.via-r1-listener");
-    if (!isConnectRefusal(viaR1)) {
+    if (!isConnect403(viaR1)) {
       fail(
         `the agent's CONNECT example.com through runner r1's listener got ${viaR1} while r1's ` +
-          `own got ${r1Allowed} — the listener does not attribute its peers`,
+          `own got ${r1Allowed}, expected the listener's 403 — it does not attribute its peers`,
       );
     }
   }
@@ -788,8 +852,11 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
       );
     }
     const r2Denied = need("r2.proxy-denied");
-    if (!isRefusal(r2Denied)) {
-      fail(`runner r2 reached https://example.com through its own listener (${r2Denied})`);
+    if (!isProxy403(r2Denied)) {
+      fail(
+        `runner r2's fetch of https://example.com through its own listener got ` +
+          `${r2Denied}${diag("r2.proxy-denied")}, expected the listener's policy 403`,
+      );
     }
     // The plane serves each runner ITS policy: example.org through the plane
     // (the control) while example.com — r1's target — is refused.
@@ -802,11 +869,12 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
       );
     }
     const r2PlainDenied = need("r2.transparent-denied");
-    if (!isRefusal(r2PlainDenied)) {
+    if (!isResetRefusal(r2PlainDenied)) {
       fail(
-        `runner r2's proxy-unaware client reached https://example.com through the transparent ` +
-          `plane (${r2PlainDenied}) — the plane applied another runner's policy (r1 got ` +
-          `${plainAllowed} there)`,
+        `runner r2's proxy-unaware client got ${r2PlainDenied}${diag("r2.transparent-denied")} ` +
+          "for https://example.com through the transparent plane, expected the plane's reset — " +
+          `it applied another runner's policy (r1 got ${plainAllowed} there), or the refusal ` +
+          "is not the plane's",
       );
     }
     // 4b. Cross-runner attribution on the real kernel: r2 through r1's listener
@@ -818,11 +886,11 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
         fail(`runner r2 dialed ${peerAddress}, not runner r1's listener ${r1ProxyEnv}`);
       }
       const r2ViaR1 = need("r2.peer-listener");
-      if (!isConnectRefusal(r2ViaR1)) {
+      if (!isConnect403(r2ViaR1)) {
         fail(
           `runner r2 (uid ${uids.get("r2")}) got ${r2ViaR1} for CONNECT example.com through ` +
-            `runner r1's listener, while r1 (uid ${uids.get("r1")}) got ${r1Allowed} — a ` +
-            "listener serves a sibling runner under its owner's policy",
+            `runner r1's listener, while r1 (uid ${uids.get("r1")}) got ${r1Allowed}; ` +
+            "expected the listener's 403 — it serves a sibling runner under its owner's policy",
         );
       }
     }
@@ -865,15 +933,23 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
           "a certificate verification error — the listener did not terminate TLS with the run CA",
       );
     }
+    // The listener accepts the CONNECT, reads the ClientHello and drops an
+    // unauthorized SNI before minting a leaf: Bun's proxied fetch reports that
+    // reset as ECONNRESET. Only that — a verification error here could be a
+    // leaf the run CA does not sign, i.e. not the listener's refusal.
     const mitmDenied = need("mitm.mitm-denied");
-    if (!isRefusal(mitmDenied)) {
-      fail(`MITM runner reached https://example.org through its MITM listener (${mitmDenied})`);
+    if (mitmDenied !== "error:ECONNRESET") {
+      fail(
+        `MITM runner's fetch of https://example.org through its MITM listener got ` +
+          `${mitmDenied}${diag("mitm.mitm-denied")}, expected the listener's reset ` +
+          "(error:ECONNRESET)",
+      );
     }
     const viaMitm = need("agent.via-mitm-listener");
-    if (!isConnectRefusal(viaMitm)) {
+    if (!isConnect403(viaMitm)) {
       fail(
-        `the agent's CONNECT example.com through the MITM runner's listener got ${viaMitm} ` +
-          "— the MITM listener does not attribute its peers",
+        `the agent's CONNECT example.com through the MITM runner's listener got ${viaMitm}, ` +
+          "expected the listener's 403 — it does not attribute its peers",
       );
     }
     // 6b. The transparent plane refuses a MITM-delivery runner (splicing would
@@ -888,40 +964,39 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
       );
     }
     const mitmPlain = need("mitm.transparent-denied");
-    if (!isRefusal(mitmPlain)) {
+    if (!isResetRefusal(mitmPlain)) {
       fail(
-        `the MITM runner's proxy-unaware client reached https://example.com through the ` +
-          `transparent plane (${mitmPlain}; r1 got ${plainAllowed}, its own listener ` +
-          `${mitmAllowed}) — the plane splices a MITM-delivery runner past credential injection`,
+        `the MITM runner's proxy-unaware client got ${mitmPlain}` +
+          `${diag("mitm.transparent-denied")} for https://example.com through the transparent ` +
+          `plane (r1 got ${plainAllowed}, its own listener ${mitmAllowed}), expected the ` +
+          "plane's reset — it splices a MITM-delivery runner past credential injection, or " +
+          "the refusal is not the plane's",
       );
     }
     // 6c. The inner TLS servers' unix sockets sit in a 0700 sidecar dir under
     //     /tmp. The dir exists (control) and an inner server lives in it
-    //     (mitm-allowed succeeded through one), yet the agent can neither list
-    //     it nor reach the socket inside: `stat` on the socket path is EACCES.
-    //     (`connect` there is informational only — Bun reports ENOENT where the
-    //     kernel returns EACCES.)
+    //     (mitm-allowed succeeded through one), yet the agent cannot list it —
+    //     and without search permission on it, no name inside resolves, so no
+    //     socket there is reachable.
     const dirStat = need("agent.mitm-dir-stat");
     const statEntries = dirStat.split(",");
     if (dirStat === "none" || statEntries.some((e) => e !== `700:${GUEST_SIDECAR_UID}`)) {
       fail(
         `the MITM socket dir(s) under /tmp read as ${dirStat}, expected ` +
-          `700:${GUEST_SIDECAR_UID} each — the dir is missing (the refusals below would be ` +
+          `700:${GUEST_SIDECAR_UID} each — the dir is missing (the refusal below would be ` +
           "vacuous) or not sidecar-private",
       );
     }
-    const connects = marker(log, "agent.mitm-socket-connect") ?? "not-reported";
-    for (const probe of ["mitm-dir-readdir", "mitm-socket-stat"]) {
-      const value = need(`agent.${probe}`);
-      const results = value.split(",");
-      const allDenied = results.every((r) => PERMISSION_DENIED.test(r));
-      if (results.length !== statEntries.length || !allDenied) {
-        fail(
-          `the agent's ${probe} on the MITM socket dir(s) got ${value} (connect: ${connects}), ` +
-            "expected EACCES for each — the MITM listener's inner servers are reachable " +
-            "outside the sidecar",
-        );
-      }
+    const dirReaddir = need("agent.mitm-dir-readdir");
+    const listings = dirReaddir.split(",");
+    if (
+      listings.length !== statEntries.length ||
+      !listings.every((r) => PERMISSION_DENIED.test(r))
+    ) {
+      fail(
+        `the agent's readdir of the MITM socket dir(s) got ${dirReaddir}, expected EACCES for ` +
+          "each — the MITM listener's inner servers are reachable outside the sidecar",
+      );
     }
   }
 
@@ -975,11 +1050,12 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext): void {
 
   console.log(
     `    runner egress ok (sidecar ready after ${ready} ms): 3 runners on distinct pool uids ` +
-      "with private groups/HOME/umask, /workspace only when opted in, no direct TCP or UDP " +
-      `egress (UDP sends: ${udpSends.join(" ")}), per-runner allowlists via CONNECT + MITM + ` +
-      "transparent plane (plane refuses the MITM runner), listeners and splicer refuse the " +
-      "agent and siblings, agent keeps its forward proxy, MITM inner sockets unreachable, no " +
-      "inner server on TCP",
+      "with private groups/HOME/umask, no permitted/effective/ambient capability and " +
+      `no_new_privs (${capReport.join(" ")}), /workspace only when opted in, no direct TCP ` +
+      `or UDP egress (UDP sends: ${udpSends.join(" ")}; 0 guest datagrams at prerouting), ` +
+      "per-runner allowlists via CONNECT + MITM + transparent plane (plane refuses the MITM " +
+      "runner), listeners (403) and splicer (reset) refuse the agent and siblings, agent " +
+      "keeps its forward proxy, MITM socket dir private, no inner server on TCP",
   );
 }
 
@@ -995,7 +1071,7 @@ async function runRunnerEgressVm(
   const boundary = await orch.createIsolationBoundary(runId);
   let udp: UdpCounter | undefined;
   try {
-    udp = await openUdpCounter(ctx.aliasIp, hits, fail);
+    udp = await openUdpCounter(ctx.aliasIp, fail);
     const sidecar = await orch.createSidecar(runId, boundary, {
       runToken: deps.runToken,
       sidecarAuthToken: SIDECAR_AUTH_TOKEN,
@@ -1045,6 +1121,7 @@ async function runRunnerEgressVm(
       VM_TIMEOUT_MS,
     );
     console.log(`==> fourth guest exit marker: ${exitCode}`);
+    const udpGuest = await udp.readGuest();
     const consoleLog = await Bun.file(`${boundary.id}/console.log`)
       .text()
       .catch(() => "");
@@ -1069,14 +1146,13 @@ async function runRunnerEgressVm(
     }
     console.log(
       `     stub hits: bundle=${hits.bundle} direct=${hits.direct} control=${hits.control} ` +
-        `credentials=${hits.credentials} udp-control=${hits.udpControl} ` +
-        `udp-guest=${hits.udpOther}`,
+        `credentials=${hits.credentials} udp-guest-at-prerouting=${udpGuest}`,
     );
     console.log("------------------------------");
     if (exitCode !== 0) {
       fail(`expected exit marker 0 from the fourth VM, got ${exitCode} (agent probe failed)`);
     }
-    assertRunnerEgress(consoleLog, ctx);
+    assertRunnerEgress(consoleLog, ctx, udpGuest);
     await orch.removeWorkload(sidecar);
     await orch.removeWorkload(agent);
   } catch (err) {
@@ -1106,8 +1182,6 @@ export async function createRunnerEgressVm(
     direct: 0,
     control: 0,
     credentials: 0,
-    udpControl: 0,
-    udpOther: 0,
   };
   const ctx: RunnerEgressContext = {
     aliasIp,

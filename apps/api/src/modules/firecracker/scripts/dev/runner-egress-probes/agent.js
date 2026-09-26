@@ -71,8 +71,6 @@ const RUNNER_OF = new Map(
 );
 /** The sidecar's `os.tmpdir()` (its env sets no TMPDIR): where its MITM socket dirs live. */
 const SIDECAR_TMPDIR = "/tmp";
-/** The MITM listener's first inner server socket (named by a counter). */
-const FIRST_INNER_SOCKET = "0.sock";
 
 function mark(probe, value, max) {
   console.log(TAG + " agent." + probe + "=" + clean(value, max));
@@ -178,7 +176,7 @@ server.listen(DONE_PORT, "127.0.0.1");
 
 // ---- probe primitives ----
 
-/** One connect (TCP `{ host, port }` or unix `{ path }`): `connected`, `error:…` or `timeout`. */
+/** One TCP connect to `{ host, port }`: `connected`, `error:…` or `timeout`. */
 function connectOnce(options, timeoutMs) {
   return new Promise((resolve) => {
     let settled = false;
@@ -311,40 +309,30 @@ async function listenSockets() {
 /**
  * The MITM listener's inner TLS servers sit on unix sockets in a 0700 dir the
  * sidecar creates under its tmpdir (`mitm-XXXXXX`). /tmp is 1777, so the agent
- * sees the name; it must neither list the dir nor reach a socket inside it.
- * One comma-separated entry per `mitm-*` dir, in the same order across the
- * markers. The verdict is `mitm-socket-stat`: `connect()` on that path is
- * informational only — Bun reports ENOENT there where the kernel returns
- * EACCES (a non-owner cannot search the 0700 dir), while `stat` reports EACCES.
+ * sees the name; the dir must be sidecar-owned 0700 and unlistable to it — a
+ * non-owner then cannot resolve any name inside, so no socket there is
+ * reachable. One comma-separated entry per `mitm-*` dir, in the same order
+ * across both markers.
  */
-async function mitmSocketProbes() {
+async function mitmSocketDirProbes() {
   let names;
   try {
     names = (await readdir(SIDECAR_TMPDIR)).filter((name) => name.startsWith("mitm-")).sort();
   } catch (err) {
     const unlisted = "tmp-" + errorOf(err);
-    const probes = ["mitm-dir-stat", "mitm-dir-readdir", "mitm-socket-stat", "mitm-socket-connect"];
-    for (const probe of probes) {
-      mark(probe, unlisted);
-    }
+    mark("mitm-dir-stat", unlisted);
+    mark("mitm-dir-readdir", unlisted);
     return;
   }
   const stats = [];
   const listings = [];
-  const socketStats = [];
-  const connects = [];
   for (const name of names) {
     const dir = join(SIDECAR_TMPDIR, name);
-    const socketPath = join(dir, FIRST_INNER_SOCKET);
     stats.push(await stat(dir).then((st) => octal(st.mode) + ":" + st.uid, errorOf));
     listings.push(await readdir(dir).then((entries) => "listed:" + entries.length, errorOf));
-    socketStats.push(await stat(socketPath).then((st) => "stat:" + octal(st.mode), errorOf));
-    connects.push(await connectOnce({ path: socketPath }, 5000));
   }
   mark("mitm-dir-stat", stats.join(",") || "none", 400);
   mark("mitm-dir-readdir", listings.join(",") || "none", 400);
-  mark("mitm-socket-stat", socketStats.join(",") || "none", 400);
-  mark("mitm-socket-connect", connects.join(",") || "none", 400);
 }
 
 // ---- 2. sidecar readiness ----
@@ -406,8 +394,8 @@ markObservation(
     tlsHandshake("127.0.0.1", TRANSPARENT_TLS_PORT, "example.com", FETCH_TIMEOUT_MS),
   ),
 );
-// The MITM listener's inner sockets are out of the agent's reach.
-await mitmSocketProbes();
+// The MITM listener's socket dir is private to the sidecar.
+await mitmSocketDirProbes();
 // Every LISTEN socket, taken last (after every probe that could lazily open one).
 mark("listen", await listenSockets(), 2000);
 server.close();

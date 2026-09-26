@@ -76,6 +76,19 @@ const TRANSPARENT_TLS_PORT = numberSetting("PROBE_TRANSPARENT_TLS_PORT");
 const HANDSHAKE_WAIT_MS = numberSetting("PROBE_HANDSHAKE_WAIT_MS");
 /** The shared workspace (guest init.sh: 2770, agent:workspace). */
 const WORKSPACE_DIR = "/workspace";
+/**
+ * `/proc/self/status` fields reported verbatim (capability sets in hex, the
+ * no_new_privs flag), as `<probe>=<value>`. The sidecar holds ambient
+ * CAP_NET_BIND_SERVICE + CAP_KILL; the host requires a runner to hold none.
+ */
+const STATUS_FIELDS = [
+  ["CapInh", "cap-inh"],
+  ["CapPrm", "cap-prm"],
+  ["CapEff", "cap-eff"],
+  ["CapAmb", "cap-amb"],
+  ["CapBnd", "cap-bnd"],
+  ["NoNewPrivs", "no-new-privs"],
+];
 
 const lines = [];
 const line = (probe, value) => TAG + " " + ID + "." + probe + "=" + clean(value);
@@ -378,13 +391,25 @@ async function resolveExampleCom() {
 
 // ---- probes ----
 
-// Every role: who am I, what is my HOME, what does my umask produce, can I read
-// my siblings' homes, and can I list the shared workspace.
+// Every role: who am I, which capabilities do I hold, what is my HOME, what
+// does my umask produce, can I read my siblings' homes, and can I list the
+// shared workspace.
 async function identityProbes() {
   const uid = process.getuid();
   mark("uid", uid);
   mark("gid", process.getgid());
   mark("egid", process.getegid());
+  let status = "";
+  let statusError = "";
+  try {
+    status = fs.readFileSync("/proc/self/status", "utf8");
+  } catch (err) {
+    statusError = errorOf(err);
+  }
+  for (const [field, name] of STATUS_FIELDS) {
+    const found = new RegExp("^" + field + ":\\s*(\\S+)\\s*$", "m").exec(status);
+    mark(name, statusError || (found ? found[1] : "missing"));
+  }
   await probe("groups", () => {
     const groups = Array.from(new Set(process.getgroups())).sort((a, b) => a - b);
     return groups.length > 0 ? groups.join(",") : "none";
@@ -438,10 +463,11 @@ async function identityProbes() {
   );
 }
 
-// Every role: a datagram straight at the platform stub on a non-DNS port — the
-// guest firewall must drop it (the stub counts host-side) — next to the same
-// socket API reaching the sidecar's DNS responder through the per-uid port-53
-// redirect: the control that this uid's datagrams do leave the process.
+// Every role: a datagram straight at the platform alias on a non-DNS port —
+// the guest firewall must drop it (the host counts guest datagrams to that port
+// at prerouting on the TAPs) — next to the same socket API reaching the
+// sidecar's DNS responder through the per-uid port-53 redirect: the control
+// that this uid's datagrams do leave the process.
 function udpProbes() {
   return Promise.all([
     netProbe("udp-platform", () =>
