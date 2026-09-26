@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // `read_skill`. It neither dispatches to REST nor reuses a REST guard: a skill
-// the space ENFORCES is readable by everyone who chats there, `skills:read` or
-// not, so its rule is its own (`services/skill-read.ts`) — the policy surface
-// of `loadEnforcedChatSkills` and `GET /api/chat/enforced-skills`.
+// the chat turn injected is readable without `skills:*`, so its rule is its own
+// (`services/skill-read.ts`); REST RBAC is unchanged.
 
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -56,10 +55,10 @@ export function buildReadSkillTool(ctx: SkillToolContext): AppstrateToolDefiniti
   const descriptor: Tool = {
     name: "read_skill",
     description:
-      "Read a skill by id, e.g. one named in your instructions. Without `path`: its SKILL.md, " +
-      "its file list and the version served. With `path`: one of those files (scripts, " +
-      "references) at that version. A skill enforced in this request's space is served at " +
-      "its published version.",
+      "Read a skill by id. Without `path`: its SKILL.md, its file list and the version " +
+      "served. With `path`: one of those files (scripts, references) at that version. A skill " +
+      "a chat turn injected is readable at the definition injected; any other needs " +
+      "`skills:read`.",
     annotations: {
       title: "Read skill",
       readOnlyHint: true,

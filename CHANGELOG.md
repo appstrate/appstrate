@@ -18,10 +18,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **MCP `read_skill` tool** (#1586), declared on every connection: a skill's
   `SKILL.md`, its file list and the version served, or one of its files with
   `path`. With `skills:read` it serves what `GET /api/packages/{scope}/{name}/files`
-  serves (the draft to an author, else the latest published version). A skill
-  enforced in the request's space is served to anyone holding `chat:write`
-  there, at its latest published version only. Refusals carry the REST status
-  and problem body (403 without `skills:read`, else 404).
+  serves (the draft to an author, else the latest published version). A skill a
+  chat turn injected — enforced or chosen, in any skill mode — is readable by
+  that turn's own bearer even without `skills:*`: at the published version
+  injected, or the draft only while unchanged since injection (409
+  `injected_draft_changed` after an edit), in the turn's space, and while the
+  caller still holds `chat:write` there. Switching the skill off or withdrawing
+  `skills:read` mid-turn does not cut it off for the rest of that turn — its
+  `SKILL.md` is already in context. REST permissions are unchanged. Refusals
+  carry the REST status and problem body (403 without `skills:read`, else 404).
 
 ### Fixed
 
