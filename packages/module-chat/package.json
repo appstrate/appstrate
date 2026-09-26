@@ -44,7 +44,6 @@
   "devDependencies": {
     "@appstrate/env": "workspace:*",
     "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
     "lucide-react": "^1.47.0",
     "react-dom": "^19.3.0"
   }

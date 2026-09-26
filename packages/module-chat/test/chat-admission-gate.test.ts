@@ -10,6 +10,10 @@
  * Locked here:
  *   - a gate rejection short-circuits to 402 with NO user message and NO usage
  *     row written (an ephemeral turn writes nothing at all);
+ *   - a refused turn asks the gate once more, as funded by the org's own
+ *     credential, and reports the answer as `own_credential_admitted` — the
+ *     module owns what is chargeable, so the client must not guess it; an
+ *     admitted turn asks exactly once;
  *   - the SUBSCRIPTION branch is gated too, reporting `subscription: true`. It
  *     used to skip admission entirely on the reasoning that it spends the
  *     user's own credential — but the turn is driven by the in-process Pi
@@ -32,7 +36,7 @@ import { getTestApp } from "../../../apps/api/test/helpers/app.ts";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
 import { assertDbCount } from "../../../apps/api/test/helpers/assertions.ts";
-import { handleChatStream, type ChatEnv } from "../src/chat-stream.ts";
+import { handleChatStream, type ChatEngine, type ChatEnv } from "../src/chat-stream.ts";
 import { logger } from "../src/logger.ts";
 import type { ChatPlatformDeps } from "../src/platform-services.ts";
 import type { ChatModelResolution } from "@appstrate/core/chat-contract";
@@ -150,8 +154,10 @@ describe("chat admission gate (handleChatStream)", () => {
     ctx = await createTestContext({ orgSlug: "chatgate" });
   });
 
+  type GateArgs = Parameters<ChatPlatformDeps["checkUsageAllowed"]>[0];
+
   it("an ephemeral turn blocked by the gate returns 402 and persists nothing", async () => {
-    let gateCalls = 0;
+    const gateArgs: GateArgs[] = [];
     const c = fakeContext({
       orgId: ctx.orgId,
       user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
@@ -163,8 +169,8 @@ describe("chat admission gate (handleChatStream)", () => {
     const res = await handleChatStream(
       c,
       fakeDeps({
-        checkUsageAllowed: async () => {
-          gateCalls += 1;
+        checkUsageAllowed: async (args) => {
+          gateArgs.push(args);
           return REJECTION;
         },
       }),
@@ -172,10 +178,17 @@ describe("chat admission gate (handleChatStream)", () => {
 
     expect(res.status).toBe(402);
     expect(res.headers.get("content-type")).toBe("application/problem+json");
-    const body = (await res.json()) as { status: number; code: string };
+    const body = (await res.json()) as {
+      status: number;
+      code: string;
+      own_credential_admitted: boolean;
+    };
     expect(body.status).toBe(402);
     expect(body.code).toBe("over_cap");
-    expect(gateCalls).toBe(1);
+    // Refused on the org's own credential too: no other model gets through.
+    expect(body.own_credential_admitted).toBe(false);
+    // The turn, then the probe: the same turn quoted as org-funded.
+    expect(gateArgs.map((a) => a.subscription)).toEqual([false, true]);
 
     // Nothing persisted — the gate runs before the MCP session, the user
     // message, and inference.
@@ -200,12 +213,90 @@ describe("chat admission gate (handleChatStream)", () => {
       expect(refusals).toEqual([
         [
           "chat turn refused by admission gate",
-          { code: "over_cap", status: 402, orgId: ctx.orgId, model: "sysmodel" },
+          {
+            code: "over_cap",
+            status: 402,
+            ownCredentialAdmitted: false,
+            orgId: ctx.orgId,
+            model: "sysmodel",
+          },
         ],
       ]);
     } finally {
       info.mockRestore();
     }
+  });
+
+  it("tells the client when the gate would admit the turn on the org's own credential", async () => {
+    // A gate that refuses platform-funded turns and admits org-funded ones.
+    const c = fakeContext({
+      orgId: ctx.orgId,
+      user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
+      spaceId: ctx.defaultSpaceId,
+      body: { messages: [userTurn("u1", "hello")] },
+    });
+    const res = await handleChatStream(
+      c,
+      fakeDeps({ checkUsageAllowed: async (args) => (args.subscription ? null : REJECTION) }),
+    );
+
+    expect(res.status).toBe(402);
+    expect(await res.json()).toMatchObject({ code: "over_cap", own_credential_admitted: true });
+  });
+
+  it("does not probe a turn already on the org's own credential", async () => {
+    // The probe would ask the identical question: its answer is the refusal.
+    const gateArgs: GateArgs[] = [];
+    const c = fakeContext({
+      orgId: ctx.orgId,
+      user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
+      spaceId: ctx.defaultSpaceId,
+      body: { messages: [userTurn("u1", "hello")] },
+    });
+    const res = await handleChatStream(
+      c,
+      fakeDeps({
+        checkUsageAllowed: async (args) => {
+          gateArgs.push(args);
+          return REJECTION;
+        },
+        resolveChatModel: async (): Promise<ChatModelResolution> => ({
+          subscription: true,
+          needsReconnection: true,
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(402);
+    expect(await res.json()).toMatchObject({ own_credential_admitted: false });
+    expect(gateArgs.map((a) => a.subscription)).toEqual([true]);
+  });
+
+  it("an admitted turn asks the gate exactly once", async () => {
+    const gateArgs: GateArgs[] = [];
+    const c = fakeContext({
+      orgId: ctx.orgId,
+      user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
+      spaceId: ctx.defaultSpaceId,
+      body: { messages: [userTurn("u1", "hello")] },
+    });
+    // Reaching the engine proves the turn was admitted; it stops there.
+    const engine: ChatEngine = () => {
+      throw new Error("engine reached");
+    };
+    const turn = handleChatStream(
+      c,
+      fakeDeps({
+        checkUsageAllowed: async (args) => {
+          gateArgs.push(args);
+          return null;
+        },
+      }),
+      engine,
+    );
+
+    await expect(turn).rejects.toThrow("engine reached");
+    expect(gateArgs.map((a) => a.subscription)).toEqual([false]);
   });
 
   it("a persisted-session turn blocked by the gate returns 402 and writes no user message or usage row", async () => {

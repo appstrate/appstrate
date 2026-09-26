@@ -5,7 +5,7 @@ import {
   classifyClientTurnError,
   clientTurnErrorFromMarker,
   clientTurnErrorMarker,
-  refusalCode,
+  readRefusal,
 } from "../src/turn-error.ts";
 
 /**
@@ -100,30 +100,48 @@ describe("status-error shape", () => {
       detail: "English prose for API consumers",
       code,
     });
-    expect(refusalCode(statusError(new Error(body)))).toBe(code);
+    expect(readRefusal(statusError(new Error(body)))).toEqual({
+      code,
+      ownCredentialAdmitted: false,
+    });
   });
 });
 
-describe("refusalCode", () => {
+describe("readRefusal", () => {
   const problem = (body: Record<string, unknown>) => JSON.stringify(body);
+
+  it("reads whether the gate would admit the turn on the org's own credential", () => {
+    const refusal = { status: 402, code: "quota_exceeded" };
+    expect(readRefusal(problem({ ...refusal, own_credential_admitted: true }))).toEqual({
+      code: "quota_exceeded",
+      ownCredentialAdmitted: true,
+    });
+    // Only a literal `true` counts: absent, false or mistyped all mean "no".
+    for (const own_credential_admitted of [undefined, false, "true", 1]) {
+      expect(readRefusal(problem({ ...refusal, own_credential_admitted }))).toEqual({
+        code: "quota_exceeded",
+        ownCredentialAdmitted: false,
+      });
+    }
+  });
 
   it("withholds a non-refusal code, which no user action can clear", () => {
     // `beforeUsage` failing closed rejects with 500 — an internal fault, not
     // something to hand the user a sentence about.
-    expect(refusalCode(problem({ status: 500, code: "unexpected" }))).toBeUndefined();
+    expect(readRefusal(problem({ status: 500, code: "unexpected" }))).toBeUndefined();
   });
 
   it("declines anything that is not a problem document", () => {
-    expect(refusalCode("Upstream model error (status 503)")).toBeUndefined();
-    expect(refusalCode("{not json")).toBeUndefined();
-    expect(refusalCode(undefined)).toBeUndefined();
+    expect(readRefusal("Upstream model error (status 503)")).toBeUndefined();
+    expect(readRefusal("{not json")).toBeUndefined();
+    expect(readRefusal(undefined)).toBeUndefined();
     // Valid JSON that is not an object, or an object without the two fields
     // that make a refusal: the status guard is what rejects these, which is
     // why sniffing the string for a leading brace bought nothing.
-    expect(refusalCode("503")).toBeUndefined();
-    expect(refusalCode("null")).toBeUndefined();
-    expect(refusalCode("[402]")).toBeUndefined();
-    expect(refusalCode(problem({ status: 402 }))).toBeUndefined();
-    expect(refusalCode(problem({ code: "quota_exceeded" }))).toBeUndefined();
+    expect(readRefusal("503")).toBeUndefined();
+    expect(readRefusal("null")).toBeUndefined();
+    expect(readRefusal("[402]")).toBeUndefined();
+    expect(readRefusal(problem({ status: 402 }))).toBeUndefined();
+    expect(readRefusal(problem({ code: "quota_exceeded" }))).toBeUndefined();
   });
 });

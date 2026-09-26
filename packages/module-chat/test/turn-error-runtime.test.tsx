@@ -13,7 +13,7 @@
  * Both run during render, so SSR is enough.
  */
 
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { renderToString } from "react-dom/server";
 import { AssistantRuntimeProvider, ThreadPrimitive } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
@@ -21,6 +21,7 @@ import { conflict } from "@appstrate/core/api-errors";
 
 import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
 import { MessageError } from "../src/ui/thread.tsx";
+import { setModelCatalog } from "../src/ui/model-store.ts";
 
 type ChatHelpers = Parameters<typeof useAISDKRuntime>[0];
 
@@ -53,6 +54,9 @@ const member: ChatHost = {
   can: () => false,
 };
 
+/** Holds `billing:manage`: billing refusals link to the billing page instead. */
+const billingManager: ChatHost = { ...member, can: (p) => p === "billing:manage" };
+
 function Turn({ chat }: { chat: ChatHelpers }) {
   const runtime = useAISDKRuntime(chat);
   return (
@@ -64,16 +68,16 @@ function Turn({ chat }: { chat: ChatHelpers }) {
   );
 }
 
-function renderFailedTurn(error: Error): string {
+function renderFailedTurn(error: Error, host: ChatHost = member): string {
   return renderToString(
-    <ChatHostProvider value={member}>
+    <ChatHostProvider value={host}>
       <Turn chat={failedChat(error)} />
     </ChatHostProvider>,
   );
 }
 
 /** The 402 body `usageRejectionResponse` (`src/chat-stream.ts`) answers with. */
-const usageRefusal = (code: string) =>
+const usageRefusal = (code: string, ownCredentialAdmitted = false) =>
   new Error(
     JSON.stringify({
       type: "https://docs.appstrate.dev/errors/usage-not-allowed",
@@ -81,29 +85,51 @@ const usageRefusal = (code: string) =>
       status: 402,
       detail: "English prose for API consumers.",
       code,
+      own_credential_admitted: ownCredentialAdmitted,
     }),
   );
 
 describe("a failed chat turn, through the real assistant-ui runtime", () => {
-  it("names an exhausted credit quota", () => {
+  // Only the own-credential case seeds the catalog; leave it empty for the rest.
+  afterEach(() => setModelCatalog([]));
+
+  it("names an exhausted credit quota, with no retry", () => {
     const html = renderFailedTurn(usageRefusal("quota_exceeded"));
     expect(html).toContain("turn.error.quotaExceeded turn.error.contactAdmin");
     expect(html).not.toContain("turn.error.unknown");
     expect(html).not.toContain("English prose");
+    expect(html).not.toContain("turn.retry");
   });
 
-  it("names a blocked subscription", () => {
+  it("names a blocked subscription, with no retry", () => {
     const html = renderFailedTurn(usageRefusal("subscription_blocked"));
     expect(html).toContain("turn.error.subscriptionBlocked turn.error.contactAdmin");
     expect(html).not.toContain("turn.error.unknown");
+    expect(html).not.toContain("turn.retry");
   });
 
-  it("names a dead model credential", () => {
+  it("links a billing manager to the billing page", () => {
+    const html = renderFailedTurn(usageRefusal("quota_exceeded"), billingManager);
+    expect(html).toContain('href="/org-settings/billing"');
+    expect(html).toContain("turn.error.manageBilling");
+    expect(html).not.toContain("turn.error.contactAdmin");
+  });
+
+  it("names another model when the gate would admit one on the org's own credential", () => {
+    setModelCatalog([{ id: "byok", source: "custom" }]);
+    const html = renderFailedTurn(usageRefusal("quota_exceeded", true));
+    expect(html).toContain(
+      "turn.error.quotaExceeded turn.error.contactAdmin turn.error.otherModel",
+    );
+  });
+
+  it("names a dead model credential, with no retry", () => {
     // The 409 `chat-stream.ts` throws, serialized as the API's error handler does.
     const body = conflict("needs_reconnection", "Credential revoked.").toProblemDetail("req_1");
     const html = renderFailedTurn(new Error(JSON.stringify(body)));
     expect(html).toContain("turn.error.needsReconnection");
     expect(html).not.toContain("turn.error.unknown");
+    expect(html).not.toContain("turn.retry");
   });
 
   it("names an in-stream rate limit, and offers a retry", () => {

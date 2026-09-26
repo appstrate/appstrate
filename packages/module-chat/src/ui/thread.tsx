@@ -47,7 +47,7 @@ import { resolveAttachmentContent, UNNAMED_FILE } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
-import { hasCreditFreeModel, subscribeModel } from "./model-store.ts";
+import { hasOwnCredentialModel, subscribeModel } from "./model-store.ts";
 import { turnModelLabel } from "./turn-model.ts";
 import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
 import { isImageMime } from "@appstrate/core/mime";
@@ -433,14 +433,14 @@ export function MessageError() {
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
   const message = useAuiState((s) => s.message);
   const canManageBilling = can("billing:manage");
-  const creditFree = React.useSyncExternalStore(
+  const hasOwnModel = React.useSyncExternalStore(
     subscribeModel,
-    hasCreditFreeModel,
-    hasCreditFreeModel,
+    hasOwnCredentialModel,
+    hasOwnCredentialModel,
   );
   const errorState = React.useMemo(
-    () => turnErrorState(message, t, { canManageBilling, hasCreditFreeModel: creditFree }),
-    [message, t, canManageBilling, creditFree],
+    () => turnErrorState(message, t, { canManageBilling, hasOwnCredentialModel: hasOwnModel }),
+    [message, t, canManageBilling, hasOwnModel],
   );
   if (!errorState) return null;
   return (

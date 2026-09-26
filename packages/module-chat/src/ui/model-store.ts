@@ -39,7 +39,7 @@ let generationCapabilities = new Map<string, ModelGenerationCapabilities>();
 /** Ids of the live catalog models; `null` until the catalog has loaded once. */
 let liveModelIds: ReadonlySet<string> | null = null;
 /** A live catalog model runs on the org's own credential (`source: "custom"`). */
-let creditFreeModelAvailable = false;
+let ownCredentialModelAvailable = false;
 let generationCache: ModelGenerationSettings = (() => {
   if (typeof localStorage === "undefined") return {};
   try {
@@ -136,7 +136,7 @@ export function setModelCatalog(
   );
   const live = models.filter(isModelLive);
   liveModelIds = new Set(live.map((m) => m.id));
-  creditFreeModelAvailable = live.some((m) => m.source === "custom");
+  ownCredentialModelAvailable = live.some((m) => m.source === "custom");
 
   if (activeModelId !== null && !liveModelIds.has(activeModelId)) activeModelId = null;
   if (cache === null || !liveModelIds.has(cache)) {
@@ -148,9 +148,9 @@ export function setModelCatalog(
   notifyModel();
 }
 
-/** Snapshot for `useSyncExternalStore(subscribeModel, …)`: a pick that spends no platform credits exists. */
-export function hasCreditFreeModel(): boolean {
-  return creditFreeModelAvailable;
+/** Snapshot for `useSyncExternalStore(subscribeModel, …)`: a live pick runs on the org's own credential. */
+export function hasOwnCredentialModel(): boolean {
+  return ownCredentialModelAvailable;
 }
 
 function defaultCapabilities(): ModelGenerationCapabilities | undefined {

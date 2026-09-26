@@ -39,8 +39,8 @@ const problem = (body: Record<string, unknown>) => assistantError(JSON.stringify
 const failed = (error: unknown) =>
   message({ status: { type: "incomplete", reason: "error", error } });
 
-const member = { canManageBilling: false, hasCreditFreeModel: false };
-const manager = { canManageBilling: true, hasCreditFreeModel: false };
+const member = { canManageBilling: false, hasOwnCredentialModel: false };
+const manager = { canManageBilling: true, hasOwnCredentialModel: false };
 const BILLING = { label: "turn.error.manageBilling", href: "/org-settings/billing" };
 
 describe("turnErrorState", () => {
@@ -145,42 +145,48 @@ describe("turnErrorState", () => {
     action,
   });
 
-  describe("quota_exceeded", () => {
-    const quota = failed(problem({ status: 402, code: "quota_exceeded", detail: "org 1" }));
+  describe.each([
+    ["quota_exceeded", "turn.error.quotaExceeded"],
+    ["subscription_blocked", "turn.error.subscriptionBlocked"],
+  ])("%s", (code, text) => {
+    const refusal = (own_credential_admitted?: boolean) =>
+      failed(problem({ status: 402, code, detail: "org 1", own_credential_admitted }));
+    const withModel = { hasOwnCredentialModel: true };
 
     it("links a billing manager to billing, and sends anyone else to them", () => {
-      expect(turnErrorState(quota, t, manager)).toEqual(
-        refused("turn.error.quotaExceeded", BILLING),
-      );
-      expect(turnErrorState(quota, t, member)).toEqual(
-        refused("turn.error.quotaExceeded turn.error.contactAdmin"),
+      expect(turnErrorState(refusal(), t, manager)).toEqual(refused(text, BILLING));
+      expect(turnErrorState(refusal(), t, member)).toEqual(
+        refused(`${text} turn.error.contactAdmin`),
       );
     });
 
-    it("names another model when one spends no platform credits", () => {
-      const withModel = { hasCreditFreeModel: true };
-      expect(turnErrorState(quota, t, { ...manager, ...withModel })).toEqual(
-        refused("turn.error.quotaExceeded turn.error.otherModel", BILLING),
+    it("names another model when the gate would admit one and the org has one", () => {
+      expect(turnErrorState(refusal(true), t, { ...manager, ...withModel })).toEqual(
+        refused(`${text} turn.error.otherModel`, BILLING),
       );
-      expect(turnErrorState(quota, t, { ...member, ...withModel })).toEqual(
-        refused("turn.error.quotaExceeded turn.error.contactAdmin turn.error.otherModel"),
+      expect(turnErrorState(refusal(true), t, { ...member, ...withModel })).toEqual(
+        refused(`${text} turn.error.contactAdmin turn.error.otherModel`),
       );
     });
-  });
 
-  it("never names another model for a blocked subscription: it refuses every turn", () => {
-    const blocked = failed(problem({ status: 402, code: "subscription_blocked" }));
-    expect(turnErrorState(blocked, t, { ...manager, hasCreditFreeModel: true })).toEqual(
-      refused("turn.error.subscriptionBlocked", BILLING),
-    );
-    expect(turnErrorState(blocked, t, { ...member, hasCreditFreeModel: true })).toEqual(
-      refused("turn.error.subscriptionBlocked turn.error.contactAdmin"),
-    );
+    it("does not name another model the gate would refuse too", () => {
+      // An own-credential model in the catalog proves nothing about its price:
+      // only the gate's answer does.
+      for (const flag of [undefined, false]) {
+        expect(turnErrorState(refusal(flag), t, { ...manager, ...withModel })).toEqual(
+          refused(text, BILLING),
+        );
+      }
+    });
+
+    it("does not name another model when the org has none to pick", () => {
+      expect(turnErrorState(refusal(true), t, manager)).toEqual(refused(text, BILLING));
+    });
   });
 
   it("keeps one sentence for a dead credential, whoever reads it", () => {
     const reconnect = failed(problem({ status: 409, code: "needs_reconnection" }));
-    for (const context of [member, { canManageBilling: true, hasCreditFreeModel: true }]) {
+    for (const context of [member, { canManageBilling: true, hasOwnCredentialModel: true }]) {
       expect(turnErrorState(reconnect, t, context)).toEqual(
         refused("turn.error.needsReconnection"),
       );
@@ -204,7 +210,7 @@ describe("turnErrorState", () => {
   });
 
   it("lets the status decide, not the code — a known code off a 500 is not a refusal", () => {
-    // The guard in `refusalCode` is only observable here: a code that IS in the
+    // The guard in `readRefusal` is only observable here: a code that IS in the
     // copy table, arriving with a status that does not mean "you must act". A
     // module failing closed describes an internal fault, so it must not borrow
     // a refusal's sentence — and must keep its Retry, since retrying may work.

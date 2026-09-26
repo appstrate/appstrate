@@ -19,7 +19,7 @@ import type { AssistantState } from "@assistant-ui/react";
 import { getExternalStoreMessages } from "@assistant-ui/react";
 import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
 
-import { clientTurnErrorFromMarker, refusalCode } from "../turn-error.ts";
+import { clientTurnErrorFromMarker, readRefusal } from "../turn-error.ts";
 import type { ChatTranslate } from "./runtime-context.ts";
 
 /**
@@ -48,12 +48,11 @@ const BILLING_HREF = "/org-settings/billing";
  * Refusals a turn can be denied with BEFORE the stream opens. A refused turn is
  * not a model failure — "check the model configuration" would send the user to
  * the wrong screen — so each code states its cause. `billing`: the org fixes it
- * in billing, so a manager gets the link and anyone else is sent to them.
- * `otherModel`: a model spending no platform credits is a way out. Keyed by the
- * wire code, loosely: an unknown code degrades to the generic failure.
+ * in billing, so a manager gets the link and anyone else is sent to them. Keyed
+ * by the wire code, loosely: an unknown code degrades to the generic failure.
  */
-const REFUSAL: Record<string, { text: string; billing?: true; otherModel?: true }> = {
-  quota_exceeded: { text: "turn.error.quotaExceeded", billing: true, otherModel: true },
+const REFUSAL: Record<string, { text: string; billing?: true }> = {
+  quota_exceeded: { text: "turn.error.quotaExceeded", billing: true },
   subscription_blocked: { text: "turn.error.subscriptionBlocked", billing: true },
   needs_reconnection: { text: "turn.error.needsReconnection" },
 };
@@ -62,8 +61,8 @@ const REFUSAL: Record<string, { text: string; billing?: true; otherModel?: true 
 export interface RefusalContext {
   /** The caller holds `billing:manage`. */
   canManageBilling: boolean;
-  /** A selectable model runs on the org's own credential (see `hasCreditFreeModel`). */
-  hasCreditFreeModel: boolean;
+  /** A selectable model runs on the org's own credential (see `hasOwnCredentialModel`). */
+  hasOwnCredentialModel: boolean;
 }
 
 interface TurnErrorState {
@@ -141,10 +140,12 @@ export function turnErrorState(
         action: undefined,
       };
     }
-    const code = refusalCode(err);
+    const read = readRefusal(err);
     const refusal =
-      code && Object.prototype.hasOwnProperty.call(REFUSAL, code) ? REFUSAL[code] : undefined;
-    if (!refusal) {
+      read && Object.prototype.hasOwnProperty.call(REFUSAL, read.code)
+        ? REFUSAL[read.code]
+        : undefined;
+    if (!read || !refusal) {
       return {
         text: t("turn.error.unknown"),
         retryable: true,
@@ -156,7 +157,8 @@ export function turnErrorState(
     const sentences = [
       refusal.text,
       refusal.billing && !manager && "turn.error.contactAdmin",
-      refusal.otherModel && context.hasCreditFreeModel && "turn.error.otherModel",
+      // The gate, not the client, knows whether another model gets through.
+      read.ownCredentialAdmitted && context.hasOwnCredentialModel && "turn.error.otherModel",
     ].filter((key): key is string => typeof key === "string");
     return {
       text: sentences.map((key) => t(key)).join(" "),

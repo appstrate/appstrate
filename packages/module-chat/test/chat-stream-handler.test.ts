@@ -380,8 +380,8 @@ describe("handleChatStream", () => {
     expect(res.headers.get("WWW-Authenticate")).toBeNull();
     expect(res.headers.get("content-type") ?? "").toContain("application/problem+json");
     const body = (await res.json()) as { code?: string };
-    // The problem `code` is the whole client contract: `refusalCode()`
-    // (`src/turn-error.ts`) reads `status` + `code`, and nothing else.
+    // The problem `code` is what the client localizes: `readRefusal()`
+    // (`src/turn-error.ts`) reads `status` + `code`, never the English `detail`.
     expect(body.code).toBe("needs_reconnection");
 
     // No session would 401 upstream, and nothing was written.

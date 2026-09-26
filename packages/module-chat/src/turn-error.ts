@@ -85,8 +85,15 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
     : undefined;
 }
 
+/** A turn refused before the stream opened, as the client may act on it. */
+export interface TurnRefusal {
+  code: string;
+  /** The gate would admit the same turn on a model running on the org's own credential. */
+  ownCredentialAdmitted: boolean;
+}
+
 /**
- * The refusal code a PRE-STREAM failure carries, if it is one.
+ * The refusal a PRE-STREAM failure carries, if it is one.
  *
  * A turn refused by the admission gate or by a dead subscription credential
  * never enters the stream, so no `appstrate:chat-turn-error:` marker is ever
@@ -97,16 +104,16 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
  * `{ code: "unknown", message }` before it reaches the message status; either
  * way the body is the message. It is the `application/problem+json` our
  * refusals answer with (`chat-stream.ts`), so parsing the message back into a
- * problem document recovers what the transport discarded. Its `code` is the
- * stable machine-readable half of the contract; its `detail` is English prose
- * for API consumers (as everywhere else in this API) and must NOT be shown in
- * a localized UI. Return the code so the caller can pick its own sentence.
+ * problem document recovers what the transport discarded: the stable `code`
+ * and the `own_credential_admitted` member. Its `detail` is English prose for
+ * API consumers (as everywhere else in this API) and must NOT be shown in a
+ * localized UI — the caller picks its own sentence from the code.
  *
  * Only a REFUSAL carries a code worth displaying: 401/402/403/409 mean "you
  * must act". Any other status (a module failing closed with a 500) describes an
  * internal fault the user can do nothing about.
  */
-export function refusalCode(value: unknown): string | undefined {
+export function readRefusal(value: unknown): TurnRefusal | undefined {
   let doc: unknown;
   try {
     doc = JSON.parse(messageFromError(value));
@@ -114,7 +121,12 @@ export function refusalCode(value: unknown): string | undefined {
     return undefined;
   }
   if (!doc || typeof doc !== "object") return undefined;
-  const { status, code } = doc as { status?: unknown; code?: unknown };
+  const { status, code, own_credential_admitted } = doc as {
+    status?: unknown;
+    code?: unknown;
+    own_credential_admitted?: unknown;
+  };
   if (status !== 401 && status !== 402 && status !== 403 && status !== 409) return undefined;
-  return typeof code === "string" && code ? code : undefined;
+  if (typeof code !== "string" || !code) return undefined;
+  return { code, ownCredentialAdmitted: own_credential_admitted === true };
 }
