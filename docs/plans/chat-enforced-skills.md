@@ -53,20 +53,22 @@ chat agree on them.
   by id.
 - Each comes as `EnforcedChatSkill { packageId, name, version, content }` at its
   `latest` published version, never the draft.
-- A skill with nothing published, or whose archive is unreadable, comes back
-  with `content: null`. The turn then renders a notice ("required by this space
-  but not available here") instead of the skill.
-- Any other failure rejects. The chat module's deps wrapper
-  (`buildChatPlatformDeps`) turns that rejection into a
+- `content: null` means only that no published version resolves (none
+  published, or deleted). The turn then renders a notice ("required by this
+  space but has no published version to follow") instead of the skill.
+- Any other failure rejects, an unreadable archive
+  (`version_artifact_unavailable`, a storage fault) included. The chat module's
+  deps wrapper (`buildChatPlatformDeps`) turns that rejection into a
   **503 `enforced_skills_unavailable`**.
 
 ## The turn
 
 `handleChatStream` starts the read at the beginning of phase B, in parallel with
-the session upsert, keyed on the space the router entered. The result is joined
-with the caller-context block. A 503 refuses the turn after the admission gate,
-but before the model binding, capacity, the user message, the active-stream
-marker and the MCP session.
+the session upsert, keyed on the space the router entered, and awaits it in
+phase A's join (with the model list and the session row). A 503 therefore
+refuses the turn before attachment materialization, credential resolution, the
+admission gate, the user message, the active-stream marker and the MCP session.
+The same promise feeds the caller-context block.
 
 `## Skills` is rendered by `formatSkillsSection`, which the context block
 appends on every path. The enforced skills survive both degradations of
@@ -77,13 +79,14 @@ whatever `readsSkills`. Its order:
 1. the strict note, if the mode is `strict`;
 2. the enforced lead line and one `<skill id version>` block per enforced skill,
    in id order;
-3. the `auto` listing, minus the enforced ids, only when `readsSkills`;
+3. the `auto` listing, minus the injected enforced ids, only when `readsSkills`;
 4. the chosen lead line and blocks;
 5. the notices.
 
 - **Budget and dedupe:** enforced skills spend the shared budget first. A pin
-  naming an enforced skill is dropped without a notice. Enforced skills do not
-  count toward `MAX_PINNED_SKILLS`.
+  naming an enforced skill that was injected is dropped without a notice; one
+  whose enforced copy was left out (no published version, over budget) stands as
+  an ordinary pin. Enforced skills do not count toward `MAX_PINNED_SKILLS`.
 - **Lead line:** the enforced skills win over a chosen skill on conflict, and
   only `SKILL.md` is provided.
 - **Strict mode:** the note says the conversation is limited to the space's
@@ -107,11 +110,10 @@ failure answers the same 503.
 - **Library** (`apps/web/src/components/package-library.tsx`): on a skill row of
   the space, an "Imposé dans le chat" checkbox.
   - Turning it on needs `skills:write` in the space (no personal-space
-    exemption), the skill active there, and a published version: the library
-    package row carries `published`, and the box is disabled with a hint
-    ("Publiez une version du skill d'abord") when it is false. Turning it off
-    needs `skills:write` only, so a flag kept on a switched-off or unpublished
-    skill can still be released.
+    exemption) and a published version: the library package row carries
+    `published`, and the box is disabled with a hint ("Publiez une version du
+    skill d'abord") when it is false. A switched-off skill can be enforced; the
+    flag waits for re-activation. Turning it off needs `skills:write` only.
   - Turning it on opens a confirmation that discloses the effect: the published
     `SKILL.md` becomes visible to every member who chats in the space. Turning
     it off asks for nothing.
