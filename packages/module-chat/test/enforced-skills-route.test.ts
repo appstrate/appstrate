@@ -16,6 +16,10 @@ import {
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
 import { seedPublishedVersion, seedSpacePackage } from "../../../apps/api/test/helpers/seed.ts";
+import { getDiscoveredModules } from "../../../apps/api/test/helpers/test-modules.ts";
+import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
+import { buildChatPlatformDeps } from "../src/platform-services.ts";
+import { createChatRouter } from "../src/routes.ts";
 
 const app = getTestApp();
 
@@ -90,5 +94,28 @@ describe("GET /api/chat/enforced-skills", () => {
 
     const viewer = await memberContext(ctx, "member", "viewer");
     expect((await list(viewer)).status).toBe(403);
+  });
+
+  it("answers a 503 `enforced_skills_unavailable` when the names cannot be read", async () => {
+    // A fresh app whose chat router runs over a failing platform read.
+    const initCtx = buildModuleInitContext();
+    const deps = buildChatPlatformDeps({
+      ...initCtx,
+      services: {
+        ...initCtx.services,
+        listEnforcedChatSkills: async () => {
+          throw new Error("database down");
+        },
+      },
+    });
+    const failing = getTestApp({
+      modules: getDiscoveredModules().map((mod) =>
+        mod.manifest.id === "chat" ? { ...mod, createRouter: () => createChatRouter(deps) } : mod,
+      ),
+    });
+    const res = await failing.request("/api/chat/enforced-skills", { headers: authHeaders(ctx) });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("content-type") ?? "").toContain("application/problem+json");
+    expect(((await res.json()) as { code?: string }).code).toBe("enforced_skills_unavailable");
   });
 });

@@ -42,6 +42,7 @@ const CONTEXT_OPTS = {
   spaceRole: "builder",
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
+  enforced: [],
 };
 
 describe("full persona invariants", () => {
@@ -457,6 +458,7 @@ describe("the persona without agent runs", () => {
         spaceRole: "builder",
         permissions: ["agents:read", "mcp:invoke"],
         skills: DEFAULT_SKILL_SELECTION,
+        enforced: [],
       }),
     ).toContain("## Existing agents you can run");
     const off = formatCallerContext(raw, {
@@ -465,6 +467,7 @@ describe("the persona without agent runs", () => {
       spaceRole: "builder",
       permissions: ["agents:read", "mcp:invoke"],
       skills: DEFAULT_SKILL_SELECTION,
+      enforced: [],
     });
     expect(off).not.toContain("## Existing agents you can run");
     expect(off).not.toContain("@acme/triage");

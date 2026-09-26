@@ -354,7 +354,8 @@ export function formatCallerContext(
     skills: ChatSkillSelection;
     /** The chosen skills active here, read by {@link buildCallerContextBlock}. */
     skillContents?: ReadonlyMap<string, SkillContent>;
-    enforced?: readonly EnforcedChatSkill[];
+    /** Required: a caller that forgot it would drop the space's skills silently. */
+    enforced: readonly EnforcedChatSkill[];
   },
 ): string {
   const author = opts.capabilities.authors;
@@ -367,7 +368,7 @@ export function formatCallerContext(
     catalogue: ctx.skills ?? [],
     catalogueTruncated: ctx.skills_truncated === true,
     contents: opts.skillContents ?? new Map(),
-    enforced: opts.enforced ?? [],
+    enforced: opts.enforced,
   });
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();

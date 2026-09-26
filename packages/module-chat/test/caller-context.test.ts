@@ -77,6 +77,7 @@ const BASE_OPTS = {
   spaceRole: "builder",
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
+  enforced: [],
 } as const;
 
 describe("formatCallerContext", () => {
@@ -174,6 +175,7 @@ describe("formatCallerContext", () => {
       spaceRole: "builder",
       permissions: ["mcp:invoke", "agents:read", "mcp:read"],
       skills: DEFAULT_SKILL_SELECTION,
+      enforced: [],
     });
     expect(out).toContain("Role in this space: builder");
     expect(out).not.toContain("role preview active");
@@ -188,6 +190,7 @@ describe("formatCallerContext", () => {
       spaceRole: "operator",
       permissions: [],
       skills: DEFAULT_SKILL_SELECTION,
+      enforced: [],
     });
     expect(preview).toContain("Role in this space: operator — role preview active");
     expect(preview).toContain("Permissions this turn: none");
@@ -197,6 +200,7 @@ describe("formatCallerContext", () => {
       spaceRole: null,
       permissions: ["mcp:read"],
       skills: DEFAULT_SKILL_SELECTION,
+      enforced: [],
     });
     expect(roleless).not.toContain("Role in this space:");
     expect(roleless).toContain("Permissions this turn: mcp:read");

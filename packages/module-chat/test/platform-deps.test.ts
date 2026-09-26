@@ -39,4 +39,38 @@ describe("buildChatPlatformDeps — loadEnforcedSkills", () => {
     expect(error).toMatchObject({ status: 503, code: "enforced_skills_unavailable" });
     expect((error as ApiError).cause).toBe(cause);
   });
+
+  it("keeps an ApiError cause's detail, which names the skill, in the 503", async () => {
+    const deps = depsOver(async () => {
+      throw new ApiError({
+        status: 422,
+        code: "version_artifact_unavailable",
+        title: "Unprocessable",
+        detail: "Skill '@acme/house' version 1.0.0 cannot be read",
+      });
+    });
+    const error = (await deps
+      .loadEnforcedSkills("org_1", "spc_1")
+      .catch((e: unknown) => e)) as ApiError;
+    expect(error.status).toBe(503);
+    expect(error.message).toContain("Skill '@acme/house' version 1.0.0 cannot be read");
+    expect(error.message).not.toContain("Retry shortly");
+  });
+
+  it("wraps the names read the same way", async () => {
+    const deps = buildChatPlatformDeps({
+      appUrl: "http://localhost:3000",
+      services: {
+        listEnforcedChatSkills: async () => {
+          throw new Error("database down");
+        },
+      },
+    } as unknown as ModuleInitContext);
+    const error = (await deps
+      .listEnforcedSkills("org_1", "spc_1")
+      .catch((e: unknown) => e)) as ApiError;
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 503, code: "enforced_skills_unavailable" });
+    expect(error.message).toContain("Retry shortly");
+  });
 });

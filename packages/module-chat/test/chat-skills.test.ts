@@ -46,7 +46,7 @@ describe("fetchSkills", () => {
 });
 
 describe("fetchEnforcedSkills", () => {
-  it("GETs the chat read with the scoping headers and keeps the valid rows", async () => {
+  it("GETs the chat read with the scoping headers and parses its rows", async () => {
     let input: RequestInfo | URL | undefined;
     let init: RequestInit | undefined;
     globalThis.fetch = (async (i: RequestInfo | URL, o?: RequestInit) => {
@@ -57,7 +57,6 @@ describe("fetchEnforcedSkills", () => {
         data: [
           { id: "@acme/tone", name: "Tone", version: "1.2.0" },
           { id: "@acme/gone", name: "Gone", version: null },
-          { id: 42, name: "malformed" },
         ],
       });
     }) as typeof fetch;
@@ -78,6 +77,18 @@ describe("fetchEnforcedSkills", () => {
       new Response(null, { status: 503 })) as typeof fetch;
     await expect(fetchEnforcedSkills(() => ({}))).rejects.toThrow("HTTP 503");
   });
+
+  // Fail closed: a drifted policy read is an error, never "nothing imposed".
+  for (const [label, body] of [
+    ["a malformed row", { object: "list", data: [{ id: 42, name: "x", version: null }] }],
+    ["a missing envelope", [{ id: "@acme/tone", name: "Tone", version: null }]],
+    ["a missing data member", { object: "list" }],
+  ] as const) {
+    it(`throws on ${label}`, async () => {
+      globalThis.fetch = (async (_input: RequestInfo | URL) => Response.json(body)) as typeof fetch;
+      await expect(fetchEnforcedSkills(() => ({}))).rejects.toThrow("Unexpected");
+    });
+  }
 });
 
 describe("ownPins", () => {

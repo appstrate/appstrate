@@ -30,12 +30,12 @@ comes back enforced when switched on again. It shows up on the wire as
   | 409    | `no_published_version`         | the skill has no `latest` published version                                                        |
   | 409    | `enforced_skills_limit`        | more than `MAX_ENFORCED_CHAT_SKILLS` (3) flagged rows in the space, deactivated ones included      |
   | 409    | `enforced_skills_budget`       | the flagged skills' published `SKILL.md` bodies exceed `CHAT_SKILLS_CONTENT_BUDGET_CHARS` (64 000) |
-  | 422    | `version_artifact_unavailable` | the skill's own published archive cannot be read                                                   |
+  | 422    | `version_artifact_unavailable` | the published archive of this skill, or of another skill already flagged here, cannot be read      |
 
-- **Setting `true`:** runs in one transaction under the advisory lock
-  `space-chat-enforced:<spaceId>` (`withChatEnforcementLock`). The flag is
-  written first, then checked (`assertChatEnforceable`); a refusal rolls the
-  whole patch back, and two concurrent enforcements cannot both pass the cap.
+- **Setting `true`:** `updatePlacementSettings` runs it in one transaction
+  under the advisory lock `space-chat-enforced:<spaceId>`. The flag is written
+  first, then checked (`assertChatEnforceable`); a refusal rolls the whole patch
+  back, and two concurrent enforcements cannot both pass the cap.
 - **Setting `false`:** a plain write, with no lock and no check.
 - **Audit:** `package.chat_enforced` / `package.chat_released`
   (`resourceType: "package"`, `after: { spaceId }`), written only when the
@@ -44,10 +44,13 @@ comes back enforced when switched on again. It shows up on the wire as
 Both constants live in `@appstrate/core/chat-contract`, so the PATCH and the
 chat agree on them.
 
-## Reading: `loadEnforcedChatSkills`
+## Reading: `loadEnforcedChatSkills` and `listEnforcedChatSkills`
 
-`ctx.services.loadEnforcedChatSkills(orgId, spaceId)` is implemented in
-`apps/api/src/services/chat-enforced-skills.ts` and runs with platform authority.
+Both `ctx.services` entries are implemented in
+`apps/api/src/services/chat-enforced-skills.ts` and run with platform
+authority. `listEnforcedChatSkills` answers `EnforcedChatSkillRef
+{ packageId, name, version }` from the database alone, for the names route;
+`loadEnforcedChatSkills`, for the turn, also reads each archive:
 
 - It returns the space's **active** skills whose placement is flagged, ordered
   by id.
@@ -58,8 +61,10 @@ chat agree on them.
   space but has no published version to follow") instead of the skill.
 - Any other failure rejects, an unreadable archive
   (`version_artifact_unavailable`, a storage fault) included. The chat module's
-  deps wrapper (`buildChatPlatformDeps`) turns that rejection into a
-  **503 `enforced_skills_unavailable`**.
+  deps wrapper (`buildChatPlatformDeps`) turns a rejection of either read into a
+  **503 `enforced_skills_unavailable`**. When the cause is an API error (a lost
+  archive), its detail, which names the skill, is appended, so an admin knows
+  which skill to release; otherwise the detail says to retry.
 
 ## The turn
 
@@ -68,7 +73,8 @@ the session upsert, keyed on the space the router entered, and awaits it in
 phase A's join (with the model list and the session row). A 503 therefore
 refuses the turn before attachment materialization, credential resolution, the
 admission gate, the user message, the active-stream marker and the MCP session.
-The same promise feeds the caller-context block.
+As with every preamble refusal, the session row and the turn's skill selection
+are already upserted by then. The same promise feeds the caller-context block.
 
 `## Skills` is rendered by `formatSkillsSection`, which the context block
 appends on every path. The enforced skills survive both degradations of
@@ -99,8 +105,9 @@ whatever `readsSkills`. Its order:
 ## `GET /api/chat/enforced-skills`
 
 Answers the names for the space the router entered:
-`{ object: "list", data: [{ id, name, version }] }`. It never returns content,
-because a member without `skills:read` may call it.
+`{ object: "list", data: [{ id, name, version }] }`, read from the database
+through `listEnforcedChatSkills` (no archive download). It never returns
+content, because a member without `skills:read` may call it.
 
 It is gated `chat:write`, like the turn, and rate-limited at 120/min. A load
 failure answers the same 503.

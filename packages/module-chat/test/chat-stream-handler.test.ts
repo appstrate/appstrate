@@ -739,7 +739,7 @@ describe("handleChatStream", () => {
       content: "Always sign with the house motto.",
     };
 
-    it("refuses the turn with a 503 when they cannot be loaded, before anything is written", async () => {
+    it("refuses the turn with a 503 when they cannot be loaded: no message, no marker, no engine", async () => {
       const sessionId = mintSessionId();
       const { engine, calls } = scriptedEngine();
       const res = await postChat(sessionId, undefined, engine, {
@@ -753,7 +753,7 @@ describe("handleChatStream", () => {
       expect(res.headers.get("content-type") ?? "").toContain("application/problem+json");
       const body = (await res.json()) as { code?: string };
       expect(body.code).toBe("enforced_skills_unavailable");
-      // No engine, so no MCP session and no usage; no user message either.
+      // The session row and its selection are upserted, as for every preamble refusal.
       expect(calls).toEqual([]);
       const rows = await db
         .select()

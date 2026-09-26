@@ -37,6 +37,7 @@ import type {
   ResolvedChatAttachment,
   ChatModelResolution,
   EnforcedChatSkill,
+  EnforcedChatSkillRef,
 } from "@appstrate/core/chat-contract";
 
 export interface ChatPlatformDeps {
@@ -107,6 +108,27 @@ export interface ChatPlatformDeps {
    * turn is refused rather than run without them.
    */
   loadEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkill[]>;
+  /** Their names only, from the database (no archive read); same 503 on failure. */
+  listEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkillRef[]>;
+}
+
+/**
+ * A failed read of the space's enforced skills, as a 503. An `ApiError` cause
+ * (a lost archive) names the skill, so its detail is kept: that fault does not
+ * pass with a retry, and an admin must know which skill to release.
+ */
+function enforcedSkillsRead<T>(read: Promise<T>, orgId: string, spaceId: string): Promise<T> {
+  return read.catch((cause: unknown) => {
+    logger.warn("enforced chat skills unavailable", { orgId, spaceId, err: String(cause) });
+    const why = cause instanceof ApiError ? cause.message : "Retry shortly.";
+    throw new ApiError({
+      status: 503,
+      code: "enforced_skills_unavailable",
+      title: "Service Unavailable",
+      detail: `The skills this space requires in its conversations could not be loaded. ${why}`,
+      cause,
+    });
+  });
 }
 
 /**
@@ -133,16 +155,8 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
     cleanupSessionFiles: (chatSessionId, tx) => ctx.services.cleanupSessionFiles(chatSessionId, tx),
     checkUsageAllowed: (args) => ctx.services.checkUsageAllowed(args),
     loadEnforcedSkills: (orgId, spaceId) =>
-      ctx.services.loadEnforcedChatSkills(orgId, spaceId).catch((cause: unknown) => {
-        logger.warn("enforced chat skills unavailable", { orgId, spaceId, err: String(cause) });
-        throw new ApiError({
-          status: 503,
-          code: "enforced_skills_unavailable",
-          title: "Service Unavailable",
-          detail:
-            "The skills this space requires in its conversations could not be loaded. Retry shortly.",
-          cause,
-        });
-      }),
+      enforcedSkillsRead(ctx.services.loadEnforcedChatSkills(orgId, spaceId), orgId, spaceId),
+    listEnforcedSkills: (orgId, spaceId) =>
+      enforcedSkillsRead(ctx.services.listEnforcedChatSkills(orgId, spaceId), orgId, spaceId),
   };
 }

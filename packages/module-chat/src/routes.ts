@@ -281,14 +281,14 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     return c.body(null, 204);
   });
 
-  // GET /api/chat/enforced-skills — names only: a member without `skills:read`
-  // may call it. Gated like the turn that injects them.
+  // GET /api/chat/enforced-skills — names only, from the database: a member
+  // without `skills:read` may call it. Gated like the turn that injects them.
   router.get(
     "/api/chat/enforced-skills",
     rateLimited(120),
     requireModulePermission("chat", "write"),
     async (c) => {
-      const skills = await deps.loadEnforcedSkills(c.get("orgId"), c.get("space").id);
+      const skills = await deps.listEnforcedSkills(c.get("orgId"), c.get("space").id);
       return c.json({
         object: "list",
         data: skills.map(({ packageId, name, version }) => ({ id: packageId, name, version })),
