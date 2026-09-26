@@ -54,7 +54,11 @@ import {
   promoteStagedDaemon,
 } from "../src/commands/runner.ts";
 import type { RunnerExec, RunnerFs, RunnerHttp } from "../src/lib/runner/exec.ts";
-import { APPSTRATE_MINISIGN_PUBKEY, type ReleaseChannelDeps } from "../src/lib/self-update.ts";
+import {
+  APPSTRATE_MINISIGN_PUBKEY,
+  MinisignMissingError,
+  type ReleaseChannelDeps,
+} from "../src/lib/self-update.ts";
 
 // ─── fakes ───────────────────────────────────────────────────────────────
 
@@ -178,7 +182,9 @@ function fakeHttp(opts: {
 }
 
 /** Signed-artefact deps for `resolveDaemonReleaseVersion`, recording every fetch. */
-function fakeChannelDeps(opts: { tag?: unknown; minisignOk?: boolean } = {}): {
+function fakeChannelDeps(
+  opts: { tag?: unknown; minisignOk?: boolean; minisignMissing?: boolean } = {},
+): {
   deps: ReleaseChannelDeps;
   fetched: string[];
 } {
@@ -195,6 +201,8 @@ function fakeChannelDeps(opts: { tag?: unknown; minisignOk?: boolean } = {}): {
         return new Uint8Array([0xde, 0xad]);
       },
       async runCommand(_cmd, args) {
+        // exitCode -1 is how `runCommand` reports ENOENT.
+        if (opts.minisignMissing) return { ok: false, exitCode: -1, stdout: "", stderr: "ENOENT" };
         const ok = opts.minisignOk !== false || args[0] !== "-V";
         return { ok, exitCode: ok ? 0 : 1, stdout: "", stderr: "" };
       },
@@ -578,6 +586,16 @@ describe("url builders", () => {
         /(not a platform v<semver>|Signature verification FAILED)[\s\S]*APPSTRATE_VERSION=vX\.Y\.Z bash -s -- --platform-url <url> --token <token>/,
       );
     }
+  });
+
+  it("resolveDaemonReleaseVersion: a missing minisign carries no release-CLI hint", async () => {
+    const { deps, fetched } = fakeChannelDeps({ minisignMissing: true });
+    const err = await resolveDaemonReleaseVersion("latest", deps).catch((e: unknown) => e);
+    // A release CLI verifies with minisign too, so the hint would mislead.
+    expect(err).toBeInstanceOf(MinisignMissingError);
+    expect((err as Error).message).toMatch(/^minisign is required/);
+    expect((err as Error).message).not.toContain("APPSTRATE_VERSION");
+    expect(fetched).toEqual([]);
   });
 
   it("firecrackerUrls: tarball + sha + inner paths (VMM and jailer from ONE archive)", () => {

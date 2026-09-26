@@ -309,6 +309,12 @@ export const defaultSelfUpdateDeps: SelfUpdateDeps = {
 };
 
 /**
+ * minisign is not installed. Its own class so the "pin a release" hints can
+ * pass it through untouched: a pinned install verifies with minisign too.
+ */
+export class MinisignMissingError extends Error {}
+
+/**
  * Download a small text artefact and its detached minisign signature into
  * `workDir`, verify them against the pinned Appstrate release key, and return
  * the text. The content is only handed back once the signature holds, so no
@@ -326,7 +332,7 @@ export async function fetchSignedText(
   const probe = await deps.runCommand("minisign", ["-v"]);
   if (!probe.ok && probe.exitCode === -1) {
     // `runCommand` returns exitCode -1 for ENOENT (cmd not found).
-    throw new Error(
+    throw new MinisignMissingError(
       [
         `minisign is required to verify ${opts.subject}.`,
         "  → macOS:   brew install minisign",
@@ -367,7 +373,7 @@ export async function fetchSignedText(
  * ({@link CHANNEL_MANIFEST_URL}), without the `v` prefix. The signature is
  * verified BEFORE the body is parsed, then the manifest must be exactly the
  * published contract. Every failure throws; callers append the pin escape
- * hatch that fits their command.
+ * hatch that fits their command (except to a {@link MinisignMissingError}).
  */
 export async function resolveLatestRelease(deps: ReleaseChannelDeps): Promise<string> {
   const workDir = await deps.makeWorkDir();
@@ -433,6 +439,7 @@ export async function resolveTargetVersion(
   try {
     return await resolveLatestRelease(deps);
   } catch (err) {
+    if (err instanceof MinisignMissingError) throw err;
     throw new Error(
       `${(err as Error).message}\n` +
         `Pin a release with --release X.Y.Z to skip the channel manifest (${CHANNEL_MANIFEST_URL}).`,

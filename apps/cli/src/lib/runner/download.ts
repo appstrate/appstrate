@@ -28,6 +28,7 @@ import type { RunnerExec, RunnerFs, RunnerHttp } from "./exec.ts";
 import type { ProgressFn } from "../download.ts";
 import {
   fetchSignedText,
+  MinisignMissingError,
   parseChecksumLine,
   resolveLatestRelease,
   type ReleaseChannelDeps,
@@ -95,6 +96,8 @@ export async function resolveDaemonReleaseVersion(
   try {
     return await resolveLatestRelease(deps);
   } catch (err) {
+    // A pinned release verifies with minisign too: no hint helps there.
+    if (err instanceof MinisignMissingError) throw err;
     // Only a dev CLI gets here: a release CLI pins the daemon to its own
     // version, so the escape hatch is running one. The bootstrap uses the tag
     // verbatim (hence the `v`) and elevates with `sudo -E` itself — no outer sudo.

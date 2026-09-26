@@ -20,6 +20,8 @@
 # commit, then commit and push:
 #   git checkout <prev> -- channels index.html install.sh install.sh.sha256 \
 #     install.sh.minisig runner runner.sha256 runner.minisig verify.sh appstrate.pub
+# A path <prev> predates (e.g. channels, rolling back the first manifest) is
+# `git rm -r`ed instead: one missing pathspec aborts the whole checkout.
 # Never `git revert` the `publish: <tag>` commit: it also created <tag>/, and
 # deleting it 404s pinned installs (a re-dispatch would re-render other bytes).
 # Later publishes are then compared against the restored manifest.

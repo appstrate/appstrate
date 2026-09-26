@@ -7,6 +7,7 @@ import {
   assetName,
   compareSemver,
   detectPlatform,
+  MinisignMissingError,
   normalizeVersion,
   parseChecksumLine,
   releaseUrls,
@@ -266,11 +267,15 @@ describe("resolveTargetVersion", () => {
     expect(fake.removed).toEqual(["/tmp/fake-channel"]);
   });
 
-  it("fails closed before any download when minisign is missing", async () => {
+  it("fails closed before any download when minisign is missing, with no pin hint", async () => {
     const fake = channelFake({ minisign: "missing" });
-    await expect(resolveTargetVersion(undefined, fake.deps)).rejects.toThrow(
-      /minisign is required to verify the release channel manifest[\s\S]*--release X\.Y\.Z/,
+    const err = await resolveTargetVersion(undefined, fake.deps).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MinisignMissingError);
+    // Pinning cannot help: the pinned path verifies with minisign too.
+    expect((err as Error).message).toMatch(
+      /^minisign is required to verify the release channel manifest/,
     );
+    expect((err as Error).message).not.toContain("--release");
     expect(fake.fetched).toEqual([]);
   });
 

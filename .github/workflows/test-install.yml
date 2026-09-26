@@ -127,7 +127,12 @@ jobs:
             jq -n --arg tag "$1" '{schema: 1, channel: "latest", tag: $tag}' >"$o/channels/latest.json"
             echo "sig $1${2:-}" >"$o/channels/latest.json.minisig"
           }
-          publish() { scripts/sync-installer-pages.sh "$1" "$W/out-$1" "$P"; }
+          # The script's ::error::/::warning::/::notice:: lines and job summary
+          # are expected here: prefix every line so the runner parses none, and
+          # keep the summary off this job (pipefail keeps the script's status).
+          publish() {
+            GITHUB_STEP_SUMMARY='' scripts/sync-installer-pages.sh "$1" "$W/out-$1" "$P" 2>&1 | sed 's/^/[sync] /'
+          }
           channel_is() { # TAG [MARK]: manifest, verify.sh and appstrate.pub
             if [ "$(jq -r .tag "$P/channels/latest.json")" != "$1" ] ||
               ! grep -qx "sig $1${2:-}" "$P/channels/latest.json.minisig"; then
