@@ -6,8 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.63] - 2026-09-26
+
+### Operators
+
+- **Three migrations, applied at boot, no operator script.** `0074_chat_session_skills`
+  (the enum `chat_skill_mode` and two `chat_sessions` columns with constant
+  defaults) and `0076_space_packages_chat_enforced` (one `space_packages` column
+  with a constant default) are shape only. `0075_org_integration_oauth_clients`
+  adds `integration_oauth_clients.org_id`, fills it from each row's space and
+  makes it `NOT NULL`, then relaxes `space_id` to nullable: every existing client
+  stays a space client. No new or renamed environment variable. The platform,
+  `PI_IMAGE` and `SIDECAR_IMAGE` move together, as always.
+- **Boot log lines renamed** (#1129). A failed orchestrator handshake logs
+  `Container orchestrator initialize failed — retrying in background`, then
+  `Container orchestrator initialize retry failed` once per minute while it
+  stays broken. The realtime LISTEN install logs
+  `Realtime LISTEN failed — retrying in background` (formerly
+  `Could not initialize realtime LISTEN`, still `error`). Alerts keyed on the
+  old texts need updating.
+- **Firecracker hosts**: the guest protocol moves to 4 (#1547). The kernel and
+  rootfs published with this release must run with this release's runner daemon.
+
 ### Added
 
+- **Skills in the chat: automatic, manual and strict modes per conversation**
+  (#1494). Automatic (the default) lists the space's skills and lets the
+  assistant load one on demand; manual and strict inject the chosen skills'
+  `SKILL.md` in full (5 at most, 64 000 characters shared); strict also removes
+  every `skills:*` permission from the turn, so the assistant can neither list,
+  read nor attach another skill. The choice is made in the composer and travels
+  with the next message: `POST /api/chat` accepts `skill_mode` and
+  `pinned_skills` (both or neither), and every chat session DTO carries them.
 - **A space can enforce skills on its chat** (#1586). `chat_enforced` on
   `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` (skills only, gated
   `skills:write` in the space) injects the skill's latest published `SKILL.md`
@@ -68,8 +98,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   forward by SemVer, so re-publishing an older release no longer rolls them
   back.
 
+- **`appstrate code sync` prints each entry's version** (#1590): `+ <slug> <v>`
+  for a new entry, `~ <slug> <before> → <after>` when the version moved
+  (`~ <slug> <v>` when only the content did), `- <slug> <v>` for a removed one,
+  under `--dry-run` as after a real sync. `--print-path` output and every
+  materialized file are unchanged.
+
 ### Fixed
 
+- **A chat turn error shows its own sentence again** (#1582). Out of credits,
+  blocked subscription, a connection to reconnect, rate limiting and an org
+  being deleted each get their own message instead of the generic « La
+  génération a échoué » ; a billing refusal points a billing manager to the
+  billing page and tells anyone else to contact an administrator, and offers no
+  Retry.
+- **`/health` recovers after a failed boot handshake with the run backend**
+  (#1129). A transient failure of the orchestrator's `initialize()` (an image
+  pull, a socket proxy or runner daemon not up yet) pinned `checks.agents` to
+  `degraded` — and the container `unhealthy` — for the life of the process; it
+  is now retried in the background and `/health` turns `healthy` once it
+  succeeds, without a restart. The platform-network probe no longer caches "not
+  in Docker" after a daemon 5xx or transport error.
+- **The sidecar exits when its forward proxy cannot bind its port** (#1587),
+  so the run fails fast instead of starting an agent whose `HTTP_PROXY` points
+  at nothing.
+- **The MITM egress listener honours the CONNECT port** (#1588). It checked
+  the SNI against port 443 and always forwarded to `:443`, so a `delivery.http`
+  runner asking for `host:8443` was answered by `host:443`, and an integration
+  declaring a non-443 port could not work. The SNI is now checked at the
+  CONNECT port and the request goes to that port.
+- **Local integration runners inside Firecracker guests are bound by their
+  connection's egress allowlist** (#1547). Every runner ran on one shared uid
+  with direct egress, so the sidecar could not tell runners apart and let any of
+  them through. Each runner now gets its own uid, is attributed by the kernel
+  socket owner, has loopback-only egress (its DNS steered to the sidecar), and
+  cannot reach another runner's listeners or MITM servers. Docker mode is
+  unchanged apart from the MITM inner servers moving to unix sockets.
 - **Runs on an aliased model backed by the OpenCode Go provider no longer fail
   with `400 MissingSessionID`** (#1583). The sidecar now re-originates an aliased
   call through the backing's pi-ai provider, so provider-level headers such as
