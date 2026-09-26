@@ -68,14 +68,18 @@ const failingOrchestrator = {
 };
 
 describe("boot gate", () => {
+  // Stops any orchestrator retry loop a test starts, so none leaks into other suites.
+  let controller: AbortController;
+
   beforeEach(() => {
+    controller = new AbortController();
     _resetServerReadyForTesting();
     _resetAgentRuntimeReadinessForTesting();
   });
 
   afterEach(() => {
-    // Never leave the module-level flags flipped (or a retry timer armed) for
-    // other suites.
+    // Never leave the module-level flags flipped for other suites.
+    controller.abort();
     _resetServerReadyForTesting();
     _resetAgentRuntimeReadinessForTesting();
   });
@@ -170,7 +174,7 @@ describe("boot gate", () => {
 
   it("reports degraded when boot completes without the agents orchestrator", async () => {
     const app = buildGatedApp();
-    await initializeAgentRuntime(failingOrchestrator);
+    await initializeAgentRuntime(failingOrchestrator, { signal: controller.signal });
     markServerReady();
 
     const { httpStatus, body } = await getHealth(app);
@@ -190,7 +194,7 @@ describe("boot gate", () => {
           if (!dependencyUp) throw new Error("runtime image pull failed");
         },
       },
-      { initialDelayMs: 1, maxDelayMs: 4 },
+      { initialDelayMs: 1, maxDelayMs: 4, signal: controller.signal },
     );
     markServerReady();
 

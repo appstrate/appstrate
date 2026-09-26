@@ -33,6 +33,7 @@ import { CLIENT_IP_HEADER } from "./client-ip.ts";
 import { triggerPostBootstrapOrg } from "./post-bootstrap-hook.ts";
 import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
+import { retryInBackground } from "./retry-in-background.ts";
 import { initCacheBus } from "./cache-bus.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../services/model-registry.ts";
@@ -269,7 +270,11 @@ export async function bootBackground(): Promise<void> {
       logger.error("Could not initialize realtime LISTEN", {
         error: getErrorMessage(err),
       });
-      retryRealtimeInBackground();
+      // Retry forever: giving up leaves every dashboard SSE silent for the process lifetime.
+      retryInBackground("Realtime LISTEN", () => initRealtime(), {
+        initialDelayMs: 1_000,
+        level: "error",
+      });
     }),
     // Cross-replica cache invalidation rides the same LISTEN client. Without
     // it every `@appstrate/core/cache` invalidation stays process-local and
@@ -778,38 +783,6 @@ async function warnOnUnserveableApiVersionPins(): Promise<void> {
       orgs: offenders.map((o) => ({ orgId: o.id, pinnedVersion: o.apiVersion })),
     },
   );
-}
-
-let realtimeRetryArmed = false;
-
-/**
- * Retry the realtime LISTEN install until it lands, armed once per process.
- * Exponential backoff capped at 60 s: giving up would leave a process whose
- * every dashboard SSE is silent for its whole life, with `/health` reporting
- * `checks.realtime: degraded` and nothing acting on it. Fire-and-forget:
- * readiness never waits on it.
- */
-function retryRealtimeInBackground(): void {
-  if (realtimeRetryArmed) return;
-  realtimeRetryArmed = true;
-  void (async () => {
-    for (let delayMs = 1_000; ; delayMs = Math.min(delayMs * 2, 60_000)) {
-      // Unref'd: a pending retry must never hold the process (or a test run) open.
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, delayMs).unref?.();
-      });
-      try {
-        await initRealtime();
-        logger.info("Realtime LISTEN channels initialized after retry");
-        return;
-      } catch (err) {
-        logger.error("Realtime LISTEN retry failed", {
-          nextDelayMs: Math.min(delayMs * 2, 60_000),
-          error: getErrorMessage(err),
-        });
-      }
-    }
-  })();
 }
 
 /**
