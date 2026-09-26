@@ -11,6 +11,14 @@ import { scopedNameRegex } from "@appstrate/core/validation";
 import { chatSkillModeValues } from "@appstrate/db/schema";
 import { MAX_PINNED_SKILLS } from "./skills.ts";
 
+/** `enforced_skills_unavailable`, shared by the turn and the names read. */
+const enforcedSkillsUnavailableResponse = (description: string) => ({
+  description: `\`enforced_skills_unavailable\` — ${description} RFC 9457 problem+json.`,
+  content: {
+    "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+  },
+});
+
 const stdHeaders = {
   "Request-Id": { $ref: "#/components/headers/RequestId" },
   "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -46,7 +54,7 @@ export const chatComponentSchemas = {
         type: "string",
         enum: [...chatSkillModeValues],
         description:
-          "How turns use skills. `auto`: the space's skills are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. Written by the turn that carries it (POST /api/chat).",
+          "How turns use skills. `auto`: the space's skills are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. In every mode, the skills the space enforces (GET /api/chat/enforced-skills) are injected first. Written by the turn that carries it (POST /api/chat).",
       },
       pinned_skills: {
         type: "array",
@@ -294,6 +302,57 @@ export const chatPaths = {
       },
     },
   },
+  "/api/chat/enforced-skills": {
+    get: {
+      operationId: "listChatEnforcedSkills",
+      tags: ["Chat"],
+      summary: "List the skills the space enforces in chat",
+      description:
+        "The skills the current space imposes on every chat conversation, whatever the conversation's `skill_mode` and the caller's `skills:*` grants: each turn injects their latest published `SKILL.md`. Names only — the content is never returned here. Sorted by id.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+      ],
+      responses: {
+        "200": {
+          description: "Enforced skills",
+          headers: stdHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["id", "name", "version"],
+                      properties: {
+                        id: { type: "string", description: "`@scope/name` package id" },
+                        name: { type: "string", description: "Display name, else the id" },
+                        version: {
+                          type: ["string", "null"],
+                          description:
+                            "Latest published version; null when none can be read now (the turn then tells the model the skill is unavailable).",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "429": { description: "Rate limited (120/min per caller)" },
+        "503": enforcedSkillsUnavailableResponse(
+          "the space's enforced skills could not be loaded.",
+        ),
+      },
+    },
+  },
   "/api/chat": {
     post: {
       operationId: "streamChat",
@@ -381,6 +440,9 @@ export const chatPaths = {
           description:
             "Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`.",
         },
+        "503": enforcedSkillsUnavailableResponse(
+          "the skills the space enforces could not be loaded, so the turn is refused before anything is persisted.",
+        ),
       },
     },
   },

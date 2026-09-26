@@ -26,6 +26,8 @@
 import type { MiddlewareHandler } from "hono";
 import type { db } from "@appstrate/db/client";
 import type { ModuleInitContext, UsageRejection } from "@appstrate/core/module";
+import { ApiError } from "@appstrate/core/api-errors";
+import { logger } from "./logger.ts";
 
 /** The chat module's open DB transaction handle (Drizzle tx). */
 type ChatDbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -34,6 +36,7 @@ import type {
   ChatUsageRecord,
   ResolvedChatAttachment,
   ChatModelResolution,
+  EnforcedChatSkill,
 } from "@appstrate/core/chat-contract";
 
 export interface ChatPlatformDeps {
@@ -98,6 +101,14 @@ export interface ChatPlatformDeps {
     sessionId: string | null;
     subscription: boolean;
   }): Promise<UsageRejection | null>;
+  /**
+   * The skills the space imposes on every conversation (active ∧ enforced,
+   * sorted by id, latest published), read with the platform's authority, not
+   * the caller's: a member without `skills:read` still gets them. Rejects with
+   * a 503 `enforced_skills_unavailable`, and the turn is then refused rather
+   * than run without them.
+   */
+  loadEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkill[]>;
 }
 
 /**
@@ -123,5 +134,17 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
     resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),
     cleanupSessionFiles: (chatSessionId, tx) => ctx.services.cleanupSessionFiles(chatSessionId, tx),
     checkUsageAllowed: (args) => ctx.services.checkUsageAllowed(args),
+    loadEnforcedSkills: (orgId, spaceId) =>
+      ctx.services.loadEnforcedChatSkills(orgId, spaceId).catch((cause: unknown) => {
+        logger.warn("enforced chat skills unavailable", { orgId, spaceId, err: String(cause) });
+        throw new ApiError({
+          status: 503,
+          code: "enforced_skills_unavailable",
+          title: "Service Unavailable",
+          detail:
+            "The skills this space requires in its conversations could not be loaded. Retry shortly.",
+          cause,
+        });
+      }),
   };
 }

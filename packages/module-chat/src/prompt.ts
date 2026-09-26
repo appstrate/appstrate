@@ -18,6 +18,7 @@
 import type { Context } from "hono";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/core/naming";
 import type { PrincipalKind } from "@appstrate/core/module";
+import type { EnforcedChatSkill } from "@appstrate/core/chat-contract";
 import { logger } from "./logger.ts";
 import { reaches, type TurnCapabilities } from "./capabilities.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
@@ -84,12 +85,14 @@ export type ChatEnv = {
 
 // Named by the persona and rendered by the context block: one string for both.
 const SKILLS_HEADING = "## Skills";
+const SKILLS_ENFORCED_LEAD =
+  "This space requires these skills in every conversation. Each is a procedure for YOU: follow it whenever it applies; where it conflicts with a skill the user chose, it wins. Only each SKILL.md is provided: a file it references is out of reach unless this turn holds skill tools.";
 const SKILLS_INJECTED_LEAD =
   "The user chose these skills for this conversation. Each is a procedure for YOU: follow it whenever it applies.";
 // Why this turn holds no `skills:*`: without it, a model reads the gap as a role
 // to fix and hunts through other operations.
 const SKILLS_STRICT_NOTE =
-  "The user restricted this conversation to the skills they chose, if any, shown here: that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the space holds — an empty result says nothing about it. Only the user lifts the restriction, by switching this conversation's skill mode in the composer. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
+  "This conversation is restricted to the skills shown here — those the space requires and those the user chose, if any: that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the space holds — an empty result says nothing about it. The user lifts only their own restriction, by switching this conversation's skill mode in the composer; the space's requirement stays. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
 
 /**
  * Instructions for an act the turn cannot perform are ABSENT rather than
@@ -296,6 +299,49 @@ function draftOnlyHint(input: {
 }
 
 /**
+ * The `## Skills` section, or "" when it has nothing to say. Apart from the
+ * rest of the block so {@link buildCallerContextBlock} appends it on every
+ * path: the space's skills never hang on `/api/me/context` answering.
+ *
+ * Order: the strict note, the space's skills, the `auto` listing, the chosen
+ * skills, the notices. A listed skill the turn cannot load is noise, as an
+ * agent it cannot launch is; an injected one needs no tool.
+ */
+function formatSkillsSection(opts: {
+  selection: ChatSkillSelection;
+  readsSkills: boolean;
+  /** The space's active skills (`/api/me/context`), listed by name in `auto`. */
+  catalogue: readonly SkillHint[];
+  catalogueTruncated: boolean;
+  contents: ReadonlyMap<string, SkillContent>;
+  enforced: readonly EnforcedChatSkill[];
+}): string {
+  const skills = resolveChatSkills(opts.selection, opts.contents, opts.enforced);
+  const imposed = new Set(opts.enforced.map((skill) => skill.packageId));
+  const listed =
+    opts.readsSkills && !injectsSkills(opts.selection.skillMode)
+      ? opts.catalogue.filter((skill) => !imposed.has(skill.packageId))
+      : [];
+  const groups: string[][] = [];
+  if (opts.selection.skillMode === "strict") groups.push([SKILLS_STRICT_NOTE]);
+  if (skills.enforced.length) {
+    groups.push([SKILLS_ENFORCED_LEAD, ...skills.enforced.flatMap((s) => ["", skillBlock(s)])]);
+  }
+  if (listed.length) {
+    groups.push([
+      ...listed.map(skillLine),
+      ...(opts.catalogueTruncated ? ["(list truncated)"] : []),
+    ]);
+  }
+  if (skills.chosen.length) {
+    groups.push([SKILLS_INJECTED_LEAD, ...skills.chosen.flatMap((s) => ["", skillBlock(s)])]);
+  }
+  if (skills.notices.length) groups.push(skills.notices);
+  if (groups.length === 0) return "";
+  return [SKILLS_HEADING, ...groups.map((group) => group.join("\n"))].join("\n\n");
+}
+
+/**
  * Render the caller context into a system-prompt block. Returns "" when the
  * payload is unusable so the caller can skip injection.
  */
@@ -313,20 +359,22 @@ export function formatCallerContext(
     skills: ChatSkillSelection;
     /** The chosen skills active here, read by {@link buildCallerContextBlock}. */
     skillContents?: ReadonlyMap<string, SkillContent>;
+    /** The space's enforced skills, loaded by the turn. */
+    enforced?: readonly EnforcedChatSkill[];
   },
 ): string {
   const author = opts.capabilities.authors;
   const runnable = reaches(opts.capabilities.runLevel, "run");
   const ctx = (raw ?? {}) as CallerContext;
   // Before the emptiness check: a payload holding only skills deserves a block.
-  // A listed skill the turn cannot load is noise, as an agent it cannot launch
-  // is; an injected one needs no tool. `auto` lists, the other modes inject.
-  const skills = resolveChatSkills(opts.skills, opts.skillContents ?? new Map());
-  const catalogue = injectsSkills(opts.skills.skillMode) ? [] : (ctx.skills ?? []);
-  const listsSkills = opts.capabilities.readsSkills && catalogue.length > 0;
-  const strict = opts.skills.skillMode === "strict";
-  const hasSkillSection =
-    strict || listsSkills || skills.injected.length > 0 || skills.notices.length > 0;
+  const skillSection = formatSkillsSection({
+    selection: opts.skills,
+    readsSkills: opts.capabilities.readsSkills,
+    catalogue: ctx.skills ?? [],
+    catalogueTruncated: ctx.skills_truncated === true,
+    contents: opts.skillContents ?? new Map(),
+    enforced: opts.enforced ?? [],
+  });
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();
   const role = ctx.org?.role?.trim();
@@ -339,7 +387,7 @@ export function formatCallerContext(
     !orgName &&
     !ctx.connections?.length &&
     !ctx.agents?.length &&
-    !hasSkillSection
+    !skillSection
   )
     return "";
 
@@ -437,19 +485,7 @@ export function formatCallerContext(
     if (ctx.agents_truncated) lines.push("(list truncated)");
   }
   // Rendered whatever the authoring grant: the chat uses skills for itself.
-  if (hasSkillSection) {
-    lines.push("", SKILLS_HEADING);
-    if (strict) lines.push(SKILLS_STRICT_NOTE);
-    if (listsSkills) {
-      for (const skill of catalogue) lines.push(skillLine(skill));
-      if (ctx.skills_truncated) lines.push("(list truncated)");
-    }
-    if (skills.injected.length) {
-      lines.push(SKILLS_INJECTED_LEAD);
-      for (const skill of skills.injected) lines.push("", skillBlock(skill));
-    }
-    if (skills.notices.length) lines.push("", ...skills.notices);
-  }
+  if (skillSection) lines.push("", skillSection);
   // `/api/me/context` also carries `recent_runs`, deliberately neither read nor rendered here: it
   // rewrites itself on every launch, busting the system prompt's single cache breakpoint.
   // `buildSystemPrompt` tells the model to call `listRuns` instead (when the turn reads runs).
@@ -499,6 +535,26 @@ function spaceRoleLabel(ref: SpaceRoleRefLike | undefined | null): string | null
   return ref.role.name?.trim() || ref.role.id;
 }
 
+/** `GET /api/me/context`: the payload, `400` when the caller lost the space, else null. */
+async function readCallerContext(
+  deps: ChatPlatformDeps,
+  origin: string,
+  headers: Headers,
+): Promise<CallerContext | 400 | null> {
+  try {
+    const res = await deps.dispatch(
+      new Request(new URL("/api/me/context", origin).toString(), { headers }),
+    );
+    if (res.ok) return (await res.json()) as CallerContext;
+    return res.status === 400 ? 400 : null;
+  } catch (err) {
+    logger.warn("me/context unavailable — chat degrades without caller context", {
+      err: String(err),
+    });
+    return null;
+  }
+}
+
 /**
  * Build the caller-context system-prompt block from `GET /api/me/context` — the
  * canonical assembler the platform MCP `get_me` tool also uses, so the chat
@@ -509,8 +565,10 @@ function spaceRoleLabel(ref: SpaceRoleRefLike | undefined | null): string | null
  * `spaceId` is the space the chat router entered, so it is always known here.
  * A 400 from the dispatch (the caller lost the space between the entry and this
  * read) degrades to an identity-only block built from the already-authenticated
- * request context (name/email/role/org); any other failure degrades to no block
- * (""). Identity always survives so date/role grounding holds.
+ * request context (name/email/role/org); any other failure degrades to the
+ * skills section alone. Identity survives the first so date/role grounding
+ * holds; the space's skills survive both. A rejected `enforced` rejects the
+ * block: the turn is refused rather than run without them.
  */
 export async function buildCallerContextBlock(
   c: Context<ChatEnv>,
@@ -525,69 +583,61 @@ export async function buildCallerContextBlock(
     capabilities: TurnCapabilities;
     permissions: readonly string[];
     skills: ChatSkillSelection;
+    /** The space's enforced skills, already loading: awaited alongside the reads. */
+    enforced: Promise<readonly EnforcedChatSkill[]>;
   },
 ): Promise<string> {
   const { origin, headers, spaceId, user, deps, locale, capabilities, skills } = args;
   // The persona's while previewing: this block tells the model what the caller
   // may do, and every operation it names is checked against the persona.
   const persona = c.get("viewAs");
-  const role = persona?.orgRole ?? c.get("orgRole");
-  const rolePreview = persona !== undefined;
-  const spaceRole = spaceRoleLabel(c.get("spaceRole"));
-  const orgName = c.get("orgName");
-  const orgSlug = c.get("orgSlug");
-
-  // Identity/role straight off the request context — the fallback when the
-  // space-scoped read cannot answer. It names no chosen skill (the listing that
-  // says which are active answers no better), but keeps the mode: strict's note.
-  const identityOnly = (): string =>
-    formatCallerContext(
+  const ctxHeaders = new Headers(headers);
+  ctxHeaders.set("x-space-id", spaceId);
+  const [context, skillContents, enforced] = await Promise.all([
+    readCallerContext(deps, origin, ctxHeaders),
+    loadSkillContents(
+      deps,
+      origin,
+      ctxHeaders,
+      injectsSkills(skills.skillMode) ? skills.pinnedSkills : [],
+    ),
+    args.enforced,
+  ]);
+  const opts = {
+    locale,
+    capabilities,
+    rolePreview: persona !== undefined,
+    spaceRole: spaceRoleLabel(c.get("spaceRole")),
+    spaceId,
+    permissions: args.permissions,
+    enforced,
+  };
+  if (context && context !== 400) {
+    return formatCallerContext(context, { ...opts, skills, skillContents });
+  }
+  // Degraded: nothing says which chosen skills are active here, so none is named,
+  // but the mode (strict's note) and the space's skills stay.
+  const unresolved: ChatSkillSelection = { skillMode: skills.skillMode, pinnedSkills: [] };
+  if (context === 400) {
+    // Identity/role straight off the request context.
+    return formatCallerContext(
       {
         user: { name: user.name ?? null, email: user.email ?? null },
-        org: { role: role ?? null, name: orgName ?? null, slug: orgSlug ?? null },
+        org: {
+          role: persona?.orgRole ?? c.get("orgRole") ?? null,
+          name: c.get("orgName") ?? null,
+          slug: c.get("orgSlug") ?? null,
+        },
       },
-      {
-        locale,
-        capabilities,
-        rolePreview,
-        spaceRole,
-        spaceId,
-        permissions: args.permissions,
-        skills: { skillMode: skills.skillMode, pinnedSkills: [] },
-      },
+      { ...opts, skills: unresolved },
     );
-
-  const chosen = injectsSkills(skills.skillMode) ? skills.pinnedSkills : [];
-  try {
-    const ctxHeaders = new Headers();
-    for (const [k, v] of Object.entries(headers)) ctxHeaders.set(k, v);
-    ctxHeaders.set("x-space-id", spaceId);
-    const [res, skillContents] = await Promise.all([
-      deps.dispatch(
-        new Request(new URL("/api/me/context", origin).toString(), { headers: ctxHeaders }),
-      ),
-      loadSkillContents(deps, origin, ctxHeaders, chosen),
-    ]);
-    if (res.ok) {
-      return formatCallerContext((await res.json()) as CallerContext, {
-        locale,
-        capabilities,
-        rolePreview,
-        spaceRole,
-        spaceId,
-        permissions: args.permissions,
-        skills,
-        skillContents,
-      });
-    }
-    // No space context (e.g. requireSpaceContext rejected) — keep the
-    // identity/role block rather than dropping context entirely.
-    if (res.status === 400) return identityOnly();
-    return "";
-  } catch (err) {
-    logger.warn("me/context unavailable — chat degrades without caller context", {
-      err: String(err),
-    });
-    return "";
   }
+  return formatSkillsSection({
+    selection: unresolved,
+    readsSkills: capabilities.readsSkills,
+    catalogue: [],
+    catalogueTruncated: false,
+    contents: new Map(),
+    enforced,
+  });
 }

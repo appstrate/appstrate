@@ -13,6 +13,7 @@ import { formatCallerContext, buildCallerContextBlock } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
 import type { ChatPlatformDeps } from "../src/platform-services.ts";
+import type { EnforcedChatSkill } from "@appstrate/core/chat-contract";
 
 /** Minimal Hono-context stub exposing the `c.get(key)` reads the builder makes. */
 
@@ -42,6 +43,7 @@ function fakeDeps(respond: (req: Request) => Response): {
       resolveChatModel: async () => ({ subscription: false }),
       recordChatUsage: async () => {},
       checkUsageAllowed: async () => null,
+      loadEnforcedSkills: async () => [],
     },
     lastRequest: () => last,
   };
@@ -390,7 +392,7 @@ describe("formatCallerContext", () => {
       );
     for (const out of [strict([]), strict(["@acme/gone"])]) {
       expect(out).toContain("## Skills");
-      expect(out).toContain("The user restricted this conversation to the skills they chose");
+      expect(out).toContain("This conversation is restricted to the skills shown here");
       expect(out).toContain("never change a role or a permission to reach one");
       // The two misreadings seen live: an empty listing as "not in the space",
       // and a role change as the way out.
@@ -401,7 +403,122 @@ describe("formatCallerContext", () => {
       { user: { name: "Ada" }, org: { role: "member" } },
       { ...BASE_OPTS, skills: { skillMode: "manual", pinnedSkills: ["@acme/gone"] } },
     );
-    expect(manual).not.toContain("The user restricted this conversation");
+    expect(manual).not.toContain("This conversation is restricted");
+  });
+
+  describe("space-enforced skills", () => {
+    const HOUSE: EnforcedChatSkill = {
+      packageId: "@acme/house",
+      name: "House rules",
+      version: "2.0.0",
+      content: "---\nname: house\n---\nHouse body.",
+    };
+    const HOUSE_BLOCK =
+      '<skill id="@acme/house" version="2.0.0">\n---\nname: house\n---\nHouse body.\n</skill>';
+    const ENFORCED_LEAD = "This space requires these skills in every conversation.";
+    const NO_SKILLS = BUILDER.filter((p) => !p.startsWith("skills:"));
+
+    it("renders them in every mode, for a turn that cannot read skills", () => {
+      for (const skillMode of ["auto", "manual", "strict"] as const) {
+        const out = formatCallerContext(
+          { user: { name: "Ada" }, org: { role: "member" } },
+          {
+            ...BASE_OPTS,
+            capabilities: caps(NO_SKILLS),
+            skills: { skillMode, pinnedSkills: [] },
+            enforced: [HOUSE],
+          },
+        );
+        expect(out.split("## Skills")).toHaveLength(2);
+        expect(out).toContain(ENFORCED_LEAD);
+        expect(out).toContain("where it conflicts with a skill the user chose, it wins");
+        expect(out).toContain("Only each SKILL.md is provided");
+        expect(out).toContain(HOUSE_BLOCK);
+      }
+    });
+
+    it("leaves them out of the `auto` listing", () => {
+      const out = formatCallerContext(
+        {
+          user: { name: "Ada" },
+          skills: [
+            { packageId: "@acme/house", display_name: "House rules" },
+            { packageId: "@acme/pdf", display_name: "PDF" },
+          ],
+        },
+        { ...BASE_OPTS, enforced: [HOUSE] },
+      );
+      expect(out).toContain("- `@acme/pdf` — PDF");
+      expect(out).not.toContain("- `@acme/house`");
+      expect(out.split("@acme/house")).toHaveLength(2);
+    });
+
+    it("orders the strict note, the space's skills, the chosen ones, then the notices", () => {
+      const out = formatCallerContext(
+        { user: { name: "Ada" } },
+        {
+          ...BASE_OPTS,
+          capabilities: caps(NO_SKILLS),
+          skills: {
+            skillMode: "strict",
+            pinnedSkills: ["@acme/gone", "@acme/house", "@acme/mine"],
+          },
+          skillContents: new Map([
+            ["@acme/mine", { packageId: "@acme/mine", version: null, content: "Mine body." }],
+            ["@acme/house", { packageId: "@acme/house", version: null, content: "Pinned copy." }],
+          ]),
+          enforced: [HOUSE],
+        },
+      );
+      const at = (text: string) => {
+        expect(out).toContain(text);
+        return out.indexOf(text);
+      };
+      expect(at("This conversation is restricted to the skills shown here")).toBeLessThan(
+        at(ENFORCED_LEAD),
+      );
+      expect(at(ENFORCED_LEAD)).toBeLessThan(at("The user chose these skills"));
+      expect(at('<skill id="@acme/mine">')).toBeLessThan(at("`@acme/gone` was chosen"));
+      // A pin naming an enforced skill is dropped: one copy, the space's.
+      expect(out).not.toContain("Pinned copy.");
+      expect(out).not.toContain("`@acme/house` was chosen");
+    });
+
+    it("keeps strict's note true: the space's requirement stays whatever the composer says", () => {
+      const out = formatCallerContext(
+        { user: { name: "Ada" } },
+        {
+          ...BASE_OPTS,
+          capabilities: caps(NO_SKILLS),
+          skills: { skillMode: "strict", pinnedSkills: [] },
+          enforced: [HOUSE],
+        },
+      );
+      expect(out).toContain("those the space requires and those the user chose");
+      expect(out).toContain("The user lifts only their own restriction");
+      expect(out).toContain("the space's requirement stays");
+    });
+
+    it("notices an enforced skill with no readable version", () => {
+      const out = formatCallerContext(
+        { user: { name: "Ada" } },
+        { ...BASE_OPTS, enforced: [{ ...HOUSE, version: null, content: null }] },
+      );
+      expect(out).toContain("`@acme/house` is required by this space but is not available here");
+      expect(out).not.toContain(ENFORCED_LEAD);
+    });
+
+    it("renders byte-identical across two turns", () => {
+      const other: EnforcedChatSkill = { ...HOUSE, packageId: "@acme/alpha", content: "Alpha." };
+      const render = () =>
+        formatCallerContext(
+          { user: { name: "Ada" }, skills: [{ packageId: "@acme/pdf" }] },
+          { ...BASE_OPTS, now: new Date("2026-06-25T09:05:00.000Z"), enforced: [other, HOUSE] },
+        );
+      const first = render();
+      expect(render()).toBe(first);
+      expect(first.indexOf("@acme/alpha")).toBeLessThan(first.indexOf("@acme/house"));
+    });
   });
 
   it("says nothing about the draft for a PUBLISHED agent", () => {
@@ -704,6 +821,9 @@ describe("formatCallerContext", () => {
   });
 });
 
+/** The space enforces nothing: the turn's load resolved empty. */
+const NO_ENFORCED: Promise<readonly EnforcedChatSkill[]> = Promise.resolve([]);
+
 describe("buildCallerContextBlock", () => {
   const user = { id: "u_1", name: "Ada", email: "ada@acme.com" };
 
@@ -724,6 +844,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: DEFAULT_SKILL_SELECTION,
+      enforced: NO_ENFORCED,
     });
     // Block is rendered from the dispatched payload, not from request context.
     expect(out).toContain("`@appstrate/gmail`");
@@ -762,6 +883,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "strict", pinnedSkills: ["@acme/a", "@acme/off"] },
+      enforced: NO_ENFORCED,
     });
     expect(seen.sort()).toEqual([
       "/api/me/context session=abc",
@@ -789,6 +911,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "auto", pinnedSkills: ["@acme/a"] },
+      enforced: NO_ENFORCED,
     });
     expect(seen).toEqual(["/api/me/context"]);
   });
@@ -813,6 +936,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
+      enforced: NO_ENFORCED,
     });
     expect(out).not.toContain("<skill");
     expect(out).toContain("`@acme/a` was chosen for this conversation but is not available here");
@@ -834,6 +958,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps([]),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: DEFAULT_SKILL_SELECTION,
+      enforced: NO_ENFORCED,
     });
     expect(out).not.toContain("## Existing agents you can run");
     expect(out).not.toContain("@appstrate/triage");
@@ -864,6 +989,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(NO_AUTHORING),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: DEFAULT_SKILL_SELECTION,
+      enforced: NO_ENFORCED,
     };
     const preview = await buildCallerContextBlock(
       fakeContext({
@@ -894,6 +1020,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(NO_AUTHORING),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: DEFAULT_SKILL_SELECTION,
+      enforced: NO_ENFORCED,
     };
     const preview = await buildCallerContextBlock(
       fakeContext({
@@ -931,6 +1058,7 @@ describe("buildCallerContextBlock", () => {
       permissions: ["mcp:read", "mcp:invoke"],
       // Nothing was resolved, so a chosen skill must not read as unavailable.
       skills: { skillMode: "manual", pinnedSkills: ["@acme/mine"] },
+      enforced: NO_ENFORCED,
     });
     expect(out).toContain("Ada (ada@acme.com)");
     expect(out).toContain("Current space: `spc_1`");
@@ -948,8 +1076,9 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER.filter((p) => !p.startsWith("skills:"))),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "strict", pinnedSkills: ["@acme/mine"] },
+      enforced: NO_ENFORCED,
     });
-    expect(out).toContain("The user restricted this conversation to the skills they chose");
+    expect(out).toContain("This conversation is restricted to the skills shown here");
     expect(out).not.toContain("@acme/mine");
   });
 
@@ -964,7 +1093,65 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: DEFAULT_SKILL_SELECTION,
+      enforced: NO_ENFORCED,
     });
     expect(out).toBe("");
+  });
+
+  describe("space-enforced skills", () => {
+    const HOUSE: EnforcedChatSkill = {
+      packageId: "@acme/house",
+      name: "House rules",
+      version: "2.0.0",
+      content: "House body.",
+    };
+    const HOUSE_BLOCK = '<skill id="@acme/house" version="2.0.0">\nHouse body.\n</skill>';
+    const build = (deps: ChatPlatformDeps, enforced: Promise<readonly EnforcedChatSkill[]>) =>
+      buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+        origin: "http://127.0.0.1:3000",
+        headers: {},
+        spaceId: "spc_1",
+        user,
+        deps,
+        capabilities: caps(BUILDER),
+        permissions: ["mcp:read", "mcp:invoke"],
+        skills: DEFAULT_SKILL_SELECTION,
+        enforced,
+      });
+
+    it("renders them from the context payload", async () => {
+      const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
+      const out = await build(deps, Promise.resolve([HOUSE]));
+      expect(out).toContain("## Your context");
+      expect(out).toContain(HOUSE_BLOCK);
+    });
+
+    it("survives the identity-only fallback", async () => {
+      const { deps } = fakeDeps(() => new Response(null, { status: 400 }));
+      const out = await build(deps, Promise.resolve([HOUSE]));
+      expect(out).toContain("Ada (ada@acme.com)");
+      expect(out).toContain(HOUSE_BLOCK);
+    });
+
+    it("survives a context read that fails or throws, as the section alone", async () => {
+      for (const respond of [
+        () => new Response(null, { status: 503 }),
+        () => {
+          throw new Error("dispatch down");
+        },
+      ]) {
+        const { deps } = fakeDeps(respond);
+        const out = await build(deps, Promise.resolve([HOUSE]));
+        expect(out.startsWith("## Skills\n")).toBe(true);
+        expect(out).toContain(HOUSE_BLOCK);
+        expect(out).not.toContain("## Your context");
+      }
+    });
+
+    it("rejects when they cannot be loaded, rather than render without them", async () => {
+      const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
+      const failure = new Error("enforced skills unavailable");
+      await expect(build(deps, Promise.reject(failure))).rejects.toBe(failure);
+    });
   });
 });
