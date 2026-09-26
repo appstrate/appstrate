@@ -526,6 +526,13 @@
       "when": 1790350554521,
       "tag": "0074_chat_session_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1790419434152,
+      "tag": "0075_space_packages_chat_enforced",
+      "breakpoints": true
     }
   ]
 }

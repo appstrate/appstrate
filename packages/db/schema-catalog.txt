@@ -532,6 +532,7 @@ column space_members.preset_role text
 column space_members.space_id text not null
 column space_members.user_id text not null
 column space_packages.block_user_connections boolean not null default false
+column space_packages.chat_enforced boolean not null default false
 column space_packages.enabled boolean not null default true
 column space_packages.generation_config jsonb
 column space_packages.input_settings jsonb not null default '{"locked": [], "values": {}}'::jsonb
