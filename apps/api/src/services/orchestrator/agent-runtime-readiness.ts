@@ -29,7 +29,6 @@ export function initializeAgentRuntime(
   orchestrator: Pick<RunOrchestrator, "initialize">,
   options: AgentRuntimeRecoveryOptions = {},
 ): Promise<void> {
-  stopAgentRuntimeRecovery();
   const self: RecoveryChain = { stopped: false };
   chain = self;
 

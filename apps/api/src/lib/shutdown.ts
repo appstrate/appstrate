@@ -74,7 +74,7 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     stopUploadGc();
     stopFileGc();
     stopStorageDeletionWorker();
-    // Before orchestrator shutdown, so a late init retry cannot act on it.
+    // No init retry is scheduled after this; an in-flight attempt's outcome is ignored.
     stopAgentRuntimeRecovery();
     await getOrchestrator().shutdown();
 

@@ -226,6 +226,8 @@ echo "==> Unavailable orchestrator"
 # Absent inside the container at boot; the recovery phase below creates it.
 readonly LATE_DOCKER_SOCKET=/tmp/appstrate-health-e2e-docker.sock
 export HEALTH_E2E_DOCKER_SOCKET="$LATE_DOCKER_SOCKET"
+# info, so recovery can be shown to re-detect the platform network (below).
+export HEALTH_E2E_LOG_LEVEL=info
 compose up -d appstrate
 negative_body=$(wait_for_health_body degraded)
 jq -e '
@@ -291,6 +293,13 @@ if [ "$recovered_id" != "$negative_id" ] || [ "$recovered_start" != "$negative_s
   echo "The container was replaced or restarted during recovery:" >&2
   echo "  before: $negative_id $negative_start" >&2
   echo "  after:  $recovered_id $recovered_start" >&2
+  exit 1
+fi
+# A healthy agents check alone would also pass with a stale "not in Docker"
+# network cache; only a successful detection after recovery logs this line.
+recovered_logs=$(compose logs --no-color appstrate)
+if ! grep -q 'Detected platform Docker network' <<<"$recovered_logs"; then
+  echo 'Recovered without re-detecting the platform Docker network' >&2
   exit 1
 fi
 echo "$recovered_body" | jq -c '{status, checks}'

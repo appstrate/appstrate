@@ -108,18 +108,13 @@ describe("agent runtime readiness", () => {
   });
 
   it("doubles the retry delay up to the ceiling", async () => {
-    const setTimeoutSpy = spyOn(globalThis, "setTimeout");
-    try {
-      const orchestrator = flakyOrchestrator(Infinity);
+    const orchestrator = flakyOrchestrator(Infinity);
 
-      await initializeAgentRuntime(orchestrator, FAST);
-      await waitFor(() => orchestrator.calls >= 6);
+    await initializeAgentRuntime(orchestrator, FAST);
+    await waitFor(() => orchestrator.calls >= 6);
 
-      const delays = setTimeoutSpy.mock.calls.map((call) => call[1]).slice(0, 5);
-      expect(delays).toEqual([1, 2, 4, 4, 4]);
-    } finally {
-      setTimeoutSpy.mockRestore();
-    }
+    const delays = warn.mock.calls.map((call) => (call[1] as { retryInMs: number }).retryInMs);
+    expect(delays.slice(0, 5)).toEqual([1, 2, 4, 4, 4]);
   });
 
   it("cancels a pending retry on stop", async () => {
@@ -155,20 +150,6 @@ describe("agent runtime readiness", () => {
     await init;
 
     expect(isAgentRuntimeReady()).toBe(false);
-  });
-
-  it("retires the previous retry chain when called again", async () => {
-    const first = flakyOrchestrator(Infinity);
-    await initializeAgentRuntime(first, FAST);
-    await waitFor(() => first.calls >= 2);
-
-    const second = flakyOrchestrator(0);
-    await initializeAgentRuntime(second, FAST);
-    const retired = first.calls;
-
-    await Bun.sleep(20);
-    expect(first.calls).toBe(retired);
-    expect(isAgentRuntimeReady()).toBe(true);
   });
 
   it("never rejects, whether initialize() throws synchronously or rejects", async () => {
