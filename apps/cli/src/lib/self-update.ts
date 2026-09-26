@@ -231,7 +231,7 @@ export function compareSemver(a: string, b: string): number {
 }
 
 /** I/O needed to download a small minisign-signed text artefact and verify it. */
-export interface SignedArtefactDeps {
+export interface ReleaseChannelDeps {
   /** GET a URL and return the body as bytes (small artefacts: the minisig). */
   fetchBinary(url: string): Promise<Uint8Array>;
   /** GET a URL and return the body as text (checksums.txt, the channel manifest). */
@@ -240,10 +240,6 @@ export interface SignedArtefactDeps {
   runCommand(cmd: string, args: string[]): Promise<CommandResult>;
   /** Write a file (used in the work dir for minisign input). */
   writeFile(path: string, data: Uint8Array | string): Promise<void>;
-}
-
-/** Signed-artefact I/O plus the throwaway work dir the channel manifest is verified in. */
-export interface ReleaseChannelDeps extends SignedArtefactDeps {
   /** Working directory for downloaded artefacts (signed file + sig). */
   makeWorkDir(): Promise<string>;
   /** Best-effort `rm -rf` — cleans the work dir and the staged download. */
@@ -324,7 +320,7 @@ export const defaultSelfUpdateDeps: SelfUpdateDeps = {
  * `subject` names the artefact in both failure messages.
  */
 export async function fetchSignedText(
-  deps: SignedArtefactDeps,
+  deps: ReleaseChannelDeps,
   opts: { url: string; sigUrl: string; workDir: string; subject: string },
 ): Promise<string> {
   const probe = await deps.runCommand("minisign", ["-v"]);

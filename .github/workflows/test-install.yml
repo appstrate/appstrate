@@ -5,7 +5,7 @@ name: Test Installer
 # so a signing-key rotation merged straight to `main` never re-ran the suite
 # that verifies signatures against it — the one change this workflow exists to
 # catch was the one change that could not trigger it. Both arms therefore list
-# every file `publish-installer.yml` renders, signs or embeds:
+# every file `publish-installer.yml` renders, signs, embeds or runs:
 #
 #   - `scripts/bootstrap.sh`         the platform installer
 #   - `scripts/bootstrap-runner.sh`  the runner installer (carries the
@@ -13,6 +13,8 @@ name: Test Installer
 #                                    the daemon binary)
 #   - `scripts/verify.sh`            the signature-verification helper both ship
 #   - `scripts/appstrate.pub`        the minisign public key they verify against
+#   - `scripts/semver-lt.sh`         the SemVer guard that keeps the signed
+#                                    "latest" channel manifest monotonic
 #
 # Adding a file to `publish-installer.yml` means adding it to BOTH lists here.
 on:
@@ -22,6 +24,7 @@ on:
       - "scripts/bootstrap-runner.sh"
       - "scripts/verify.sh"
       - "scripts/appstrate.pub"
+      - "scripts/semver-lt.sh"
       - ".github/workflows/test-install.yml"
       - ".github/workflows/publish-installer.yml"
   push:
@@ -31,6 +34,7 @@ on:
       - "scripts/bootstrap-runner.sh"
       - "scripts/verify.sh"
       - "scripts/appstrate.pub"
+      - "scripts/semver-lt.sh"
       - ".github/workflows/test-install.yml"
       - ".github/workflows/publish-installer.yml"
   workflow_dispatch:
@@ -60,7 +64,40 @@ jobs:
             "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
           echo "${SHFMT_SHA256}  /tmp/shfmt" | sha256sum --check --strict
           chmod +x /tmp/shfmt
-          /tmp/shfmt -d -i 2 -ci scripts/bootstrap.sh scripts/bootstrap-runner.sh scripts/verify.sh
+          /tmp/shfmt -d -i 2 -ci scripts/bootstrap.sh scripts/bootstrap-runner.sh scripts/verify.sh scripts/semver-lt.sh
+
+      - name: semver-lt.sh table
+        # publish-installer.yml's monotonic "latest" guard rests on this
+        # comparison; each lt pair is also asserted reversed (→ not lt).
+        run: |
+          fail=0
+          check() {
+            local want=$1 rc=0
+            shift
+            scripts/semver-lt.sh "$@" 2>/dev/null || rc=$?
+            if [ "$rc" -ne "$want" ]; then
+              echo "::error::semver-lt.sh $* exited $rc, want $want"
+              fail=1
+            fi
+          }
+          while read -r a b; do
+            check 0 "$a" "$b"
+            check 1 "$b" "$a"
+          done <<'LT'
+          v1.0.0-beta.9 v1.0.0-beta.10
+          v1.0.0-beta.63 v1.0.0-rc.1
+          v1.0.0-rc.1 v1.0.0
+          v1.0.0-beta.63 v1.0.0
+          v1.0.0 v1.0.1
+          v1.0.9 v1.1.0
+          v2.0.0 v10.0.0
+          LT
+          check 1 v1.0.0 v1.0.0
+          check 1 v1.0.0-beta.63 v1.0.0-beta.63
+          check 2 v1.0 v1.0.1
+          check 2 v1.0.0-beta-1 v1.0.0
+          check 2 v1.0.0
+          exit "$fail"
 
   workflow-lint:
     runs-on: ubuntu-latest
@@ -261,6 +298,23 @@ jobs:
             || { echo "::error::CHANNEL_URL rewrite did not take effect"; exit 1; }
           grep -q "APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"" /tmp/bootstrap.sh \
             || { echo "::error::pubkey rewrite did not take effect"; exit 1; }
+
+          # Same rewrite for the runner installer (Scenarios 7e/7f): it carries
+          # the same URL_BASE / CHANNEL_URL / pubkey literals.
+          # shellcheck disable=SC2016  # `${VERSION}` is literal in the sed pattern
+          sed \
+            -e "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" \
+            -e 's|https://github.com/appstrate/appstrate/releases/download/${VERSION}|http://localhost:8766/release|' \
+            -e 's|https://get.appstrate.dev/channels/latest.json|http://localhost:8766/channels/latest.json|' \
+            -e "s|APPSTRATE_MINISIGN_PUBKEY=\"[^\"]*\"|APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"|" \
+            scripts/bootstrap-runner.sh > /tmp/bootstrap-runner.sh
+          bash -n /tmp/bootstrap-runner.sh
+          for want in 'URL_BASE="http://localhost:8766/release"' \
+            'CHANNEL_URL="http://localhost:8766/channels/latest.json"' \
+            "APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\""; do
+            grep -qF "$want" /tmp/bootstrap-runner.sh \
+              || { echo "::error::bootstrap-runner.sh rewrite missing: $want"; exit 1; }
+          done
 
           # ── Pre-create the install destinations ──────────────────────
           # bootstrap.sh calls `install -m 0755 …` which does NOT create
@@ -635,6 +689,52 @@ jobs:
             || { echo "::error::bootstrap did not refuse skip-verify + latest"; exit 1; }
           echo "::endgroup::"
           echo "✓ skip-verify + latest refused"
+
+          # ── Scenario 7e: bootstrap-runner.sh resolves latest the same way ─
+          # Non-root here, so it elevates with (passwordless) `sudo -E` only to
+          # install the verified binary and exec `appstrate runner install`.
+          echo "::group::runner: latest via channel manifest"
+          set +e
+          RUNNER_OUT=$(APPSTRATE_BIN_DIR="$RUNNER_TEMP/bin-runner" \
+            APPSTRATE_VERSION=latest \
+            bash /tmp/bootstrap-runner.sh --platform-url http://127.0.0.1:3000 --token dry 2>&1)
+          rc=$?
+          set -e
+          echo "$RUNNER_OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap-runner exited $rc resolving latest"; exit 1; }
+          echo "$RUNNER_OUT" | grep -q "Resolved latest release: v1.0.0-dry" \
+            || { echo "::error::runner latest did not resolve to the manifest's tag"; exit 1; }
+          echo "$RUNNER_OUT" | grep -q "Integrity + provenance verified" \
+            || { echo "::error::runner latest install skipped verification"; exit 1; }
+          echo "$RUNNER_OUT" | grep -q "FAKE_CLI_RAN subcommand=runner argv=runner install --platform-url" \
+            || { echo "::error::bootstrap-runner did not hand off to \`appstrate runner install\`"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ runner latest path OK"
+
+          # ── Scenario 7f: runner + tampered channel manifest ────────────
+          echo "::group::runner: tampered channel manifest"
+          cp "$ROOT/channels/latest.json" "$ROOT/channels/latest.json.bak"
+          sed -i 's/v1.0.0-dry/v9.9.9/' "$ROOT/channels/latest.json"
+          set +e
+          RUNNER_CHAN_OUT=$(APPSTRATE_BIN_DIR="$RUNNER_TEMP/bin-runner-tampered" \
+            APPSTRATE_VERSION=latest \
+            bash /tmp/bootstrap-runner.sh --platform-url http://127.0.0.1:3000 --token dry 2>&1)
+          rc=$?
+          set -e
+          mv "$ROOT/channels/latest.json.bak" "$ROOT/channels/latest.json"
+          echo "$RUNNER_CHAN_OUT"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::bootstrap-runner accepted a tampered channel manifest"; exit 1
+          fi
+          echo "$RUNNER_CHAN_OUT" | grep -q "Channel manifest signature verification FAILED" \
+            || { echo "::error::bootstrap-runner did not report the manifest signature failure"; exit 1; }
+          echo "$RUNNER_CHAN_OUT" | grep -q "FAKE_CLI_RAN" \
+            && { echo "::error::bootstrap-runner exec'd the CLI despite a tampered manifest"; exit 1; }
+          test ! -e "$RUNNER_TEMP/bin-runner-tampered/appstrate" \
+            || { echo "::error::bootstrap-runner installed despite a tampered manifest"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ runner tampered-manifest path OK"
 
           # ── Scenario 8a: dual-install pre-check (issue #249) ─────────
           # When `appstrate` already exists on PATH at a different path

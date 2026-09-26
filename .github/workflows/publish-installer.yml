@@ -21,6 +21,10 @@ name: Publish Installer
 # `pages/<tag>/` is always written; the root pointers and the manifest are
 # promoted only when the tag is >= the current manifest's tag (SemVer), so
 # a re-dispatched old tag or out-of-order runs never move "latest" back.
+# The first manifest ships with the first `v*` tag built by this workflow (a
+# re-dispatched, already-published tag fails at the immutable pages/<tag>/ guard,
+# by design). Roll "latest" back = `git revert` the bad `publish: <tag>` commit on
+# `installer-pages`; the guard then compares against the restored manifest.
 on:
   push:
     tags:
@@ -54,9 +58,13 @@ jobs:
 
       - name: Resolve version
         id: ver
+        # Via env, never `${{ }}` in the script: the dispatch input is
+        # untrusted until the regex below has validated it.
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="$INPUT_VERSION"
           else
             VERSION="${GITHUB_REF_NAME}"
           fi
@@ -203,7 +211,8 @@ jobs:
               -t "appstrate runner $VERSION" \
               -m out/runner
           # Channel manifest — the contract `self-update` and the bootstrap
-          # scripts verify (signature, then schema/channel/tag).
+          # scripts verify (signature, then schema/channel/tag). Shipped clients
+          # hard-fail on `schema != 1`: a new schema needs a new path.
           mkdir -p out/channels
           jq -n --arg tag "$VERSION" '{schema: 1, channel: "latest", tag: $tag}' \
             > out/channels/latest.json
@@ -270,22 +279,23 @@ jobs:
           cp out/runner.minisig     "pages/${VERSION}/runner.minisig"
 
           # Monotonic promotion: the root pointers and the channel manifest
-          # only move forward. dpkg sorts `~` before everything, even the end
-          # of the string, so mapping the prerelease `-` to `~` yields SemVer
-          # precedence (1.0.0~beta.9 < 1.0.0~beta.10 < 1.0.0~rc.1 < 1.0.0);
-          # GNU `sort -V` would put 1.0.0 before 1.0.0-beta.1.
-          deb_version() { sed 's/^v//; s/-/~/' <<<"$1"; }
+          # only move forward (SemVer precedence, see scripts/semver-lt.sh).
           PROMOTE=true
           CURRENT=""
           if [ -f pages/channels/latest.json ]; then
             CURRENT=$(jq -r .tag pages/channels/latest.json)
-            if ! grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$' <<<"$CURRENT"; then
-              echo "::error::pages/channels/latest.json has an invalid tag '${CURRENT}' — fix the branch by hand."
-              exit 1
-            fi
-            if dpkg --compare-versions "$(deb_version "$VERSION")" lt "$(deb_version "$CURRENT")"; then
-              PROMOTE=false
-            fi
+            # 0 = older, 1 = not older; anything else (malformed tag) must
+            # abort, never fall through to promotion.
+            rc=0
+            scripts/semver-lt.sh "$VERSION" "$CURRENT" || rc=$?
+            case "$rc" in
+              0) PROMOTE=false ;;
+              1) ;;
+              *)
+                echo "::error::Cannot compare ${VERSION} with pages/channels/latest.json tag '${CURRENT}' — fix the branch by hand."
+                exit 1
+                ;;
+            esac
           fi
 
           if [ "$PROMOTE" = true ]; then
@@ -310,17 +320,13 @@ jobs:
             echo "Channel latest NOT promoted: ${VERSION} < ${CURRENT}; published under /${VERSION}/ only." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-          # Publish verify.sh wrapper. If the public key is committed under
-          # scripts/appstrate.pub, substitute its value into verify.sh so users
-          # don't need a second round-trip. Minisign public keys contain a
+          # Publish verify.sh with the committed public key substituted in, so
+          # users don't need a second round-trip (earlier steps already fail
+          # without scripts/appstrate.pub). Minisign public keys contain a
           # comment line + a single base64 line — extract the base64 line.
-          if [ -f scripts/appstrate.pub ]; then
-            PUBKEY=$(grep -v '^untrusted' scripts/appstrate.pub | head -1 | tr -d '\n')
-            sed "s|__APPSTRATE_MINISIGN_PUBKEY__|${PUBKEY}|" scripts/verify.sh > pages/verify.sh
-            cp scripts/appstrate.pub pages/appstrate.pub
-          else
-            cp scripts/verify.sh pages/verify.sh
-          fi
+          PUBKEY=$(grep -v '^untrusted' scripts/appstrate.pub | head -1 | tr -d '\n')
+          sed "s|__APPSTRATE_MINISIGN_PUBKEY__|${PUBKEY}|" scripts/verify.sh > pages/verify.sh
+          cp scripts/appstrate.pub pages/appstrate.pub
 
           # Custom domain for GitHub Pages
           echo "get.appstrate.dev" > pages/CNAME

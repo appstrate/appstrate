@@ -55,8 +55,8 @@ export function parseSha256(text: string): string {
 
 /**
  * The runner seams as the signed-artefact I/O `self-update` verifies with. The
- * work dir is a real temp dir, not `RunnerFs`: the minisign inputs are scratch
- * files, never host state.
+ * minisign inputs are written through `RunnerFs`, but into a scratch temp dir
+ * created and removed directly: it is throwaway, never host state.
  */
 function releaseChannelDeps(opts: {
   http: RunnerHttp;
