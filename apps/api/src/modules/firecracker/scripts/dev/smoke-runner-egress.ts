@@ -374,11 +374,11 @@ async function udpCounterPackets(name: string): Promise<number | undefined> {
  * whose prerouting chain, at priority raw (ahead of conntrack and of any
  * filter chain that could drop the packet first, the orchestrator's
  * `appstrate_fc` included), counts every datagram to UDP_PORT arriving on a
- * guest TAP. It accepts nothing and nothing listens on the port: the count is
- * taken before any host verdict, so a zero says the GUEST firewall kept the
- * datagram in. The host's own datagram to the platform alias loops back over
- * `lo` through the same hook into a twin counter — the control that this
- * table counts on this host. The caller deletes the table in its `finally`;
+ * guest TAP. It accepts nothing: the count is taken before any host verdict,
+ * so a zero says the GUEST firewall kept the datagram in. The host's own
+ * datagram to the platform alias loops back over `lo` through the same hook
+ * into a twin counter — the control that this table counts on this host. The
+ * caller deletes the table in its `finally`;
  * a table left by a crashed run is replaced (with its counts) here.
  */
 async function openUdpCounter(aliasIp: string, fail: Fail): Promise<UdpCounter> {
@@ -396,14 +396,21 @@ async function openUdpCounter(aliasIp: string, fail: Fail): Promise<UdpCounter> 
     "}",
     "",
   ].join("\n");
+  // A host-side sink bound on the destination: Bun (1.3.14) crashes at process
+  // exit when a UDP socket's datagram draws an ICMP port-unreachable.
+  const sink = await Bun.udpSocket({ hostname: aliasIp, port: UDP_PORT }).catch((err: unknown) =>
+    fail(`could not bind the UDP sink on ${aliasIp}:${UDP_PORT}: ${String(err)}`),
+  );
   const created = await nft(["-f", "/dev/stdin"], script);
   if (created.code !== 0) {
+    sink.close();
     fail(
       `could not create the smoke's UDP counter table inet ${UDP_TABLE} (nft exit ` +
         `${created.code}): ${created.err.trim()}`,
     );
   }
   const close = async () => {
+    sink.close();
     await nft(["delete", "table", "inet", UDP_TABLE]);
   };
 
