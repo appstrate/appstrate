@@ -129,8 +129,8 @@ const CONTEXT_WINDOW = 200_000;
 const MAX_TOKENS = 32_768;
 
 /**
- * The platform proxy's auth — the only headers the handler hands pi-ai. pi-ai's
- * provider layer may add its own (OpenCode's session header), never ours.
+ * The platform proxy's auth: the handler itself adds no other header. pi-ai's
+ * provider layer may add its own (OpenCode's session header).
  */
 const PROXY_HEADERS = { authorization: "Bearer run-token" };
 
@@ -167,8 +167,8 @@ function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessage
  */
 async function originatedPayload(backing: Backing): Promise<Record<string, unknown>> {
   let payload: unknown;
-  const capture: BackingStreamFn = (piProvider, model, context, options) =>
-    streamBacking(piProvider, model, context, {
+  const capture: BackingStreamFn = (model, context, options) =>
+    streamBacking(model, context, {
       ...options,
       onPayload: (next: unknown) => {
         payload = next;
@@ -191,7 +191,7 @@ async function originatedPayload(backing: Backing): Promise<Record<string, unkno
 async function directPayload(backing: Backing): Promise<Record<string, unknown>> {
   let payload: unknown;
   const model = buildBackingModel(depsFor(backing));
-  const result = await streamBacking(backing.providerId, model, CONTEXT, {
+  const result = await streamBacking(model, CONTEXT, {
     apiKey: "sk-real-key",
     maxTokens: 4_096,
     reasoning: "high",
@@ -241,8 +241,8 @@ describe("re-originated request shape", () => {
     // sidecar re-applying the rule, a `max` request drops to pi's built-in
     // table, which collapses `xhigh` AND `max` onto 16384.
     let payload: unknown;
-    const capture: BackingStreamFn = (piProvider, model, context, options) =>
-      streamBacking(piProvider, model, context, {
+    const capture: BackingStreamFn = (model, context, options) =>
+      streamBacking(model, context, {
         ...options,
         onPayload: (next: unknown) => {
           payload = next;
@@ -272,6 +272,36 @@ describe("re-originated request shape", () => {
   it("sends the REAL model id upstream, never the alias", async () => {
     const payload = await originatedPayload(BACKINGS[0]!);
     expect(payload["model"]).toBe("deepseek-chat");
+  });
+
+  // The container sends a normalized transcript (system prompt inside `messages`),
+  // not the legacy `systemPrompt` field the fixtures above use.
+  it("forwards the wire transcript's system prompt exactly once", async () => {
+    const prompt = "You are the wire-shaped system prompt.";
+    let payload: unknown;
+    const capture: BackingStreamFn = (model, context, options) =>
+      streamBacking(model, context, {
+        ...options,
+        onPayload: (next: unknown) => {
+          payload = next;
+          throw new Error("payload captured");
+        },
+      });
+    const res = handlePiMessagesRequest(
+      depsFor(BACKINGS[0]!, capture),
+      new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
+      JSON.stringify({
+        model: "appstrate-medium",
+        context: {
+          messages: [
+            { role: "system", content: prompt, timestamp: 0 },
+            { role: "user", content: "hi", timestamp: 0 },
+          ],
+        },
+      }),
+    );
+    await res.text();
+    expect(JSON.stringify(payload).split(prompt)).toHaveLength(2);
   });
 });
 
@@ -325,8 +355,8 @@ describe("buildBackingModel", () => {
   // call: nothing on the descriptor carries the dialect any more.
   it("takes the adaptive Anthropic shape from Pi's record", async () => {
     let payload: unknown;
-    const capture: BackingStreamFn = (piProvider, model, context, options) =>
-      streamBacking(piProvider, model, context, {
+    const capture: BackingStreamFn = (model, context, options) =>
+      streamBacking(model, context, {
         ...options,
         onPayload: (next: unknown) => {
           payload = next;
@@ -452,7 +482,7 @@ describe("long cache retention", () => {
       contextWindow: CONTEXT_WINDOW,
       maxTokens: MAX_TOKENS,
     };
-    const result = await streamBacking(ANTHROPIC.providerId, model, CONTEXT, {
+    const result = await streamBacking(model, CONTEXT, {
       apiKey: "sk-real-key",
       cacheRetention: "long",
       onPayload: (next: unknown) => {
@@ -931,7 +961,7 @@ async function forwardedOptions(
   path = "/llm/messages",
 ): Promise<{ options: Record<string, unknown>; warnings: Array<Record<string, unknown>> }> {
   let seen: Record<string, unknown> = {};
-  const capture: BackingStreamFn = (_piProvider, _model, _context, options) => {
+  const capture: BackingStreamFn = (_model, _context, options) => {
     seen = options as unknown as Record<string, unknown>;
     return fakeStream([]);
   };
@@ -1269,19 +1299,6 @@ describe("handlePiMessagesRequest", () => {
  */
 describe("transient upstream failures", () => {
   /**
-   * Bun's `typeof fetch` carries a static `preconnect` beside the call
-   * signature; forward the real one so a stub is a faithful drop-in.
-   */
-  function asFetch(
-    fn: (
-      input: Parameters<typeof fetch>[0],
-      init: Parameters<typeof fetch>[1],
-    ) => Promise<Response>,
-  ): typeof fetch {
-    return Object.assign(fn, { preconnect: fetch.preconnect });
-  }
-
-  /**
    * Answer `statuses` in order (repeating the last), recording each call.
    * `retry-after-ms: 1` keeps a real backoff sleep sub-millisecond.
    */
@@ -1542,7 +1559,7 @@ describe("pi-ai version drift", () => {
   ): Promise<{ warnings: Array<Record<string, unknown>>; forwarded: Record<string, unknown> }> {
     let model: Record<string, unknown> = {};
     let options: Record<string, unknown> = {};
-    const capture: BackingStreamFn = (_piProvider, m, _context, o) => {
+    const capture: BackingStreamFn = (m, _context, o) => {
       model = m as unknown as Record<string, unknown>;
       options = o as unknown as Record<string, unknown>;
       return fakeStream([]);
@@ -1624,59 +1641,50 @@ describe("provider-layer quirks", () => {
     modelId: "house-model",
     baseUrl: "https://llm.gateway.test/v1",
   };
+  const OPENCODE = BACKINGS.find((b) => b.name === "opencode-go")!;
 
-  /** A socket that records each request and refuses it, ending the turn. */
-  function recordingFetch(): { fetch: typeof fetch; requests: Request[] } {
+  async function upstreamRequest(backing: Backing, sessionId?: string): Promise<Request> {
     const requests: Request[] = [];
-    const record = async (
-      input: Parameters<typeof fetch>[0],
-      init: Parameters<typeof fetch>[1],
-    ): Promise<Response> => {
+    const fetchImpl = asFetch(async (input, init) => {
       requests.push(
         input instanceof Request ? new Request(input, init) : new Request(String(input), init),
       );
       return new Response("{}", { status: 400, headers: { "content-type": "application/json" } });
-    };
-    return { fetch: Object.assign(record, { preconnect: fetch.preconnect }), requests };
-  }
-
-  async function upstreamRequest(backing: Backing, sessionId?: string): Promise<Request> {
-    const upstream = recordingFetch();
+    });
     const res = handlePiMessagesRequest(
-      { ...depsFor(backing), fetchImpl: upstream.fetch },
+      { ...depsFor(backing), fetchImpl },
       new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
       JSON.stringify({ model: "appstrate-medium", context: CONTEXT, options: { sessionId } }),
     );
     await res.text();
-    expect(upstream.requests).toHaveLength(1);
-    return upstream.requests[0]!;
+    expect(requests).toHaveLength(1);
+    return requests[0]!;
   }
 
-  const opencode = BACKINGS.find((b) => b.name === "opencode-go")!;
-
   it("sends the container's session id as `x-opencode-session` to an OpenCode backing", async () => {
-    const request = await upstreamRequest(opencode, "session-1583");
+    const request = await upstreamRequest(OPENCODE, "session-1583");
+    expect(request.headers.get("x-opencode-session")).toBe("session-1583");
+  });
+
+  it("sends it to a gateway pointed at OpenCode's endpoint too", async () => {
+    const gateway = { ...GATEWAY, baseUrl: "https://opencode.ai/zen/go/v1" };
+    const request = await upstreamRequest(gateway, "session-1583");
     expect(request.headers.get("x-opencode-session")).toBe("session-1583");
   });
 
   it("adds no session header to an OpenCode backing when the request carries none", async () => {
-    const request = await upstreamRequest(opencode);
+    const request = await upstreamRequest(OPENCODE);
     expect(request.headers.has("x-opencode-session")).toBe(false);
   });
 
-  for (const name of ["deepseek", "openai responses", "anthropic"]) {
-    it(`adds no OpenCode header to a ${name} backing`, async () => {
-      const request = await upstreamRequest(
-        BACKINGS.find((b) => b.name === name)!,
-        "session-1583",
-      );
-      expect(request.headers.has("x-opencode-session")).toBe(false);
-    });
-  }
+  it("adds no OpenCode header to another vendor's backing", async () => {
+    const request = await upstreamRequest(BACKINGS[0]!, "session-1583");
+    expect(request.headers.has("x-opencode-session")).toBe(false);
+  });
 
   // A gateway's derived `model.provider` is `openai`, whose built-in provider
   // speaks Responses: dispatching through it would hit `/responses`.
-  it("dispatches a gateway backing through the raw API, not a derived provider", async () => {
+  it("dispatches a gateway elsewhere through the raw API, not a derived provider", async () => {
     const request = await upstreamRequest(GATEWAY, "session-1583");
     expect(new URL(request.url).pathname).toBe("/internal/llm-proxy/x/chat/completions");
     expect(request.headers.has("x-opencode-session")).toBe(false);
@@ -1686,23 +1694,17 @@ describe("provider-layer quirks", () => {
     const request = await upstreamRequest({ ...GATEWAY, providerId: "openai" }, "session-1583");
     expect(new URL(request.url).pathname).toBe("/internal/llm-proxy/x/chat/completions");
   });
-
-  it("keys the provider on the backing's Pi provider key, never `model.provider`", async () => {
-    const model = buildBackingModel(depsFor(opencode));
-    const sessionHeader = async (piProvider: string | null) => {
-      const upstream = recordingFetch();
-      await streamBacking(piProvider, model, CONTEXT, {
-        apiKey: "k",
-        sessionId: "session-1583",
-        fetch: upstream.fetch,
-      }).result();
-      return upstream.requests[0]?.headers.get("x-opencode-session");
-    };
-    expect(model.provider).toBe("opencode-go");
-    expect(await sessionHeader(null)).toBeNull();
-    expect(await sessionHeader("opencode-go")).toBe("session-1583");
-  });
 });
+
+/**
+ * Bun's `typeof fetch` carries a static `preconnect` beside the call
+ * signature; forward the real one so a stub is a faithful drop-in.
+ */
+function asFetch(
+  fn: (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => Promise<Response>,
+): typeof fetch {
+  return Object.assign(fn, { preconnect: fetch.preconnect });
+}
 
 /**
  * A stand-in for pi-ai's `AssistantMessageEventStream` that replays a fixed

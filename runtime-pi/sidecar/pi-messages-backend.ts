@@ -15,8 +15,8 @@
  * — the model ID only, never the Model record — answered by an SSE stream of
  * `PiMessagesEvent`, a CLOSED union nothing vendor-shaped can ride in. No quirk
  * table is mirrored: {@link handlePiMessagesRequest} rebuilds the REAL backing's
- * `Model` and dispatches it through pi-ai's own provider layer, so every
- * per-vendor serializer keeps running one process to the left of the container.
+ * `Model` for pi-ai's own `streamSimple`, so every per-vendor serializer keeps
+ * running one process to the left of the container.
  *
  * The projection onto that union is a WHITELIST: every outbound event is built
  * field by field and NO inbound object is ever spread into an outbound one. A
@@ -123,7 +123,6 @@ interface PiMessagesRequestBody {
  * repo bans `mock.module()`); production passes {@link streamBacking}.
  */
 export type BackingStreamFn = (
-  piProvider: string | null,
   model: Model<Api>,
   context: Context,
   options: SimpleStreamOptions,
@@ -634,7 +633,6 @@ export function handlePiMessagesRequest(
     redirectingFetch(transport, modelBaseUrl, proxyBaseUrl),
   );
   const upstream = stream(
-    swap.backing?.providerId ?? null,
     model,
     body.context,
     projectRequestOptions(body, swap, deps.upstream, abort.signal, statusProbe.fetch),

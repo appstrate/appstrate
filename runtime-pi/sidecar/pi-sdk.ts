@@ -7,7 +7,7 @@
  * `runtime-pi/sidecar/*.ts`. It carries pi-ai to terminate an aliased run's
  * `pi-messages` and re-originate against the real backing, so vendor quirks stay
  * derived by pi-ai rather than mirrored here (`MODEL_ALIASES.md`). `./api/*`
- * and `./providers/all` subpaths; the model registry comes via runner-pi's `pi-model`.
+ * and `./providers/all` subpaths plus the root; model records come via runner-pi's `pi-model`.
  */
 
 import { streamSimple as anthropicMessages } from "@earendil-works/pi-ai/api/anthropic-messages";
@@ -16,16 +16,17 @@ import { streamSimple as openaiCodexResponses } from "@earendil-works/pi-ai/api/
 import { streamSimple as openaiCompletions } from "@earendil-works/pi-ai/api/openai-completions";
 import { streamSimple as openaiResponses } from "@earendil-works/pi-ai/api/openai-responses";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
-import { normalizeContext } from "@earendil-works/pi-ai";
-import type { AliasBackingApiShape } from "@appstrate/core/model-swap";
-import type {
-  Api,
-  AssistantMessageEventStream,
-  Context,
-  Model,
-  SimpleStreamOptions,
-  TranscriptContext,
+import {
+  normalizeContext,
+  type Api,
+  type AssistantMessageEventStream,
+  type Context,
+  type Model,
+  type SimpleStreamOptions,
+  type TranscriptContext,
 } from "@earendil-works/pi-ai";
+import type { AliasBackingApiShape } from "@appstrate/core/model-swap";
+import { trimTrailingSlashes } from "@appstrate/runner-pi/llm-proxy-routes";
 
 export type {
   Api,
@@ -55,28 +56,30 @@ const BACKING_STREAMS = {
   "openai-responses": openaiResponses,
 } as const satisfies Record<AliasBackingApiShape, unknown>;
 
-/** pi-ai's built-in providers by id, constructed once. */
-const BUILTIN_PROVIDERS = new Map(builtinProviders().map((provider) => [provider.id, provider]));
+const BUILTIN_PROVIDERS = builtinProviders();
+const PROVIDER_BY_ID = new Map(BUILTIN_PROVIDERS.map((provider) => [provider.id, provider]));
+const PROVIDER_BY_BASE_URL = new Map(
+  BUILTIN_PROVIDERS.flatMap((provider) =>
+    provider.getModels().map((record) => [trimTrailingSlashes(record.baseUrl), provider] as const),
+  ),
+);
 
 /**
- * Dispatch through pi-ai's built-in provider `piProvider` when its catalog serves
- * `model.api` (pi-ai's own rule), so its provider-layer quirks apply — OpenCode's
- * `x-opencode-session`. Keyed on the Pi provider key, never `model.provider`,
- * which a gateway (`null`) derives from its API shape; otherwise pi-ai's raw
- * implementation of `model.api`. The widening cast matches pi-ai's registry:
- * sound because an entry is only reached by a model whose `api` IS its key, and
- * required by `strictFunctionTypes` contravariance.
+ * Stream through pi-ai's built-in provider (by catalog endpoint, else `model.provider`) when
+ * its catalog serves `model.api` — `compat.streamSimple`'s check — so provider-layer quirks
+ * apply; else the raw per-API stream, whose cast holds as only a model of that `api` reaches it.
  */
 export function streamBacking(
-  piProvider: string | null,
   model: Model<Api>,
   context: Context,
   options: SimpleStreamOptions,
 ): AssistantMessageEventStream {
-  // What pi-ai's own `streamSimple` hands a provider; identity on the container's.
+  // Providers take the branded `TranscriptContext`; the container's is already one.
   const transcript = normalizeContext(context);
-  const provider = piProvider === null ? undefined : BUILTIN_PROVIDERS.get(piProvider);
-  if (provider?.getModels().some((candidate) => candidate.api === model.api)) {
+  const provider =
+    PROVIDER_BY_BASE_URL.get(trimTrailingSlashes(model.baseUrl)) ??
+    PROVIDER_BY_ID.get(model.provider);
+  if (provider?.getModels().some((record) => record.api === model.api)) {
     return provider.streamSimple(model, transcript, options);
   }
   const impl = BACKING_STREAMS[model.api as AliasBackingApiShape] as
