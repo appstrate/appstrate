@@ -442,7 +442,16 @@ export async function handleChatStream(
     sessionId: meteringSessionId,
     subscription: isSubscription,
   });
-  if (rejection) return usageRejectionResponse(rejection);
+  if (rejection) {
+    const refused = usageRejectionResponse(rejection);
+    logger.info("chat turn refused by admission gate", {
+      code: rejection.code,
+      status: refused.status,
+      orgId,
+      model: chosen.id,
+    });
+    return refused;
+  }
 
   // Join phase B. This is the one place its failure is allowed to surface.
   const contextResult = await contextBlockPromise;
