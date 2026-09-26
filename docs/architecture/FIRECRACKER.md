@@ -308,7 +308,7 @@ platform API (:PORT)                       /sbin/appstrate-init  (PID 1, overlay
 ├─ lo alias 10.231.255.1/32   ◄── sink ──  │                      /proc hidepid=2)
 ├─ TAP afc<n> 10.231.x.y/30   ◄── eth0 ──  └─ guest supervisor    (root, bun)
 ├─ nft table appstrate_fc                     ├─ sidecar   uid 1000 — full egress,
-│  (guest↔host/internet policy)               │   │         CAP_NET_BIND_SERVICE (:53/:80/:443)
+│  (guest↔host/internet policy)               │   │         CAP_NET_BIND_SERVICE (:53/:80/:443), CAP_KILL
 └─ firecracker process (VMM)                  │   └─ integration runners uid 1100-1163
                                               │       (setuid wrapper, one uid per runner,
                                               │        lo only, UDP/53 → 127.0.0.1:53)
@@ -366,10 +366,12 @@ which answers with `127.0.0.1` and never forwards a query, so DNS is no
 exfiltration channel; runner TCP/53 is dropped. The redirected flow keeps
 the output interface it was first routed to (eth0), hence its own accept
 rule in the filter chain. The supervisor starts the sidecar with ambient
-`CAP_NET_BIND_SERVICE` (`setpriv --ambient-caps`), so only the sidecar can
-hold :53/:80/:443 — the unprivileged port floor is untouched, and the
-runners never hold it (the exec of the setuid wrapper clears the ambient
-set, its setuid to the pool uid the permitted and effective sets).
+`CAP_NET_BIND_SERVICE` and `CAP_KILL` (`setpriv --ambient-caps`): only the
+sidecar can hold :53/:80/:443 — the unprivileged port floor is untouched —
+and it can signal the runners it owns on their pool uids, so a runner that
+ignores stdin EOF still dies when the sidecar tears it down. The runners
+never hold either (the exec of the setuid wrapper clears the ambient set,
+its setuid to the pool uid the permitted and effective sets).
 
 The `appstrate_fc` table also carries a host-side `output`-hook chain:
 host-originated traffic whose socket uid falls in the jailed-VMM range

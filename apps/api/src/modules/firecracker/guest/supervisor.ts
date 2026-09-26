@@ -125,24 +125,26 @@ interface Child {
  * exec. The sidecar is NOT hardened: it legitimately execs the setuid
  * runner wrapper to drop each integration runner to its own pool uid.
  *
- * `ambientCap` keeps one capability across the uid change: setpriv sets
- * PR_SET_KEEPCAPS itself, raises the cap in the inheritable then the ambient
- * set, and the kernel carries an ambient cap over the (non-setuid) exec.
+ * `ambientCaps` keeps capabilities across the uid change: setpriv sets
+ * PR_SET_KEEPCAPS itself, raises them in the inheritable then the ambient
+ * set, and the kernel carries ambient caps over the (non-setuid) exec.
  */
 function spawnAs(
   uidOrUser: string,
   argv: string[],
   env: Record<string, string>,
   cwd: string,
-  opts: { harden: boolean; ambientCap?: string } = { harden: true },
+  opts: { harden: boolean; ambientCaps?: string[] } = { harden: true },
 ): Child {
   const isNumeric = /^\d+$/.test(uidOrUser);
   const privArgs = isNumeric
     ? ["--reuid", uidOrUser, "--regid", uidOrUser, "--clear-groups"]
     : ["--reuid", uidOrUser, "--regid", uidOrUser, "--init-groups"];
   if (opts.harden) privArgs.push("--no-new-privs", "--bounding-set", "-all");
-  if (opts.ambientCap) {
-    privArgs.push("--inh-caps", `+${opts.ambientCap}`, "--ambient-caps", `+${opts.ambientCap}`);
+  if (opts.ambientCaps?.length) {
+    // setpriv takes a comma list with a sign on each entry: +a,+b.
+    const caps = opts.ambientCaps.map((cap) => `+${cap}`).join(",");
+    privArgs.push("--inh-caps", caps, "--ambient-caps", caps);
   }
   const proc: ChildProcess = spawn("setpriv", [...privArgs, "--", ...argv], {
     cwd,
@@ -282,13 +284,17 @@ async function main(): Promise<void> {
       APPSTRATE_RUNNER_UIDS: GUEST_RUNNER_UIDS,
     },
     "/tmp",
-    // The runners' transparent plane (DNS responder on 127.0.0.1:53, SNI/Host
-    // splicers on :443/:80) sits on low ports only the sidecar may hold, so
-    // neither the agent nor a runner can squat them first. The runners never
-    // hold it: the kernel clears the ambient set on the exec of the setuid
-    // wrapper, whose setuid to the pool uid clears permitted and effective
-    // (inheritable may keep the bit — inert under no_new_privs, no file caps).
-    { harden: false, ambientCap: "net_bind_service" },
+    // net_bind_service: the runners' transparent plane (DNS responder on
+    // 127.0.0.1:53, SNI/Host splicers on :443/:80) sits on low ports only the
+    // sidecar may hold, so neither the agent nor a runner can squat them.
+    // kill: the sidecar owns every runner's lifecycle, and a runner lives on
+    // its pool uid, which uid 1000 could not otherwise signal. Both only widen
+    // the guest's most trusted workload (it holds every credential). The
+    // runners never hold either: the kernel clears the ambient set on the exec
+    // of the setuid wrapper, whose setuid to the pool uid clears permitted and
+    // effective (inheritable may keep the bits — inert under no_new_privs, no
+    // file caps).
+    { harden: false, ambientCaps: ["net_bind_service", "kill"] },
   );
   log(`sidecar pid ${sidecar.pid}`);
 
