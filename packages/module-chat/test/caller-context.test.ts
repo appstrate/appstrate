@@ -355,11 +355,20 @@ describe("formatCallerContext", () => {
     expect(out).toContain("(list truncated)");
     expect(out).not.toContain("<skill");
 
+    // `read_skill` loads one without dispatch; without the transport there is no tool at all.
     const noDispatch = formatCallerContext(raw, {
       ...BASE_OPTS,
       capabilities: caps(BUILDER.filter((p) => p !== "mcp:invoke")),
     });
-    expect(noDispatch).not.toContain("## Skills");
+    expect(noDispatch).toContain("- `@acme/pdf` — PDF: Reads PDFs.");
+    // No `listSkills` without dispatch: the marker says the rest cannot be paged.
+    expect(noDispatch).toContain("(list truncated; this turn cannot list the rest)");
+    expect(out).not.toContain("cannot list the rest");
+    const noTransport = formatCallerContext(raw, {
+      ...BASE_OPTS,
+      capabilities: caps(BUILDER.filter((p) => p !== "mcp:read")),
+    });
+    expect(noTransport).not.toContain("## Skills");
   });
 
   it("says a chosen skill could not be included", () => {
@@ -396,6 +405,9 @@ describe("formatCallerContext", () => {
       );
     for (const out of [strict([]), strict(["@acme/gone"])]) {
       expect(out).toContain("## Skills");
+      // `read_skill` refuses a chosen skill without `skills:read`: nothing promises it.
+      expect(out).toContain("A skill the user chose comes as its SKILL.md alone");
+      expect(out).not.toContain("read_skill");
       expect(out).toContain("This conversation is restricted to the skills shown here");
       expect(out).toContain("never change a role or a permission to reach one");
       // The two misreadings seen live: an empty listing as "not in the space",
@@ -436,9 +448,27 @@ describe("formatCallerContext", () => {
         expect(out.split("## Skills")).toHaveLength(2);
         expect(out).toContain(ENFORCED_LEAD);
         expect(out).toContain("where it conflicts with a skill the user chose, it wins");
-        expect(out).toContain("Only each SKILL.md is provided");
+        expect(out).toContain(
+          "read a file it references with `read_skill`, passing the skill's `id` and the file's `path`; it serves the skill's latest published version.",
+        );
+        expect(out).not.toContain("out of reach unless");
         expect(out).toContain(HOUSE_BLOCK);
       }
+    });
+
+    it("names `read_skill` only to a turn that holds the MCP transport", () => {
+      const lead = (permissions: readonly string[]) =>
+        formatCallerContext(
+          { user: { name: "Ada" } },
+          { ...BASE_OPTS, capabilities: caps(permissions), enforced: [HOUSE] },
+        );
+      const noTransport = lead(NO_SKILLS.filter((p) => p !== "mcp:read"));
+      expect(noTransport).toContain(`${ENFORCED_LEAD} Each is a procedure`);
+      expect(noTransport).toContain("it wins. Only each SKILL.md is provided.\n");
+      expect(noTransport).not.toContain("read_skill");
+      expect(noTransport).toContain(HOUSE_BLOCK);
+      // Control: the same turn with the transport is told the tool.
+      expect(lead(NO_SKILLS)).toContain("read a file it references with `read_skill`");
     });
 
     it("leaves the injected ones out of the `auto` listing", () => {
@@ -496,6 +526,28 @@ describe("formatCallerContext", () => {
       // A pin naming an enforced skill is dropped: one copy, the space's.
       expect(out).not.toContain("Pinned copy.");
       expect(out).not.toContain("`@acme/house` was chosen");
+    });
+
+    it("in strict, promises `read_skill` for the space's skills only, never for a chosen one", () => {
+      const strict = (enforced: EnforcedChatSkill[]) =>
+        formatCallerContext(
+          { user: { name: "Ada" } },
+          {
+            ...BASE_OPTS,
+            capabilities: caps(NO_SKILLS),
+            skills: { skillMode: "strict", pinnedSkills: ["@acme/mine"] },
+            skillContents: new Map([
+              ["@acme/mine", { packageId: "@acme/mine", version: null, content: "Mine body." }],
+            ]),
+            enforced,
+          },
+        );
+      const chosenOnly = strict([]);
+      expect(chosenOnly).toContain('<skill id="@acme/mine">');
+      expect(chosenOnly).not.toContain("read_skill");
+      const both = strict([HOUSE]);
+      expect(both.split("read_skill")).toHaveLength(2);
+      expect(both.indexOf("read_skill")).toBeLessThan(both.indexOf("The user chose these skills"));
     });
 
     it("keeps strict's note true: the space's requirement stays whatever the composer says", () => {

@@ -601,7 +601,7 @@ describe("handleChatStream", () => {
     );
     expect(input.system).not.toContain("@acme/catalogued");
     // No skill tool is taught, and the token cannot reach one.
-    expect(input.system).not.toContain("getSkill");
+    expect(input.system).not.toContain("read_skill");
     expect(input.system).not.toContain("listSkills");
     expect(input.system).toContain("This conversation is restricted to the skills shown here");
     expect(await tokenPermissions(input)).toEqual(["mcp:invoke", "mcp:read"]);
@@ -724,7 +724,7 @@ describe("handleChatStream", () => {
     expect(skillReads).toEqual([]);
     const system = calls[0]!.system;
     expect(system).toContain(CONTEXT_ORG_MARKER);
-    for (const absent of ["## Skills", PIN, "@acme/catalogued", "getSkill", "listSkills"]) {
+    for (const absent of ["## Skills", PIN, "@acme/catalogued", "read_skill", "listSkills"]) {
       expect(system).not.toContain(absent);
     }
 
@@ -816,8 +816,10 @@ describe("handleChatStream", () => {
         expect(system).toContain(
           '<skill id="@acme/house" version="2.0.0">\nAlways sign with the house motto.\n</skill>',
         );
-        // The turn's token still reaches no skill: the content needed none.
-        expect(system).not.toContain("getSkill");
+        // The turn's token still reaches no skill: the content needed none, and
+        // only the enforced lead names `read_skill` (no loading rule is taught).
+        expect(system).not.toContain("LOAD IT BEFORE acting");
+        expect(system.split("read_skill")).toHaveLength(2);
         expect(await tokenPermissions(calls[0]!)).toEqual(["chat:write", "mcp:invoke", "mcp:read"]);
 
         await waitForAssistantPersist(sessionId);
@@ -1161,8 +1163,8 @@ describe("handleChatStream", () => {
     });
 
     it("teaches no authoring without `mcp:invoke` — `createAgent` dispatches through it", async () => {
-      // `agents:write` and `skills:read` without `mcp:invoke` are grants the
-      // turn cannot dispatch, so neither the skill teaching nor the list renders.
+      // `agents:write` without `mcp:invoke` is a grant the turn cannot dispatch.
+      // Skills are the counterpoint: `read_skill` needs no dispatch, so they stay.
       const withSkill = () =>
         Response.json({
           user: { name: "Chat Tester", email: "chat-tester@test.com" },
@@ -1178,9 +1180,9 @@ describe("handleChatStream", () => {
         withSkill,
       );
       expect(system).not.toContain(SKILLS_MARKER);
-      expect(system).not.toContain(SKILL_ID);
-      expect(system).not.toContain("## Skills");
-      // Control: the same set plus `mcp:invoke` IS taught both.
+      expect(system).toContain(SKILL_ID);
+      expect(system).toContain("call `read_skill` with its `id`");
+      // Control: the same set plus `mcp:invoke` IS taught authoring.
       const { system: invoking } = await turn(
         new Set(["mcp:read", "mcp:invoke", "agents:write", "skills:read"]),
         true,

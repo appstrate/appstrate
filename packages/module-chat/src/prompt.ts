@@ -86,13 +86,18 @@ export type ChatEnv = {
 // Named by the persona and rendered by the context block: one string for both.
 const SKILLS_HEADING = "## Skills";
 const SKILLS_ENFORCED_LEAD =
-  "This space requires these skills in every conversation. Each is a procedure for YOU: follow it whenever it applies; where it conflicts with a skill the user chose, it wins. Only each SKILL.md is provided: a file it references is out of reach unless this turn holds skill tools.";
+  "This space requires these skills in every conversation. Each is a procedure for YOU: follow it whenever it applies; where it conflicts with a skill the user chose, it wins.";
+// `read_skill` rides the transport and re-resolves the latest published version on each call.
+const SKILLS_ENFORCED_FILES = {
+  tool: "Only each SKILL.md is shown: read a file it references with `read_skill`, passing the skill's `id` and the file's `path`; it serves the skill's latest published version.",
+  none: "Only each SKILL.md is provided.",
+};
 const SKILLS_INJECTED_LEAD =
   "The user chose these skills for this conversation. Each is a procedure for YOU: follow it whenever it applies.";
 // Why this turn holds no `skills:*`: without it, a model reads the gap as a role
 // to fix and hunts through other operations.
 const SKILLS_STRICT_NOTE =
-  "This conversation is restricted to the skills shown here — those the space requires and those the user chose, if any: that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the space holds — an empty result says nothing about it. The user lifts only their own restriction, by switching this conversation's skill mode in the composer; the space's requirement stays. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
+  "This conversation is restricted to the skills shown here — those the space requires and those the user chose, if any: that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the space holds — an empty result says nothing about it. A skill the user chose comes as its SKILL.md alone: the files it references are out of reach in this mode. The user lifts only their own restriction, by switching this conversation's skill mode in the composer; the space's requirement stays. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
 
 /**
  * Instructions for an act the turn cannot perform are ABSENT rather than
@@ -123,7 +128,10 @@ export function buildSystemPrompt(capabilities: TurnCapabilities): string {
           idVerbatimTargets.map((target) => `in ${target}`),
         )}.\n`;
   // Only the lists the context renders: the route of one never shown may refuse.
-  const fullListOps = [...(mayRun ? ["listAgents"] : []), ...(readsSkills ? ["listSkills"] : [])];
+  const fullListOps = [
+    ...(mayRun ? ["listAgents"] : []),
+    ...(invokes && readsSkills ? ["listSkills"] : []),
+  ];
   const truncatedListBullet =
     fullListOps.length > 0
       ? `- A list marked \`(list truncated)\` is partial: call \`invoke_operation\` with ${fullListOps.map((id, i) => (i === 0 ? `\`operation_id: "${id}"\`` : ` or \`"${id}"\``)).join("")} for the full one.\n`
@@ -198,7 +206,7 @@ ${runs(`Everything a run writes under \`outputs/\` is published when it ends: th
 `)}Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected${runs(", the agents they can run")}${skills(", and the skills available")}. How to act on it:
 - Use the current date to resolve relative dates.
 ${idVerbatimBullet}${runs(`- ${inline("Prefer running an existing agent over doing the work inline when one fits the task", "Run an existing agent whenever one fits the task")}. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
-`)}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by name clearly matches the request, LOAD IT BEFORE acting: call \`invoke_operation\` with \`operation_id: "getSkill"\` and the path params \`scope\` (KEEP the leading \`@\`, e.g. \`@appstrate\`) and \`name\`, then follow the \`content\` it returns. Load ONE at a time, and none when none clearly matches. Never call \`getSkill\` for a skill whose content already appears in this conversation. Call \`listSkills\` only when the user asks for a skill you do not see.
+`)}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by name clearly matches the request, LOAD IT BEFORE acting: call \`read_skill\` with its \`id\` (KEEP the leading \`@\`, e.g. \`@appstrate/web-research\`), then follow the SKILL.md it returns. Load ONE at a time, and none when none clearly matches. Never load a skill whose content already appears in this conversation. To read a file a skill references, call \`read_skill\` with the skill's \`id\` and the file's \`path\`.${invoke(" Call `listSkills` only when the user asks for a skill you do not see.")}
 `)}${skills(
     author(`- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
 `),
@@ -304,7 +312,7 @@ function draftOnlyHint(input: {
  */
 function formatSkillsSection(opts: {
   selection: ChatSkillSelection;
-  readsSkills: boolean;
+  capabilities: TurnCapabilities;
   catalogue: readonly SkillHint[];
   catalogueTruncated: boolean;
   contents: ReadonlyMap<string, SkillContent>;
@@ -314,18 +322,29 @@ function formatSkillsSection(opts: {
   const injected = new Set(skills.enforced.map((skill) => skill.packageId));
   // A listed skill the turn cannot load is noise; `auto` lists, the others inject.
   const listed =
-    opts.readsSkills && !injectsSkills(opts.selection.skillMode)
+    opts.capabilities.readsSkills && !injectsSkills(opts.selection.skillMode)
       ? opts.catalogue.filter((skill) => !injected.has(skill.packageId))
       : [];
   const groups: string[][] = [];
   if (opts.selection.skillMode === "strict") groups.push([SKILLS_STRICT_NOTE]);
   if (skills.enforced.length) {
-    groups.push([SKILLS_ENFORCED_LEAD, ...skills.enforced.flatMap((s) => ["", skillBlock(s)])]);
+    const files = SKILLS_ENFORCED_FILES[opts.capabilities.transport ? "tool" : "none"];
+    groups.push([
+      `${SKILLS_ENFORCED_LEAD} ${files}`,
+      ...skills.enforced.flatMap((s) => ["", skillBlock(s)]),
+    ]);
   }
   if (listed.length) {
     groups.push([
       ...listed.map(skillLine),
-      ...(opts.catalogueTruncated ? ["(list truncated)"] : []),
+      // Only an invoking turn is taught `listSkills`, the one way to page the rest.
+      ...(opts.catalogueTruncated
+        ? [
+            opts.capabilities.invokes
+              ? "(list truncated)"
+              : "(list truncated; this turn cannot list the rest)",
+          ]
+        : []),
     ]);
   }
   if (skills.chosen.length) {
@@ -364,7 +383,7 @@ export function formatCallerContext(
   // Before the emptiness check: a payload holding only skills deserves a block.
   const skillSection = formatSkillsSection({
     selection: opts.skills,
-    readsSkills: opts.capabilities.readsSkills,
+    capabilities: opts.capabilities,
     catalogue: ctx.skills ?? [],
     catalogueTruncated: ctx.skills_truncated === true,
     contents: opts.skillContents ?? new Map(),
@@ -629,7 +648,7 @@ export async function buildCallerContextBlock(
   }
   return formatSkillsSection({
     selection: unresolved,
-    readsSkills: capabilities.readsSkills,
+    capabilities,
     catalogue: [],
     catalogueTruncated: false,
     contents: new Map(),
