@@ -633,19 +633,19 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   },
   {
     method: "POST",
-    path: "/api/org-integrations/{packageId}/auths/{authKey}/oauth-clients",
+    path: "/api/org-integrations/{scope}/{name}/auths/{authKey}/oauth-clients",
     jsonSchema: toJsonSchema(oauthClientCreateSchema),
     description: "Register an org-level integration OAuth client",
   },
   {
     method: "PUT",
-    path: "/api/org-integrations/{packageId}/oauth-clients/{clientId}",
+    path: "/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}",
     jsonSchema: toJsonSchema(oauthClientUpdateSchema),
     description: "Rotate an org-level integration OAuth client",
   },
   {
     method: "PUT",
-    path: "/api/org-integrations/{packageId}/auths/{authKey}/default-client",
+    path: "/api/org-integrations/{scope}/{name}/auths/{authKey}/default-client",
     jsonSchema: toJsonSchema(setDefaultClientSchema),
     description: "Select the org-level default OAuth client for an integration auth",
   },

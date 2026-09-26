@@ -11,7 +11,7 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
  * client routes (`paths/org-integrations.ts`) reuse the exported shapes.
  */
 
-export const packageIdParam = {
+const packageIdParam = {
   name: "packageId",
   in: "path",
   required: true,

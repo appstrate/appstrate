@@ -285,10 +285,17 @@ export function useInitiateIntegrationConnect() {
 export type IntegrationClientTier = "space" | "org";
 
 const SPACE_CLIENTS = "/api/integrations/{packageId}/auths/{authKey}/clients";
-const ORG_CLIENTS = "/api/org-integrations/{packageId}/auths/{authKey}/clients";
+const ORG_CLIENTS = "/api/org-integrations/{scope}/{name}/auths/{authKey}/clients";
 
 type AuthPath = { path: { packageId: string; authKey: string } };
 type ClientPath = { path: { packageId: string; clientId: string } };
+/** Org routes address the integration as `{scope}/{name}`; space routes by `{packageId}`. */
+function orgAuthPath({ packageId, authKey }: AuthPath["path"]) {
+  return { ...splitPackageRef(packageId), authKey };
+}
+function orgClientPath({ packageId, clientId }: ClientPath["path"]) {
+  return { ...splitPackageRef(packageId), clientId };
+}
 type CreateOAuthClientBody =
   paths["/api/integrations/{packageId}/auths/{authKey}/oauth-clients"]["post"]["requestBody"]["content"]["application/json"];
 type RotateOAuthClientBody =
@@ -321,6 +328,7 @@ export function useIntegrationClients(
   const orgScope = useOrgOnlyScope();
   const path = { packageId: packageId ?? "", authKey: authKey ?? "" };
   const ready = !!packageId && !!authKey;
+  const orgPath = orgAuthPath(path);
   // One query per tier: literal paths keep the client typed.
   const space = $api.useQuery(
     "get",
@@ -334,7 +342,7 @@ export function useIntegrationClients(
   const org = $api.useQuery(
     "get",
     ORG_CLIENTS,
-    { params: { path, header: orgScope.header } },
+    { params: { path: orgPath, header: orgScope.header } },
     {
       enabled: tier === "org" && orgScope.enabled && ready,
       select: (envelope): IntegrationClient[] => envelope.data,
@@ -352,8 +360,11 @@ export function useCreateIntegrationOAuthClient(tier: IntegrationClientTier) {
         tier === "space"
           ? await client.POST("/api/integrations/{packageId}/auths/{authKey}/oauth-clients", vars)
           : await client.POST(
-              "/api/org-integrations/{packageId}/auths/{authKey}/oauth-clients",
-              vars,
+              "/api/org-integrations/{scope}/{name}/auths/{authKey}/oauth-clients",
+              {
+                params: { path: orgAuthPath(vars.params.path) },
+                body: vars.body,
+              },
             );
       return data;
     },
@@ -369,7 +380,10 @@ export function useRotateIntegrationOAuthClient(tier: IntegrationClientTier) {
       const { data } =
         tier === "space"
           ? await client.PUT("/api/integrations/{packageId}/oauth-clients/{clientId}", vars)
-          : await client.PUT("/api/org-integrations/{packageId}/oauth-clients/{clientId}", vars);
+          : await client.PUT("/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}", {
+              params: { path: orgClientPath(vars.params.path) },
+              body: vars.body,
+            });
       return data;
     },
     onSuccess,
@@ -388,8 +402,11 @@ export function useSetDefaultIntegrationClient(tier: IntegrationClientTier) {
         tier === "space"
           ? await client.PUT("/api/integrations/{packageId}/auths/{authKey}/default-client", vars)
           : await client.PUT(
-              "/api/org-integrations/{packageId}/auths/{authKey}/default-client",
-              vars,
+              "/api/org-integrations/{scope}/{name}/auths/{authKey}/default-client",
+              {
+                params: { path: orgAuthPath(vars.params.path) },
+                body: vars.body,
+              },
             );
       return data;
     },
@@ -423,7 +440,9 @@ export function useDeleteIntegrationOAuthClient(tier: IntegrationClientTier) {
       if (tier === "space") {
         await client.DELETE("/api/integrations/{packageId}/oauth-clients/{clientId}", vars);
       } else {
-        await client.DELETE("/api/org-integrations/{packageId}/oauth-clients/{clientId}", vars);
+        await client.DELETE("/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}", {
+          params: { path: orgClientPath(vars.params.path) },
+        });
       }
     },
     onSuccess,

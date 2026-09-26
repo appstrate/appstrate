@@ -17,7 +17,7 @@ import {
   orgOnlyHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey, seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
 import { auditEvents, integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { __resetSystemIntegrationsForTest } from "../../../src/services/integration-client-registry.ts";
@@ -201,63 +201,30 @@ describe("/api/org-integrations — org-level OAuth clients", () => {
     expect(audit?.after).toMatchObject({ deletedConnections: 0 });
   });
 
-  it("keeps the tiers apart on the by-id routes (404 both ways)", async () => {
-    const orgClient = await createOrgClient("org-app");
-    const spaceClient = await createSpaceClient("space-app");
-
-    const viaOrg = await app.request(`${ORG_BASE}/oauth-clients/${spaceClient}`, {
-      method: "DELETE",
-      headers: orgOnlyHeaders(ctx),
-    });
-    expect(viaOrg.status).toBe(404);
-
-    const viaSpace = await app.request(`${SPACE_BASE}/oauth-clients/${orgClient}`, {
-      method: "PUT",
-      headers: spaceJson,
-      body: JSON.stringify({ client_id: "hijack" }),
-    });
-    expect(viaSpace.status).toBe(404);
-
-    expect(await db.select().from(integrationOauthClients)).toHaveLength(2);
-  });
-
-  it("404s an integration of another org and a non-UUID client id", async () => {
-    const other = await createTestContext({ orgSlug: "other" });
-    await seedIntegration(other.orgId, oauthManifest("@other/gmail"));
-
-    const res = await app.request("/api/org-integrations/@other/gmail/auths/google/clients", {
-      headers: orgOnlyHeaders(ctx),
-    });
-    expect(res.status).toBe(404);
-
-    const created = await app.request(
-      "/api/org-integrations/@other/gmail/auths/google/oauth-clients",
-      {
-        method: "POST",
-        headers: json,
-        body: JSON.stringify({ client_id: "x", client_secret: "y" }),
-      },
-    );
-    expect(created.status).toBe(404);
+  // Service refusals are covered in the service test; this pins the route-only
+  // UUID guard and the HTTP mapping once per router.
+  it("maps refusals to 404/400 on both routers", async () => {
+    await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
+    const body = JSON.stringify({ client_id: "x", client_secret: "y" });
 
     const badId = await app.request(`${ORG_BASE}/oauth-clients/not-a-uuid`, {
       method: "DELETE",
       headers: orgOnlyHeaders(ctx),
     });
     expect(badId.status).toBe(404);
-  });
-
-  it("refuses an org client on an auto-provisioned (DCR/CIMD) auth (400)", async () => {
-    await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
-    const res = await app.request(
+    const orgAuto = await app.request(
       "/api/org-integrations/@myorg/remote-mcp/auths/oauth/oauth-clients",
-      {
-        method: "POST",
-        headers: json,
-        body: JSON.stringify({ client_id: "x", client_secret: "y" }),
-      },
+      { method: "POST", headers: json, body },
     );
-    expect(res.status).toBe(400);
+    expect(orgAuto.status).toBe(400);
+
+    expect((await promote("not-a-uuid")).status).toBe(404);
+    const spaceAuto = await app.request(
+      "/api/integrations/@myorg/remote-mcp/auths/oauth/oauth-clients",
+      { method: "POST", headers: spaceJson, body },
+    );
+    expect(spaceAuto.status).toBe(400);
+
     expect(await db.select().from(integrationOauthClients)).toHaveLength(0);
   });
 
@@ -372,49 +339,6 @@ describe("/api/org-integrations — org-level OAuth clients", () => {
         .from(integrationOauthClients)
         .where(eq(integrationOauthClients.id, client));
       expect(row?.spaceId).toBe(ctx.defaultSpaceId);
-    });
-
-    it("404s a client of another space, an org client and a non-UUID id", async () => {
-      const second = await seedSpace({ orgId: ctx.orgId, name: "Second" });
-      const [foreign] = await db
-        .insert(integrationOauthClients)
-        .values({
-          orgId: ctx.orgId,
-          spaceId: second.id,
-          integrationId: "@myorg/gmail",
-          authKey: "google",
-          clientId: "second-app",
-          clientSecretEncrypted: "enc",
-        })
-        .returning({ id: integrationOauthClients.id });
-      const orgClient = await createOrgClient("org-app");
-
-      expect((await promote(foreign!.id)).status).toBe(404);
-      expect((await promote(orgClient)).status).toBe(404);
-      expect((await promote("not-a-uuid")).status).toBe(404);
-    });
-
-    it("400s an auto-provisioned (DCR/CIMD) client", async () => {
-      await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
-      const [auto] = await db
-        .insert(integrationOauthClients)
-        .values({
-          orgId: ctx.orgId,
-          spaceId: ctx.defaultSpaceId,
-          integrationId: "@myorg/remote-mcp",
-          authKey: "oauth",
-          clientId: "dcr-client",
-          clientSecretEncrypted: "",
-          tokenEndpointAuthMethod: "none",
-          autoProvisioned: true,
-        })
-        .returning({ id: integrationOauthClients.id });
-
-      const res = await app.request(
-        `/api/integrations/@myorg/remote-mcp/oauth-clients/${auto!.id}/promote`,
-        { method: "POST", headers: authHeaders(ctx) },
-      );
-      expect(res.status).toBe(400);
     });
   });
 });

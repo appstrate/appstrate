@@ -7892,7 +7892,7 @@
         }
       }
     },
-    "/api/org-integrations/{packageId}/auths/{authKey}/clients": {
+    "/api/org-integrations/{scope}/{name}/auths/{authKey}/clients": {
       "get": {
         "operationId": "listOrgIntegrationClients",
         "tags": ["Integrations"],
@@ -7903,14 +7903,10 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "packageId",
-            "in": "path",
-            "required": true,
-            "description": "Integration package id (e.g. `@official/gmail`).",
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "authKey",
@@ -8012,7 +8008,7 @@
         }
       }
     },
-    "/api/org-integrations/{packageId}/auths/{authKey}/default-client": {
+    "/api/org-integrations/{scope}/{name}/auths/{authKey}/default-client": {
       "put": {
         "operationId": "setOrgDefaultIntegrationClient",
         "tags": ["Integrations"],
@@ -8023,14 +8019,10 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "packageId",
-            "in": "path",
-            "required": true,
-            "description": "Integration package id (e.g. `@official/gmail`).",
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "authKey",
@@ -8150,7 +8142,7 @@
         }
       }
     },
-    "/api/org-integrations/{packageId}/auths/{authKey}/oauth-clients": {
+    "/api/org-integrations/{scope}/{name}/auths/{authKey}/oauth-clients": {
       "post": {
         "operationId": "createOrgIntegrationOAuthClient",
         "tags": ["Integrations"],
@@ -8161,14 +8153,10 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "packageId",
-            "in": "path",
-            "required": true,
-            "description": "Integration package id (e.g. `@official/gmail`).",
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "authKey",
@@ -8295,7 +8283,7 @@
         }
       }
     },
-    "/api/org-integrations/{packageId}/oauth-clients/{clientId}": {
+    "/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}": {
       "put": {
         "operationId": "rotateOrgIntegrationOAuthClient",
         "tags": ["Integrations"],
@@ -8306,14 +8294,10 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "packageId",
-            "in": "path",
-            "required": true,
-            "description": "Integration package id (e.g. `@official/gmail`).",
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "clientId",
@@ -8448,14 +8432,10 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "packageId",
-            "in": "path",
-            "required": true,
-            "description": "Integration package id (e.g. `@official/gmail`).",
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "clientId",

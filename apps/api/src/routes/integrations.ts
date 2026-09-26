@@ -351,10 +351,13 @@ function assertOAuthClientRowId(clientId: string): string {
  * `spaceId` tells the tiers apart. Each router registers them itself so the
  * `verify:openapi` route scan sees every path.
  */
-export function oauthClientHandlers(scopeOf: (c: Context<AppEnv>) => SpaceScope | OrgScope) {
+export function oauthClientHandlers(
+  scopeOf: (c: Context<AppEnv>) => SpaceScope | OrgScope,
+  packageIdOf: (c: Context<AppEnv>) => string,
+) {
   return {
     async list(c: Context<AppEnv>) {
-      const packageId = c.req.param("packageId")!;
+      const packageId = packageIdOf(c);
       const authKey = c.req.param("authKey")!;
       const scope = scopeOf(c);
       // 404 an unknown integration/auth rather than list nothing (the org tier's service does).
@@ -363,7 +366,7 @@ export function oauthClientHandlers(scopeOf: (c: Context<AppEnv>) => SpaceScope 
     },
 
     async setDefault(c: Context<AppEnv>) {
-      const packageId = c.req.param("packageId")!;
+      const packageId = packageIdOf(c);
       const authKey = c.req.param("authKey")!;
       const scope = scopeOf(c);
       const body = await readJsonBody(c, setDefaultClientSchema);
@@ -377,7 +380,7 @@ export function oauthClientHandlers(scopeOf: (c: Context<AppEnv>) => SpaceScope 
     },
 
     async create(c: Context<AppEnv>) {
-      const packageId = c.req.param("packageId")!;
+      const packageId = packageIdOf(c);
       const authKey = c.req.param("authKey")!;
       const body = await readJsonBody(c, oauthClientCreateSchema);
       const client = await createIntegrationOAuthClient(
@@ -395,7 +398,7 @@ export function oauthClientHandlers(scopeOf: (c: Context<AppEnv>) => SpaceScope 
     },
 
     async rotate(c: Context<AppEnv>) {
-      const packageId = c.req.param("packageId")!;
+      const packageId = packageIdOf(c);
       const clientId = assertOAuthClientRowId(c.req.param("clientId")!);
       const body = await readJsonBody(c, oauthClientUpdateSchema);
       const client = await updateIntegrationOAuthClient(
@@ -413,7 +416,7 @@ export function oauthClientHandlers(scopeOf: (c: Context<AppEnv>) => SpaceScope 
     },
 
     async remove(c: Context<AppEnv>) {
-      const packageId = c.req.param("packageId")!;
+      const packageId = packageIdOf(c);
       const clientId = assertOAuthClientRowId(c.req.param("clientId")!);
       const { deletedConnections } = await deleteIntegrationOAuthClient(
         scopeOf(c),
@@ -705,7 +708,7 @@ export function createIntegrationsRouter() {
   // The space's OAuth clients plus the default it inherits (org or system); new
   // connections always use the default — there is no per-connect picker.
   // Deleting a client deletes the connections it minted.
-  const clients = oauthClientHandlers(getSpaceScope);
+  const clients = oauthClientHandlers(getSpaceScope, (c) => c.req.param("packageId")!);
   const configure = requirePermission("integrations", "configure");
   router.get(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/clients",

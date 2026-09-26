@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **Integration OAuth clients can be registered once for the whole
-  organization** (#1264). `/api/org-integrations/{packageId}/...` (list,
+  organization** (#1264). `/api/org-integrations/{scope}/{name}/...` (list,
   register, rotate, delete, set default; `org-integrations:configure`, owner and
   admin, session-only) manages org-level clients that every space inherits;
   connect resolves space > org > system.
@@ -23,14 +23,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **Integration OAuth client API contract** (#1264), visible to API consumers:
-  `IntegrationOAuthClient.spaceId` is nullable (`null` = org client); a client
-  descriptor's `source` gains `"org"`; `GET /api/integrations/{packageId}/auths/{authKey}/clients`
-  lists only the space's own clients plus the one default it inherits (other org
-  and system clients are no longer listed); `PUT .../default-client` on a space
-  rejects (400) a system client that is not the inherited default; the by-id
-  client routes (`PUT`/`DELETE .../oauth-clients/{clientId}`) now also require
-  the client to belong to `{packageId}` (404 otherwise).
+- **BREAKING (API): a space's integration OAuth client routes return and
+  accept only that space's clients and the default it inherits** (#1264).
+  `GET /api/integrations/{packageId}/auths/{authKey}/clients` lists the space's
+  own clients plus the one inherited default (org or system), no other org or
+  system client, and is reachable with `integrations:read` (API keys included).
+  `PUT …/auths/{authKey}/default-client` answers `400` for a system client that
+  is not the inherited default. `PUT`/`DELETE …/oauth-clients/{clientId}` answer
+  `404` when the client does not belong to `{packageId}`.
+  `IntegrationOAuthClient.spaceId` is nullable (`null` = org client), and a
+  client descriptor's `source` gains `"org"`.
 
 ### Fixed
 

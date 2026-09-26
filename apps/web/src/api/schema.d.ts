@@ -2631,7 +2631,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/org-integrations/{packageId}/auths/{authKey}/clients": {
+    "/api/org-integrations/{scope}/{name}/auths/{authKey}/clients": {
         parameters: {
             query?: never;
             header?: never;
@@ -2651,7 +2651,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/org-integrations/{packageId}/auths/{authKey}/default-client": {
+    "/api/org-integrations/{scope}/{name}/auths/{authKey}/default-client": {
         parameters: {
             query?: never;
             header?: never;
@@ -2671,7 +2671,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/org-integrations/{packageId}/auths/{authKey}/oauth-clients": {
+    "/api/org-integrations/{scope}/{name}/auths/{authKey}/oauth-clients": {
         parameters: {
             query?: never;
             header?: never;
@@ -2691,7 +2691,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/org-integrations/{packageId}/oauth-clients/{clientId}": {
+    "/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -15750,8 +15750,10 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
             path: {
-                /** @description Integration package id (e.g. `@official/gmail`). */
-                packageId: string;
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
                 /** @description Auth key as declared in the manifest's `auths` map. */
                 authKey: string;
             };
@@ -15807,8 +15809,10 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
             path: {
-                /** @description Integration package id (e.g. `@official/gmail`). */
-                packageId: string;
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
                 /** @description Auth key as declared in the manifest's `auths` map. */
                 authKey: string;
             };
@@ -15871,8 +15875,10 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
             path: {
-                /** @description Integration package id (e.g. `@official/gmail`). */
-                packageId: string;
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
                 /** @description Auth key as declared in the manifest's `auths` map. */
                 authKey: string;
             };
@@ -15941,8 +15947,10 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
             path: {
-                /** @description Integration package id (e.g. `@official/gmail`). */
-                packageId: string;
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
                 /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
                 clientId: string;
             };
@@ -16011,8 +16019,10 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
             path: {
-                /** @description Integration package id (e.g. `@official/gmail`). */
-                packageId: string;
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
                 /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
                 clientId: string;
             };
