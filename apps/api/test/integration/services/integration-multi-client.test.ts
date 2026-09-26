@@ -83,6 +83,7 @@ describe("integration multi-client", () => {
     const [row] = await db
       .insert(integrationOauthClients)
       .values({
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION,
         authKey: AUTH_KEY,
@@ -491,6 +492,7 @@ describe("integration multi-client", () => {
             updatedAt: "2026-01-01T00:00:00.000Z",
           },
         ],
+        orgClients: [],
       };
     }
 
@@ -551,6 +553,7 @@ describe("integration multi-client", () => {
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
         })),
+        orgClients: [],
       };
     }
 
@@ -590,6 +593,7 @@ describe("integration multi-client", () => {
     it("rejects a second auto-provisioned client for the same auth (one-auto)", async () => {
       async function seedAuto(clientId: string): Promise<void> {
         await db.insert(integrationOauthClients).values({
+          orgId: ctx.orgId,
           spaceId: ctx.defaultSpaceId,
           integrationId: INTEGRATION,
           authKey: AUTH_KEY,

@@ -135,7 +135,8 @@ export type { IntegrationToolCatalogEntry };
 export interface IntegrationOAuthClient {
   /** Row UUID — the `client_ref` handle for rotate / delete / default-client. */
   id: string;
-  spaceId: string;
+  /** `null` for an org-level client, inherited by every space of the org. */
+  spaceId: string | null;
   integration_package_id: string;
   auth_key: string;
   client_id: string;
