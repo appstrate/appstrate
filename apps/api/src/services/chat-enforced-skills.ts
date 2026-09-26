@@ -5,47 +5,78 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, packageShares, spacePackages } from "@appstrate/db/schema";
+import {
+  packageDistTags,
+  packages,
+  packageShares,
+  packageVersions,
+  spacePackages,
+} from "@appstrate/db/schema";
 import {
   CHAT_SKILLS_CONTENT_BUDGET_CHARS,
   MAX_ENFORCED_CHAT_SKILLS,
   type EnforcedChatSkill,
+  type EnforcedChatSkillRef,
 } from "@appstrate/core/chat-contract";
+import { asRecord } from "@appstrate/core/safe-json";
 import { conflict } from "../lib/errors.ts";
 import type { Tx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
-import { activePackagesFilter, updateSpacePackage } from "./space-packages.ts";
+import { activePackagesFilter, latestTagJoin, updateSpacePackage } from "./space-packages.ts";
 import { loadPublishedDefinition } from "./package-versions.ts";
 
-/**
- * The space's ACTIVE flagged skills, sorted by id. `content: null` only when no
- * version resolves any more; an unreadable archive rejects, so a storage fault
- * never drops the policy silently.
- */
-export async function loadEnforcedChatSkills(
+/** The space's ACTIVE flagged skills, sorted by id, named from their `latest` published version. */
+export async function listEnforcedChatSkills(
   orgId: string,
   spaceId: string,
-): Promise<EnforcedChatSkill[]> {
+): Promise<EnforcedChatSkillRef[]> {
   const rows = await db
-    .select({ id: packages.id })
+    .select({
+      id: packages.id,
+      version: packageVersions.version,
+      manifest: packageVersions.manifest,
+    })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
     .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
+    .leftJoin(packageDistTags, latestTagJoin(packages.id))
+    // A yanked target does not resolve as `latest` (`resolveVersionFromCatalog`).
+    .leftJoin(
+      packageVersions,
+      and(eq(packageVersions.id, packageDistTags.versionId), eq(packageVersions.yanked, false)),
+    )
     .where(
       and(activePackagesFilter({ orgId, spaceId }, "skill"), eq(spacePackages.chatEnforced, true)),
     )
     .orderBy(packages.id);
 
+  return rows.map(({ id, version, manifest }) => {
+    const { display_name } = asRecord(manifest);
+    return {
+      packageId: id,
+      name: typeof display_name === "string" ? display_name : id,
+      version: version ?? null,
+    };
+  });
+}
+
+/**
+ * {@link listEnforcedChatSkills} with each SKILL.md. `content: null` only when no
+ * version resolves; an unreadable archive rejects, so a storage fault never
+ * drops the policy silently.
+ */
+export async function loadEnforcedChatSkills(
+  orgId: string,
+  spaceId: string,
+): Promise<EnforcedChatSkill[]> {
+  const refs = await listEnforcedChatSkills(orgId, spaceId);
   return Promise.all(
-    rows.map(async ({ id }) => {
-      const published = await loadPublishedDefinition("skill", id, "latest");
-      return {
-        packageId: id,
-        name: published?.name ?? id,
-        version: published?.version ?? null,
-        content: published?.content ?? null,
-      };
+    refs.map(async (ref) => {
+      const published = ref.version
+        ? await loadPublishedDefinition("skill", ref.packageId, ref.version)
+        : null;
+      return { ...ref, content: published?.content ?? null };
     }),
   );
 }

@@ -1053,9 +1053,9 @@ export async function getResolvedRunConfig(
 
 /**
  * Update the per-space settings row for `(spaceId, packageId)` — the model, the
- * proxy, the generation settings, the stored input values and the chat
- * enforcement flag, and nothing else. `chatEnforcedChanged` says whether the
- * write moved that flag.
+ * proxy, the generation settings, the stored input values and — with
+ * `requirePlacement` only, never on a create — the chat enforcement flag, and
+ * nothing else. `chatEnforcedChanged` says whether the write moved that flag.
  *
  * `enabled` is NOT here: activation has its own pair of doors
  * ({@link activatePackage} / {@link deactivatePackage}), which keeps the
@@ -1098,7 +1098,6 @@ export async function updateSpacePackage(
     modelId: string | null;
     generationConfig: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId: string | null;
-    chatEnforced: boolean;
   }> = { updatedAt: new Date() };
   // `space_packages.input_settings` has exactly ONE write path, and it is
   // this function — the public input-settings route and every internal caller
@@ -1114,10 +1113,6 @@ export async function updateSpacePackage(
   if (updates.modelId !== undefined) set.modelId = updates.modelId;
   if (updates.generationConfig !== undefined) set.generationConfig = updates.generationConfig;
   if (updates.proxyId !== undefined) set.proxyId = updates.proxyId;
-  if (updates.chatEnforced !== undefined) set.chatEnforced = updates.chatEnforced;
-  // Against the row as read under its lock, so the caller's audit names a real change.
-  const chatEnforcedMoved = (before: { chatEnforced: boolean } | null) =>
-    updates.chatEnforced !== undefined && (before?.chatEnforced ?? false) !== updates.chatEnforced;
 
   const work = async (tx: Tx) => {
     // Tenant boundary, atomic with the write: the target package must be
@@ -1138,13 +1133,13 @@ export async function updateSpacePackage(
       // landed and the 200 body was `{"object":"space_package"}`. The
       // `EXISTS` makes the UPDATE match nothing instead, so the refusal below
       // states the truth.
+      const { chatEnforced } = updates;
+      // Read under the row lock, so the caller's audit names a real change.
       const before =
-        updates.chatEnforced === undefined
-          ? null
-          : await currentPlacement(tx, packageId, scope.spaceId);
+        chatEnforced === undefined ? null : await currentPlacement(tx, packageId, scope.spaceId);
       const updated = await tx
         .update(spacePackages)
-        .set(set)
+        .set(chatEnforced === undefined ? set : { ...set, chatEnforced })
         .where(
           and(
             eq(spacePackages.spaceId, scope.spaceId),
@@ -1156,7 +1151,9 @@ export async function updateSpacePackage(
       if (updated.length === 0) {
         throw notFound(`Package '${packageId}' is not placed in this space`);
       }
-      return { chatEnforcedChanged: chatEnforcedMoved(before) };
+      return {
+        chatEnforcedChanged: chatEnforced !== undefined && before?.chatEnforced !== chatEnforced,
+      };
     }
 
     // Create-on-first-write, and only where it changes no verdict. Without this
@@ -1179,14 +1176,13 @@ export async function updateSpacePackage(
           ? { generationConfig: updates.generationConfig }
           : {}),
         ...(updates.proxyId !== undefined ? { proxyId: updates.proxyId } : {}),
-        ...(updates.chatEnforced !== undefined ? { chatEnforced: updates.chatEnforced } : {}),
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
         target: [spacePackages.spaceId, spacePackages.packageId],
         set,
       });
-    return { chatEnforcedChanged: chatEnforcedMoved(existing) };
+    return { chatEnforcedChanged: false };
   };
   return opts?.tx ? work(opts.tx) : db.transaction(work);
 }

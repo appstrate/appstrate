@@ -604,7 +604,7 @@ export const spacesPaths = {
         },
         "422": {
           description:
-            "Enforcing a skill whose latest published archive cannot be read (`version_artifact_unavailable`). Nothing in the patch is written.",
+            "Enforcing a skill while a latest published archive cannot be read (`version_artifact_unavailable`, `detail` naming the package): this skill's own, or that of a skill this space already enforces — the budget check reads every one, and the space's chats already refuse their turns until that skill is republished or released. Nothing in the patch is written.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

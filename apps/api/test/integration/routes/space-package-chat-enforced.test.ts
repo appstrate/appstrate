@@ -4,10 +4,11 @@
  * `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` with `chat_enforced`
  * (issue #1586): a space imposes a skill on every chat conversation held in it.
  *
- * Pinned here: the gate (`skills:write` in the space), the refusals in their
- * order (404 unplaced, 400 non-skill, 409 draft-only / cap / budget), that a
- * refusal writes nothing, that two concurrent enforcements cannot both pass the
- * cap, and that the audit trail records an actual change and nothing else.
+ * Pinned here: the gate (`skills:write` in the space, no personal-space waiver),
+ * the refusals in their order (403, then 400 non-skill, then 404 unplaced, then
+ * 409 draft-only / cap / budget and 422 unreadable archive), that a refusal
+ * writes nothing, that two concurrent enforcements cannot both pass the cap,
+ * and that the audit trail records an actual change and nothing else.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -21,14 +22,17 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
 import {
+  addOrgMember,
   authHeaders,
   createTestContext,
+  createTestUser,
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
   seedPackage,
   seedPublishedVersion,
+  seedSpace,
   seedSpaceMember,
   seedSpacePackage,
   seedSpaceRole,
@@ -157,17 +161,75 @@ describe("enforcing a skill in the chat", () => {
     expect(ok.status, await ok.clone().text()).toBe(200);
   });
 
-  it("404s a skill that is not placed here, before any 409", async () => {
-    // Not published either: the placement refusal is the one answered.
+  it("404s a skill with no placement row here, before any 409", async () => {
+    // Homed here but never switched on, and not published: the missing row is
+    // the refusal answered.
+    await seedPackage({
+      id: "@enforce/never-on",
+      orgId: ctx.orgId,
+      type: "skill",
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: { name: "@enforce/never-on", version: "1.0.0", type: "skill" },
+    });
+    await expectProblem(await patch("@enforce/never-on", { chat_enforced: true }), 404);
+    expect(await storedFlag("@enforce/never-on")).toBeNull();
+  });
+
+  it("404s a skill homed in another space and never offered here", async () => {
+    const other = await seedSpace({ orgId: ctx.orgId, name: "Other" });
     await seedPackage({
       id: "@enforce/elsewhere",
       orgId: ctx.orgId,
       type: "skill",
-      homeSpaceId: ctx.defaultSpaceId,
+      homeSpaceId: other.id,
       draftManifest: { name: "@enforce/elsewhere", version: "1.0.0", type: "skill" },
     });
+    await seedSpacePackage(other.id, "@enforce/elsewhere");
+    await seedPublishedVersion("@enforce/elsewhere", "1.0.0");
     await expectProblem(await patch("@enforce/elsewhere", { chat_enforced: true }), 404);
     expect(await storedFlag("@enforce/elsewhere")).toBeNull();
+  });
+
+  it("answers 400 for a non-skill before looking at its placement", async () => {
+    await seedPackage({
+      id: "@enforce/stray-agent",
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+    });
+    await expectProblem(await patch("@enforce/stray-agent", { chat_enforced: true }), 400, {
+      code: "chat_enforced_not_skill",
+    });
+  });
+
+  it("403s the owner of a personal space without `skills:write` — configure has no waiver", async () => {
+    const guest = await createTestUser();
+    await addOrgMember(ctx.orgId, guest.id, "guest");
+    const listed = await app.request("/api/spaces", {
+      headers: { Cookie: guest.cookie, "X-Org-Id": ctx.orgId },
+    });
+    const spaces = ((await listed.json()) as { data: { id: string; personal: boolean }[] }).data;
+    const own = spaces.find((space) => space.personal)!.id;
+    await seedPackage({
+      id: "@enforce/mine",
+      orgId: ctx.orgId,
+      type: "skill",
+      homeSpaceId: own,
+      draftManifest: { name: "@enforce/mine", version: "1.0.0", type: "skill" },
+    });
+    await seedSpacePackage(own, "@enforce/mine");
+    await seedPublishedVersion("@enforce/mine", "1.0.0");
+
+    const res = await app.request(`/api/spaces/${own}/packages/@enforce/mine`, {
+      method: "PATCH",
+      headers: {
+        Cookie: guest.cookie,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": own,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ chat_enforced: true }),
+    });
+    await expectProblem(res, 403);
   });
 
   it("400s a package that is not a skill", async () => {
@@ -246,6 +308,16 @@ describe("enforcing a skill in the chat", () => {
       code: "version_artifact_unavailable",
     });
     expect(await storedFlag("@enforce/broken")).toBe(false);
+  });
+
+  it("422s naming an already-enforced skill whose archive is gone", async () => {
+    await seedSkill("@enforce/a-broken", { enforced: true });
+    await storage.deleteFile(AGENT_PACKAGES_BUCKET, versionZipKey("@enforce/a-broken", "1.0.0"));
+    await seedSkill("@enforce/b-new");
+    const refused = await patch("@enforce/b-new", { chat_enforced: true });
+    const body = await expectProblem(refused, 422, { code: "version_artifact_unavailable" });
+    expect(body.detail).toContain("@enforce/a-broken");
+    expect(await storedFlag("@enforce/b-new")).toBe(false);
   });
 
   it("lets exactly one of two concurrent enforcements at cap − 1 through", async () => {
