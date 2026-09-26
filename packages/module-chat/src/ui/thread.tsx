@@ -427,7 +427,7 @@ function TurnLimitNotice() {
  * not reached a finish chunk yet. A refusal never offers Retry; a billing one
  * links whoever can manage billing to the billing page.
  */
-function MessageError() {
+export function MessageError() {
   const { t, can } = useChatHost();
   // Select a plain field, never a derived object: this selector IS
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
