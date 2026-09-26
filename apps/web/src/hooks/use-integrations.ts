@@ -281,11 +281,7 @@ export function useInitiateIntegrationConnect() {
 // OAuth clients — space tier and org tier
 // ─────────────────────────────────────────────
 
-/**
- * Which tier of custom OAuth clients a hook targets. `space` rows override the
- * org's for that space; `org` rows (org context only, no space) are inherited
- * by every space. Both tiers take the same bodies and return the same shapes.
- */
+/** `space` clients override the org's for that space; `org` clients apply to every space. */
 export type IntegrationClientTier = "space" | "org";
 
 const SPACE_CLIENTS = "/api/integrations/{packageId}/auths/{authKey}/clients";
@@ -300,10 +296,7 @@ type RotateOAuthClientBody =
 type SetDefaultClientBody =
   paths["/api/integrations/{packageId}/auths/{authKey}/default-client"]["put"]["requestBody"]["content"]["application/json"];
 
-/**
- * After any client mutation: both lists (an org change re-badges the space
- * list and can move its default) and the detail (`has_oauth_client`).
- */
+/** Refreshes both lists: an org change re-badges the space list and can move its default. */
 function useClientMutationSuccess(messageKey: string) {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
@@ -316,11 +309,8 @@ function useClientMutationSuccess(messageKey: string) {
 }
 
 /**
- * OAuth clients a tier may pick as its default, each with `source` and which
- * is the default: the tier's own clients plus the one default it inherits (org
- * or system). Secrets are never returned. New connections always use the
- * default — there is no per-connect picker. The org tier is gated at the call
- * site (`org-integrations:configure`).
+ * A tier's own clients plus the one default it inherits (org or system). New
+ * connections always use the default — there is no per-connect picker.
  */
 export function useIntegrationClients(
   tier: IntegrationClientTier,
@@ -331,8 +321,7 @@ export function useIntegrationClients(
   const orgScope = useOrgOnlyScope();
   const path = { packageId: packageId ?? "", authKey: authKey ?? "" };
   const ready = !!packageId && !!authKey;
-  // One typed query per tier (literal paths keep the client typed); only the
-  // selected tier's query is enabled.
+  // One query per tier: literal paths keep the client typed.
   const space = $api.useQuery(
     "get",
     SPACE_CLIENTS,
@@ -354,11 +343,7 @@ export function useIntegrationClients(
   return tier === "space" ? space : org;
 }
 
-/**
- * Register a NEW custom (BYO-app) OAuth client for an auth — repeatable. The
- * first of a tier becomes its default; later ones stay non-default until
- * promoted via {@link useSetDefaultIntegrationClient}.
- */
+/** Register a custom (BYO-app) client; only a tier's first becomes its default. */
 export function useCreateIntegrationOAuthClient(tier: IntegrationClientTier) {
   const onSuccess = useClientMutationSuccess("integration.oauthClient.save.success");
   return useMutation({
@@ -430,10 +415,7 @@ export function usePromoteIntegrationOAuthClient() {
   });
 }
 
-/**
- * Delete one custom client by its id — with the connections it minted (in the
- * space, or in every space of the org for an org client).
- */
+/** Also deletes the connections it minted — in every space for an org client. */
 export function useDeleteIntegrationOAuthClient(tier: IntegrationClientTier) {
   const onSuccess = useClientMutationSuccess("integration.oauthClient.delete.success");
   return useMutation({

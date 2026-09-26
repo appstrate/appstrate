@@ -368,11 +368,8 @@ function OAuthClientModal({
  * pattern). Auto-provisioned (remote MCP DCR/CIMD) auths keep ONE machine
  * client, shown read-only with a delete action that re-triggers registration;
  * a manual escape hatch (opt-in) covers the rare server needing a pre-registered
- * public client. Secrets are never returned by the endpoint.
- *
- * `tier` picks the routes: each lists the tier's own clients (editable) plus
- * the one default it inherits; any listed row can be made the default. `space`
- * rows can be promoted to the org, whose clients every space inherits.
+ * public client. Secrets are never returned by the endpoint. `tier` picks the
+ * routes; only the tier's own rows are editable.
  */
 function ClientsTable({
   tier,
@@ -417,12 +414,9 @@ function ClientsTable({
   // exactly the setup this display exists to get right. New connections always
   // use the default client, so that client's override is the one that decides.
   const effectiveRedirectUri = rows.find((c) => c.is_default)?.redirect_uri || platformRedirectUri;
-  // Choosing a default only matters when there is more than one row.
   const canChooseDefault = rows.length > 1;
-  // The rows this tier owns (edit/delete); the others are inherited.
   const ownSource = tier === "space" ? "custom" : "org";
-  // Both tables share the page, and an org row shows in both: prefix the org
-  // table's test ids so none collide.
+  // An org row shows in both tables on the page: prefix the org table's test ids.
   const tid = (id: string) => (tier === "space" ? id : `org-${id}`);
   const hasAutoClient = rows.some((c) => c.auto_provisioned);
   // Classic auths always allow registering more custom clients; auto-provisioned
@@ -826,8 +820,6 @@ function ConfigAuthBlock({
           autoProvisioned={status.client_auto_provisioned}
         />
       )}
-      {/* The org's own clients, inherited by every space. Auto-provisioned
-          (DCR/CIMD) clients are per space, so those auths have no org tier. */}
       {isOAuth && !status.client_auto_provisioned && can("org-integrations:configure") && (
         <ClientsTable
           tier="org"

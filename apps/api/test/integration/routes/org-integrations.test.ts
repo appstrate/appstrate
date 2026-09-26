@@ -21,6 +21,7 @@ import { seedApiKey, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { auditEvents, integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { __resetSystemIntegrationsForTest } from "../../../src/services/integration-client-registry.ts";
+import { getApiKeyAllowedScopes } from "../../../src/lib/permissions.ts";
 
 const app = getTestApp();
 
@@ -275,16 +276,20 @@ describe("/api/org-integrations — org-level OAuth clients", () => {
     expect(await db.select().from(integrationOauthClients)).toHaveLength(0);
   });
 
-  it("forbids an owner-minted API key (session-only permission, 403)", async () => {
+  it("forbids an owner-minted max-scope API key (session-only permission, 403)", async () => {
     const orgClient = await createOrgClient("org-app");
     const key = await seedApiKey({
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
-      scopes: ["integrations:read"],
+      scopes: [...getApiKeyAllowedScopes()],
     });
     const asKey = { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" };
 
+    // Control: the key authenticates and reaches the space tier.
+    expect(
+      (await app.request(`${SPACE_BASE}/auths/google/clients`, { headers: asKey })).status,
+    ).toBe(200);
     const listed = await app.request(`${ORG_BASE}/auths/google/clients`, { headers: asKey });
     expect(listed.status).toBe(403);
     const created = await app.request(`${ORG_BASE}/auths/google/oauth-clients`, {

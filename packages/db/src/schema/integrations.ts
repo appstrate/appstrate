@@ -79,7 +79,7 @@ export const integrationConnections = pgTable(
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
     // Which registered OAuth client minted this connection — a flat client id:
     // the env id of a system client (SYSTEM_INTEGRATIONS) or the
-    // `integration_oauth_clients.id` of the org's own per-space client.
+    // `integration_oauth_clients.id` of a custom (space or org) client.
     // Pinned so token refresh resolves the SAME client credentials that minted
     // the tokens. Resolved system-first then DB-by-id (mirrors the model-provider
     // credential pattern), so a system id MUST NOT be UUID-shaped.
@@ -171,21 +171,9 @@ export const integrationConnections = pgTable(
 );
 
 /**
- * Custom (BYO-app) OAuth2 clients for integration auths, at two tiers:
- *
- *   - space row (`space_id` set): used in that space, and overrides the org
- *     row for it;
- *   - org row (`space_id IS NULL`): inherited by every space of the org.
- *
- * Resolution is space > org > system client (`SYSTEM_INTEGRATIONS`). Each tier
- * may hold N clients per `(integration, auth)` with at most one `is_default`
- * (`idx_ioc_one_default` for space rows, `idx_ioc_one_org_default` for org
- * rows). Auto-provisioned (DCR/CIMD) clients are space rows only
- * (`ioc_auto_provisioned_is_space`), one per auth (`idx_ioc_one_auto`).
- *
- * A space row's `(space_id, org_id)` must name a space of that org (composite
- * FK). Rows are deleted with their space, org, or integration package (FK
- * cascades).
+ * Custom (BYO-app) OAuth2 clients for integration auths: a space row overrides the
+ * org rows (`space_id IS NULL`) every space inherits (space > org > system client).
+ * At most one `is_default` per tier and `(integration, auth)`.
  */
 export const integrationOauthClients = pgTable(
   "integration_oauth_clients",
@@ -194,7 +182,6 @@ export const integrationOauthClients = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    /** NULL = org-level row. FK: `integration_oauth_clients_space_id_org_id_fk`. */
     spaceId: text("space_id"),
     integrationId: text("integration_package_id")
       .notNull()
@@ -238,10 +225,6 @@ export const integrationOauthClients = pgTable(
     tokenEndpointAuthMethod: text("token_endpoint_auth_method"),
     /** Optional pre-registered redirect URI; falls back to the platform default at connect time. */
     redirectUri: text("redirect_uri"),
-    // Whether this client is the default of its tier for new connections. A
-    // per-row flag because the default is scoped per (space or org,
-    // integration, auth); at most one per tier (partial unique indexes below).
-    // The service flags a new client default only when its tier has none.
     isDefault: boolean("is_default").notNull().default(false),
     // Provenance: `true` for a client minted automatically via DCR/CIMD at
     // connect time (remote MCP public client), `false` for an admin-registered
@@ -254,20 +237,16 @@ export const integrationOauthClients = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    // A space row can only point at a space of its own org. MATCH SIMPLE: not
-    // checked for org rows (`space_id IS NULL`).
+    // A space row must name a space of its own org (unchecked for org rows).
     foreignKey({
       name: "integration_oauth_clients_space_id_org_id_fk",
       columns: [table.spaceId, table.orgId],
       foreignColumns: [spaces.id, spaces.orgId],
     }).onDelete("cascade"),
-    // At most one default client per (space, integration, auth). "Default =
-    // inherited" is simply zero rows flagged default. Org rows have a NULL
-    // `space_id`, so they never collide here.
+    // One default per tier: space rows here, org rows (NULL `space_id`) below.
     uniqueIndex("idx_ioc_one_default")
       .on(table.spaceId, table.integrationId, table.authKey)
       .where(sql`${table.isDefault}`),
-    // At most one default org-level client per (org, integration, auth).
     uniqueIndex("idx_ioc_one_org_default")
       .on(table.orgId, table.integrationId, table.authKey)
       .where(sql`${table.isDefault} AND ${table.spaceId} IS NULL`),
@@ -301,8 +280,8 @@ export const integrationOauthClients = pgTable(
       sql`NOT ${table.autoProvisioned} OR ${table.spaceId} IS NOT NULL`,
     ),
     index("idx_integration_oauth_clients_package").on(table.integrationId),
-    // Hot path: the connect resolver + clients lists enumerate every client
-    // of a (space, integration, auth) and of the space's (org, integration, auth).
+    // Hot path: the connect resolver + clients list enumerate every custom
+    // client for a (space, integration, auth).
     index("idx_integration_oauth_clients_lookup").on(
       table.spaceId,
       table.integrationId,

@@ -50,7 +50,7 @@ import {
 } from "./integration-client-registry.ts";
 import { isActiveHere } from "./package-activation.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
-import { setExactlyOneDefault, isUuid, type DbOrTx } from "../lib/db-helpers.ts";
+import { setExactlyOneDefault, isUniqueViolation, isUuid, type DbOrTx } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import { ApiError, notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
 import {
@@ -657,7 +657,7 @@ function assertClientAuth(
   const auth = lookupAuth(manifest, authKey) as AfpsManifestAuth;
   if (auth.type !== "oauth2") {
     throw invalidRequest(
-      `Cannot register an OAuth client for auth '${authKey}' (type '${auth.type}' is not oauth2)`,
+      `Auth '${authKey}' is type '${auth.type}', not oauth2: it has no OAuth clients`,
     );
   }
   if (!autoProvisioned && usesAutoProvisionedClient(manifest, auth)) {
@@ -847,8 +847,8 @@ export function encodeClientAuthForStorage(input: {
  * upsert): a fresh client id is minted each time so multiple clients coexist.
  *
  * `is_default` is set to `true` only when no client of its tier is already the
- * default (mirrors `org-models` first-credential-wins); the DB partial unique
- * `idx_ioc_one_default` (space) / `idx_ioc_one_org_default` (org) is the backstop.
+ * default (mirrors `org-models` first-credential-wins); the loser of a race on
+ * `idx_ioc_one_default` (space) / `idx_ioc_one_org_default` (org) is stored non-default.
  *
  * Creation always supplies `clientSecret` (blank means "register a public
  * client"), so `encodeClientAuthForStorage` never returns the preserve
@@ -886,23 +886,29 @@ export async function createIntegrationOAuthClient(
   // client"), so the encoder never returns the preserve sentinel here.
   const clientAuth = encodeClientAuthForStorage(input)!;
   const now = new Date();
-  const [row] = await db
-    .insert(integrationOauthClients)
-    .values({
-      orgId: owner.orgId,
-      spaceId: isSpaceOwner(owner) ? owner.spaceId : null,
-      integrationId: packageId,
-      authKey,
-      clientId: input.clientId,
-      clientSecretEncrypted: clientAuth.clientSecretEncrypted,
-      tokenEndpointAuthMethod: clientAuth.tokenEndpointAuthMethod,
-      redirectUri: input.redirectUri ?? null,
-      isDefault,
-      autoProvisioned,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .returning();
+  const insert = (asDefault: boolean) =>
+    db
+      .insert(integrationOauthClients)
+      .values({
+        orgId: owner.orgId,
+        spaceId: isSpaceOwner(owner) ? owner.spaceId : null,
+        integrationId: packageId,
+        authKey,
+        clientId: input.clientId,
+        clientSecretEncrypted: clientAuth.clientSecretEncrypted,
+        tokenEndpointAuthMethod: clientAuth.tokenEndpointAuthMethod,
+        redirectUri: input.redirectUri ?? null,
+        isDefault: asDefault,
+        autoProvisioned,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+  const [row] = await insert(isDefault).catch((err: unknown) => {
+    // A concurrent write took the tier's first default: land as non-default.
+    if (!isDefault || autoProvisioned || !isUniqueViolation(err)) throw err;
+    return insert(false);
+  });
 
   if (!row) {
     throw new Error("createIntegrationOAuthClient: insert returned no row");
@@ -1020,6 +1026,21 @@ export async function promoteIntegrationOAuthClient(
   clientId: string,
 ): Promise<IntegrationOAuthClientWithSecret> {
   await assertSpaceInScope(scope);
+  try {
+    return await moveClientToOrg(scope, packageId, clientId, true);
+  } catch (err) {
+    // A concurrent write took the org tier's first default: land as non-default.
+    if (!isUniqueViolation(err)) throw err;
+    return moveClientToOrg(scope, packageId, clientId, false);
+  }
+}
+
+function moveClientToOrg(
+  scope: SpaceScope,
+  packageId: string,
+  clientId: string,
+  mayDefault: boolean,
+): Promise<IntegrationOAuthClientWithSecret> {
   return db.transaction(async (tx) => {
     const [existing] = await tx
       .select()
@@ -1034,15 +1055,12 @@ export async function promoteIntegrationOAuthClient(
         `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot leave its space.`,
       );
     }
-    const orgHasDefault = await hasTierDefault(
-      { orgId: scope.orgId },
-      packageId,
-      existing.authKey,
-      tx,
-    );
+    const isDefault =
+      mayDefault &&
+      !(await hasTierDefault({ orgId: scope.orgId }, packageId, existing.authKey, tx));
     const [row] = await tx
       .update(integrationOauthClients)
-      .set({ spaceId: null, isDefault: !orgHasDefault, updatedAt: new Date() })
+      .set({ spaceId: null, isDefault, updatedAt: new Date() })
       .where(eq(integrationOauthClients.id, existing.id))
       .returning();
     return projectClientWithSecret(row!);
