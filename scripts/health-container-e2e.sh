@@ -6,8 +6,12 @@
 #   - Docker's health state for that running container
 #
 # The positive instance uses the real Docker socket and must be healthy. The
-# negative instance points the same image at a missing socket; boot completes
-# in degraded mode and the image healthcheck must mark the container unhealthy.
+# negative instance points the same image at a socket path that does not exist
+# yet; boot completes in degraded mode and the image healthcheck must mark the
+# container unhealthy. The socket then appears at that path inside the SAME
+# running container, and the background retry of the orchestrator's
+# initialization must bring /health and Docker health back to healthy with no
+# restart (#1129).
 #
 # HEALTH_E2E_EE=1 boots the SAME image and topology with the commercial module
 # enabled and adds the "EE module" phase below (loaded, sweeping). The "EE
@@ -73,8 +77,9 @@ trap cleanup EXIT
 
 wait_for_health_body() {
   local expected="$1"
+  local timeout_s="${2:-90}"
   local body=""
-  for _ in $(seq 1 90); do
+  for _ in $(seq 1 "$timeout_s"); do
     body=$(curl -fsS "http://127.0.0.1:${E2E_PORT}/health" 2>/dev/null || true)
     if jq -e --arg expected "$expected" '.status == $expected' <<<"$body" >/dev/null 2>&1; then
       printf '%s' "$body"
@@ -218,7 +223,9 @@ echo "billing_webhook_status=$webhook_status"
 compose down --volumes --remove-orphans >/dev/null
 
 echo "==> Unavailable orchestrator"
-export HEALTH_E2E_DOCKER_SOCKET=/tmp/appstrate-health-e2e-missing.sock
+# Absent inside the container at boot; the recovery phase below creates it.
+readonly LATE_DOCKER_SOCKET=/tmp/appstrate-health-e2e-docker.sock
+export HEALTH_E2E_DOCKER_SOCKET="$LATE_DOCKER_SOCKET"
 compose up -d appstrate
 negative_body=$(wait_for_health_body degraded)
 jq -e '
@@ -227,6 +234,7 @@ jq -e '
   .checks.agents.status == "degraded"
 ' <<<"$negative_body" >/dev/null
 negative_id=$(compose ps -q appstrate)
+negative_start=$(docker inspect "$negative_id" --format '{{.State.StartedAt}} restarts={{.RestartCount}}')
 
 # Docker runs health probes every five seconds during start-period. The old
 # compose-level `wget /` override therefore turned healthy almost immediately,
@@ -250,5 +258,42 @@ negative_logs=$(compose logs --no-color appstrate)
 grep -q 'Could not initialize container orchestrator' <<<"$negative_logs"
 echo "$negative_body" | jq -c '{status, checks}'
 echo "docker_health=unhealthy"
+
+# The orchestrator retries a failed initialize() after 5s, 10s, 20s, 40s, then
+# every 60s (apps/api/src/services/orchestrator/agent-runtime-readiness.ts).
+# No delay exceeds that 60s ceiling, so whenever the socket appears the next
+# retry is at most one ceiling away; the margin covers the successful
+# initialize() itself (ping + image checks against the real daemon).
+# Docker then needs a single passing probe — one 30s interval plus its 10s
+# timeout — which the 120s default of wait_for_docker_health covers.
+echo "==> Orchestrator recovers"
+readonly RETRY_CEILING_S=60
+readonly RECOVERY_BUDGET_S=$((RETRY_CEILING_S + 30))
+# docker-compose.yml bind-mounts the host socket at /var/run/docker.sock in
+# every mode, and the positive phase proved it usable. A running container
+# takes no new mount, so the late socket is a symlink to that one. Permissions
+# hold: with DOCKER_SOCKET absent at start, docker-entrypoint.sh skips its drop
+# to `bun` and the process runs as root, like `docker exec`.
+docker exec "$negative_id" ln -s /var/run/docker.sock "$LATE_DOCKER_SOCKET"
+recovered_body=$(wait_for_health_body healthy "$RECOVERY_BUDGET_S")
+jq -e '
+  .status == "healthy" and
+  .checks.database.status == "healthy" and
+  .checks.agents.status == "healthy"
+' <<<"$recovered_body" >/dev/null
+wait_for_docker_health "$negative_id" healthy
+
+# A restart would also turn it healthy (a fresh boot finds the socket), and
+# would prove nothing about the background retry.
+recovered_id=$(compose ps -q appstrate)
+recovered_start=$(docker inspect "$recovered_id" --format '{{.State.StartedAt}} restarts={{.RestartCount}}')
+if [ "$recovered_id" != "$negative_id" ] || [ "$recovered_start" != "$negative_start" ]; then
+  echo "The container was replaced or restarted during recovery:" >&2
+  echo "  before: $negative_id $negative_start" >&2
+  echo "  after:  $recovered_id $recovered_start" >&2
+  exit 1
+fi
+echo "$recovered_body" | jq -c '{status, checks}'
+echo "docker_health=healthy (same container, $recovered_start)"
 
 echo "Platform container health E2E passed"
