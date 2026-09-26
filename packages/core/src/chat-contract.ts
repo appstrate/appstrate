@@ -160,15 +160,20 @@ export const CHAT_SKILLS_CONTENT_BUDGET_CHARS = 64_000;
 /** Skills a space may enforce on its chat conversations. */
 export const MAX_ENFORCED_CHAT_SKILLS = 3;
 
-/**
- * A skill a space enforces on its chat conversations, read with platform
- * authority at its latest published version.
- */
-export interface EnforcedChatSkill {
+/** A skill a space enforces on its chat conversations, without its content. */
+export interface EnforcedChatSkillRef {
   packageId: string;
   /** Display name: the manifest's `display_name`, else the package id. */
   name: string;
+  /** The `latest` published version; null when none resolves. */
   version: string | null;
-  /** The published SKILL.md; null when no published version is readable now (deleted, unreadable). */
+}
+
+/** An enforced skill with its SKILL.md, read with platform authority at its latest published version. */
+export interface EnforcedChatSkill extends EnforcedChatSkillRef {
+  /**
+   * The published SKILL.md; null only when no published version resolves.
+   * A version that resolves but cannot be read rejects the whole load instead.
+   */
   content: string | null;
 }

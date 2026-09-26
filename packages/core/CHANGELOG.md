@@ -9,21 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`PlatformServices.loadEnforcedChatSkills`** (`@appstrate/core/module`, #1586) —
+- **`PlatformServices.loadEnforcedChatSkills`** and
+  **`PlatformServices.listEnforcedChatSkills`** (`@appstrate/core/module`, #1586) —
   the skills a space enforces on its chat conversations: its active skills whose
-  placement is chat-enforced, sorted by id, each at its latest published version,
-  read with platform authority whatever the caller's `skills:*` grants. It rejects
-  on failure so the chat refuses the turn instead of running it without the
-  space's policy. A new required member: the platform implements it, modules only
-  call it.
+  placement is chat-enforced, sorted by id, at their latest published version,
+  read with platform authority whatever the caller's `skills:*` grants. `load`
+  returns each SKILL.md; `list` returns names only, from the database. Both reject
+  on failure, so the chat refuses the turn instead of running it without the
+  space's policy. New required members: the platform implements them, modules
+  only call them.
 
-- **`EnforcedChatSkill`**, **`CHAT_SKILLS_CONTENT_BUDGET_CHARS`** and
-  **`MAX_ENFORCED_CHAT_SKILLS`** (`@appstrate/core/chat-contract`, #1586) — one
-  enforced skill (`packageId`, `name`, `version`, `content`, `null` when no
-  published version is readable now), the characters the SKILL.md bodies of one
-  chat turn share (64 000, enforced first), and the number of skills a space may
-  enforce (3). Shared so the platform's enforcement write and the chat module's
-  injection agree.
+- **`EnforcedChatSkillRef`**, **`EnforcedChatSkill`**,
+  **`CHAT_SKILLS_CONTENT_BUDGET_CHARS`** and **`MAX_ENFORCED_CHAT_SKILLS`**
+  (`@appstrate/core/chat-contract`, #1586) — an enforced skill without and with
+  its content (`content` is null only when no published version resolves; a read
+  failure rejects), the characters the SKILL.md bodies of one chat turn share
+  (64 000, enforced first), and the number of skills a space may enforce (3).
 
 ## [12.0.0] — 2026-09-25
 
