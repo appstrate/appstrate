@@ -392,6 +392,10 @@ describe("formatCallerContext", () => {
       expect(out).toContain("## Skills");
       expect(out).toContain("The user restricted this conversation to the skills they chose");
       expect(out).toContain("never change a role or a permission to reach one");
+      // The two misreadings seen live: an empty listing as "not in the space",
+      // and a role change as the way out.
+      expect(out).toContain("an empty result says nothing about it");
+      expect(out).toContain("switching this conversation's skill mode in the composer");
     }
     const manual = formatCallerContext(
       { user: { name: "Ada" }, org: { role: "member" } },

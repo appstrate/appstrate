@@ -89,7 +89,7 @@ const SKILLS_INJECTED_LEAD =
 // Why this turn holds no `skills:*`: without it, a model reads the gap as a role
 // to fix and hunts through other operations.
 const SKILLS_STRICT_NOTE =
-  "The user restricted this conversation to the skills they chose, if any, shown here: that is why this turn holds no `skills:*` permission. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
+  "The user restricted this conversation to the skills they chose, if any, shown here: that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the space holds — an empty result says nothing about it. Only the user lifts the restriction, by switching this conversation's skill mode in the composer. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
 
 /**
  * Instructions for an act the turn cannot perform are ABSENT rather than
