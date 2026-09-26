@@ -692,7 +692,7 @@ constraint integration_connections integration_connections_user_id_user_id_fk FO
 constraint integration_oauth_clients integration_oauth_clients_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
 constraint integration_oauth_clients integration_oauth_clients_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint integration_oauth_clients integration_oauth_clients_pkey PRIMARY KEY (id)
-constraint integration_oauth_clients integration_oauth_clients_space_id_org_id_fk FOREIGN KEY (space_id, org_id) REFERENCES spaces(id, org_id) ON DELETE CASCADE
+constraint integration_oauth_clients integration_oauth_clients_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint integration_oauth_clients ioc_auth_method_values CHECK (((token_endpoint_auth_method IS NULL) OR (token_endpoint_auth_method = ANY (ARRAY['client_secret_post'::text, 'client_secret_basic'::text, 'none'::text]))))
 constraint integration_oauth_clients ioc_auto_provisioned_is_space CHECK (((NOT auto_provisioned) OR (space_id IS NOT NULL)))
 constraint integration_oauth_clients ioc_public_iff_no_secret CHECK ((((token_endpoint_auth_method = 'none'::text) AND (client_secret_encrypted = ''::text)) OR ((token_endpoint_auth_method IS DISTINCT FROM 'none'::text) AND (client_secret_encrypted <> ''::text))))
@@ -1114,7 +1114,6 @@ index CREATE UNIQUE INDEX uq_oauth_client_resources_pair ON public.oauth_client_
 index CREATE UNIQUE INDEX uq_org_invitations_pending ON public.org_invitations USING btree (org_id, email) WHERE (status = 'pending'::invitation_status)
 index CREATE UNIQUE INDEX uq_org_models_unaliased_binding ON public.org_models USING btree (org_id, credential_id, model_id) WHERE (aliased = false)
 index CREATE UNIQUE INDEX uq_runs_id_org_id ON public.runs USING btree (id, org_id)
-index CREATE UNIQUE INDEX uq_spaces_id_org_id ON public.spaces USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_spaces_org_owner ON public.spaces USING btree (org_id, owner_user_id) WHERE (owner_user_id IS NOT NULL)
 index CREATE UNIQUE INDEX uq_storage_deletion_jobs_pending ON public.storage_deletion_jobs USING btree (bucket, storage_key) WHERE (completed_at IS NULL)
 index CREATE UNIQUE INDEX user_email_unique ON public."user" USING btree (email)

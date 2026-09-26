@@ -40,7 +40,6 @@ import {
   uniqueIndex,
   jsonb,
   check,
-  foreignKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
@@ -173,7 +172,8 @@ export const integrationConnections = pgTable(
 /**
  * Custom (BYO-app) OAuth2 clients for integration auths: a space row overrides the
  * org rows (`space_id IS NULL`) every space inherits (space > org > system client).
- * At most one `is_default` per tier and `(integration, auth)`.
+ * At most one `is_default` per tier and `(integration, auth)`. The service keeps a
+ * space row's `org_id` equal to its space's org.
  */
 export const integrationOauthClients = pgTable(
   "integration_oauth_clients",
@@ -182,7 +182,7 @@ export const integrationOauthClients = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    spaceId: text("space_id"),
+    spaceId: text("space_id").references(() => spaces.id, { onDelete: "cascade" }),
     integrationId: text("integration_package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
@@ -237,12 +237,6 @@ export const integrationOauthClients = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    // A space row must name a space of its own org (unchecked for org rows).
-    foreignKey({
-      name: "integration_oauth_clients_space_id_org_id_fk",
-      columns: [table.spaceId, table.orgId],
-      foreignColumns: [spaces.id, spaces.orgId],
-    }).onDelete("cascade"),
     // One default per tier: space rows here, org rows (NULL `space_id`) below.
     uniqueIndex("idx_ioc_one_default")
       .on(table.spaceId, table.integrationId, table.authKey)

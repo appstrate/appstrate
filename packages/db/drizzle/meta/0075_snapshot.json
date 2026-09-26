@@ -2095,27 +2095,6 @@
           "method": "btree",
           "with": {}
         },
-        "uq_spaces_id_org_id": {
-          "name": "uq_spaces_id_org_id",
-          "columns": [
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_spaces_one_default": {
           "name": "idx_spaces_one_default",
           "columns": [
@@ -5527,12 +5506,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "integration_oauth_clients_space_id_org_id_fk": {
-          "name": "integration_oauth_clients_space_id_org_id_fk",
+        "integration_oauth_clients_space_id_spaces_id_fk": {
+          "name": "integration_oauth_clients_space_id_spaces_id_fk",
           "tableFrom": "integration_oauth_clients",
           "tableTo": "spaces",
-          "columnsFrom": ["space_id", "org_id"],
-          "columnsTo": ["id", "org_id"],
+          "columnsFrom": ["space_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
