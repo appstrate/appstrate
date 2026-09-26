@@ -58,9 +58,9 @@ const BACKING_STREAMS = {
 const PROVIDERS = new Map(builtinProviders().map((provider) => [provider.id, provider]));
 
 /**
- * Stream the normalized transcript through the built-in provider `model.provider` when its
- * catalog serves `model.api`, as pi-ai's `compat.streamSimple` does, so provider-layer quirks
- * apply; else through pi-ai's `model.api` stream (sound cast: that entry's key IS `model.api`).
+ * Stream through built-in provider `model.provider` (so its quirks apply) only when its catalog
+ * serves `model.api`: a single-API provider streams ANY `model.api` through its one API. Else
+ * through pi-ai's `model.api` stream (sound cast: that entry's key IS `model.api`).
  */
 export function streamBacking(
   model: Model<Api>,
