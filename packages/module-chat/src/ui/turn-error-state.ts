@@ -126,35 +126,30 @@ export function turnErrorState(
     // `code` we localize here. A refusal names an action the user must take, so
     // retrying cannot clear it.
     const classified = clientTurnErrorFromMarker(err) ?? clientTurnErrorFromRateLimit(err);
-    const code = classified ? undefined : refusalCode(err);
+    if (classified) {
+      return {
+        text: t(TURN_ERROR_KEY[classified.category]),
+        retryable: classified.retryable,
+        // The marker carries a category and nothing else; a request id only ever
+        // reaches the client through the persisted turn metadata above.
+        requestId: undefined,
+      };
+    }
+    const code = refusalCode(err);
     const refusal =
       code && Object.prototype.hasOwnProperty.call(REFUSAL, code) ? REFUSAL[code] : undefined;
-    const refusalKey = refusal?.text;
-    if (refusal?.billing) {
-      const text = t(refusal.text);
-      return canManageBilling
-        ? {
-            text,
-            retryable: false,
-            requestId: undefined,
-            action: { label: t("turn.error.manageBilling"), href: BILLING_HREF },
-          }
-        : {
-            text: `${text} ${t("turn.error.contactAdmin")}`,
-            retryable: false,
-            requestId: undefined,
-          };
+    if (!refusal) {
+      return { text: t("turn.error.unknown"), retryable: true, requestId: undefined };
     }
+    const manager = refusal.billing === true && canManageBilling;
     return {
-      text: classified
-        ? t(TURN_ERROR_KEY[classified.category])
-        : refusalKey
-          ? t(refusalKey)
-          : t("turn.error.unknown"),
-      retryable: classified?.retryable ?? refusalKey === undefined,
-      // The marker carries a category and nothing else; a request id only ever
-      // reaches the client through the persisted turn metadata above.
+      text:
+        refusal.billing && !manager
+          ? `${t(refusal.text)} ${t("turn.error.contactAdmin")}`
+          : t(refusal.text),
+      retryable: false,
       requestId: undefined,
+      ...(manager && { action: { label: t("turn.error.manageBilling"), href: BILLING_HREF } }),
     };
   }
 
