@@ -41,7 +41,10 @@ import {
 import { mintSessionId } from "../src/session-id.ts";
 import { acquirePiChatSlot, releaseOnClose } from "../src/pi-chat/concurrency.ts";
 import type { PiChatInput } from "../src/pi-chat/engine.ts";
-import type { ChatAttachmentRequest } from "@appstrate/core/chat-contract";
+import {
+  INJECTED_SKILLS_AUTH_EXTRA,
+  type ChatAttachmentRequest,
+} from "@appstrate/core/chat-contract";
 import type { ModuleInitContext, PrincipalKind } from "@appstrate/core/module";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "../src/platform-services.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
@@ -197,6 +200,14 @@ async function collectUiChunks(
     chunks.push(JSON.parse(data));
   }
   return chunks;
+}
+
+/** The injected-skills claim the turn's MCP bearer resolves to. */
+async function tokenInjectedSkills(input: PiChatInput): Promise<unknown> {
+  const resolved = await chatLoopbackStrategy.authenticate({
+    headers: new Headers({ authorization: input.platformMcp!.headers!.Authorization! }),
+  } as never);
+  return resolved!.extra?.[INJECTED_SKILLS_AUTH_EXTRA];
 }
 
 /** The permission set the turn's platform-MCP bearer actually carries. */
@@ -566,7 +577,11 @@ describe("handleChatStream", () => {
       }
       if (url.pathname.startsWith("/api/packages/skills/")) {
         read.push(url.pathname.replace("/api/packages/skills/", ""));
-        return Response.json({ content: "Always answer in haiku.", version: "1.0.0" });
+        return Response.json({
+          content: "Always answer in haiku.",
+          definition: "published",
+          version: "1.0.0",
+        });
       }
       if (url.pathname !== "/api/me/context") return scriptedDispatch()(req);
       return Response.json({
@@ -583,7 +598,9 @@ describe("handleChatStream", () => {
     const res = await postChat(sessionId, undefined, engine, {
       dispatch,
       // Every `skills:*` is withheld, not only `skills:read`: a write echoes the SKILL.md.
+      // `chat:write` is on every turn token: `read_skill` honours the claim only with it.
       permissions: new Set([
+        "chat:write",
         "mcp:read",
         "mcp:invoke",
         "skills:read",
@@ -601,10 +618,17 @@ describe("handleChatStream", () => {
     );
     expect(input.system).not.toContain("@acme/catalogued");
     // No skill tool is taught, and the token cannot reach one.
-    expect(input.system).not.toContain("read_skill");
+    // The injected skill's files stay readable; no loading or listing is taught.
+    expect(input.system).toContain("read a file it references with `read_skill`");
+    expect(input.system).not.toContain("LOAD IT BEFORE acting");
     expect(input.system).not.toContain("listSkills");
     expect(input.system).toContain("This conversation is restricted to the skills shown here");
-    expect(await tokenPermissions(input)).toEqual(["mcp:invoke", "mcp:read"]);
+    expect(await tokenPermissions(input)).toEqual(["chat:write", "mcp:invoke", "mcp:read"]);
+    // The bearer names what was injected, so `read_skill` serves it without `skills:read`.
+    expect(await tokenInjectedSkills(input)).toEqual({
+      spaceId: ctx.defaultSpaceId,
+      skills: { [PIN]: { definition: "published", version: "1.0.0" } },
+    });
 
     await waitForAssistantPersist(sessionId);
   });
@@ -817,31 +841,42 @@ describe("handleChatStream", () => {
           '<skill id="@acme/house" version="2.0.0">\nAlways sign with the house motto.\n</skill>',
         );
         // The turn's token still reaches no skill: the content needed none, and
-        // only the enforced lead names `read_skill` (no loading rule is taught).
+        // `read_skill` is named for the injected files only (no loading rule is taught).
         expect(system).not.toContain("LOAD IT BEFORE acting");
-        expect(system.split("read_skill")).toHaveLength(2);
+        expect(system).toContain("it wins. Only each SKILL.md is shown: read a file");
         expect(await tokenPermissions(calls[0]!)).toEqual(["chat:write", "mcp:invoke", "mcp:read"]);
+        // Readable through `read_skill` all the same: the bearer names it, bound to the space.
+        expect(await tokenInjectedSkills(calls[0]!)).toEqual({
+          spaceId: ctx.defaultSpaceId,
+          skills: { "@acme/house": { definition: "published", version: "2.0.0" } },
+        });
 
         await waitForAssistantPersist(sessionId);
       }
     });
 
-    it("keeps them when the caller-context read fails", async () => {
-      const sessionId = mintSessionId();
-      const { engine, calls } = scriptedEngine();
-      const res = await postChat(sessionId, undefined, engine, {
-        permissions: new Set(["chat:write", "mcp:read", "mcp:invoke"]),
-        context: () => new Response(null, { status: 500 }),
-        loadEnforcedChatSkills: async () => [HOUSE],
-      });
-      expect(res.status).toBe(200);
-      await collectUiChunks(res);
+    it("keeps them, and their claim, when the caller-context read fails or 400s", async () => {
+      for (const status of [500, 400]) {
+        const sessionId = mintSessionId();
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(sessionId, undefined, engine, {
+          permissions: new Set(["chat:write", "mcp:read", "mcp:invoke"]),
+          context: () => new Response(null, { status }),
+          loadEnforcedChatSkills: async () => [HOUSE],
+        });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
 
-      const system = calls[0]!.system;
-      expect(system).not.toContain(CONTEXT_ORG_MARKER);
-      expect(system).toContain('<skill id="@acme/house" version="2.0.0">');
+        const system = calls[0]!.system;
+        expect(system).not.toContain(CONTEXT_ORG_MARKER);
+        expect(system).toContain('<skill id="@acme/house" version="2.0.0">');
+        expect(await tokenInjectedSkills(calls[0]!)).toEqual({
+          spaceId: ctx.defaultSpaceId,
+          skills: { "@acme/house": { definition: "published", version: "2.0.0" } },
+        });
 
-      await waitForAssistantPersist(sessionId);
+        await waitForAssistantPersist(sessionId);
+      }
     });
   });
 

@@ -6,6 +6,7 @@ import {
   type EnforcedChatSkill,
 } from "@appstrate/core/chat-contract";
 import {
+  injectedSkills,
   parseSkillList,
   resolveChatSkills,
   type ChatSkillSelection,
@@ -16,6 +17,7 @@ const content = (id: string, body = `# ${id}`): SkillContent => ({
   packageId: id,
   version: "1.0.0",
   content: body,
+  served: { definition: "published", version: "1.0.0" },
 });
 
 const enforcedSkill = (id: string, body: string | null = `# ${id}`): EnforcedChatSkill => ({
@@ -100,8 +102,18 @@ describe("resolveChatSkills — space-enforced skills", () => {
         [enforcedSkill("@b/house"), enforcedSkill("@z/house")],
       );
       expect(result.enforced).toEqual([
-        { packageId: "@b/house", version: "2.0.0", content: "# @b/house" },
-        { packageId: "@z/house", version: "2.0.0", content: "# @z/house" },
+        {
+          packageId: "@b/house",
+          version: "2.0.0",
+          content: "# @b/house",
+          served: { definition: "published", version: "2.0.0" },
+        },
+        {
+          packageId: "@z/house",
+          version: "2.0.0",
+          content: "# @z/house",
+          served: { definition: "published", version: "2.0.0" },
+        },
       ]);
       expect(result.chosen.map((s) => s.packageId)).toEqual(
         skillMode === "auto" ? [] : ["@a/mine"],
@@ -202,5 +214,38 @@ describe("parseSkillList", () => {
   it("reads an unreadable body as no skills", () => {
     expect(parseSkillList(null)).toEqual([]);
     expect(parseSkillList({ data: "nope" })).toEqual([]);
+  });
+});
+
+describe("injectedSkills", () => {
+  it("names exactly the injected definitions, never a noticed or over-budget one", () => {
+    const result = resolve(
+      { skillMode: "strict", pinnedSkills: ["@a/big", "@a/gone", "@a/mine"] },
+      [
+        { ...content("@a/mine"), served: { definition: "draft", lockVersion: 3 } },
+        content("@a/big", "x".repeat(BUDGET)),
+      ],
+      [enforcedSkill("@b/house"), enforcedSkill("@b/unpublished", null)],
+    );
+    expect(injectedSkills(result)).toEqual({
+      "@b/house": { definition: "published", version: "2.0.0" },
+      "@a/mine": { definition: "draft", lockVersion: 3 },
+    });
+  });
+
+  it("notices a chosen skill the platform answered malformed, and names it nowhere", () => {
+    const result = resolveChatSkills(
+      { skillMode: "manual", pinnedSkills: ["@a/odd"] },
+      new Map([["@a/odd", null]]),
+      [],
+    );
+    expect(result.notices).toEqual([
+      "The skill `@a/odd` was chosen for this conversation but could not be read.",
+    ]);
+    expect(injectedSkills(result)).toEqual({});
+  });
+
+  it("is empty when nothing is injected", () => {
+    expect(injectedSkills(resolve({ skillMode: "auto", pinnedSkills: ["@a/mine"] }))).toEqual({});
   });
 });

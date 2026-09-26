@@ -119,7 +119,7 @@
   "library.chatEnforce.cannot": "Vous n'avez pas la permission de modifier les skills de cet espace",
   "library.chatEnforce.publishFirst": "Publiez une version du skill d'abord",
   "library.chatEnforce.confirmTitle": "Imposer ce skill dans le chat ?",
-  "library.chatEnforce.confirmDescription": "Le SKILL.md de la dernière version publiée de « {{package}} » sera injecté dans chaque conversation de l'espace {{space}}. Son contenu sera visible par tous les membres qui discutent dans cet espace, quels que soient leurs droits sur les skills.",
+  "library.chatEnforce.confirmDescription": "Le SKILL.md de la dernière version publiée de « {{package}} » sera injecté dans chaque conversation de l'espace {{space}}. Son contenu, et les fichiers qu'il référence, seront visibles par tous les membres qui discutent dans cet espace, quels que soient leurs droits sur les skills.",
   "library.chatEnforce.confirm": "Imposer",
   "library.chatEnforce.error.noPublishedVersion": "Ce skill n'a aucune version publiée : publiez-en une avant de l'imposer dans le chat.",
   "library.chatEnforce.error.limit": "Cet espace impose déjà le nombre maximal de skills dans le chat. Retirez-en un avant d'en imposer un autre.",

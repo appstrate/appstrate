@@ -2,11 +2,14 @@
 
 import { describe, expect, it } from "bun:test";
 import {
-  CHAT_LOOPBACK_AUTH_METHOD,
   chatLoopbackStrategy,
   mintLoopbackToken,
   mintMcpLoopbackToken,
 } from "../src/loopback-auth.ts";
+import {
+  CHAT_LOOPBACK_AUTH_METHOD,
+  INJECTED_SKILLS_AUTH_EXTRA,
+} from "@appstrate/core/chat-contract";
 
 const claims = {
   userId: "u_1",
@@ -91,6 +94,59 @@ describe("mintMcpLoopbackToken (Pi-engine platform-MCP bearer)", () => {
       headers: authHeaders(mintMcpLoopbackToken({ ...claims, permissions: callerPermissions })),
     } as never);
     expect(plain!.extra).toBeUndefined();
+  });
+
+  it("carries the injected skills into `extra[INJECTED_SKILLS_AUTH_EXTRA]`, only on the MCP bearer", async () => {
+    const injectedSkills = {
+      spaceId: "spc_1",
+      skills: {
+        "@acme/house": { definition: "published" as const, version: "2.0.0" },
+        "@acme/mine": { definition: "draft" as const, lockVersion: 4 },
+      },
+    };
+    const token = mintMcpLoopbackToken({
+      ...claims,
+      permissions: callerPermissions,
+      injectedSkills,
+    });
+    const res = await chatLoopbackStrategy.authenticate({ headers: authHeaders(token) } as never);
+    expect(res!.extra?.[INJECTED_SKILLS_AUTH_EXTRA]).toEqual(injectedSkills);
+    // The inference bearer has no field for it, and an empty map signs nothing.
+    const inference = await chatLoopbackStrategy.authenticate({
+      headers: authHeaders(mintLoopbackToken(claims)),
+    } as never);
+    expect(inference!.extra).toBeUndefined();
+    const empty = await chatLoopbackStrategy.authenticate({
+      headers: authHeaders(
+        mintMcpLoopbackToken({
+          ...claims,
+          permissions: callerPermissions,
+          injectedSkills: { spaceId: "spc_1", skills: {} },
+        }),
+      ),
+    } as never);
+    expect(empty!.extra).toBeUndefined();
+  });
+
+  it("drops a malformed injected-skills claim and keeps the token", async () => {
+    const published = { definition: "published", version: "1.0.0" };
+    for (const injectedSkills of [
+      { skills: { "@acme/x": published } },
+      { spaceId: "spc_1", skills: { "@acme/x": { definition: "latest", version: "1.0.0" } } },
+      { spaceId: "spc_1", skills: { "@acme/x": { definition: "draft", version: "1.0.0" } } },
+      { spaceId: "spc_1", skills: { "@acme/x": { definition: "draft", lockVersion: 1.5 } } },
+      { spaceId: "spc_1", skills: { "@acme/x": { ...published, content: "leak" } } },
+      { spaceId: "spc_1", skills: { "@acme/x": published }, orgId: "org_2" },
+    ]) {
+      const token = mintMcpLoopbackToken({
+        ...claims,
+        permissions: callerPermissions,
+        injectedSkills: injectedSkills as never,
+      });
+      const res = await chatLoopbackStrategy.authenticate({ headers: authHeaders(token) } as never);
+      expect(res!.permissions).toEqual(callerPermissions);
+      expect(res!.extra?.[INJECTED_SKILLS_AUTH_EXTRA]).toBeUndefined();
+    }
   });
 
   it("a preview grafted onto another token's signature is refused", async () => {

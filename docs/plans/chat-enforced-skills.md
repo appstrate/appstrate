@@ -97,9 +97,8 @@ whatever `readsSkills`. Its order:
   only `SKILL.md` is injected: a file it references is read with `read_skill`
   (below).
 - **Strict mode:** the note says the conversation is limited to the space's
-  skills plus the user's, that the user lifts only their own restriction, and
-  that a chosen skill comes as its `SKILL.md` alone. `turnPermissions` is
-  unchanged: `strict` still strips every `skills:*`.
+  skills plus the user's, and that the user lifts only their own restriction.
+  `turnPermissions` is unchanged: `strict` still strips every `skills:*`.
 - **Cache:** nothing in the section varies per turn. The prompt stays
   byte-identical for a given session state. Enforcing, releasing or publishing a
   new version costs each active session in the space one cache miss.
@@ -113,31 +112,44 @@ served; with it, that file at the same version). The tool is read-only and
 declared on every MCP connection, so the chat engine holds it on every turn.
 It answers in three branches, in this order:
 
-1. the skill is enforced and active in the request's space and the caller
-   holds `chat:write` there (a chat turn always does): its latest published
-   version, resolved on each call, with platform authority and no `skills:*`
-   needed — a writer never reads a draft that disagrees with the injected
-   `SKILL.md`;
+1. the skill was injected in this turn: the chat signs an `injectedSkills`
+   claim into the turn's MCP bearer (`injectedSkillsSchema`,
+   `@appstrate/core/chat-contract`, surfaced as
+   `authExtra[INJECTED_SKILLS_AUTH_EXTRA]`): `{ spaceId, skills }`, each skill
+   either `{ definition: "published", version }` or
+   `{ definition: "draft", lockVersion }` — enforced skills as published,
+   chosen ones as `getSkill` served them, a draft pinned to the
+   `lock_version` its `ETag` carried (a detail answered without it is
+   malformed: the skill is left out with a "could not be read" notice). The
+   tool serves exactly that definition, with no `skills:*` needed, and
+   honours the claim only on the chat loopback bearer, in the claim's space,
+   while the caller still holds `chat:write` there; a skill released mid-turn
+   is still served for the rest of that turn, and an edited draft answers
+   409 `injected_draft_changed`. A skill that got a notice (unavailable, over
+   budget) is not named. A malformed claim is dropped and the token kept;
 2. otherwise, the caller holds `skills:read`: the version `getSkill` serves
    them (the draft when they may write it, else the latest published), with
    `getSkill`'s order of refusals — 403 before 404;
 3. otherwise: refused.
 
-The first branch is why the rule lives in the tool rather than in RBAC. An
-enforced skill is exactly the one a member without `skills:read` must follow,
-and the space already disclosed its `SKILL.md` to them; its files are the same
-disclosure, bounded by the same flag. Widening the REST routes instead would
-make every `skills:*` guard depend on chat policy. So the REST RBAC is
-untouched: `invoke_operation` on the skill routes still needs `skills:read`,
-and `strict` still strips every `skills:*` from the turn token — a strict turn
-reads the space's skills' files through branch 1 and no chosen skill's.
+The first branch is why the rule lives in the tool rather than in RBAC. What
+the prompt injected is already disclosed to the member — an enforced skill
+whatever their `skills:*`, a chosen one in `strict` where the turn holds none —
+and its files are the same disclosure, bounded by the same turn. Widening the
+REST routes instead would make every `skills:*` guard depend on chat policy.
+So the REST RBAC is untouched: `invoke_operation` on the skill routes still
+needs `skills:read`, and `strict` still strips every `skills:*` from the turn
+token. Only the MCP bearer carries the claim, never the inference bearer; it is
+minted after the context block resolves, so it names what the prompt holds.
 
 The persona teaches loading on `readsSkills` (`transport` ∧ `skills:read`,
-`transport` being `mcp:read`). The enforced lead line names `read_skill` on
-`transport` alone, since branch 1 needs no `skills:*`; a turn without the
-transport holds no tool, and its lead says only that `SKILL.md` is provided.
-Both variants are static per capability set, so the section stays byte-stable
-per session.
+`transport` being `mcp:read`). The enforced and chosen lead lines name
+`read_skill` on `transport` alone, since branch 1 needs no `skills:*`; the
+strict note stays about the restriction. A turn without the transport holds no
+tool, and its leads say only that `SKILL.md` is provided. Both variants are
+static per capability set, so the section stays byte-stable per session. An
+injected draft's `<skill>` tag carries `definition="draft"` instead of a
+version, since `read_skill` answers it by definition.
 
 ## `GET /api/chat/enforced-skills`
 

@@ -13,6 +13,10 @@ import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../
 import { turnCapabilities } from "../src/capabilities.ts";
 import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
 
+/** The block's text; the skills it injected are pinned in caller-context.test.ts. */
+const contextText = (...args: Parameters<typeof formatCallerContext>) =>
+  formatCallerContext(...args).text;
+
 /** The turn's capabilities, from a permission set a role can actually hold. */
 function caps(permissions: readonly string[]) {
   return turnCapabilities((permission) => permissions.includes(permission));
@@ -159,7 +163,7 @@ describe("full persona invariants", () => {
   });
 
   it("names the same heading the context block renders", () => {
-    const block = formatCallerContext(
+    const block = contextText(
       {
         user: { name: "Ada" },
         skills: [{ packageId: "@acme/mine" }],
@@ -233,21 +237,19 @@ describe("caller-context prompt hygiene", () => {
   const identity = { user: { name: "Ada" }, org: { role: "member" } };
 
   it("renders the forwarded locale in the reply-language line", () => {
-    const out = formatCallerContext(identity, { ...CONTEXT_OPTS, locale: "en-US" });
+    const out = contextText(identity, { ...CONTEXT_OPTS, locale: "en-US" });
     expect(out).toContain("Reply in the user's language (en)");
   });
 
   it("defaults the reply language to fr without a locale", () => {
-    expect(formatCallerContext(identity, CONTEXT_OPTS)).toContain(
-      "Reply in the user's language (fr)",
-    );
+    expect(contextText(identity, CONTEXT_OPTS)).toContain("Reply in the user's language (fr)");
   });
 
   it("keeps the block free of standing instructions — they belong to the system prompt", () => {
     // Everything the model must DO with the context lives in the persona
     // (`buildSystemPrompt`). The block renders data only; the sole exception is the
     // reply-language line, which is parameterised by the `X-Chat-Locale` header.
-    const out = formatCallerContext(
+    const out = contextText(
       {
         user: { name: "Ada" },
         org: { role: "member" },
@@ -461,7 +463,7 @@ describe("the persona without agent runs", () => {
       agents: [{ packageId: "@acme/triage", takes_input: false }],
     };
     expect(
-      formatCallerContext(raw, {
+      contextText(raw, {
         capabilities: caps(BUILDER),
         rolePreview: false,
         spaceRole: "builder",
@@ -470,7 +472,7 @@ describe("the persona without agent runs", () => {
         enforced: [],
       }),
     ).toContain("## Existing agents you can run");
-    const off = formatCallerContext(raw, {
+    const off = contextText(raw, {
       capabilities: caps([...MCP, "agents:write"]),
       rolePreview: false,
       spaceRole: "builder",

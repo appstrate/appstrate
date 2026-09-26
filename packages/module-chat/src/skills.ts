@@ -8,6 +8,8 @@ import type { ChatSkillMode } from "@appstrate/db/schema";
 import {
   CHAT_SKILLS_CONTENT_BUDGET_CHARS,
   type EnforcedChatSkill,
+  type InjectedSkill,
+  type InjectedSkills,
 } from "@appstrate/core/chat-contract";
 
 export interface SkillHint {
@@ -45,6 +47,8 @@ export interface SkillContent {
   packageId: string;
   version: string | null;
   content: string;
+  /** Its claim entry: what `read_skill` serves this turn. */
+  served: InjectedSkill;
 }
 
 /** Every chosen skill is injected in full on every turn: a context-budget bound. */
@@ -78,11 +82,12 @@ interface ResolvedChatSkills {
  * chosen ones in stored order (sorted and deduped by `ensureSession`), all out of
  * one budget. A pin naming an injected enforced skill is dropped silently; one
  * whose enforced copy was left out stands as an ordinary pin. `contents` holds
- * only the chosen skills active here and read; any other becomes a notice.
+ * the chosen skills active here and read (`null`: answered malformed); any
+ * other becomes a notice.
  */
 export function resolveChatSkills(
   selection: ChatSkillSelection,
-  contents: ReadonlyMap<string, SkillContent>,
+  contents: ReadonlyMap<string, SkillContent | null>,
   enforced: readonly EnforcedChatSkill[],
 ): ResolvedChatSkills {
   const resolved: ResolvedChatSkills = { enforced: [], chosen: [], notices: [] };
@@ -100,7 +105,12 @@ export function resolveChatSkills(
       );
     } else {
       left -= content.length;
-      resolved.enforced.push({ packageId, version, content });
+      resolved.enforced.push({
+        packageId,
+        version,
+        content,
+        served: { definition: "published", version },
+      });
     }
   }
   if (!injectsSkills(selection.skillMode)) return resolved;
@@ -108,7 +118,11 @@ export function resolveChatSkills(
   // A chosen skill is the user's own act, so the model is told when it is left out.
   for (const id of selection.pinnedSkills.filter((pinned) => !injectedIds.has(pinned))) {
     const skill = contents.get(id);
-    if (!skill) {
+    if (skill === null) {
+      resolved.notices.push(
+        `The skill \`${id}\` was chosen for this conversation but could not be read.`,
+      );
+    } else if (!skill) {
       resolved.notices.push(
         `The skill \`${id}\` was chosen for this conversation but is not available here — it may have been removed, deactivated, or be out of your reach.`,
       );
@@ -122,4 +136,14 @@ export function resolveChatSkills(
     }
   }
   return resolved;
+}
+
+/**
+ * What `read_skill` may serve this turn without `skills:read`: exactly the
+ * definitions injected, never a skill that only got a notice.
+ */
+export function injectedSkills(resolved: ResolvedChatSkills): InjectedSkills["skills"] {
+  return Object.fromEntries(
+    [...resolved.enforced, ...resolved.chosen].map(({ packageId, served }) => [packageId, served]),
+  );
 }

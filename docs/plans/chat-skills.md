@@ -17,7 +17,7 @@ chosen skills (`chat_sessions.pinned_skills`):
 | ---------------- | --------------------------------------- | ------------------------------------------------- |
 | `auto` (default) | the space's skills, one line each       | `read_skill`, `listSkills`                        |
 | `manual`         | the chosen skills in full, no listing   | `read_skill`, `listSkills`, on the user's request |
-| `strict`         | the chosen skills in full, nothing else | `read_skill` on the space's required skills only  |
+| `strict`         | the chosen skills in full, nothing else | `read_skill` on the injected skills only          |
 
 **auto** is progressive disclosure, as in the Agent Skills spec: one line per
 skill (id, version, label, description) under `## Skills`; the model loads a
@@ -31,10 +31,13 @@ cannot launch is shown no runnable agent. `listSkills`, for a truncated list,
 goes through `invoke_operation` and is named only when the turn also invokes.
 
 **manual** and **strict** inject each chosen skill's whole `SKILL.md`, front
-matter included, as `<skill id="…" version="…">…</skill>` under `## Skills`,
+matter included, as `<skill id="…" version="…">…</skill>` (a draft: `definition="draft"`) under `## Skills`,
 sorted by id, after a lead line telling the model to follow them. The chat reads
 them with the CALLER's own headers, so they need the caller's `skills:read`, not
-the turn's. In parallel:
+the turn's. Whatever skill a turn injects stays readable through `read_skill`
+(its files included) at the injected definition — injected in this turn (signed
+claim) ⇒ readable at that definition; else `skills:read`; else refused. In
+parallel:
 
 - `GET /api/packages/skills`, the space's ACTIVE skills, uncapped — the listing
   the picker chooses from. `getSkill` only checks readability, so a skill
@@ -52,8 +55,8 @@ At most `MAX_PINNED_SKILLS` (5) chosen skills: every one is in every turn.
 **strict** also withholds every `skills:*` from the turn's permissions
 (`turnPermissions`, the mechanism the agent-authoring switch uses), so the MCP
 surface derived from the route guards drops `listSkills` and `getSkill`,
-`read_skill` refuses every skill but those the space requires (so a chosen
-skill's other files are out of reach, and the strict note says so), declaring a skill in an agent (`dependencies.skills`, checked by
+`read_skill` serves only the skills injected in the turn (named in the turn's
+signed MCP bearer, see `docs/plans/chat-enforced-skills.md`), declaring a skill in an agent (`dependencies.skills`, checked by
 `assertPackageDependenciesAccessible`) is refused, and so is writing one — a
 write answers with the package detail, `SKILL.md` included, so `skills:write`
 alone would read any skill the caller authors. The persona already teaches
@@ -97,7 +100,8 @@ a session row is a selection.
 Rejected: a `chat_session_skills` table (a replace-on-write set read with the
 session row needs none); two booleans ("list the space" / "allow listing"),
 whose fourth combination — listing on, listing tool off — cannot be enforced:
-`read_skill` and `listSkills` share `skills:read`.
+`listSkills` and `read_skill` on a skill the turn did not inject both answer to
+`skills:read` alone.
 
 The selection rides the turn: `POST /api/chat` takes `skill_mode` and
 `pinned_skills` (both or neither), and `ensureSession` writes them in the
