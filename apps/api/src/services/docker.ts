@@ -1071,7 +1071,10 @@ let platformNetworkCache: { networkId: string; hostname: string } | null | undef
  * Uses os.hostname() (Docker sets hostname = container ID prefix) to inspect
  * ourselves and find the first non-default-bridge network.
  * Returns null when running outside Docker (local dev).
- * Result is cached after the first call.
+ * Only definitive answers from a live daemon are cached (a parsed inspect, or
+ * 404 = not a container). Any other status or a transport error throws
+ * uncached, so a daemon outage at boot is retried rather than pinning every
+ * sidecar to `host.docker.internal` for the process lifetime (#1129).
  */
 export async function detectPlatformNetwork(): Promise<{
   networkId: string;
@@ -1079,53 +1082,49 @@ export async function detectPlatformNetwork(): Promise<{
 } | null> {
   if (platformNetworkCache !== undefined) return platformNetworkCache;
 
-  try {
-    const containerName = hostname();
-    const res = await dockerFetch(`/containers/${containerName}/json`);
+  const containerName = hostname();
+  const res = await dockerFetch(`/containers/${containerName}/json`);
 
-    if (!res.ok) {
-      // 404 = not running in Docker (local dev)
-      platformNetworkCache = null;
-      return null;
-    }
-
-    const data = (await res.json()) as {
-      Config?: { Hostname?: string };
-      NetworkSettings?: {
-        Networks?: Record<
-          string,
-          { NetworkID?: string; Aliases?: string[] | null; IPAddress?: string; Gateway?: string }
-        >;
-      };
-    };
-
-    const networks = data.NetworkSettings?.Networks;
-    if (!networks) {
-      platformNetworkCache = null;
-      return null;
-    }
-
-    // Find the first non-default network (skip "bridge" and "host")
-    const DEFAULT_NETWORKS = new Set(["bridge", "host", "none"]);
-    for (const [name, info] of Object.entries(networks)) {
-      if (DEFAULT_NETWORKS.has(name) || !info.NetworkID) continue;
-
-      // Use the first alias or fall back to the container hostname
-      const dnsName = info.Aliases?.[0] ?? data.Config?.Hostname ?? containerName;
-
-      platformNetworkCache = { networkId: info.NetworkID, hostname: dnsName };
-      logger.info("Detected platform Docker network", {
-        network: name,
-        networkId: info.NetworkID,
-        hostname: dnsName,
-      });
-      return platformNetworkCache;
-    }
-
-    platformNetworkCache = null;
-    return null;
-  } catch {
+  if (res.status === 404) {
     platformNetworkCache = null;
     return null;
   }
+  if (!res.ok) {
+    throw new Error(`Docker inspect of the platform container failed: HTTP ${res.status}`);
+  }
+
+  const data = (await res.json()) as {
+    Config?: { Hostname?: string };
+    NetworkSettings?: {
+      Networks?: Record<
+        string,
+        { NetworkID?: string; Aliases?: string[] | null; IPAddress?: string; Gateway?: string }
+      >;
+    };
+  };
+
+  // Find the first non-default network (skip "bridge" and "host")
+  const DEFAULT_NETWORKS = new Set(["bridge", "host", "none"]);
+  for (const [name, info] of Object.entries(data.NetworkSettings?.Networks ?? {})) {
+    if (DEFAULT_NETWORKS.has(name) || !info.NetworkID) continue;
+
+    // Use the first alias or fall back to the container hostname
+    const dnsName = info.Aliases?.[0] ?? data.Config?.Hostname ?? containerName;
+
+    platformNetworkCache = { networkId: info.NetworkID, hostname: dnsName };
+    logger.info("Detected platform Docker network", {
+      network: name,
+      networkId: info.NetworkID,
+      hostname: dnsName,
+    });
+    return platformNetworkCache;
+  }
+
+  platformNetworkCache = null;
+  return null;
+}
+
+/** Test-only: forget the cached detection result. */
+export function _resetPlatformNetworkCacheForTesting(): void {
+  platformNetworkCache = undefined;
 }
