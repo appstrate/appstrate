@@ -25,13 +25,14 @@ FROM ${SIDECAR_IMAGE} AS sidecar
 FROM ghcr.io/astral-sh/uv:0.7 AS uv
 
 # The setuid runner-exec wrapper, compiled static so it has zero runtime
-# deps inside the guest, then exercised: its refusal paths and the exact
-# credentials of a drop fail the build on any mismatch (this stage runs as
-# root, so the throwaway pool users it creates never reach the rootfs).
+# deps inside the guest, then exercised as root (not through the setuid bit):
+# its argument and identity refusals and the exact credentials of a drop fail
+# the build on any mismatch (the throwaway pool users it creates never reach
+# the rootfs).
 FROM alpine:3.21 AS wrapper
 RUN apk add --no-cache gcc musl-dev
 COPY apps/api/src/modules/firecracker/guest/runner-exec.c apps/api/src/modules/firecracker/guest/runner-exec-selftest.sh /tmp/
-RUN gcc -static -O2 -Wall -Werror -o /tmp/appstrate-runner-exec /tmp/runner-exec.c
+RUN gcc -static -O2 -Wall -Wextra -Werror -o /tmp/appstrate-runner-exec /tmp/runner-exec.c
 RUN sh /tmp/runner-exec-selftest.sh /tmp/appstrate-runner-exec
 
 FROM ${PI_IMAGE}

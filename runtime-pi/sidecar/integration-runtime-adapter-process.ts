@@ -419,6 +419,11 @@ export function createProcessIntegrationRuntimeAdapter({
   /** Integration id → policy the transparent plane serves that runner. */
   const transparentPolicies = new Map<string, EgressPolicy>();
   let plane: Promise<TransparentEgressPlane | null> | null = null;
+  /** Set by `shutdown()`: a plane started after it would have no one to close it. */
+  let shutDown = false;
+  const refuseAfterShutdown = () => {
+    if (shutDown) throw new Error("process integration adapter is shut down");
+  };
 
   const attribution: PeerAttribution =
     typeof uidPool === "string"
@@ -428,6 +433,8 @@ export function createProcessIntegrationRuntimeAdapter({
           // A pool uid exists only through `spawn()`, which registers it before
           // the runner starts.
           if (runnersByUid.size === 0) return null;
+          // Not IPv4: no row can ever name it, so no re-read can either.
+          if (!procNetTcpEndpoint(peer) || !procNetTcpEndpoint(peer.listener)) return undefined;
           for (let read = 1; ; read += 1) {
             let table: string;
             try {
@@ -452,12 +459,14 @@ export function createProcessIntegrationRuntimeAdapter({
    * redirects every runner's DNS. Runs without a plain-CONNECT runner never
    * bind 53/443/80.
    */
-  const ensurePlane = () =>
-    (plane ??= startTransparentEgressPlane({
+  const ensurePlane = () => {
+    refuseAfterShutdown();
+    return (plane ??= startTransparentEgressPlane({
       ipv4: async () => "127.0.0.1",
       policyForPeer: policyForRunnerPeer(attribution, transparentPolicies),
       ...transparentPlane,
     }));
+  };
 
   return {
     id: "process",
@@ -473,6 +482,7 @@ export function createProcessIntegrationRuntimeAdapter({
     },
 
     async spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration> {
+      refuseAfterShutdown();
       const { runId, spec, bundleRoot, egress, workspaceHandle, onStderrLine } = options;
       // First, before any credential material is rendered: a runner we are
       // going to refuse must not have `delivery.files` secrets written to
@@ -587,6 +597,7 @@ export function createProcessIntegrationRuntimeAdapter({
     },
 
     async shutdown(): Promise<void> {
+      shutDown = true;
       // Nothing to do for the subprocess itself — SubprocessTransport owns it
       // and tears it down on `transport.close()` (called by the MCP client's
       // `client.close()` in `bootIntegrations.shutdown`).

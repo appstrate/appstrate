@@ -363,15 +363,21 @@ proxy-unaware runner reaches them through the sidecar's transparent plane on
 lookups are steered per uid in the kernel instead: an `output_nat` chain
 redirects the pool's UDP/53 to the sidecar's responder on `127.0.0.1:53`,
 which answers with `127.0.0.1` and never forwards a query, so DNS is no
-exfiltration channel; runner TCP/53 is dropped. The redirected flow keeps
+exfiltration channel; runner TCP/53 is dropped. The responder is part of the
+plane, started on the run's first plain-CONNECT runner spawn: with only
+MITM-delivery runners nothing holds `127.0.0.1:53` and their lookups fail
+closed. The redirected flow keeps
 the output interface it was first routed to (eth0), hence its own accept
 rule in the filter chain. The supervisor starts the sidecar with ambient
 `CAP_NET_BIND_SERVICE` and `CAP_KILL` (`setpriv --ambient-caps`): only the
 sidecar can hold :53/:80/:443 — the unprivileged port floor is untouched —
-and it can signal the runners it owns on their pool uids, so a runner that
-ignores stdin EOF still dies when the sidecar tears it down. The runners
-never hold either (the exec of the setuid wrapper clears the ambient set,
-its setuid to the pool uid the permitted and effective sets).
+and it can signal a runner process on its pool uid, so a runner that ignores
+stdin EOF is SIGTERMed, then SIGKILLed, on teardown. The signal reaches the
+runner's own pid, not descendants it forked; one that outlives the teardown
+keeps a uid that stays attributed to the same integration until the run
+ends, so it gains nothing the runner did not hold. The runners never hold
+either (the exec of the setuid wrapper clears the ambient set, its setuid to
+the pool uid the permitted and effective sets).
 
 The `appstrate_fc` table also carries a host-side `output`-hook chain:
 host-originated traffic whose socket uid falls in the jailed-VMM range
@@ -420,7 +426,11 @@ host↔guest isolation.
    `--workspace`, which the process adapter passes only when the integration
    opted into the workspace and the run carries a directory handle; otherwise
    the runner has none. The image build runs `guest/runner-exec-selftest.sh`
-   against the compiled wrapper and fails on any refusal or drop mismatch. The supervisor passes the pool to the sidecar as
+   against the compiled wrapper, as root rather than through the setuid bit:
+   it covers the refusals (a malformed uid argument, a uid outside the pool,
+   without a pool user or without its private group) and the credentials a
+   drop lands on, and fails the build on any mismatch. The supervisor passes
+   the pool to the sidecar as
    `APPSTRATE_RUNNER_UIDS`. One uid per runner lets the sidecar attribute
    every loopback connection to one runner and keeps each runner's HOME,
    files and `/proc/<pid>/environ` out of its siblings' and the agent's reach.

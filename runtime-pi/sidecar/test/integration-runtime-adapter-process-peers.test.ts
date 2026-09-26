@@ -273,6 +273,23 @@ describe("process adapter — runner uids and peer attribution", () => {
     expect(warnings.join("\n")).toContain("runner peer lookup failed");
   });
 
+  it("refuses a non-IPv4 peer or listener end without reading the table", async () => {
+    const adapter = await newAdapter();
+    await spawn(adapter, "@orga/a");
+    const attribute = adapter.peerAttribution();
+    expect(await attribute({ ...peer(40000), address: "::1" })).toBeUndefined();
+    expect(
+      await attribute({ ...peer(40000), listener: { address: "::1", port: LISTENER } }),
+    ).toBeUndefined();
+    expect(reads).toBe(0);
+  });
+
+  it("refuses spawns once shut down", async () => {
+    const adapter = await newAdapter();
+    await adapter.shutdown();
+    await expect(spawn(adapter, "@orga/a")).rejects.toThrow(/shut down/);
+  });
+
   it("attributes no peer to a runner, without reading the table, before any spawn", async () => {
     const adapter = await newAdapter();
     expect(await adapter.peerAttribution()(peer(40000))).toBeNull();
@@ -541,6 +558,15 @@ describe("process adapter — transparent egress plane (#779)", () => {
     // A second start would fail to bind the ports the first holds, and warn.
     expect(warnings).toEqual([]);
     expect(await planeUp()).toBe(true);
+  });
+
+  it("starts no plane for a spawn that reaches it after shutdown", async () => {
+    const adapter = await newAdapter();
+    // The spawn parks on its first await (admission's stat), then shutdown runs.
+    const spawning = spawn(adapter, "@orga/connect", connectEgress);
+    await adapter.shutdown();
+    await expect(spawning).rejects.toThrow(/shut down/);
+    expect(await planeUp()).toBe(false);
   });
 
   it("closes the plane on shutdown, idempotently", async () => {

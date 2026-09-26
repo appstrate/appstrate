@@ -1431,9 +1431,19 @@ describe("MITM listener — per-SNI inner servers are off the loopback", () => {
   runIfOpenssl("rejects `ready` when the listen fails, leaving no socket directory", async () => {
     const bundle = await makeCaBundle();
     await withTmpRoot(async (root) => {
-      // TEST-NET-1 (RFC 5737) is assigned to no local interface: the bind fails.
-      const listener = newListener(bundle, { host: "192.0.2.1" });
-      await expect(listener.ready).rejects.toMatchObject({ code: "EADDRNOTAVAIL" });
+      // A 64-byte label cannot be encoded as a DNS name (RFC 1035 caps labels at
+      // 63), so resolution fails before any query or bind (glibc, musl, macOS),
+      // where an unassigned address would still bind under `ip_nonlocal_bind`.
+      const host = `${"a".repeat(64)}.invalid`;
+      const listener = newListener(bundle, { host });
+      const failure = await listener.ready.then(
+        () => null,
+        (err: unknown) => err,
+      );
+      // Never leave a listener behind, even if the host somehow resolved.
+      if (failure === null) await listener.close();
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toContain(host);
       expect(await fs.readdir(root)).toEqual([]);
     });
   });

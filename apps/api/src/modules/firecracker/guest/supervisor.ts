@@ -287,8 +287,10 @@ async function main(): Promise<void> {
     // net_bind_service: the runners' transparent plane (DNS responder on
     // 127.0.0.1:53, SNI/Host splicers on :443/:80) sits on low ports only the
     // sidecar may hold, so neither the agent nor a runner can squat them.
-    // kill: the sidecar owns every runner's lifecycle, and a runner lives on
-    // its pool uid, which uid 1000 could not otherwise signal. Both only widen
+    // kill: lets the sidecar SIGTERM/SIGKILL a runner process on its pool uid
+    // at teardown, which uid 1000 could not otherwise signal. It does not reach
+    // descendants the runner forked; their uid stays attributed to the same
+    // integration until the run ends, so they gain nothing. Both only widen
     // the guest's most trusted workload (it holds every credential). The
     // runners never hold either: the kernel clears the ambient set on the exec
     // of the setuid wrapper, whose setuid to the pool uid clears permitted and
