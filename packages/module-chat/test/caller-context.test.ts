@@ -369,13 +369,35 @@ describe("formatCallerContext", () => {
   });
 
   it("omits the heading entirely when nothing is chosen and nothing is listed", () => {
-    for (const skillMode of ["auto", "manual", "strict"] as const) {
+    for (const skillMode of ["auto", "manual"] as const) {
       const out = formatCallerContext(
         { user: { name: "Ada" }, org: { role: "member" }, skills: [] },
         { ...BASE_OPTS, skills: { skillMode, pinnedSkills: [] } },
       );
       expect(out).not.toContain("## Skills");
     }
+  });
+
+  it("tells a strict turn why it holds no skill permission, even with nothing chosen", () => {
+    const strict = (pinnedSkills: string[]) =>
+      formatCallerContext(
+        { user: { name: "Ada" }, org: { role: "member" } },
+        {
+          ...BASE_OPTS,
+          capabilities: caps(BUILDER.filter((p) => !p.startsWith("skills:"))),
+          skills: { skillMode: "strict", pinnedSkills },
+        },
+      );
+    for (const out of [strict([]), strict(["@acme/gone"])]) {
+      expect(out).toContain("## Skills");
+      expect(out).toContain("The user restricted this conversation to the skills they chose");
+      expect(out).toContain("never change a role or a permission to reach one");
+    }
+    const manual = formatCallerContext(
+      { user: { name: "Ada" }, org: { role: "member" } },
+      { ...BASE_OPTS, skills: { skillMode: "manual", pinnedSkills: ["@acme/gone"] } },
+    );
+    expect(manual).not.toContain("The user restricted this conversation");
   });
 
   it("says nothing about the draft for a PUBLISHED agent", () => {
@@ -908,6 +930,22 @@ describe("buildCallerContextBlock", () => {
     });
     expect(out).toContain("Ada (ada@acme.com)");
     expect(out).toContain("Current space: `spc_1`");
+    expect(out).not.toContain("@acme/mine");
+  });
+
+  it("keeps strict's note in the identity-only fallback", async () => {
+    const { deps } = fakeDeps(() => new Response(null, { status: 400 }));
+    const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+      origin: "http://127.0.0.1:3000",
+      headers: {},
+      spaceId: "spc_1",
+      user,
+      deps,
+      capabilities: caps(BUILDER.filter((p) => !p.startsWith("skills:"))),
+      permissions: ["mcp:read", "mcp:invoke"],
+      skills: { skillMode: "strict", pinnedSkills: ["@acme/mine"] },
+    });
+    expect(out).toContain("The user restricted this conversation to the skills they chose");
     expect(out).not.toContain("@acme/mine");
   });
 

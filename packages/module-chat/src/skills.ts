@@ -46,8 +46,12 @@ export interface SkillContent {
 /** Every chosen skill is injected in full on every turn: a context-budget bound. */
 export const MAX_PINNED_SKILLS = 5;
 
-/** Characters of one injected `SKILL.md`; a longer one is left out with a notice. */
-export const MAX_SKILL_CONTENT_CHARS = 16_000;
+/**
+ * Characters the injected `SKILL.md`s share, spent in stored order: what weighs
+ * on the context is the sum, not one skill. One that does not fit what is left
+ * is left out with a notice; a later, smaller one may still fit.
+ */
+export const SKILLS_CONTENT_BUDGET_CHARS = 64_000;
 
 /** Named as the `chat_sessions` columns, so a session row is a selection. */
 export interface ChatSkillSelection {
@@ -84,17 +88,19 @@ export function resolveChatSkills(
   // A chosen skill is the user's own act, so the model is told when it is left out.
   const notices: string[] = [];
   if (!injectsSkills(selection.skillMode)) return { injected, notices };
+  let left = SKILLS_CONTENT_BUDGET_CHARS;
   for (const id of selection.pinnedSkills) {
     const skill = contents.get(id);
     if (!skill) {
       notices.push(
         `The skill \`${id}\` was chosen for this conversation but is not available here — it may have been removed, deactivated, or be out of your reach.`,
       );
-    } else if (skill.content.length > MAX_SKILL_CONTENT_CHARS) {
+    } else if (skill.content.length > left) {
       notices.push(
-        `The skill \`${id}\` was chosen for this conversation but is too long to include (${skill.content.length} characters, limit ${MAX_SKILL_CONTENT_CHARS}).`,
+        `The skill \`${id}\` was chosen for this conversation but does not fit (${skill.content.length} characters; the chosen skills share ${SKILLS_CONTENT_BUDGET_CHARS}, ${left} left).`,
       );
     } else {
+      left -= skill.content.length;
       injected.push(skill);
     }
   }

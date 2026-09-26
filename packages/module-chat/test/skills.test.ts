@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import {
-  MAX_SKILL_CONTENT_CHARS,
+  SKILLS_CONTENT_BUDGET_CHARS,
   parseSkillList,
   resolveChatSkills,
   type ChatSkillSelection,
@@ -46,17 +46,29 @@ describe("resolveChatSkills", () => {
     expect(result.notices[1]).toContain("`@z/gone`");
   });
 
-  it("leaves out a skill longer than the cap, with a notice naming both lengths", () => {
-    const long = "x".repeat(MAX_SKILL_CONTENT_CHARS + 1);
-    const exact = "y".repeat(MAX_SKILL_CONTENT_CHARS);
-    const result = resolve({ skillMode: "strict", pinnedSkills: ["@a/exact", "@a/long"] }, [
-      content("@a/long", long),
-      content("@a/exact", exact),
-    ]);
-    expect(result.injected.map((s) => s.packageId)).toEqual(["@a/exact"]);
+  it("spends one budget across the chosen skills, in stored order", () => {
+    const third = Math.floor(SKILLS_CONTENT_BUDGET_CHARS / 3);
+    const result = resolve(
+      { skillMode: "strict", pinnedSkills: ["@a/one", "@a/two", "@a/three"] },
+      [
+        content("@a/one", "x".repeat(third * 2)),
+        // Over what is left after `@a/one`, though under the budget on its own.
+        content("@a/two", "y".repeat(third * 2)),
+        content("@a/three", "z".repeat(SKILLS_CONTENT_BUDGET_CHARS - third * 2)),
+      ],
+    );
+    expect(result.injected.map((s) => s.packageId)).toEqual(["@a/one", "@a/three"]);
     expect(result.notices).toEqual([
-      `The skill \`@a/long\` was chosen for this conversation but is too long to include (${MAX_SKILL_CONTENT_CHARS + 1} characters, limit ${MAX_SKILL_CONTENT_CHARS}).`,
+      `The skill \`@a/two\` was chosen for this conversation but does not fit (${third * 2} characters; the chosen skills share ${SKILLS_CONTENT_BUDGET_CHARS}, ${SKILLS_CONTENT_BUDGET_CHARS - third * 2} left).`,
     ]);
+  });
+
+  it("injects one long skill that fits the budget", () => {
+    const result = resolve({ skillMode: "manual", pinnedSkills: ["@a/art"] }, [
+      content("@a/art", "a".repeat(19_735)),
+    ]);
+    expect(result.injected.map((s) => s.packageId)).toEqual(["@a/art"]);
+    expect(result.notices).toEqual([]);
   });
 });
 

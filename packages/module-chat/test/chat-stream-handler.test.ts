@@ -569,7 +569,14 @@ describe("handleChatStream", () => {
     const { engine, calls } = scriptedEngine();
     const res = await postChat(sessionId, undefined, engine, {
       dispatch,
-      permissions: new Set(["mcp:read", "mcp:invoke", "skills:read"]),
+      // Every `skills:*` is withheld, not only `skills:read`: a write echoes the SKILL.md.
+      permissions: new Set([
+        "mcp:read",
+        "mcp:invoke",
+        "skills:read",
+        "skills:write",
+        "skills:delete",
+      ]),
     });
     expect(res.status).toBe(200);
     await collectUiChunks(res);
@@ -583,6 +590,9 @@ describe("handleChatStream", () => {
     // No skill tool is taught, and the token cannot reach one.
     expect(input.system).not.toContain("getSkill");
     expect(input.system).not.toContain("listSkills");
+    expect(input.system).toContain(
+      "The user restricted this conversation to the skills they chose",
+    );
     expect(await tokenPermissions(input)).toEqual(["mcp:invoke", "mcp:read"]);
 
     await waitForAssistantPersist(sessionId);

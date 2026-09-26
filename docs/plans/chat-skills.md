@@ -39,16 +39,24 @@ the turn's. In parallel:
   the content — by construction the definition any other reader gets (the
   draft when writable, else the latest published version).
 
-A chosen skill that is not active, whose read fails, or whose `SKILL.md` is
-longer than `MAX_SKILL_CONTENT_CHARS` (16 000) renders one notice line instead.
+The injected `SKILL.md`s share one budget, `SKILLS_CONTENT_BUDGET_CHARS`
+(64 000), spent in stored order: what weighs on the context is the sum, so one
+long skill passes while the whole fits. A chosen skill that is not active, whose
+read fails, or that does not fit what is left renders one notice line instead.
 At most `MAX_PINNED_SKILLS` (5) chosen skills: every one is in every turn.
 
-**strict** also withholds `skills:read` from the turn's permissions
+**strict** also withholds every `skills:*` from the turn's permissions
 (`turnPermissions`, the mechanism the agent-authoring switch uses), so the MCP
-surface derived from the route guards drops `listSkills` and `getSkill`, and
+surface derived from the route guards drops `listSkills` and `getSkill`,
 declaring a skill in an agent (`dependencies.skills`, checked by
-`assertPackageDependenciesAccessible`) is refused. The persona already teaches
+`assertPackageDependenciesAccessible`) is refused, and so is writing one — a
+write answers with the package detail, `SKILL.md` included, so `skills:write`
+alone would read any skill the caller authors. The persona already teaches
 those only on `readsSkills`. No per-operation exception is needed.
+
+The `## Skills` section of a strict turn always says why it holds no
+`skills:*`: without it, a model reads the gap as a role to fix, hunts through
+other operations, and offers to change a role to reach a skill.
 
 The mode lives on the session row, so the handler computes the turn's
 permissions after its session upsert; the context block chains on the same

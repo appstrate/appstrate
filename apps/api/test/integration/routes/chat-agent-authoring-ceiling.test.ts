@@ -128,4 +128,16 @@ describe("a chat turn in the strict skill mode", () => {
     // Control: the same bearer outside strict lists them.
     expect((await list("manual")).status).toBe(200);
   });
+
+  it("is refused writing a skill, whose response would echo its SKILL.md", async () => {
+    const create = (skillMode: ChatSkillMode) =>
+      app.request("/api/packages/skills", {
+        method: "POST",
+        headers: { ...bearer(true, skillMode), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+    expect((await create("strict")).status).toBe(403);
+    // Control: outside strict the guard passes and the empty body is judged.
+    expect((await create("manual")).status).toBe(400);
+  });
 });

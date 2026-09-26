@@ -22,7 +22,6 @@ import { logger } from "./logger.ts";
 import { reaches, type TurnCapabilities } from "./capabilities.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 import {
-  DEFAULT_SKILL_SELECTION,
   injectsSkills,
   parseSkillList,
   resolveChatSkills,
@@ -87,6 +86,10 @@ export type ChatEnv = {
 const SKILLS_HEADING = "## Skills";
 const SKILLS_INJECTED_LEAD =
   "The user chose these skills for this conversation. Each is a procedure for YOU: follow it whenever it applies.";
+// Why this turn holds no `skills:*`: without it, a model reads the gap as a role
+// to fix and hunts through other operations.
+const SKILLS_STRICT_NOTE =
+  "The user restricted this conversation to the skills they chose, if any, shown here: that is why this turn holds no `skills:*` permission. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
 
 /**
  * Instructions for an act the turn cannot perform are ABSENT rather than
@@ -321,7 +324,9 @@ export function formatCallerContext(
   const skills = resolveChatSkills(opts.skills, opts.skillContents ?? new Map());
   const catalogue = injectsSkills(opts.skills.skillMode) ? [] : (ctx.skills ?? []);
   const listsSkills = opts.capabilities.readsSkills && catalogue.length > 0;
-  const hasSkillSection = listsSkills || skills.injected.length > 0 || skills.notices.length > 0;
+  const strict = opts.skills.skillMode === "strict";
+  const hasSkillSection =
+    strict || listsSkills || skills.injected.length > 0 || skills.notices.length > 0;
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();
   const role = ctx.org?.role?.trim();
@@ -434,6 +439,7 @@ export function formatCallerContext(
   // Rendered whatever the authoring grant: the chat uses skills for itself.
   if (hasSkillSection) {
     lines.push("", SKILLS_HEADING);
+    if (strict) lines.push(SKILLS_STRICT_NOTE);
     if (listsSkills) {
       for (const skill of catalogue) lines.push(skillLine(skill));
       if (ctx.skills_truncated) lines.push("(list truncated)");
@@ -454,7 +460,7 @@ export function formatCallerContext(
  * The chosen skills to inject: those in the space's ACTIVE listing (`getSkill`
  * only checks readability), with their `SKILL.md` through `getSkill`. Both with
  * the caller's own headers — what the caller would read, even in `strict`,
- * whose token holds no `skills:read`. A refusal or a failure leaves a skill out.
+ * whose token holds no `skills:*`. A refusal or a failure leaves a skill out.
  */
 async function loadSkillContents(
   deps: ChatPlatformDeps,
@@ -532,8 +538,8 @@ export async function buildCallerContextBlock(
   const orgSlug = c.get("orgSlug");
 
   // Identity/role straight off the request context — the fallback when the
-  // space-scoped read cannot answer. It names no chosen skill: the space's
-  // listing that says which are active answers no better.
+  // space-scoped read cannot answer. It names no chosen skill (the listing that
+  // says which are active answers no better), but keeps the mode: strict's note.
   const identityOnly = (): string =>
     formatCallerContext(
       {
@@ -547,7 +553,7 @@ export async function buildCallerContextBlock(
         spaceRole,
         spaceId,
         permissions: args.permissions,
-        skills: DEFAULT_SKILL_SELECTION,
+        skills: { skillMode: skills.skillMode, pinnedSkills: [] },
       },
     );
 
