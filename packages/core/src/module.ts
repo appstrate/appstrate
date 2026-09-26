@@ -22,6 +22,7 @@ import type {
   ChatUsageRecord,
   ResolvedChatAttachment,
   ChatModelResolution,
+  EnforcedChatSkill,
 } from "./chat-contract.ts";
 import type { OrchestratorRegistration } from "./platform-types.ts";
 import type { TerminalRunStatus } from "./run-status.ts";
@@ -1466,6 +1467,14 @@ export interface PlatformServices {
    * the platform's RFC 9457 errors, which the chat route surfaces to the user.
    */
   resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
+  /**
+   * The skills a space enforces on its chat: its ACTIVE skills whose placement
+   * is chat-enforced, sorted by id, each at its latest published version. Read
+   * with platform authority, independent of the caller's `skills:*` grants.
+   * Rejects on failure, so the chat refuses the turn rather than running it
+   * without the space's policy.
+   */
+  loadEnforcedChatSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkill[]>;
   /**
    * Detach-or-delete the files contained by a chat session being deleted. A
    * session file a run still consumes is detached (`chat_session_id = NULL`)

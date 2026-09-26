@@ -149,3 +149,26 @@ export interface ChatUsageRecord {
  * literal — a drift would silently leave the index in place, costing cache.
  */
 export const OPERATION_INDEX_HEADING = "## Operation index";
+
+/**
+ * Characters the SKILL.md bodies injected into one chat turn share: the
+ * space-enforced skills first, then the ones the user chose. Shared so the
+ * platform's enforcement write and the chat module's injection agree.
+ */
+export const CHAT_SKILLS_CONTENT_BUDGET_CHARS = 64_000;
+
+/** Skills a space may enforce on its chat conversations. */
+export const MAX_ENFORCED_CHAT_SKILLS = 3;
+
+/**
+ * A skill a space enforces on its chat conversations, read with platform
+ * authority at its latest published version.
+ */
+export interface EnforcedChatSkill {
+  packageId: string;
+  /** Display name: the manifest's `display_name`, else the package id. */
+  name: string;
+  version: string | null;
+  /** The published SKILL.md; null when no published version is readable now (deleted, unreadable). */
+  content: string | null;
+}

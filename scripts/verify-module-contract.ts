@@ -307,6 +307,7 @@ const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   resolveChatModel: { owners: ["module-chat"] },
   recordChatUsage: { owners: ["module-chat"] },
   resolveChatAttachment: { owners: ["module-chat"] },
+  loadEnforcedChatSkills: { owners: ["module-chat"] },
   cleanupSessionFiles: { owners: ["module-chat"] },
   checkUsageAllowed: { owners: ["module-chat"] },
   setFileStorageLimit: { owners: ["module-ee"] },

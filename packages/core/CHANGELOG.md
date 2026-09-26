@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`PlatformServices.loadEnforcedChatSkills`** (`@appstrate/core/module`, #1586) —
+  the skills a space enforces on its chat conversations: its active skills whose
+  placement is chat-enforced, sorted by id, each at its latest published version,
+  read with platform authority whatever the caller's `skills:*` grants. It rejects
+  on failure so the chat refuses the turn instead of running it without the
+  space's policy. A new required member: the platform implements it, modules only
+  call it.
+
+- **`EnforcedChatSkill`**, **`CHAT_SKILLS_CONTENT_BUDGET_CHARS`** and
+  **`MAX_ENFORCED_CHAT_SKILLS`** (`@appstrate/core/chat-contract`, #1586) — one
+  enforced skill (`packageId`, `name`, `version`, `content`, `null` when no
+  published version is readable now), the characters the SKILL.md bodies of one
+  chat turn share (64 000, enforced first), and the number of skills a space may
+  enforce (3). Shared so the platform's enforcement write and the chat module's
+  injection agree.
+
 ## [12.0.0] — 2026-09-25
 
 ### Added
