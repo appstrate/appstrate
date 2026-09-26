@@ -7,7 +7,7 @@
  *
  * ## Why a loop, when the orchestrator already pulls at boot
  *
- * `DockerOrchestrator.initialize()` pre-pulls both images once per process
+ * `DockerOrchestrator.initialize()` pre-pulls both images at boot (retried until it succeeds)
  * and caches "verified" for the process lifetime. That cache is a claim about
  * the host, and the host is shared: any external janitor — Coolify's nightly
  * automated cleanup, a cron `docker system prune`, a disk-pressure sweep —

@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failure rejects), the characters the SKILL.md bodies of one chat turn share
   (64 000, enforced first), and the number of skills a space may enforce (3).
 
+### Changed
+
+- **`RunOrchestrator.initialize()` may be called again after it rejects**
+  (`@appstrate/core/platform-types`, #1129) — the platform retries it in the
+  background with backoff until it resolves once, instead of once per process.
+  Implementations must tolerate a retry after a partial failure. Documentation
+  only: the signature is unchanged.
+
 ## [12.0.0] — 2026-09-25
 
 ### Added
