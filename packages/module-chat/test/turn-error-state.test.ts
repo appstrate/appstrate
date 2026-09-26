@@ -136,6 +136,18 @@ describe("turnErrorState", () => {
     ).toMatchObject({ text: "turn.error.upstreamUnavailable", retryable: true });
   });
 
+  it("reads a pre-stream 429 as rate limiting, whatever its code", () => {
+    // The route rate limit and the chat capacity cap both answer 429 before the
+    // stream opens: waiting clears either, so it keeps its Retry.
+    for (const code of ["rate_limited", "chat_capacity"]) {
+      expect(turnErrorState(failed(problem({ status: 429, code })), t, manager)).toEqual({
+        text: "turn.error.rateLimited",
+        retryable: true,
+        requestId: undefined,
+      });
+    }
+  });
+
   /** A refusal as rendered: no retry, no request id. */
   const refused = (text: string, action?: typeof BILLING) => ({
     text,

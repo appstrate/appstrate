@@ -19,7 +19,11 @@ import type { AssistantState } from "@assistant-ui/react";
 import { getExternalStoreMessages } from "@assistant-ui/react";
 import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
 
-import { clientTurnErrorFromMarker, readRefusal } from "../turn-error.ts";
+import {
+  clientTurnErrorFromMarker,
+  clientTurnErrorFromRateLimit,
+  readRefusal,
+} from "../turn-error.ts";
 import type { ChatTranslate } from "./runtime-context.ts";
 
 /**
@@ -50,7 +54,8 @@ const BILLING_HREF = "/org-settings/billing";
  * send the user to the wrong screen — so each code gets its own copy. Keyed by
  * the wire code, loosely: a code we have no sentence for degrades to the
  * generic failure rather than rendering a missing i18n key. `billing`: a
- * manager gets the billing link, anyone else is told to ask one.
+ * manager gets the billing link, anyone else is told to contact an
+ * organization administrator.
  */
 const REFUSAL: Record<string, { text: string; billing?: true }> = {
   quota_exceeded: { text: "turn.error.quotaExceeded", billing: true },
@@ -125,10 +130,10 @@ export function turnErrorState(
   if (message.status?.type === "incomplete" && message.status.reason === "error") {
     const err = message.status.error;
     // An in-stream failure carries our marker; a turn refused BEFORE the stream
-    // opened carries the RFC 9457 body the transport throws verbatim, whose
-    // `code` we localize here. A refusal names an action the user must take, so
-    // retrying cannot clear it.
-    const classified = clientTurnErrorFromMarker(err);
+    // opened carries the RFC 9457 body the transport throws verbatim: a 429 is
+    // throttling (retryable), any other refusal's `code` we localize here. A
+    // refusal names an action the user must take, so retrying cannot clear it.
+    const classified = clientTurnErrorFromMarker(err) ?? clientTurnErrorFromRateLimit(err);
     if (classified) {
       return {
         text: t(TURN_ERROR_KEY[classified.category]),

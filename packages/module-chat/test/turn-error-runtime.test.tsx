@@ -25,6 +25,7 @@ import { conflict } from "@appstrate/core/api-errors";
 import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
 import { MessageError } from "../src/ui/thread.tsx";
 import { setModelCatalog } from "../src/ui/model-store.ts";
+import { chatCapacityError } from "../src/pi-chat/concurrency.ts";
 
 type ChatHelpers = Parameters<typeof useAISDKRuntime>[0];
 
@@ -143,6 +144,14 @@ describe("a failed chat turn, through the real assistant-ui runtime", () => {
     expect(html).toContain("turn.error.needsReconnection");
     expect(html).not.toContain("turn.error.unknown");
     expect(html).not.toContain("turn.retry");
+  });
+
+  it("names a pre-stream 429 as rate limiting, and offers a retry", () => {
+    // The capacity cap, serialized as the API's error handler does.
+    const html = renderFailedTurn(refused(chatCapacityError().toProblemDetail("req_1")));
+    expect(html).toContain("turn.error.rateLimited");
+    expect(html).toContain("turn.retry");
+    expect(html).not.toContain("turn.error.unknown");
   });
 
   it("names an in-stream rate limit, and offers a retry", () => {

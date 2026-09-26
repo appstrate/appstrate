@@ -67,7 +67,8 @@ function usageRejectionResponse(
       status,
       detail: rejection.message,
       code: rejection.code,
-      own_credential_admitted: ownCredentialAdmitted,
+      // Probed only on a 402; absent reads as false.
+      ...(status === 402 ? { own_credential_admitted: ownCredentialAdmitted } : {}),
     }),
     { status, headers: { "content-type": "application/problem+json" } },
   );
@@ -455,7 +456,13 @@ export async function handleChatStream(
       !isSubscription &&
       (await deps.checkUsageAllowed({ ...gateArgs, subscription: true }).then(
         (probe) => probe === null,
-        () => false,
+        (err: unknown) => {
+          logger.warn("chat admission probe failed", {
+            orgId,
+            err: err instanceof Error ? err.message : String(err),
+          });
+          return false;
+        },
       ));
     const refused = usageRejectionResponse(rejection, ownCredentialAdmitted);
     logger.info("chat turn refused by admission gate", {

@@ -17,7 +17,10 @@ export interface ClientTurnError {
 
 const ERROR_MARKER_PREFIX = "appstrate:chat-turn-error:";
 
-/** A string or an object's `message`: assistant-ui turns the Error into `{ code, message }`. */
+/**
+ * A string, or any thrown value carrying a string `message` (assistant-ui turns
+ * the Error into `{ code, message }`).
+ */
 function messageFromError(error: unknown): string {
   if (typeof error === "string") return error;
   if (!error || typeof error !== "object") return "";
@@ -81,6 +84,23 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
     : undefined;
 }
 
+/** The RFC 9457 document a pre-stream failure carries as its message (see {@link readRefusal}). */
+function problemFromError(value: unknown): Record<string, unknown> | undefined {
+  try {
+    const doc: unknown = JSON.parse(messageFromError(value));
+    return doc && typeof doc === "object" ? (doc as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A pre-stream 429 (route rate limit, chat capacity), whatever its code: retryable. */
+export function clientTurnErrorFromRateLimit(value: unknown): ClientTurnError | undefined {
+  return problemFromError(value)?.status === 429
+    ? clientTurnErrorForCategory("rate_limited")
+    : undefined;
+}
+
 export interface TurnRefusal {
   code: string;
   /** The gate would admit the same turn on a model running on the org's own credential. */
@@ -104,21 +124,13 @@ export interface TurnRefusal {
  *
  * Only a REFUSAL carries a code worth displaying: 401/402/403/409 mean "you
  * must act". Any other status (a module failing closed with a 500) describes an
- * internal fault the user can do nothing about.
+ * internal fault the user can do nothing about. A 429 is throttling, read by
+ * {@link clientTurnErrorFromRateLimit}.
  */
 export function readRefusal(value: unknown): TurnRefusal | undefined {
-  let doc: unknown;
-  try {
-    doc = JSON.parse(messageFromError(value));
-  } catch {
-    return undefined;
-  }
-  if (!doc || typeof doc !== "object") return undefined;
-  const { status, code, own_credential_admitted } = doc as {
-    status?: unknown;
-    code?: unknown;
-    own_credential_admitted?: unknown;
-  };
+  const doc = problemFromError(value);
+  if (!doc) return undefined;
+  const { status, code, own_credential_admitted } = doc;
   if (status !== 401 && status !== 402 && status !== 403 && status !== 409) return undefined;
   if (typeof code !== "string" || !code) return undefined;
   return { code, ownCredentialAdmitted: own_credential_admitted === true };

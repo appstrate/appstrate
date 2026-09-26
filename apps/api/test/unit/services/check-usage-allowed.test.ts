@@ -277,6 +277,16 @@ describe("checkUsageAllowed", () => {
         executionPlane: "platform",
       },
     ]);
+
+    // The flag alone flips the source: the chat's own-credential probe re-asks
+    // a refused turn with `subscription: true` and relies on exactly this.
+    await checkUsageAllowed({
+      orgId: ORG_ID,
+      presetId: SYSTEM_PRESET,
+      sessionId: "chs_sub",
+      subscription: false,
+    });
+    expect(calls.map((c) => c.credentialSource)).toEqual(["org", "system"]);
   });
 
   it("lets a metering module reject a subscription turn (platform compute is platform-funded)", async () => {

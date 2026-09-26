@@ -13,7 +13,8 @@
  *   - a turn refused with 402 asks the gate once more, as funded by the org's
  *     own credential, and reports the answer as `own_credential_admitted` — the
  *     module owns what is chargeable, so the client must not guess it; an
- *     admitted turn, or any other refusal, asks exactly once;
+ *     admitted turn, or any other refusal, asks exactly once (and such a
+ *     refusal carries no `own_credential_admitted`);
  *   - the SUBSCRIPTION branch is gated too, reporting `subscription: true`. It
  *     used to skip admission entirely on the reasoning that it spends the
  *     user's own credential — but the turn is driven by the in-process Pi
@@ -244,25 +245,33 @@ describe("chat admission gate (handleChatStream)", () => {
     expect(await res.json()).toMatchObject({ code: "over_cap", own_credential_admitted: true });
   });
 
-  it("a throwing probe still answers the 402, as not admitted", async () => {
-    const c = fakeContext({
-      orgId: ctx.orgId,
-      user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
-      spaceId: ctx.defaultSpaceId,
-      body: { messages: [userTurn("u1", "hello")] },
-    });
-    const res = await handleChatStream(
-      c,
-      fakeDeps({
-        checkUsageAllowed: async (args) => {
-          if (args.subscription) throw new Error("gate unavailable");
-          return REJECTION;
-        },
-      }),
-    );
+  it("a throwing probe still answers the 402, as not admitted, and logs one warning", async () => {
+    const warn = spyOn(logger, "warn");
+    try {
+      const c = fakeContext({
+        orgId: ctx.orgId,
+        user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
+        spaceId: ctx.defaultSpaceId,
+        body: { messages: [userTurn("u1", "hello")] },
+      });
+      const res = await handleChatStream(
+        c,
+        fakeDeps({
+          checkUsageAllowed: async (args) => {
+            if (args.subscription) throw new Error("gate unavailable");
+            return REJECTION;
+          },
+        }),
+      );
 
-    expect(res.status).toBe(402);
-    expect(await res.json()).toMatchObject({ code: "over_cap", own_credential_admitted: false });
+      expect(res.status).toBe(402);
+      expect(await res.json()).toMatchObject({ code: "over_cap", own_credential_admitted: false });
+      expect(warn.mock.calls.filter(([msg]) => msg === "chat admission probe failed")).toEqual([
+        ["chat admission probe failed", { orgId: ctx.orgId, err: "gate unavailable" }],
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("does not probe a subscription turn", async () => {
@@ -315,7 +324,10 @@ describe("chat admission gate (handleChatStream)", () => {
     );
 
     expect(res.status).toBe(refusal.status);
-    expect(await res.json()).toMatchObject({ code: refusal.code, own_credential_admitted: false });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.code).toBe(refusal.code);
+    // Only a 402 is probed, so only a 402 carries the member.
+    expect(body).not.toHaveProperty("own_credential_admitted");
     expect(gateArgs.map((a) => a.subscription)).toEqual([false]);
   });
 
