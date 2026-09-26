@@ -348,12 +348,10 @@ export async function handleChatStream(
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
-  // The space's enforced skills, read with the platform's authority, start now,
-  // alongside the session row: they depend on nothing else. Their failure (a
-  // 503) refuses the turn where the block below is joined. The empty handler only
-  // marks the rejection handled for an early return; the block still sees it.
+  // The space's enforced skills depend on nothing but the ids, so they start
+  // now; phase A's join awaits them, so their 503 refuses the turn before any
+  // file is materialized.
   const enforcedSkills = deps.loadEnforcedSkills(orgId, spaceId);
-  enforcedSkills.catch(() => {});
   // Then the caller-context block. It depends on the space id and the caller's
   // headers and the session row (the turn's grants and its skills) — never on the
   // chosen model or the admission gate — so it starts the moment the row
@@ -404,6 +402,7 @@ export async function handleChatStream(
   const [models, { permissions, capabilities }] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
     turn,
+    enforcedSkills,
   ]);
   const chosen = pickModel(models, modelId);
   let generationSettings;
@@ -493,8 +492,7 @@ export async function handleChatStream(
     return refused;
   }
 
-  // Join phase B. This is the one place its failure is allowed to surface —
-  // the enforced skills' 503 included, before anything is written.
+  // Join phase B. This is the one place its failure is allowed to surface.
   const contextResult = await contextBlockPromise;
   if (!contextResult.ok) throw contextResult.error;
   const contextBlock = contextResult.block;

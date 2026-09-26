@@ -299,28 +299,23 @@ function draftOnlyHint(input: {
 }
 
 /**
- * The `## Skills` section, or "" when it has nothing to say. Apart from the
- * rest of the block so {@link buildCallerContextBlock} appends it on every
- * path: the space's skills never hang on `/api/me/context` answering.
- *
- * Order: the strict note, the space's skills, the `auto` listing, the chosen
- * skills, the notices. A listed skill the turn cannot load is noise, as an
- * agent it cannot launch is; an injected one needs no tool.
+ * `## Skills`, or "". Kept apart so {@link buildCallerContextBlock} appends it on
+ * every path: the space's skills never depend on `/api/me/context` answering.
  */
 function formatSkillsSection(opts: {
   selection: ChatSkillSelection;
   readsSkills: boolean;
-  /** The space's active skills (`/api/me/context`), listed by name in `auto`. */
   catalogue: readonly SkillHint[];
   catalogueTruncated: boolean;
   contents: ReadonlyMap<string, SkillContent>;
   enforced: readonly EnforcedChatSkill[];
 }): string {
   const skills = resolveChatSkills(opts.selection, opts.contents, opts.enforced);
-  const imposed = new Set(opts.enforced.map((skill) => skill.packageId));
+  const injected = new Set(skills.enforced.map((skill) => skill.packageId));
+  // A listed skill the turn cannot load is noise; `auto` lists, the others inject.
   const listed =
     opts.readsSkills && !injectsSkills(opts.selection.skillMode)
-      ? opts.catalogue.filter((skill) => !imposed.has(skill.packageId))
+      ? opts.catalogue.filter((skill) => !injected.has(skill.packageId))
       : [];
   const groups: string[][] = [];
   if (opts.selection.skillMode === "strict") groups.push([SKILLS_STRICT_NOTE]);
@@ -359,7 +354,6 @@ export function formatCallerContext(
     skills: ChatSkillSelection;
     /** The chosen skills active here, read by {@link buildCallerContextBlock}. */
     skillContents?: ReadonlyMap<string, SkillContent>;
-    /** The space's enforced skills, loaded by the turn. */
     enforced?: readonly EnforcedChatSkill[];
   },
 ): string {
@@ -535,7 +529,7 @@ function spaceRoleLabel(ref: SpaceRoleRefLike | undefined | null): string | null
   return ref.role.name?.trim() || ref.role.id;
 }
 
-/** `GET /api/me/context`: the payload, `400` when the caller lost the space, else null. */
+/** `GET /api/me/context`: the payload, `400` (the caller lost the space), or null. */
 async function readCallerContext(
   deps: ChatPlatformDeps,
   origin: string,
@@ -583,7 +577,7 @@ export async function buildCallerContextBlock(
     capabilities: TurnCapabilities;
     permissions: readonly string[];
     skills: ChatSkillSelection;
-    /** The space's enforced skills, already loading: awaited alongside the reads. */
+    /** Already loading; a rejection rejects the block. */
     enforced: Promise<readonly EnforcedChatSkill[]>;
   },
 ): Promise<string> {

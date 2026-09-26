@@ -102,11 +102,9 @@ export interface ChatPlatformDeps {
     subscription: boolean;
   }): Promise<UsageRejection | null>;
   /**
-   * The skills the space imposes on every conversation (active ∧ enforced,
-   * sorted by id, latest published), read with the platform's authority, not
-   * the caller's: a member without `skills:read` still gets them. Rejects with
-   * a 503 `enforced_skills_unavailable`, and the turn is then refused rather
-   * than run without them.
+   * The space's enforced skills, read with the platform's authority: a member
+   * without `skills:read` still gets them. A failure rejects with a 503 so the
+   * turn is refused rather than run without them.
    */
   loadEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkill[]>;
 }

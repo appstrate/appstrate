@@ -281,9 +281,8 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     return c.body(null, 204);
   });
 
-  // GET /api/chat/enforced-skills — the skills the entered space imposes on every
-  // conversation, by name only: what the composer shows a member who may not
-  // read skills. Gated like the turn that injects them; the content never leaves.
+  // GET /api/chat/enforced-skills — names only: a member without `skills:read`
+  // may call it. Gated like the turn that injects them.
   router.get(
     "/api/chat/enforced-skills",
     rateLimited(120),

@@ -437,7 +437,7 @@ describe("formatCallerContext", () => {
       }
     });
 
-    it("leaves them out of the `auto` listing", () => {
+    it("leaves the injected ones out of the `auto` listing", () => {
       const out = formatCallerContext(
         {
           user: { name: "Ada" },
@@ -451,6 +451,16 @@ describe("formatCallerContext", () => {
       expect(out).toContain("- `@acme/pdf` — PDF");
       expect(out).not.toContain("- `@acme/house`");
       expect(out.split("@acme/house")).toHaveLength(2);
+
+      // One the turn could not inject stays listed, so the model can still load it.
+      const unpublished = formatCallerContext(
+        {
+          user: { name: "Ada" },
+          skills: [{ packageId: "@acme/house", display_name: "House rules" }],
+        },
+        { ...BASE_OPTS, enforced: [{ ...HOUSE, version: null, content: null }] },
+      );
+      expect(unpublished).toContain("- `@acme/house` — House rules");
     });
 
     it("orders the strict note, the space's skills, the chosen ones, then the notices", () => {
@@ -504,7 +514,9 @@ describe("formatCallerContext", () => {
         { user: { name: "Ada" } },
         { ...BASE_OPTS, enforced: [{ ...HOUSE, version: null, content: null }] },
       );
-      expect(out).toContain("`@acme/house` is required by this space but is not available here");
+      expect(out).toContain(
+        "`@acme/house` is required by this space but has no published version to follow.",
+      );
       expect(out).not.toContain(ENFORCED_LEAD);
     });
 

@@ -767,8 +767,34 @@ describe("handleChatStream", () => {
       expect(session?.activeStreamId ?? null).toBeNull();
     });
 
+    it("refuses before materializing any composer attachment", async () => {
+      const sessionId = mintSessionId();
+      const resolved: string[] = [];
+      const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+        permissions: new Set(["chat:write", "mcp:read", "mcp:invoke"]),
+        parts: [
+          { type: "text", text: "résume ce fichier" },
+          {
+            type: "file",
+            url: "appfile://file_abcdefgh",
+            mediaType: "text/plain",
+            filename: "r.txt",
+          },
+        ],
+        resolveChatAttachment: async (request) => {
+          resolved.push(request.uri);
+          return { uri: request.uri, name: "r.txt", mime: "text/plain", size: 12 };
+        },
+        loadEnforcedChatSkills: async () => {
+          throw new Error("storage outage");
+        },
+      });
+      expect(res.status).toBe(503);
+      expect(resolved).toEqual([]);
+    });
+
     it("injects them for a caller who holds `chat:write` and no `skills:*`, in every mode", async () => {
-      for (const skillMode of ["auto", "strict"] as const) {
+      for (const skillMode of ["auto", "manual", "strict"] as const) {
         const sessionId = mintSessionId();
         const loaded: [string, string][] = [];
         const { engine, calls } = scriptedEngine();

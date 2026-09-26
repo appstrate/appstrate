@@ -121,18 +121,29 @@ describe("resolveChatSkills — space-enforced skills", () => {
     expect(result.notices).toEqual([]);
   });
 
-  it("drops a pin naming an enforced skill even when that one has no readable version", () => {
+  it("keeps a pin naming an enforced skill that has no published version", () => {
     const result = resolve(
       { skillMode: "strict", pinnedSkills: ["@a/house"] },
       [content("@a/house")],
       [enforcedSkill("@a/house", null)],
     );
     expect(result.enforced).toEqual([]);
-    expect(result.chosen).toEqual([]);
-    // One notice, the space's: the user's pin says nothing more.
+    expect(result.chosen.map((s) => s.packageId)).toEqual(["@a/house"]);
     expect(result.notices).toEqual([
-      "The skill `@a/house` is required by this space but is not available here — it has no published version that can be read now.",
+      "The skill `@a/house` is required by this space but has no published version to follow.",
     ]);
+  });
+
+  it("keeps a pin naming an enforced skill that did not fit", () => {
+    const result = resolve(
+      { skillMode: "manual", pinnedSkills: ["@a/house"] },
+      [content("@a/house", "short draft")],
+      [enforcedSkill("@a/house", "h".repeat(BUDGET + 1))],
+    );
+    expect(result.enforced).toEqual([]);
+    expect(result.chosen.map((s) => s.packageId)).toEqual(["@a/house"]);
+    expect(result.notices).toHaveLength(1);
+    expect(result.notices[0]).toContain("is required by this space but does not fit");
   });
 
   it("spends the shared budget on the space's skills first", () => {
@@ -163,17 +174,6 @@ describe("resolveChatSkills — space-enforced skills", () => {
     expect(result.notices).toEqual([
       `The skill \`@a/b\` is required by this space but does not fit (11 characters; the injected skills share ${BUDGET}, 10 left).`,
     ]);
-  });
-
-  it("does not count the enforced skills against the pin cap", () => {
-    const pins = ["@a/1", "@a/2", "@a/3", "@a/4", "@a/5"];
-    const result = resolve(
-      { skillMode: "manual", pinnedSkills: pins },
-      pins.map((id) => content(id)),
-      [enforcedSkill("@z/house")],
-    );
-    expect(result.chosen.map((s) => s.packageId)).toEqual(pins);
-    expect(result.enforced.map((s) => s.packageId)).toEqual(["@z/house"]);
   });
 });
 

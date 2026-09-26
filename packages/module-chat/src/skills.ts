@@ -68,19 +68,17 @@ export function injectsSkills(mode: ChatSkillMode): boolean {
 }
 
 interface ResolvedChatSkills {
-  /** The space's, in the platform's id order: injected in every mode. */
   enforced: SkillContent[];
-  /** The user's, in stored order, minus any the space already imposes. */
   chosen: SkillContent[];
   notices: string[];
 }
 
 /**
- * The skills to inject. The space's come first and spend the shared budget
- * before the user's; a chosen skill the space already imposes is dropped
- * silently. `contents` holds only the chosen skills that are active here and
- * whose `SKILL.md` was read (sorted and deduped by the one writer,
- * `ensureSession`); any other becomes a notice.
+ * The skills to inject: the space's first, in the platform's id order, then the
+ * chosen ones in stored order (sorted and deduped by `ensureSession`), all out of
+ * one budget. A pin naming an injected enforced skill is dropped silently; one
+ * whose enforced copy was left out stands as an ordinary pin. `contents` holds
+ * only the chosen skills active here and read; any other becomes a notice.
  */
 export function resolveChatSkills(
   selection: ChatSkillSelection,
@@ -94,7 +92,7 @@ export function resolveChatSkills(
   for (const { packageId, version, content } of enforced) {
     if (content === null) {
       resolved.notices.push(
-        `The skill \`${packageId}\` is required by this space but is not available here — it has no published version that can be read now.`,
+        `The skill \`${packageId}\` is required by this space but has no published version to follow.`,
       );
     } else if (content.length > left) {
       resolved.notices.push(
@@ -106,9 +104,9 @@ export function resolveChatSkills(
     }
   }
   if (!injectsSkills(selection.skillMode)) return resolved;
-  const imposedIds = new Set(enforced.map((skill) => skill.packageId));
+  const injectedIds = new Set(resolved.enforced.map((skill) => skill.packageId));
   // A chosen skill is the user's own act, so the model is told when it is left out.
-  for (const id of selection.pinnedSkills.filter((pinned) => !imposedIds.has(pinned))) {
+  for (const id of selection.pinnedSkills.filter((pinned) => !injectedIds.has(pinned))) {
     const skill = contents.get(id);
     if (!skill) {
       resolved.notices.push(
