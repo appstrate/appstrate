@@ -68,7 +68,7 @@ sidecar
   ├─ for each integration with httpDeliveryAuths:
   │     ├─ GET /internal/integration-credentials/<id>           ← initial payload
   │     ├─ createIntegrationCredentialsSource()                  ← cache + refresh hook
-  │     ├─ createIntegrationMitmListener() (binds 0.0.0.0 in Docker mode) ← per-SNI Bun.serve on a unix socket (0700 dir)
+  │     ├─ createIntegrationMitmListener() (binds 0.0.0.0 in Docker mode) ← one inner Bun.serve per upstream authority (host:port), each on a unix socket (0700 dir)
   │     └─ docker create … --network appstrate-exec-<runId>     ← per-run bridge, DNS alias `sidecar`
   │             -e HTTPS_PROXY=http://sidecar:<port>
   │             -e NODE_EXTRA_CA_CERTS=/tmp/appstrate-ca.pem

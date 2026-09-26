@@ -9,9 +9,10 @@
 // It drops to <uid> — one uid of the runner pool, allocated by the sidecar
 // per spawned integration runner — with that pool user's private group
 // (gid == uid) as primary group, sets HOME to its 0700 home, umask 007 and
-// no_new_privs, and execs the integration MCP server command. The only
-// supplementary group is `workspace` (1003), and only with --workspace (the
-// integration opted into /workspace); otherwise there is none.
+// no_new_privs, closes every inherited fd above stdio, and execs the
+// integration MCP server command. The only supplementary group is
+// `workspace` (1003), and only with --workspace (the integration opted into
+// /workspace); otherwise there is none.
 //
 // One uid and one group per runner lets the kernel attribute every socket
 // to exactly one runner (the sidecar enforces per-runner egress on that
@@ -38,6 +39,7 @@
 #include <string.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 #define RUNNER_UID_FIRST 1100
@@ -110,6 +112,14 @@ int main(int argc, char **argv) {
   // The runner must never re-escalate through another setuid exec.
   if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
     perror("appstrate-runner-exec: prctl(no_new_privs)");
+    return 126;
+  }
+  // No descriptor the sidecar leaked without CLOEXEC may reach the runner: a
+  // socket it opened still egresses as uid 1000. stdio (0-2) stays — it is
+  // the MCP transport. musl has no close_range() wrapper; the syscall needs
+  // kernel >= 5.9 (the guest runs 6.1).
+  if (syscall(SYS_close_range, 3U, ~0U, 0U) != 0) {
+    perror("appstrate-runner-exec: close_range");
     return 126;
   }
   execvp(args[1], &args[1]);

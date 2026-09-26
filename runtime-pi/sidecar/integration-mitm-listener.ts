@@ -167,8 +167,6 @@ interface CreateMitmListenerOptions {
   credentials: MitmCredentialSource;
   /** Host to bind. Defaults to `"127.0.0.1"`. */
   host?: string;
-  /** Parent of the per-listener inner-socket directory. Defaults to `os.tmpdir()`. */
-  socketRoot?: string;
   /** Upstream fetch implementation. Defaults to `globalThis.fetch`. */
   fetch?: typeof fetch;
   /**
@@ -209,6 +207,7 @@ export type MitmListenerEvent =
   | { kind: "upstream-error"; url: string; error: string };
 
 export interface MitmListenerHandle {
+  /** Rejects if the listener cannot come up, leaving nothing bound or on disk. */
   readonly ready: Promise<void>;
   address(): { host: string; port: number };
   proxyUrl(): string;
@@ -241,7 +240,7 @@ export function createIntegrationMitmListener(
   // directory, named by a counter, not the authority: AF_UNIX paths cap near
   // 104 bytes.
   const tlsServers = new Map<string, Promise<InnerTlsServer>>();
-  const socketDir = mkdtemp(join(options.socketRoot ?? tmpdir(), "mitm-"));
+  const socketDir = mkdtemp(join(tmpdir(), "mitm-"));
   let socketCount = 0;
 
   const getOrCreateTlsServer = (sniHost: string, port: number): Promise<InnerTlsServer> => {
@@ -321,10 +320,23 @@ export function createIntegrationMitmListener(
     });
   });
 
-  const listening = new Promise<void>((res) => {
-    tcpServer.listen(port, host, () => res());
+  const listening = new Promise<void>((res, rej) => {
+    tcpServer.once("error", rej);
+    tcpServer.listen(port, host, () => {
+      tcpServer.off("error", rej);
+      res();
+    });
   });
-  const ready = Promise.all([listening, socketDir]).then(() => {});
+  // The caller registers the listener for teardown only once `ready` settles,
+  // so a half-up listener tears down whatever half came up.
+  const ready = Promise.allSettled([listening, socketDir]).then(async ([listen, dir]) => {
+    if (listen.status === "fulfilled" && dir.status === "fulfilled") return;
+    if (listen.status === "fulfilled") {
+      await new Promise<void>((res) => tcpServer.close(() => res()));
+    }
+    if (dir.status === "fulfilled") await rm(dir.value, { recursive: true, force: true });
+    throw listen.status === "rejected" ? listen.reason : (dir as PromiseRejectedResult).reason;
+  });
 
   return {
     ready,

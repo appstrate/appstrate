@@ -284,9 +284,10 @@ async function main(): Promise<void> {
     "/tmp",
     // The runners' transparent plane (DNS responder on 127.0.0.1:53, SNI/Host
     // splicers on :443/:80) sits on low ports only the sidecar may hold, so
-    // neither the agent nor a runner can squat them first. The runners
-    // inherit nothing: the setuid wrapper clears the ambient set, and its
-    // drop to the pool uid clears every capability.
+    // neither the agent nor a runner can squat them first. The runners never
+    // hold it: the kernel clears the ambient set on the exec of the setuid
+    // wrapper, whose setuid to the pool uid clears permitted and effective
+    // (inheritable may keep the bit — inert under no_new_privs, no file caps).
     { harden: false, ambientCap: "net_bind_service" },
   );
   log(`sidecar pid ${sidecar.pid}`);

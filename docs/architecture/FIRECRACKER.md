@@ -368,7 +368,8 @@ the output interface it was first routed to (eth0), hence its own accept
 rule in the filter chain. The supervisor starts the sidecar with ambient
 `CAP_NET_BIND_SERVICE` (`setpriv --ambient-caps`), so only the sidecar can
 hold :53/:80/:443 — the unprivileged port floor is untouched, and the
-runners inherit nothing (the setuid wrapper clears the ambient set).
+runners never hold it (the exec of the setuid wrapper clears the ambient
+set, its setuid to the pool uid the permitted and effective sets).
 
 The `appstrate_fc` table also carries a host-side `output`-hook chain:
 host-originated traffic whose socket uid falls in the jailed-VMM range
@@ -410,11 +411,14 @@ host↔guest isolation.
    the pool 1100-1163 and hands it to the wrapper, which refuses any uid
    outside the pool or without a pool user. Each pool user `runner<i>` has a
    private primary group (gid == uid) and a 0700 home `/home/runner<i>`; the
-   wrapper sets `HOME` to it and applies `umask 007`. Its only supplementary
-   group is `workspace` (1003, access to `/workspace`), granted on
+   wrapper sets `HOME` to it, applies `umask 007` and closes every inherited
+   fd above stdio (`close_range`), so no descriptor the sidecar leaked still
+   egresses as uid 1000. Its only supplementary group is `workspace` (1003;
+   `/workspace` is `2770 1001:1003`, closed to every other uid), granted on
    `--workspace`, which the process adapter passes only when the integration
    opted into the workspace and the run carries a directory handle; otherwise
-   the runner has none. The supervisor passes the pool to the sidecar as
+   the runner has none. The image build runs `guest/runner-exec-selftest.sh`
+   against the compiled wrapper and fails on any refusal or drop mismatch. The supervisor passes the pool to the sidecar as
    `APPSTRATE_RUNNER_UIDS`. One uid per runner lets the sidecar attribute
    every loopback connection to one runner and keeps each runner's HOME,
    files and `/proc/<pid>/environ` out of its siblings' and the agent's reach.

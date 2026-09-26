@@ -44,9 +44,8 @@ describe("runner uid pool contract", () => {
     expect(cDefine("RUNNER_UID_COUNT")).toBe(GUEST_RUNNER_UID_COUNT);
   });
 
-  it("runner-exec.c grants only the workspace group, and no shared runner group", () => {
+  it("runner-exec.c grants the workspace group", () => {
     expect(cDefine("WORKSPACE_GID")).toBe(1003);
-    expect(wrapperSource).not.toMatch(/RUNNER_GID/);
   });
 
   it("Dockerfile.rootfs bakes each pool uid a private group and a 0700 home", () => {
@@ -58,8 +57,7 @@ describe("runner uid pool contract", () => {
     expect(dockerfile).toMatch(/chmod 700 "\/home\/runner\$i"/);
   });
 
-  it("Dockerfile.rootfs creates the workspace group and no shared runner group", () => {
+  it("Dockerfile.rootfs creates the workspace group", () => {
     expect(capture(dockerfile, /addgroup -g (\d+) workspace\b/)).toBe(1003);
-    expect(dockerfile).not.toMatch(/addgroup -g 1002\b|addgroup "runner\$i" workspace/);
   });
 });

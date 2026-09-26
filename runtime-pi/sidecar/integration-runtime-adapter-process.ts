@@ -23,7 +23,7 @@
  * runner uid loopback-only egress and redirects its DNS to 127.0.0.1:53, so
  * every route out crosses a sidecar listener: the runner's own CONNECT/MITM
  * listener, or the transparent plane (#779) this adapter mounts on 127.0.0.1
- * for proxy-unaware clients.
+ * for proxy-unaware clients, on the first plain-CONNECT runner's spawn.
  */
 
 import { mkdir, readFile, stat, writeFile, chmod, rm } from "node:fs/promises";
@@ -231,6 +231,12 @@ function procNetTcpEndpoint({ address, port }: Endpoint): string | undefined {
     .join("")}:${hex(port, 4)}`;
 }
 
+/**
+ * `/proc/net/tcp` is generated a page at a time, so a read racing socket churn
+ * can skip a row: a miss is re-read up to this many reads in total.
+ */
+const PROC_NET_TCP_READS = 3;
+
 interface SubprocessPlan {
   command: string;
   args: string[];
@@ -412,42 +418,52 @@ export function createProcessIntegrationRuntimeAdapter({
   let allocatedUids = 0;
   /** Integration id → policy the transparent plane serves that runner. */
   const transparentPolicies = new Map<string, EgressPolicy>();
-  let plane: TransparentEgressPlane | null = null;
+  let plane: Promise<TransparentEgressPlane | null> | null = null;
 
   const attribution: PeerAttribution =
     typeof uidPool === "string"
       ? // No pool: admission refuses every spawn, so no peer can be a runner.
         noRunnerPeers
       : async (peer) => {
-          let table: string;
-          try {
-            table = await readProcNetTcp();
-          } catch (err) {
-            logger.warn("runner peer lookup failed — refusing unattributable peers", {
-              error: err instanceof Error ? err.message : String(err),
-            });
-            return undefined;
+          // A pool uid exists only through `spawn()`, which registers it before
+          // the runner starts.
+          if (runnersByUid.size === 0) return null;
+          for (let read = 1; ; read += 1) {
+            let table: string;
+            try {
+              table = await readProcNetTcp();
+            } catch (err) {
+              logger.warn("runner peer lookup failed — refusing unattributable peers", {
+                error: err instanceof Error ? err.message : String(err),
+              });
+              return undefined;
+            }
+            const uid = socketOwnerUid(table, peer);
+            if (uid !== undefined) {
+              if (uid < uidPool.first || uid > uidPool.last) return null;
+              return runnersByUid.get(uid);
+            }
+            if (read === PROC_NET_TCP_READS) return undefined;
           }
-          const uid = socketOwnerUid(table, peer);
-          if (uid === undefined) return undefined;
-          if (uid < uidPool.first || uid > uidPool.last) return null;
-          return runnersByUid.get(uid);
         };
+
+  /**
+   * #779 — the plane, started once: its DNS answers 127.0.0.1, where the guest
+   * redirects every runner's DNS. Runs without a plain-CONNECT runner never
+   * bind 53/443/80.
+   */
+  const ensurePlane = () =>
+    (plane ??= startTransparentEgressPlane({
+      ipv4: async () => "127.0.0.1",
+      policyForPeer: policyForRunnerPeer(attribution, transparentPolicies),
+      ...transparentPlane,
+    }));
 
   return {
     id: "process",
 
     async prepare(runId: string): Promise<RuntimeAdapterRunContext> {
       logger.info("process integration adapter ready", { runId });
-      // #779 — runners exist only with a pool. Their DNS lands on 127.0.0.1:53,
-      // so the plane binds and answers with 127.0.0.1.
-      if (typeof uidPool !== "string") {
-        plane = await startTransparentEgressPlane({
-          ipv4: async () => "127.0.0.1",
-          policyForPeer: policyForRunnerPeer(attribution, transparentPolicies),
-          ...transparentPlane,
-        });
-      }
       // Subprocess inherits the parent's NS — loopback reaches the
       // listener directly.
       return {
@@ -487,9 +503,11 @@ export function createProcessIntegrationRuntimeAdapter({
       // The plane serves the runners docker gives `--dns`: plain-CONNECT egress.
       // A MITM-delivery runner's DNS lands on 127.0.0.1 too (the guest redirect
       // is per uid, not per kind) and the plane refuses it: splicing would
-      // bypass credential injection.
+      // bypass credential injection. Up before the runner starts: its DNS lands
+      // on the plane from its first lookup.
       if (egress && egress.caCertHostPath === null) {
         transparentPolicies.set(spec.integrationId, egress.policy);
+        await ensurePlane();
       }
       const procEnv: Record<string, string> = { ...spec.spawnEnv };
       if (egress) {
@@ -580,8 +598,9 @@ export function createProcessIntegrationRuntimeAdapter({
         await rm(path, { force: true }).catch(() => {});
       }
       createdPaths.length = 0;
-      await plane?.close();
+      const started = plane;
       plane = null;
+      await (await started)?.close();
       transparentPolicies.clear();
     },
   };

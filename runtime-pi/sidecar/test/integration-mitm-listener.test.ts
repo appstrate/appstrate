@@ -1342,58 +1342,99 @@ describe("MITM listener — per-SNI inner servers are off the loopback", () => {
     return listening;
   }
 
+  /**
+   * Run `body` with `os.tmpdir()` (it reads `TMPDIR` on every call) on a fresh
+   * root, so the listener's `mitm-*` socket directory lands where the test can
+   * list it.
+   */
+  async function withTmpRoot(body: (root: string) => Promise<void>): Promise<void> {
+    const root = await fs.mkdtemp(path.join(tmpdir(), "mitm-t-"));
+    const saved = process.env.TMPDIR;
+    process.env.TMPDIR = root;
+    try {
+      await body(root);
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }
+
+  function newListener(
+    bundle: Awaited<ReturnType<typeof makeCaBundle>>,
+    options: { host?: string; fetch?: typeof fetch },
+  ) {
+    return createIntegrationMitmListener({
+      caBundle: bundle,
+      minter: createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      }),
+      credentials: {
+        current: () => payload("v", "oauth2", { access_token: "t" }, ["https://api.test.local/**"]),
+        deliveryPlans: () => ({ v: plan("Authorization", "t") }),
+      },
+      resolveHostFn: stubResolveHost,
+      ...options,
+      ...permissiveEgress,
+    });
+  }
+
   runIfOpenssl(
     "serves each SNI on a unix socket in a 0700 directory, removed on close",
     async () => {
-      const root = await fs.mkdtemp(path.join(tmpdir(), "mitm-t-"));
+      // Minted before TMPDIR moves: the CA's work dir lives under `tmpdir()` too.
       const bundle = await makeCaBundle();
-      const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
-      const listener = createIntegrationMitmListener({
-        caBundle: bundle,
-        minter: createCertMinter({
-          caCertPem: bundle.pems.caCertPem,
-          caKeyPem: bundle.pems.caKeyPem,
-        }),
-        credentials: {
-          current: () =>
-            payload("v", "oauth2", { access_token: "t" }, ["https://api.test.local/**"]),
-          deliveryPlans: () => ({ v: plan("Authorization", "t") }),
-        },
-        resolveHostFn: stubResolveHost,
-        fetch: recorded.fetch,
-        socketRoot: root,
-        ...permissiveEgress,
+      await withTmpRoot(async (root) => {
+        const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
+        const listener = newListener(bundle, { fetch: recorded.fetch });
+        await listener.ready;
+        // The cert minter stages its own work dir under `tmpdir()` at the first
+        // mint; only the `mitm-*` directory is the listener's.
+        const socketDirs = async () =>
+          (await fs.readdir(root)).filter((name) => name.startsWith("mitm-"));
+        try {
+          const [dirName, ...others] = await socketDirs();
+          expect(dirName).toBeDefined();
+          expect(others).toEqual([]);
+          const dir = path.join(root, dirName!);
+          expect((await fs.stat(dir)).mode & 0o777).toBe(0o700);
+          const linux = process.platform === "linux";
+          const listenersBefore = linux ? await ownTcpListenInodes() : new Set<string>();
+
+          const out = await drivenFetch({
+            listenerPort: listener.address().port,
+            sni: "api.test.local",
+            caCertPem: bundle.pems.caCertPem,
+            method: "GET",
+            path: "/items",
+            headers: {},
+          });
+          // Relayed through the inner server, credential injected.
+          expect(out.status).toBe(200);
+          expect((recorded.calls[0]!.init.headers as Headers).get("Authorization")).toBe(
+            "Bearer t",
+          );
+
+          const [socketName, ...moreSockets] = await fs.readdir(dir);
+          expect(moreSockets).toEqual([]);
+          expect((await fs.stat(path.join(dir, socketName!))).isSocket()).toBe(true);
+          if (linux) expect(await ownTcpListenInodes()).toEqual(listenersBefore);
+        } finally {
+          await listener.close();
+        }
+        expect(await socketDirs()).toEqual([]);
       });
-      await listener.ready;
-      try {
-        const [dirName, ...others] = await fs.readdir(root);
-        expect(others).toEqual([]);
-        const dir = path.join(root, dirName!);
-        expect((await fs.stat(dir)).mode & 0o777).toBe(0o700);
-        const linux = process.platform === "linux";
-        const listenersBefore = linux ? await ownTcpListenInodes() : new Set<string>();
-
-        const out = await drivenFetch({
-          listenerPort: listener.address().port,
-          sni: "api.test.local",
-          caCertPem: bundle.pems.caCertPem,
-          method: "GET",
-          path: "/items",
-          headers: {},
-        });
-        // Relayed through the inner server, credential injected.
-        expect(out.status).toBe(200);
-        expect((recorded.calls[0]!.init.headers as Headers).get("Authorization")).toBe("Bearer t");
-
-        const [socketName, ...moreSockets] = await fs.readdir(dir);
-        expect(moreSockets).toEqual([]);
-        expect((await fs.stat(path.join(dir, socketName!))).isSocket()).toBe(true);
-        if (linux) expect(await ownTcpListenInodes()).toEqual(listenersBefore);
-      } finally {
-        await listener.close();
-      }
-      expect(await fs.readdir(root)).toEqual([]);
-      await fs.rm(root, { recursive: true, force: true });
     },
   );
+
+  runIfOpenssl("rejects `ready` when the listen fails, leaving no socket directory", async () => {
+    const bundle = await makeCaBundle();
+    await withTmpRoot(async (root) => {
+      // TEST-NET-1 (RFC 5737) is assigned to no local interface: the bind fails.
+      const listener = newListener(bundle, { host: "192.0.2.1" });
+      await expect(listener.ready).rejects.toMatchObject({ code: "EADDRNOTAVAIL" });
+      expect(await fs.readdir(root)).toEqual([]);
+    });
+  });
 });

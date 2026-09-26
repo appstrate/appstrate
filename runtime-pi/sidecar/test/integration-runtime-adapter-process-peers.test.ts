@@ -126,6 +126,31 @@ describe("socketOwnerUid", () => {
   );
 });
 
+let stopCapture = () => {};
+
+/**
+ * Collect the warn/error lines the sidecar logger emits until the next
+ * `afterEach`. The suite preload pins `LOG_LEVEL=error`, which would drop every
+ * `warn` before the sink sees it, so the capture lowers it to `warn`.
+ */
+function captureWarnings(): string[] {
+  const lines: string[] = [];
+  const previousLevel = process.env.LOG_LEVEL;
+  process.env.LOG_LEVEL = "warn";
+  _setLogSinkForTesting((level, line) => {
+    if (level === "warn" || level === "error") lines.push(line);
+  });
+  stopCapture = () => {
+    _setLogSinkForTesting(null);
+    if (previousLevel === undefined) delete process.env.LOG_LEVEL;
+    else process.env.LOG_LEVEL = previousLevel;
+    stopCapture = () => {};
+  };
+  return lines;
+}
+
+afterEach(() => stopCapture());
+
 function localSpec(integrationId: string): IntegrationSpawnSpec {
   return {
     integrationId,
@@ -145,6 +170,8 @@ describe("process adapter — runner uids and peer attribution", () => {
   let bundleRoot: string;
   let runnerExec: PassthroughRunnerExec;
   let table: string;
+  /** Served, in order, before `table`: a read racing socket churn that skipped a row. */
+  let staleTables: string[];
   let readFails: boolean;
   let reads: number;
   let adapters: IntegrationRuntimeAdapter[];
@@ -152,7 +179,7 @@ describe("process adapter — runner uids and peer attribution", () => {
   const readProcNetTcp = async () => {
     reads += 1;
     if (readFails) throw new Error("ENOENT: /proc/net/tcp");
-    return table;
+    return staleTables.shift() ?? table;
   };
 
   async function newAdapter(): Promise<IntegrationRuntimeAdapter> {
@@ -179,6 +206,7 @@ describe("process adapter — runner uids and peer attribution", () => {
     await writeFile(join(bundleRoot, "server.ts"), "process.exit(0);\n");
     runnerExec = await installPassthroughRunnerExec();
     table = HEADER;
+    staleTables = [];
     readFails = false;
     reads = 0;
     adapters = [];
@@ -219,13 +247,36 @@ describe("process adapter — runner uids and peer attribution", () => {
     expect(await attribute(peer(40003))).toBeUndefined();
   });
 
-  it("refuses a peer with no socket entry, or when the table cannot be read", async () => {
+  it("re-reads a table that missed the peer's row, and attributes it on a later read", async () => {
     const adapter = await newAdapter();
     await spawn(adapter, "@orga/a");
-    const attribute = adapter.peerAttribution();
-    expect(await attribute(peer(40009))).toBeUndefined();
+    staleTables = [HEADER];
+    table = [HEADER, row(0, loopback(40000), loopback(LISTENER), "01", FIRST)].join("\n");
+    expect(await adapter.peerAttribution()(peer(40000))).toBe("@orga/a");
+    expect(reads).toBe(2);
+  });
+
+  it("refuses a peer no socket entry names after three reads", async () => {
+    const adapter = await newAdapter();
+    await spawn(adapter, "@orga/a");
+    expect(await adapter.peerAttribution()(peer(40009))).toBeUndefined();
+    expect(reads).toBe(3);
+  });
+
+  it("refuses at once, with a warning, when the table cannot be read", async () => {
+    const warnings = captureWarnings();
+    const adapter = await newAdapter();
+    await spawn(adapter, "@orga/a");
     readFails = true;
-    expect(await attribute(peer(40009))).toBeUndefined();
+    expect(await adapter.peerAttribution()(peer(40009))).toBeUndefined();
+    expect(reads).toBe(1);
+    expect(warnings.join("\n")).toContain("runner peer lookup failed");
+  });
+
+  it("attributes no peer to a runner, without reading the table, before any spawn", async () => {
+    const adapter = await newAdapter();
+    expect(await adapter.peerAttribution()(peer(40000))).toBeNull();
+    expect(reads).toBe(0);
   });
 
   it("attributes no peer to a runner, without reading the table, when there is no pool", async () => {
@@ -318,6 +369,11 @@ describe("process adapter — transparent egress plane (#779)", () => {
     caCertHostPath: null,
     policy,
   };
+  /** The adapter opens the CA's directory to the runner, so it must be a real one. */
+  const mitmEgress = (): RuntimeEgressContext => ({
+    ...connectEgress,
+    caCertHostPath: join(bundleRoot, "ca.pem"),
+  });
 
   let bundleRoot: string;
   let runnerExec: PassthroughRunnerExec;
@@ -420,7 +476,6 @@ describe("process adapter — transparent egress plane (#779)", () => {
   });
 
   afterEach(async () => {
-    _setLogSinkForTesting(null);
     for (const adapter of adapters) await adapter.shutdown();
     for (const socket of upstream.sockets) socket.destroy();
     await new Promise<void>((resolve) => upstream.server.close(() => resolve()));
@@ -428,12 +483,20 @@ describe("process adapter — transparent egress plane (#779)", () => {
     await rm(bundleRoot, { recursive: true, force: true });
   });
 
+  /** Whether the plane holds its three ports (all three, or none). */
+  async function planeUp(): Promise<boolean> {
+    const free = [
+      await bindable("udp", ports.dns),
+      await bindable("tcp", ports.tls),
+      await bindable("tcp", ports.http),
+    ];
+    expect(new Set(free).size).toBe(1);
+    return !free[0];
+  }
+
   it("answers the runners' DNS with 127.0.0.1, and warns about nothing", async () => {
-    const warnings: string[] = [];
-    _setLogSinkForTesting((level, line) => {
-      if (level === "warn" || level === "error") warnings.push(line);
-    });
-    await newAdapter();
+    const warnings = captureWarnings();
+    await spawn(await newAdapter(), "@orga/connect", connectEgress);
     expect(warnings).toEqual([]);
     const reply = await exchange(ports.dns, buildQuery(ALLOWED, 1));
     expect(reply).not.toBeNull();
@@ -453,11 +516,7 @@ describe("process adapter — transparent egress plane (#779)", () => {
   it("refuses a MITM-delivery runner, a non-runner peer and a host outside the policy", async () => {
     const adapter = await newAdapter();
     await spawn(adapter, "@orga/connect", connectEgress);
-    // The adapter opens the CA's directory to the runner, so it must be a real one.
-    await spawn(adapter, "@orga/mitm", {
-      ...connectEgress,
-      caCertHostPath: join(bundleRoot, "ca.pem"),
-    });
+    await spawn(adapter, "@orga/mitm", mitmEgress());
     const hello = buildClientHello(ALLOWED);
     expect(await sendAs(FIRST + 1, ports.tls, hello)).toHaveLength(0);
     expect(await sendAs(1000, ports.tls, hello)).toHaveLength(0);
@@ -465,22 +524,31 @@ describe("process adapter — transparent egress plane (#779)", () => {
     expect(upstream.received).toHaveLength(0);
   });
 
-  it("starts no plane without a runner uid pool", async () => {
-    delete process.env.APPSTRATE_RUNNER_UIDS;
-    await newAdapter();
-    expect(await bindable("udp", ports.dns)).toBe(true);
-    expect(await bindable("tcp", ports.tls)).toBe(true);
-    expect(await bindable("tcp", ports.http)).toBe(true);
+  it("starts no plane at prepare, nor for a MITM-delivery runner", async () => {
+    const adapter = await newAdapter();
+    expect(await planeUp()).toBe(false);
+    await spawn(adapter, "@orga/mitm", mitmEgress());
+    expect(await planeUp()).toBe(false);
+  });
+
+  it("starts the plane once, on the first plain-CONNECT spawns, even concurrent ones", async () => {
+    const warnings = captureWarnings();
+    const adapter = await newAdapter();
+    await Promise.all([
+      spawn(adapter, "@orga/a", connectEgress),
+      spawn(adapter, "@orga/b", connectEgress),
+    ]);
+    // A second start would fail to bind the ports the first holds, and warn.
+    expect(warnings).toEqual([]);
+    expect(await planeUp()).toBe(true);
   });
 
   it("closes the plane on shutdown, idempotently", async () => {
     const adapter = await newAdapter();
-    expect(await bindable("udp", ports.dns)).toBe(false);
-    expect(await bindable("tcp", ports.tls)).toBe(false);
+    await spawn(adapter, "@orga/connect", connectEgress);
+    expect(await planeUp()).toBe(true);
     await adapter.shutdown();
     await adapter.shutdown();
-    expect(await bindable("udp", ports.dns)).toBe(true);
-    expect(await bindable("tcp", ports.tls)).toBe(true);
-    expect(await bindable("tcp", ports.http)).toBe(true);
+    expect(await planeUp()).toBe(false);
   });
 });

@@ -67,9 +67,10 @@ chmod 1777 /tmp
 mkdir -p /workspace
 # Shared workspace: agent (1001) owns it; an integration runner reaches it
 # only when the runner-exec wrapper grants it the `workspace` group (1003).
-# setgid keeps files created by either side group-shared.
+# No "other" bits: any other uid (a runner without the group, the sidecar)
+# cannot even list it. setgid keeps files created by either side group-shared.
 chown 1001:1003 /workspace
-chmod 2775 /workspace
+chmod 2770 /workspace
 
 # --- Config drive (second virtio-block device, read-only ext4) --------------
 mkdir -p /config
