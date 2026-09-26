@@ -14,7 +14,7 @@ Lives at [`apps/cli/`](./) in the monorepo; versioned in lockstep with the platf
 curl -fsSL https://get.appstrate.dev | bash
 ```
 
-Detects your OS/arch, downloads the matching binary from [GitHub Releases](https://github.com/appstrate/appstrate/releases/latest), drops it at `/usr/local/bin/appstrate`, and immediately execs `appstrate install`.
+Detects your OS/arch, downloads the matching binary of the release the served installer is pinned to (with `APPSTRATE_VERSION=latest`, the tag named by the minisign-signed channel manifest `https://get.appstrate.dev/channels/latest.json`) from [GitHub Releases](https://github.com/appstrate/appstrate/releases), drops it at `/usr/local/bin/appstrate`, and immediately execs `appstrate install`.
 
 Supported: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. **Windows is not a v1 target** — run the one-liner inside WSL2 (which reuses the `linux-x64` binary), or invoke `bunx appstrate install` natively if you already have Bun on Windows.
 
@@ -218,7 +218,7 @@ The dashboard's **Devices** preferences page (and `GET /api/auth/cli/sessions`) 
 Channel-aware in-place upgrade. The binary stamps its install source at build time (`__APPSTRATE_INSTALL_SOURCE__`), so `self-update` knows whether it was installed via curl, Bun, or bunx and dispatches accordingly.
 
 ```sh
-appstrate self-update                 # update to latest stable
+appstrate self-update                 # update to the newest release
 appstrate self-update --release v1.2.3
 appstrate self-update --force         # bypass version-equality short-circuit
 ```
@@ -228,7 +228,7 @@ appstrate self-update --force         # bypass version-equality short-circuit
 | `--release <tag>` | git tag | Pin the upgrade to a specific release.        |
 | `-f`, `--force`   | —       | Re-install even if already on target version. |
 
-- **curl channel** — downloads the new binary, verifies minisign + SHA-256, and atomically replaces `~/.local/bin/appstrate`.
+- **curl channel** — resolves the newest release from the signed channel manifest (`https://get.appstrate.dev/channels/latest.json` + `.minisig`, verified with minisign before it is read; any failure is fatal — `--release` skips it), downloads the new binary, verifies minisign + SHA-256, and atomically replaces `~/.local/bin/appstrate`.
 - **bun channel** — refuses to overwrite, prints the matching `bun update -g @appstrate/cli` invocation.
 - **unknown channel** — emits diagnostic instructions.
 

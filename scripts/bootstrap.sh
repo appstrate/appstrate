@@ -45,6 +45,8 @@
 #                                 PATH. Equivalent to uv's UV_NO_MODIFY_PATH.
 #   APPSTRATE_SKIP_VERIFY=1       Skip signature + checksum verification (CI
 #                                 debug only — do NOT set on user machines).
+#                                 Requires a pinned version: "latest" is only
+#                                 ever resolved through a verified signature.
 #   APPSTRATE_NO_INSTALL_MINISIGN=1
 #                                 Do not attempt to auto-install `minisign` via
 #                                 the host package manager when it's missing.
@@ -120,6 +122,11 @@ _appstrate_bootstrap() {
   # Rotation SOP: docs/adr/ADR-006-cli-device-flow-monorepo.md.
   APPSTRATE_MINISIGN_PUBKEY="RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaXEfQ4cFi5XN0KCtKr0e"
 
+  # Signed channel manifest naming the current "latest" release tag, published
+  # by `publish-installer.yml` and signed with the key above (`.minisig` next
+  # to it). Only read when VERSION is "latest".
+  CHANNEL_URL="https://get.appstrate.dev/channels/latest.json"
+
   # ─── Helpers ────────────────────────────────────────────────────────────────
 
   TMPDIR=$(mktemp -d)
@@ -129,41 +136,39 @@ _appstrate_bootstrap() {
   log() { printf '\033[0;36m→\033[0m  %s\n' "$*"; }
   err() { printf '\033[0;31m✗\033[0m  %s\n' "$*" >&2; }
 
-  # Newest platform `v<semver>` GitHub Release, resolved by listing — not
-  # `releases/latest`. GitHub's "latest" is whichever non-prerelease Release
-  # was created last, whatever its tag: a `cli@` / `core@` / `afps-shared@`
-  # Release published without `make_latest: false`, or created by hand, would
-  # be handed back and carries no CLI binary (`checksums.txt.minisig` 404).
-  # Only `v*` Releases ship the assets this script downloads. Drafts and
-  # prereleases are skipped, same as `releases/latest`. Pages of 30 are walked
-  # (5 at most) until one holds a `v*` Release. No jq: the three fields are
-  # grepped in document order (tag_name precedes draft/prerelease in GitHub's
-  # payload) and awk decides once it holds all three. Creation order within a
-  # page, unlike the CLI's highest-semver pick: BSD sort has no -V and a
-  # semver comparator in awk is not worth it for a path the rendered installer
-  # never takes (it pins `__APPSTRATE_VERSION__`).
-  resolve_latest_platform_release() {
-    local page fields tag
-    for page in 1 2 3 4 5; do
-      # shellcheck disable=SC2086 # CURL_OPTS is word-split on purpose (see its definition)
-      fields=$(curl $CURL_OPTS -H 'Accept: application/vnd.github+json' \
-        "https://api.github.com/repos/appstrate/appstrate/releases?per_page=30&page=${page}" |
-        grep -oE '"(tag_name|draft|prerelease)": *("[^"]*"|true|false)') || true
-      [ -z "$fields" ] && return 1
-      tag=$(printf '%s\n' "$fields" | awk -F': *' '
-          $1 ~ /tag_name/   { gsub(/"/, "", $2); tag = $2; draft = ""; pre = "" }
-          $1 ~ /"draft"/    { draft = $2 }
-          $1 ~ /prerelease/ { pre = $2 }
-          tag != "" && draft != "" && pre != "" {
-            if (tag ~ /^v[0-9]+\.[0-9]+\.[0-9]+/ && draft == "false" && pre == "false") { print tag; exit }
-            tag = ""
-          }')
-      if [ -n "$tag" ]; then
-        printf '%s\n' "$tag"
-        return 0
-      fi
-    done
-    return 1
+  # "latest" = the tag in the signed channel manifest, not a GitHub API lookup:
+  # no rate limit, and the tag is authenticated by the checksums.txt key.
+  # Signature first, content second. No jq on the host: fields are grepped
+  # whitespace-tolerantly, then validated strictly.
+  resolve_latest_tag() {
+    local manifest="$TMPDIR/latest.json" json schema channel tag
+    local tag_re='^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$'
+    # shellcheck disable=SC2086 # CURL_OPTS is word-split on purpose (see its definition)
+    if ! curl $CURL_OPTS "$CHANNEL_URL" -o "$manifest" ||
+      ! curl $CURL_OPTS "$CHANNEL_URL.minisig" -o "$manifest.minisig"; then
+      err "Could not download the release channel manifest ($CHANNEL_URL)."
+      return 1
+    fi
+    if ! minisign -Vm "$manifest" -x "$manifest.minisig" -P "$APPSTRATE_MINISIGN_PUBKEY" >/dev/null; then
+      err "Channel manifest signature verification FAILED — it was NOT signed by the Appstrate key."
+      return 1
+    fi
+    # One line, then a field is read only if its key occurs exactly once and
+    # its value ends at `,` or `}` (rejects `1.5`, `\"` inside a tag, dupes).
+    json=$(tr '\r\n\t' '   ' <"$manifest")
+    field() {
+      [ "$(grep -o "\"$1\"" <<<"$json" | wc -l)" -eq 1 ] &&
+        grep -oE "\"$1\"[[:space:]]*:[[:space:]]*$2[[:space:]]*[,}]" <<<"$json" |
+        sed -E 's/^[^:]*:[[:space:]]*"?//; s/"?[[:space:]]*[,}]$//'
+    }
+    schema=$(field schema '[0-9]+')
+    channel=$(field channel '"[^"\\]*"')
+    tag=$(field tag '"[^"\\]*"')
+    if [ "$schema" != "1" ] || [ "$channel" != "latest" ] || ! [[ "$tag" =~ $tag_re ]]; then
+      err "Channel manifest is malformed (expected schema 1, channel \"latest\", one vX.Y.Z tag)."
+      return 1
+    fi
+    printf '%s\n' "$tag"
   }
 
   have_sha256sum() { command -v sha256sum >/dev/null 2>&1; }
@@ -553,24 +558,8 @@ _appstrate_bootstrap() {
 
   # ─── Download + verify ──────────────────────────────────────────────────────
 
-  # Resolved here, past the SOURCE_ONLY return above: a test harness that
-  # sources this script must define the helpers without a network call.
-  if [ "$VERSION" = "latest" ]; then
-    VERSION=$(resolve_latest_platform_release || true)
-    if [ -z "$VERSION" ]; then
-      err "No platform v* release found among the newest GitHub Releases. Pin one with APPSTRATE_VERSION=vX.Y.Z."
-      exit 1
-    fi
-    log "Resolved latest platform release: $VERSION"
-  fi
-  URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
-  URL="${URL_BASE}/${ASSET}"
-  CHECKSUMS_URL="${URL_BASE}/checksums.txt"
-  CHECKSUMS_SIG_URL="${URL_BASE}/checksums.txt.minisig"
-
-  log "Downloading Appstrate CLI ($OS/$ARCH, $VERSION)"
-  curl $CURL_OPTS "$URL" -o "$TMPDIR/$ASSET"
-
+  # Verification prerequisites are settled BEFORE anything is downloaded:
+  # resolving "latest" already needs minisign (the channel manifest is signed).
   if [ "${APPSTRATE_SKIP_VERIFY:-0}" = "1" ]; then
     # Hard-gate the skip on CI=true. The flag exists ONLY for CI debug
     # of the verification path itself; in any other context (interactive
@@ -585,6 +574,14 @@ _appstrate_bootstrap() {
       err "    → macOS:   brew install minisign"
       err "    → Debian:  sudo apt install minisign"
       err "    → Alpine:  apk add minisign"
+      exit 1
+    fi
+    # The manifest's signature is the only thing that makes its tag
+    # trustworthy — skipping it would let an on-path attacker pick the
+    # version. Fail closed instead of reading an unverified manifest.
+    if [ "$VERSION" = "latest" ]; then
+      err "APPSTRATE_SKIP_VERIFY=1 cannot resolve \"latest\" (the channel manifest is trusted only"
+      err "  through its signature). Pin a release with APPSTRATE_VERSION=vX.Y.Z."
       exit 1
     fi
     warn "APPSTRATE_SKIP_VERIFY=1 + CI=true — integrity + provenance checks skipped."
@@ -674,7 +671,26 @@ _appstrate_bootstrap() {
         exit 1
       fi
     fi
+  fi
 
+  # Resolved here, past the SOURCE_ONLY return above: a test harness that
+  # sources this script must define the helpers without a network call.
+  if [ "$VERSION" = "latest" ]; then
+    VERSION=$(resolve_latest_tag) || {
+      err "Could not resolve the latest release. Pin one with APPSTRATE_VERSION=vX.Y.Z."
+      exit 1
+    }
+    log "Resolved latest release: $VERSION"
+  fi
+  URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
+  URL="${URL_BASE}/${ASSET}"
+  CHECKSUMS_URL="${URL_BASE}/checksums.txt"
+  CHECKSUMS_SIG_URL="${URL_BASE}/checksums.txt.minisig"
+
+  log "Downloading Appstrate CLI ($OS/$ARCH, $VERSION)"
+  curl $CURL_OPTS "$URL" -o "$TMPDIR/$ASSET"
+
+  if [ "${APPSTRATE_SKIP_VERIFY:-0}" != "1" ]; then
     log "Fetching release checksums + signature"
     curl $CURL_OPTS "$CHECKSUMS_URL" -o "$TMPDIR/checksums.txt"
     curl $CURL_OPTS "$CHECKSUMS_SIG_URL" -o "$TMPDIR/checksums.txt.minisig"

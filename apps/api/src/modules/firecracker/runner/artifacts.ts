@@ -286,8 +286,9 @@ export function resolveArch(nodeArch: string = process.arch): GuestArch {
  *
  * WHY `latest/download` STAYS HERE, when the CLI (`self-update`,
  * `runner/download.ts`), `scripts/bootstrap.sh` and `scripts/bootstrap-runner.sh`
- * all dropped it in favour of listing the GitHub Releases API. Three reasons,
- * and the decision is deliberate rather than an oversight:
+ * all dropped it: they resolve "latest" from the minisign-signed channel
+ * manifest at `get.appstrate.dev/channels/latest.json`, with no GitHub API
+ * call. Three reasons, and the decision is deliberate rather than an oversight:
  *
  *  1. Unpinned is a SUPPORTED MODE, not a fallback. `FIRECRACKER_ARTIFACTS_VERSION`
  *     is optional by design (`host-env.ts`), `appstrate runner install` leaves it
@@ -306,10 +307,11 @@ export function resolveArch(nodeArch: string = process.arch): GuestArch {
  *     `daemonUrls` had no equivalent: a wrong release there is a plain 404 on
  *     the asset a user asked for by version.
  *
- *  3. The daemon has no Releases-listing client, and giving it one would mean
- *     an unauthenticated GitHub API call (60 req/h per IP) on the boot path of
- *     every KVM host — a new hard dependency on a rate-limited endpoint to
- *     replace a redirect that fails loudly. A host that cares picks the pin.
+ *  3. The daemon does not read the channel manifest. It verifies with its own
+ *     Ed25519 key and has no minisign client, so reading it would put a second
+ *     verifier and a second origin (`get.appstrate.dev`) on the boot path of
+ *     every KVM host — a new hard dependency to replace a redirect that fails
+ *     loudly and, per (2), cannot cost integrity. A host that cares picks the pin.
  *
  * The residual exposure is availability only: if a non-`v*` Release is ever
  * marked GitHub's "latest", these assets 404 and the daemon either keeps its
