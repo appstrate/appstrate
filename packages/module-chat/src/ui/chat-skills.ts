@@ -16,10 +16,9 @@ export async function fetchSkills(getHeaders: GetHeaders | null | undefined): Pr
   return parseSkillList(await res.json());
 }
 
-const enforcedSkillRowSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  version: z.string().nullable(),
+const enforcedSkillsSchema = z.object({
+  object: z.literal("list"),
+  data: z.array(z.object({ id: z.string(), name: z.string(), version: z.string().nullable() })),
 });
 
 /** Through the chat module (`chat:write`): a member without `skills:read` sees them too. */
@@ -31,13 +30,14 @@ export async function fetchEnforcedSkills(
     headers: { ...getHeaders?.() },
   });
   if (!res.ok) throw new Error(`Failed to load the enforced skills (HTTP ${res.status})`);
-  const data = ((await res.json()) as { data?: unknown } | null)?.data;
-  return (Array.isArray(data) ? data : []).flatMap((row) => {
-    const parsed = enforcedSkillRowSchema.safeParse(row);
-    if (!parsed.success) return [];
-    const { id, name, version } = parsed.data;
-    return [{ packageId: id, display_name: name, version }];
-  });
+  // Strict: a policy read that drifted must fail loudly, never read as "nothing imposed".
+  const parsed = enforcedSkillsSchema.safeParse(await res.json());
+  if (!parsed.success) throw new Error("Unexpected enforced skills response");
+  return parsed.data.data.map(({ id, name, version }) => ({
+    packageId: id,
+    display_name: name,
+    version,
+  }));
 }
 
 /** An enforced skill is injected anyway: a pin naming it is not counted nor re-sent. */

@@ -22648,7 +22648,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Enforcing a skill whose latest published archive cannot be read (`version_artifact_unavailable`). Nothing in the patch is written. */
+            /** @description Enforcing a skill while a latest published archive cannot be read (`version_artifact_unavailable`, `detail` naming the package): this skill's own, or that of a skill this space already enforces — the budget check reads every one, and the space's chats already refuse their turns until that skill is republished or released. Nothing in the patch is written. */
             422: {
                 headers: {
                     [name: string]: unknown;

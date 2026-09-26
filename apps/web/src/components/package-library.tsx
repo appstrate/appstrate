@@ -617,7 +617,9 @@ function SpacePlacements({
           })}
           confirmLabel={t("library.chatEnforce.confirm")}
           variant="default"
-          isPending={setChatEnforced.isPending}
+          isPending={
+            setChatEnforced.isPending && setChatEnforced.variables?.packageId === confirming?.id
+          }
           onConfirm={() => {
             if (!confirming) return;
             setChatEnforced.mutate(
