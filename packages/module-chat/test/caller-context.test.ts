@@ -298,11 +298,10 @@ describe("formatCallerContext", () => {
     }
   });
 
-  it("injects the chosen skills in full, sorted, tagged with id and version, in manual and strict", () => {
+  it("injects the chosen skills in full, in stored order, tagged with id and version, in manual and strict", () => {
     const raw = {
       user: { name: "Ada" },
       org: { role: "member" },
-      requested_skills: [{ packageId: "@acme/zeta" }, { packageId: "@acme/mine" }],
       skills: [{ packageId: "@acme/pdf", display_name: "PDF" }],
       skills_truncated: true,
     };
@@ -321,7 +320,7 @@ describe("formatCallerContext", () => {
       const out = formatCallerContext(raw, {
         ...BASE_OPTS,
         capabilities: caps(permissions),
-        skills: { skillMode, pinnedSkills: ["@acme/zeta", "@acme/mine"] },
+        skills: { skillMode, pinnedSkills: ["@acme/mine", "@acme/zeta"] },
         skillContents,
       });
       expect(out.split("## Skills")).toHaveLength(2);
@@ -359,7 +358,7 @@ describe("formatCallerContext", () => {
 
   it("says a chosen skill could not be included", () => {
     const out = formatCallerContext(
-      { user: { name: "Ada" }, org: { role: "member" }, requested_skills: [] },
+      { user: { name: "Ada" }, org: { role: "member" } },
       { ...BASE_OPTS, skills: { skillMode: "manual", pinnedSkills: ["@acme/gone"] } },
     );
     expect(out).toContain("## Skills");
@@ -369,28 +368,10 @@ describe("formatCallerContext", () => {
     expect(out).not.toContain("The user chose these skills");
   });
 
-  it("is byte-identical whatever order the chosen skills arrive in", () => {
-    const opts = (order: string[]) => ({
-      ...BASE_OPTS,
-      skills: { skillMode: "manual" as const, pinnedSkills: order },
-      skillContents: new Map(
-        order.map((id) => [id, { packageId: id, version: "1.0.0", content: `${id} body` }]),
-      ),
-    });
-    const raw = (order: string[]) => ({
-      user: { name: "Ada" },
-      org: { role: "member" },
-      requested_skills: order.map((packageId) => ({ packageId })),
-    });
-    expect(formatCallerContext(raw(["@a/b", "@a/a"]), opts(["@a/b", "@a/a"]))).toEqual(
-      formatCallerContext(raw(["@a/a", "@a/b"]), opts(["@a/a", "@a/b"])),
-    );
-  });
-
   it("omits the heading entirely when nothing is chosen and nothing is listed", () => {
     for (const skillMode of ["auto", "manual", "strict"] as const) {
       const out = formatCallerContext(
-        { user: { name: "Ada" }, org: { role: "member" }, skills: [], requested_skills: [] },
+        { user: { name: "Ada" }, org: { role: "member" }, skills: [] },
         { ...BASE_OPTS, skills: { skillMode, pinnedSkills: [] } },
       );
       expect(out).not.toContain("## Skills");
@@ -735,11 +716,11 @@ describe("buildCallerContextBlock", () => {
     const { deps } = fakeDeps((req) => {
       const url = new URL(req.url);
       seen.push(`${url.pathname}${url.search} ${req.headers.get("cookie")}`);
-      if (url.pathname === "/api/me/context") {
-        // `@acme/off` reads fine through `getSkill` but is not active here.
+      if (url.pathname === "/api/me/context") return Response.json({ user: { name: "Ada" } });
+      // `@acme/off` reads fine through `getSkill` but is not in the active listing.
+      if (url.pathname === "/api/packages/skills") {
         return Response.json({
-          user: { name: "Ada" },
-          requested_skills: [{ packageId: "@acme/a" }],
+          data: [{ id: "@acme/a", name: "A", description: null, version: "2.0.0" }],
         });
       }
       const id = url.pathname.replace("/api/packages/skills/", "");
@@ -757,7 +738,8 @@ describe("buildCallerContextBlock", () => {
       skills: { skillMode: "strict", pinnedSkills: ["@acme/a", "@acme/off"] },
     });
     expect(seen.sort()).toEqual([
-      "/api/me/context?skills=%40acme%2Fa%2C%40acme%2Foff session=abc",
+      "/api/me/context session=abc",
+      "/api/packages/skills session=abc",
       "/api/packages/skills/@acme/a session=abc",
       "/api/packages/skills/@acme/off session=abc",
     ]);
@@ -786,11 +768,16 @@ describe("buildCallerContextBlock", () => {
   });
 
   it("leaves out a chosen skill whose content read is refused", async () => {
-    const { deps } = fakeDeps((req) =>
-      new URL(req.url).pathname === "/api/me/context"
-        ? Response.json({ user: { name: "Ada" }, requested_skills: [{ packageId: "@acme/a" }] })
-        : new Response(null, { status: 403 }),
-    );
+    const { deps } = fakeDeps((req) => {
+      const { pathname } = new URL(req.url);
+      if (pathname === "/api/me/context") return Response.json({ user: { name: "Ada" } });
+      if (pathname === "/api/packages/skills") {
+        return Response.json({
+          data: [{ id: "@acme/a", name: "A", description: null, version: null }],
+        });
+      }
+      return new Response(null, { status: 403 });
+    });
     const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: {},

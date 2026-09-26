@@ -16,7 +16,6 @@ import {
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatSessions } from "@appstrate/db/schema";
-import { mintSessionId } from "../src/session-id.ts";
 
 const app = getTestApp();
 
@@ -45,7 +44,7 @@ describe("chat session skills", () => {
   }
 
   it("reads the picker's four fields off the real skills listing", async () => {
-    // `fetchSkills` hand-types this row; this is what keeps it honest.
+    // `parseSkillList` reads these four fields; this keeps it on the real route.
     const created = await app.request("/api/packages/skills", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -98,13 +97,5 @@ describe("chat session skills", () => {
     const detail = await getSession(fresh.id);
     expect(detail.skill_mode).toBe("manual");
     expect(detail.pinned_skills).toEqual(["@acme/a"]);
-  });
-
-  it("serves no route that writes the selection outside a turn", async () => {
-    const res = await app.request(
-      `/api/chat/sessions/${mintSessionId()}/skills`,
-      json({ method: "PUT", body: JSON.stringify({ skill_mode: "manual", pinned_skills: [] }) }),
-    );
-    expect(res.status).toBe(404);
   });
 });

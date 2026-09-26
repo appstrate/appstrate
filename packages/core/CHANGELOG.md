@@ -11,10 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **New export `packageIdSchema` (`@appstrate/core/validation`)** — a Zod
-  string schema for a `@scope/name` package id (`scopedNameRegex`), for request
-  bodies and queries that name packages.
-
 - **`DEFAULT_MODEL_REASONING_LEVEL`** (`@appstrate/core/model-generation`, #1574) —
   the reasoning level runs and chat apply when no layer sets one (`medium`). Pi has
   no "provider default" reasoning state, so an unset level resolves to this one,

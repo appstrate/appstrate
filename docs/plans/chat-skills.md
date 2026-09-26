@@ -30,12 +30,11 @@ runnable agent.
 matter included, as `<skill id="…" version="…">…</skill>` under `## Skills`,
 sorted by id, after a lead line telling the model to follow them. The chat reads
 them with the CALLER's own headers, so they need the caller's `skills:read`, not
-the turn's. Two reads, in parallel with nothing between them:
+the turn's. In parallel:
 
-- `GET /api/me/context?skills=<ids>` answers which chosen skills are ACTIVE in
-  the space (`requested_skills`, the listing's activation rule, past its 15-row
-  cap). `getSkill` only checks readability, so a skill switched off here would
-  otherwise still be injected.
+- `GET /api/packages/skills`, the space's ACTIVE skills, uncapped — the listing
+  the picker chooses from. `getSkill` only checks readability, so a skill
+  switched off here would otherwise still be injected.
 - `GET /api/packages/skills/{scope}/{name}` (`getSkill`) per chosen skill gives
   the content — by construction the definition any other reader gets (the
   draft when writable, else the latest published version).
@@ -56,18 +55,9 @@ permissions after its session upsert; the context block chains on the same
 promise.
 
 The system prompt is ONE `cache_control` block: what renders there is
-byte-identical across turns for the same session state (sorted, no clocks, no
-counters). Changing the mode or the chosen skills, or editing a chosen skill,
+byte-identical across turns for the same session state (the chosen skills are
+stored sorted, no clocks, no counters). Changing the mode or the chosen skills, or editing a chosen skill,
 may miss the cache once.
-
-## Caller context
-
-`GET /api/me/context?skills=<comma-separated ids>` resolves the named skills by
-exact id for the caller in the current space: `requested_skills`, in no
-particular order (the chat sorts). An id that resolves nothing — unknown,
-inactive, out of reach — is simply absent. At most `MAX_REQUESTED_SKILLS` (30)
-distinct ids; a malformed id or more is a 400. The chat asks only in `manual`
-and `strict`.
 
 ## Per-conversation choice
 
@@ -97,6 +87,10 @@ message is lost on reload — as a model choice is. Every session DTO carries bo
 fields. There is no chat-specific skill listing: the picker reads
 `GET /api/packages/skills`.
 
+Rejected: `GET /api/me/context?skills=<ids>` resolving the chosen skills by
+exact id — a new API surface whose only answer the chat read was "active or
+not", which the listing already gives.
+
 Rejected: a `PUT /api/chat/sessions/{id}/skills` written on every click. It had
 to create the row for a fresh conversation (an empty sidebar entry, an URL
 change), make the send wait for it, and handle a write that fails before the
@@ -106,9 +100,9 @@ UI: a picker in the composer — the mode as the model picker's tabs (one look
 across the composer) with the chosen mode's explanation, and one checkbox per
 skill, inert in `auto`. Mounted when `canPinSkills` holds (`chat:write` ∧
 `skills:read`) and the session read succeeded — a failed read would show the
-defaults, and a change would send them over the stored choice. The selection
-lives in local state seeded from the session detail; only what the user
-changed is sent.
+defaults, and a change would send them over the stored choice. The picker is
+controlled: the conversation holds the selection, seeded from the session
+detail, and sends only what the user changed.
 
 ## Out of scope
 

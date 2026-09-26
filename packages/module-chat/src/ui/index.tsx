@@ -446,32 +446,30 @@ const Conversation = memo(function Conversation({
   // Stable identity: `ConversationInner` keys its store-attach effect on it.
   const initialMessages = useMemo(() => history.data?.messages ?? [], [history.data?.messages]);
 
-  // Seeded once per conversation (`key={id}` remount). No picker on a failed
-  // read: it would show the defaults, and a change would send them over the
-  // stored choice.
-  const initialSkills = history.data?.skills ?? DEFAULT_SKILL_SELECTION;
+  // No picker on a failed read: it would show the defaults, and a change would
+  // send them over the stored choice.
   const showPicker = canPinSkills && !history.isError;
-  // What the user changed in the picker, sent with every turn and written by it;
-  // nothing changed = nothing sent, and the stored selection stands.
-  const chosenSkills = useRef<ChatSkillSelection | undefined>(undefined);
+  // What the user changed, sent with every turn (which writes it); nothing
+  // changed = nothing sent, and the stored selection stands. The ref is the
+  // transport's request-time read of the same value.
+  const [chosenSkills, setChosenSkills] = useState<ChatSkillSelection>();
+  const chosenSkillsRef = useRef<ChatSkillSelection>(undefined);
   const chooseSkills = useCallback((selection: ChatSkillSelection) => {
-    chosenSkills.current = selection;
+    chosenSkillsRef.current = selection;
+    setChosenSkills(selection);
   }, []);
-  const getChosenSkills = useCallback(() => chosenSkills.current, []);
+  const getChosenSkills = useCallback(() => chosenSkillsRef.current, []);
+  const skills = chosenSkills ?? history.data?.skills ?? DEFAULT_SKILL_SELECTION;
   const slot = useMemo(
     () => (
       <div className="flex items-center gap-2">
         {showPicker && (
-          <SkillsPicker
-            getHeaders={getHeaders}
-            initialSelection={initialSkills}
-            onChange={chooseSkills}
-          />
+          <SkillsPicker getHeaders={getHeaders} selection={skills} onChange={chooseSkills} />
         )}
         {composerSlot}
       </div>
     ),
-    [getHeaders, initialSkills, chooseSkills, showPicker, composerSlot],
+    [getHeaders, skills, chooseSkills, showPicker, composerSlot],
   );
 
   if (persistedAtMount && history.isPending) {
@@ -553,7 +551,7 @@ function ConversationInner({
               agent_authoring: getAgentAuthoringEnabled(),
               ...(skills && {
                 skill_mode: skills.skillMode,
-                pinned_skills: [...skills.pinnedSkills],
+                pinned_skills: skills.pinnedSkills,
               }),
             },
           };

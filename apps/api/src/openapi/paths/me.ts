@@ -2,7 +2,6 @@
 
 import { packageSourceValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { MAX_REQUESTED_SKILLS } from "../../lib/skill-requests.ts";
 
 /**
  * User-scoped identity routes (`/api/me/*`).
@@ -14,49 +13,6 @@ import { MAX_REQUESTED_SKILLS } from "../../lib/skill-requests.ts";
  *
  * The other routes in this namespace run inside org (or space) context.
  */
-
-/** One skill hint in `GET /api/me/context`, shared by `skills` and `requested_skills`. */
-const skillHintSchema = {
-  type: "object",
-  required: [
-    "packageId",
-    "display_name",
-    "description",
-    "version",
-    "published",
-    "home_writable",
-    "source",
-  ],
-  properties: {
-    packageId: {
-      type: "string",
-      description:
-        'Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills.',
-    },
-    display_name: { type: "string" },
-    description: { type: "string" },
-    version: {
-      type: ["string", "null"],
-      description:
-        "The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range.",
-    },
-    published: {
-      type: "boolean",
-      description:
-        "True when the skill has a published version (or is a system skill). " +
-        "False means draft-only: a manifest range can select nothing, and only " +
-        "`dependency_overrides` with `draft` reaches its working copy.",
-    },
-    home_writable: {
-      type: "boolean",
-      description:
-        "Whether THIS caller may write the skill, i.e. whether its draft is " +
-        "theirs to run — `dependency_overrides` with `draft` answers 403 " +
-        "`draft_not_writable` otherwise.",
-    },
-    source: { type: "string", enum: [...packageSourceValues] },
-  },
-} as const;
 
 export const mePaths = {
   "/api/me/orgs": {
@@ -467,19 +423,6 @@ export const mePaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        {
-          name: "skills",
-          in: "query",
-          required: false,
-          description:
-            "Comma-separated `@scope/name` skill ids to resolve by exact id into " +
-            `\`requested_skills\`, past the \`skills\` cap. At most ${MAX_REQUESTED_SKILLS} distinct ids; ` +
-            `a malformed id or more than ${MAX_REQUESTED_SKILLS} distinct ids is a 400; an unknown, ` +
-            "inactive or unreadable id is absent from " +
-            "`requested_skills`.",
-          schema: { type: "string" },
-          example: "@acme/tone,@acme/pdf",
-        },
       ],
       responses: {
         "200": {
@@ -500,7 +443,6 @@ export const mePaths = {
                   "skills",
                   "skills_truncated",
                   "skills_total",
-                  "requested_skills",
                 ],
                 properties: {
                   user: {
@@ -640,7 +582,47 @@ export const mePaths = {
                       "caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent " +
                       "manifest's `dependencies.skills`. When `skills_truncated` is true, the " +
                       "full list is reachable via the `listSkills` operation.",
-                    items: skillHintSchema,
+                    items: {
+                      type: "object",
+                      required: [
+                        "packageId",
+                        "display_name",
+                        "description",
+                        "version",
+                        "published",
+                        "home_writable",
+                        "source",
+                      ],
+                      properties: {
+                        packageId: {
+                          type: "string",
+                          description:
+                            'Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills.',
+                        },
+                        display_name: { type: "string" },
+                        description: { type: "string" },
+                        version: {
+                          type: ["string", "null"],
+                          description:
+                            "The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range.",
+                        },
+                        published: {
+                          type: "boolean",
+                          description:
+                            "True when the skill has a published version (or is a system skill). " +
+                            "False means draft-only: a manifest range can select nothing, and only " +
+                            "`dependency_overrides` with `draft` reaches its working copy.",
+                        },
+                        home_writable: {
+                          type: "boolean",
+                          description:
+                            "Whether THIS caller may write the skill, i.e. whether its draft is " +
+                            "theirs to run — `dependency_overrides` with `draft` answers 403 " +
+                            "`draft_not_writable` otherwise.",
+                        },
+                        source: { type: "string", enum: [...packageSourceValues] },
+                      },
+                    },
                   },
                   skills_truncated: {
                     type: "boolean",
@@ -650,14 +632,6 @@ export const mePaths = {
                   skills_total: {
                     type: "integer",
                     description: "Total active skills before the cap.",
-                  },
-                  requested_skills: {
-                    type: "array",
-                    description:
-                      "Skills named by the `skills` query parameter that resolved in this space " +
-                      "(past the `skills` cap), in no particular order. Empty without the parameter " +
-                      "or without `skills:read`.",
-                    items: skillHintSchema,
                   },
                 },
               },
@@ -703,22 +677,10 @@ export const mePaths = {
                 ],
                 skills_truncated: false,
                 skills_total: 1,
-                requested_skills: [
-                  {
-                    packageId: "@acme/tone",
-                    display_name: "House tone",
-                    description: "Rewrites a draft in the company's tone of voice.",
-                    version: "1.0.0",
-                    published: true,
-                    home_writable: true,
-                    source: "local",
-                  },
-                ],
               },
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

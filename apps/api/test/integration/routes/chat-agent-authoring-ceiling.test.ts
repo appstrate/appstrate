@@ -20,7 +20,7 @@ import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 // auth strategy from.
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 import { turnPermissions } from "../../../../../packages/module-chat/src/turn-permissions.ts";
-import type { ChatSkillMode } from "../../../../../packages/module-chat/src/skills.ts";
+import type { ChatSkillMode } from "@appstrate/db/schema";
 
 const app = getTestApp();
 await registerTestPlatformApp();

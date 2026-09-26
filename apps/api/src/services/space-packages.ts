@@ -19,7 +19,7 @@
  * too, but only UPDATES a column in place on a row already placed.
  */
 
-import { eq, and, exists, inArray, sql } from "drizzle-orm";
+import { eq, and, exists, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { spacePackages, packages, packageShares, packageDistTags } from "@appstrate/db/schema";
 import { notFound, parseBody } from "../lib/errors.ts";
@@ -713,53 +713,6 @@ interface HintOptions {
   }) => boolean;
 }
 
-/** Columns both hint reads (capped listing, exact-id resolution) select. */
-const hintColumns = {
-  id: packages.id,
-  type: packages.type,
-  source: packages.source,
-  homeSpaceId: packages.homeSpaceId,
-  draftManifest: packages.draftManifest,
-  // `latest` dist-tag version id — non-null iff the package has a published
-  // version. Lets `published` below be answered without an N+1 (a draft-only
-  // agent must be run with `version=draft`).
-  latestVersionId: packageDistTags.versionId,
-} as const;
-
-type HintRow = {
-  id: string;
-  type: PackageType;
-  source: string;
-  homeSpaceId: string | null;
-  draftManifest: unknown;
-  latestVersionId: number | null;
-};
-
-/** Row → hint, the one projection both hint reads use. */
-function projectPackageHint<T extends PackageHint>(
-  row: HintRow,
-  project: (base: PackageHint, manifest: Record<string, unknown>) => T,
-  homeWritable: HintOptions["homeWritable"],
-): T {
-  const manifest = asRecord(row.draftManifest) as Record<string, unknown>;
-  const base: PackageHint = {
-    packageId: typeof manifest.name === "string" ? manifest.name : row.id,
-    display_name: typeof manifest.display_name === "string" ? manifest.display_name : "",
-    description: typeof manifest.description === "string" ? manifest.description : "",
-    source: row.source ?? "local",
-    published: row.source === "system" || row.latestVersionId != null,
-    // Decided by the CALLER's authority over the package's home, which this
-    // service has no context to read — the route resolves it and hands the
-    // verdict down. Absent resolver (no HTTP caller) ⇒ nobody authors here.
-    home_writable: homeWritable?.(row) ?? false,
-  };
-  return project(base, manifest);
-}
-
-function latestDistTagJoin() {
-  return and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest"));
-}
-
 /**
  * List the packages of one `type` an actor in this space could use, as a
  * bounded hint for the get_me / chat-prompt caller context. "Could use" is
@@ -789,18 +742,46 @@ async function listActivePackageHints<T extends PackageHint>(
 ): Promise<{ items: T[]; truncated: boolean; total: number }> {
   const limit = opts?.limit ?? DEFAULT_PACKAGE_HINT_LIMIT;
   const rows = await db
-    .select({ ...hintColumns, total: sql<number>`count(*) over ()`.mapWith(Number) })
+    .select({
+      id: packages.id,
+      type: packages.type,
+      source: packages.source,
+      homeSpaceId: packages.homeSpaceId,
+      draftManifest: packages.draftManifest,
+      // `latest` dist-tag version id — non-null iff the package has a published
+      // version. Lets `published` below be answered without an N+1 (a draft-only
+      // agent must be run with `version=draft`).
+      latestVersionId: packageDistTags.versionId,
+      total: sql<number>`count(*) over ()`.mapWith(Number),
+    })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
-    .leftJoin(packageDistTags, latestDistTagJoin())
+    .leftJoin(
+      packageDistTags,
+      and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
+    )
     .where(activePackagesFilter(scope, type))
     .orderBy(...packageListingOrder())
     .limit(limit);
 
   const total = rows[0]?.total ?? 0;
 
-  const items = rows.map((row) => projectPackageHint(row, project, opts?.homeWritable));
+  const items = rows.map((row) => {
+    const manifest = asRecord(row.draftManifest) as Record<string, unknown>;
+    const base: PackageHint = {
+      packageId: typeof manifest.name === "string" ? manifest.name : row.id,
+      display_name: typeof manifest.display_name === "string" ? manifest.display_name : "",
+      description: typeof manifest.description === "string" ? manifest.description : "",
+      source: row.source ?? "local",
+      published: row.source === "system" || row.latestVersionId != null,
+      // Decided by the CALLER's authority over the package's home, which this
+      // service has no context to read — the route resolves it and hands the
+      // verdict down. Absent resolver (no HTTP caller) ⇒ nobody authors here.
+      home_writable: opts?.homeWritable?.(row) ?? false,
+    };
+    return project(base, manifest);
+  });
 
   return { items, truncated: total > items.length, total };
 }
@@ -855,10 +836,6 @@ interface ActiveSkillsResult {
   total: number;
 }
 
-function projectActiveSkill(base: PackageHint, manifest: Record<string, unknown>): ActiveSkill {
-  return { ...base, version: typeof manifest.version === "string" ? manifest.version : null };
-}
-
 /**
  * Active-skill hint for the caller context. Skills are not run directly: the
  * model declares them under an agent manifest's `dependencies.skills`, and the
@@ -872,27 +849,13 @@ export async function listActiveSkills(
   const { items, truncated, total } = await listActivePackageHints(
     scope,
     "skill",
-    projectActiveSkill,
+    (base, manifest) => ({
+      ...base,
+      version: typeof manifest.version === "string" ? manifest.version : null,
+    }),
     opts,
   );
   return { skills: items, truncated, total };
-}
-
-/** Exact-id resolution of skill hints, past the listing's cap; an id that resolves nothing is absent. */
-export async function resolveSkillsByIds(
-  scope: SpaceScope,
-  ids: readonly string[],
-  opts?: HintOptions,
-): Promise<ActiveSkill[]> {
-  if (ids.length === 0) return [];
-  const rows = await db
-    .select(hintColumns)
-    .from(packages)
-    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
-    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
-    .leftJoin(packageDistTags, latestDistTagJoin())
-    .where(and(activePackagesFilter(scope, "skill"), inArray(packages.id, [...ids])));
-  return rows.map((row) => projectPackageHint(row, projectActiveSkill, opts?.homeWritable));
 }
 
 /**

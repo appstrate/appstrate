@@ -541,17 +541,21 @@ describe("handleChatStream", () => {
       pinnedSkills: [PIN],
     });
 
-    // Echo back whatever `?skills=` asked for, and serve each chosen skill's
-    // content, so the rendered block is a function of what the handler read.
-    const requested: string[][] = [];
+    // The chosen skill is in the space's active listing; record which contents
+    // are read, so the rendered block is a function of what the handler read.
+    const read: string[] = [];
     const dispatch = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
+      if (url.pathname === "/api/packages/skills") {
+        return Response.json({
+          data: [{ id: PIN, name: "Pinned", description: null, version: "1.0.0" }],
+        });
+      }
       if (url.pathname.startsWith("/api/packages/skills/")) {
+        read.push(url.pathname.replace("/api/packages/skills/", ""));
         return Response.json({ content: "Always answer in haiku.", version: "1.0.0" });
       }
       if (url.pathname !== "/api/me/context") return scriptedDispatch()(req);
-      const ids = (url.searchParams.get("skills") ?? "").split(",").filter(Boolean);
-      requested.push(ids);
       return Response.json({
         user: { name: "Chat Tester", email: "chat-tester@test.com" },
         org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
@@ -559,7 +563,6 @@ describe("handleChatStream", () => {
         agents: [],
         // Non-empty on purpose: strict lists no skill, so it must not render.
         skills: [{ packageId: "@acme/catalogued", display_name: "Catalogued" }],
-        requested_skills: ids.map((id) => ({ packageId: id })),
       });
     };
 
@@ -571,7 +574,7 @@ describe("handleChatStream", () => {
     expect(res.status).toBe(200);
     await collectUiChunks(res);
 
-    expect(requested[0]).toEqual([PIN]);
+    expect(read).toEqual([PIN]);
     const input = calls[0]!;
     expect(input.system).toContain(
       `<skill id="${PIN}" version="1.0.0">\nAlways answer in haiku.\n</skill>`,
@@ -662,8 +665,8 @@ describe("handleChatStream", () => {
 
   it("teaches no skill on a turn without `skills:read`", async () => {
     // The payload below DOES carry skills, so every absence asserted is the
-    // turn's own gate, not an empty fixture: no `?skills=` is asked, and
-    // neither the persona nor the block names a skill.
+    // turn's own gate, not an empty fixture: neither the persona nor the
+    // block names a skill.
     const sessionId = mintSessionId();
     const PIN = "@acme/pinned-skill";
     await db.insert(chatSessions).values({
@@ -674,7 +677,7 @@ describe("handleChatStream", () => {
       title: null,
       pinnedSkills: [PIN],
     });
-    const contextUrls: URL[] = [];
+    const skillReads: string[] = [];
     const withSkills = () =>
       Response.json({
         user: { name: "Chat Tester", email: "chat-tester@test.com" },
@@ -682,11 +685,10 @@ describe("handleChatStream", () => {
         connections: [],
         agents: [],
         skills: [{ packageId: "@acme/catalogued", display_name: "Catalogued" }],
-        requested_skills: [{ packageId: PIN, display_name: "Pinned" }],
       });
     const dispatch = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
-      if (url.pathname === "/api/me/context") contextUrls.push(url);
+      if (url.pathname.startsWith("/api/packages/skills")) skillReads.push(url.pathname);
       return scriptedDispatch(undefined, withSkills)(req);
     };
 
@@ -698,8 +700,7 @@ describe("handleChatStream", () => {
     expect(res.status).toBe(200);
     await collectUiChunks(res);
 
-    expect(contextUrls).toHaveLength(1);
-    expect(contextUrls[0]!.searchParams.has("skills")).toBe(false);
+    expect(skillReads).toEqual([]);
     const system = calls[0]!.system;
     expect(system).toContain(CONTEXT_ORG_MARKER);
     for (const absent of ["## Skills", PIN, "@acme/catalogued", "getSkill", "listSkills"]) {

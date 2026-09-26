@@ -1,17 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Which skills a chat turn shows the model. Pure and order-independent: the
-// result sits in the system prompt's single `cache_control` block.
+// Which chosen skills a chat turn injects. Pure: the result sits in the system
+// prompt's single `cache_control` block.
 
+import { z } from "zod";
 import type { ChatSkillMode } from "@appstrate/db/schema";
-
-export type { ChatSkillMode };
 
 export interface SkillHint {
   packageId: string;
   display_name?: string | null;
   description?: string | null;
   version?: string | null;
+}
+
+/** The fields read off a row of `GET /api/packages/skills`. */
+const skillListRowSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  version: z.string().nullable(),
+});
+
+/**
+ * `GET /api/packages/skills`: the space's ACTIVE skills, uncapped — what the
+ * picker offers, and what a chosen skill must be in to be injected. A malformed
+ * row is dropped.
+ */
+export function parseSkillList(body: unknown): SkillHint[] {
+  const data = (body as { data?: unknown } | null)?.data;
+  return (Array.isArray(data) ? data : []).flatMap((row) => {
+    const parsed = skillListRowSchema.safeParse(row);
+    if (!parsed.success) return [];
+    const { id, name, description, version } = parsed.data;
+    return [{ packageId: id, display_name: name, description, version }];
+  });
 }
 
 /** A chosen skill's `SKILL.md`, as `getSkill` serves it to the caller. */
@@ -31,7 +53,7 @@ export const MAX_SKILL_CONTENT_CHARS = 16_000;
 export interface ChatSkillSelection {
   skillMode: ChatSkillMode;
   /** Injected in `manual` and `strict`; kept but unused in `auto`. */
-  pinnedSkills: readonly string[];
+  pinnedSkills: string[];
 }
 
 export const DEFAULT_SKILL_SELECTION: ChatSkillSelection = {
@@ -44,42 +66,27 @@ export function injectsSkills(mode: ChatSkillMode): boolean {
   return mode !== "auto";
 }
 
-export interface ResolveChatSkillsInput {
-  selection: ChatSkillSelection;
-  /** `/api/me/context` `requested_skills`: the chosen skills active in this space. */
-  requested: readonly SkillHint[];
-  /** The chosen skills' content by package id; a failed read is absent. */
-  contents: ReadonlyMap<string, SkillContent>;
-  /** `/api/me/context` `skills`: the space's listing, capped. */
-  catalogue: readonly SkillHint[];
-  catalogueTruncated: boolean;
-}
-
 interface ResolvedChatSkills {
   injected: SkillContent[];
-  catalogue: SkillHint[];
-  catalogueTruncated: boolean;
   notices: string[];
 }
 
-export function resolveChatSkills(input: ResolveChatSkillsInput): ResolvedChatSkills {
-  const { selection } = input;
-  if (!injectsSkills(selection.skillMode)) {
-    return {
-      injected: [],
-      catalogue: [...input.catalogue],
-      catalogueTruncated: input.catalogueTruncated,
-      notices: [],
-    };
-  }
-
-  const active = new Set(input.requested.map((hint) => hint.packageId));
+/**
+ * The chosen skills to inject, in their stored order (sorted and deduped by the
+ * one writer, `ensureSession`). `contents` holds only the chosen skills that are
+ * active here and whose `SKILL.md` was read; any other becomes a notice.
+ */
+export function resolveChatSkills(
+  selection: ChatSkillSelection,
+  contents: ReadonlyMap<string, SkillContent>,
+): ResolvedChatSkills {
   const injected: SkillContent[] = [];
   // A chosen skill is the user's own act, so the model is told when it is left out.
   const notices: string[] = [];
-  for (const id of [...new Set(selection.pinnedSkills)].sort()) {
-    const skill = input.contents.get(id);
-    if (!active.has(id) || !skill) {
+  if (!injectsSkills(selection.skillMode)) return { injected, notices };
+  for (const id of selection.pinnedSkills) {
+    const skill = contents.get(id);
+    if (!skill) {
       notices.push(
         `The skill \`${id}\` was chosen for this conversation but is not available here — it may have been removed, deactivated, or be out of your reach.`,
       );
@@ -91,5 +98,5 @@ export function resolveChatSkills(input: ResolveChatSkillsInput): ResolvedChatSk
       injected.push(skill);
     }
   }
-  return { injected, catalogue: [], catalogueTruncated: false, notices };
+  return { injected, notices };
 }

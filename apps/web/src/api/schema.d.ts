@@ -13415,13 +13415,7 @@ export interface operations {
     };
     getMyContext: {
         parameters: {
-            query?: {
-                /**
-                 * @description Comma-separated `@scope/name` skill ids to resolve by exact id into `requested_skills`, past the `skills` cap. At most 30 distinct ids; a malformed id or more than 30 distinct ids is a 400; an unknown, inactive or unreadable id is absent from `requested_skills`.
-                 * @example @acme/tone,@acme/pdf
-                 */
-                skills?: string;
-            };
+            query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -13500,18 +13494,7 @@ export interface operations {
                      *         }
                      *       ],
                      *       "skills_truncated": false,
-                     *       "skills_total": 1,
-                     *       "requested_skills": [
-                     *         {
-                     *           "packageId": "@acme/tone",
-                     *           "display_name": "House tone",
-                     *           "description": "Rewrites a draft in the company's tone of voice.",
-                     *           "version": "1.0.0",
-                     *           "published": true,
-                     *           "home_writable": true,
-                     *           "source": "local"
-                     *         }
-                     *       ]
+                     *       "skills_total": 1
                      *     }
                      */
                     "application/json": {
@@ -13588,25 +13571,9 @@ export interface operations {
                         skills_truncated: boolean;
                         /** @description Total active skills before the cap. */
                         skills_total: number;
-                        /** @description Skills named by the `skills` query parameter that resolved in this space (past the `skills` cap), in no particular order. Empty without the parameter or without `skills:read`. */
-                        requested_skills: {
-                            /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
-                            packageId: string;
-                            display_name: string;
-                            description: string;
-                            /** @description The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range. */
-                            version: string | null;
-                            /** @description True when the skill has a published version (or is a system skill). False means draft-only: a manifest range can select nothing, and only `dependency_overrides` with `draft` reaches its working copy. */
-                            published: boolean;
-                            /** @description Whether THIS caller may write the skill, i.e. whether its draft is theirs to run — `dependency_overrides` with `draft` answers 403 `draft_not_writable` otherwise. */
-                            home_writable: boolean;
-                            /** @enum {string} */
-                            source: "local" | "system";
-                        }[];
                     };
                 };
             };
-            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };

@@ -1,28 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The pure rules the skill picker applies to the conversation's selection. */
+/** The skill picker's data and pure rules. */
 
-import type { SkillHint } from "../skills.ts";
+import { parseSkillList, type SkillHint } from "../skills.ts";
+import type { GetHeaders } from "./runtime-context.ts";
 
-/** Pin/unpin, sorted. The picker disables a new pin at the cap; the route refuses one past it. */
-export function togglePinned(pinned: readonly string[], packageId: string): readonly string[] {
-  const set = new Set(pinned);
-  if (set.has(packageId)) set.delete(packageId);
-  else set.add(packageId);
-  return [...set].sort();
+/** The space's active skills, the ones the picker chooses from. */
+export async function fetchSkills(getHeaders: GetHeaders | null | undefined): Promise<SkillHint[]> {
+  const res = await fetch("/api/packages/skills", {
+    credentials: "include",
+    headers: { ...getHeaders?.() },
+  });
+  if (!res.ok) throw new Error(`Failed to load skills (HTTP ${res.status})`);
+  return parseSkillList(await res.json());
 }
 
-/** A picker row; `available: false` is a pin the catalogue no longer lists. */
-export interface SkillPickerRow {
-  skill: SkillHint;
-  available: boolean;
+/** Pin/unpin. The picker disables a new pin at the cap; the route refuses one past it. */
+export function togglePinned(pinned: readonly string[], packageId: string): string[] {
+  return pinned.includes(packageId)
+    ? pinned.filter((id) => id !== packageId)
+    : [...pinned, packageId];
 }
 
-/** The catalogue, then every pin missing from it, so a dead pin can still be removed. */
+/**
+ * A picker row: the catalogue, then every pin missing from it (`available:
+ * false`), so a dead pin can still be removed.
+ */
 export function skillPickerRows(
   catalogue: readonly SkillHint[],
   pinned: readonly string[],
-): SkillPickerRow[] {
+): { skill: SkillHint; available: boolean }[] {
   const listed = new Set(catalogue.map((skill) => skill.packageId));
   const dead = pinned.filter((id) => !listed.has(id));
   return [

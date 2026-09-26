@@ -58,10 +58,6 @@ export async function ensureSession(
   spaceId: string,
   selection?: ChatSkillSelection,
 ): Promise<ChatSkillSelection> {
-  const skills = selection && {
-    skillMode: selection.skillMode,
-    pinnedSkills: [...selection.pinnedSkills],
-  };
   // The id is client-minted, so a caller could send an id that already belongs
   // to another tenant; a plain `DO NOTHING` would leave that row intact and we'd
   // then persist a message into it. `DO UPDATE … SET id = id` is a no-op write
@@ -83,11 +79,11 @@ export async function ensureSession(
   // 404, not 403, so we don't reveal that the id exists for someone else.
   const [row] = await db
     .insert(chatSessions)
-    .values({ id, orgId, userId, spaceId, title: null, ...skills })
+    .values({ id, orgId, userId, spaceId, title: null, ...selection })
     .onConflictDoUpdate({
       target: chatSessions.id,
       // `updatedAt` stays either way, so a pin never reorders the sidebar.
-      set: skills ?? { id: sql`${chatSessions.id}` },
+      set: selection ?? { id: sql`${chatSessions.id}` },
       setWhere: and(
         eq(chatSessions.orgId, orgId),
         eq(chatSessions.userId, userId),

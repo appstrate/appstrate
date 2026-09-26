@@ -65,13 +65,7 @@ import {
 } from "../services/integration-connections.ts";
 import { handoffStepsFor } from "../services/connect/provisioning.ts";
 import { logger } from "../lib/logger.ts";
-import {
-  listRunnableAgents,
-  listActiveSkills,
-  resolveSkillsByIds,
-} from "../services/space-packages.ts";
-import { MAX_REQUESTED_SKILLS } from "../lib/skill-requests.ts";
-import { packageIdSchema } from "@appstrate/core/validation";
+import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
 import { canReadRuns } from "@appstrate/core/permissions";
@@ -470,26 +464,6 @@ router.get(
 );
 
 /**
- * `?skills=@scope/a,@scope/b` — deduped, order-preserving; a malformed id is a
- * 400, an unknown one is absent from `requested_skills`.
- */
-const requestedSkillsSchema = z
-  .string()
-  .transform((raw) => [
-    ...new Set(
-      raw
-        .split(",")
-        .map((id) => id.trim())
-        .filter(Boolean),
-    ),
-  ])
-  .pipe(
-    z
-      .array(packageIdSchema)
-      .max(MAX_REQUESTED_SKILLS, { error: `At most ${MAX_REQUESTED_SKILLS} skill ids` }),
-  );
-
-/**
  * GET /api/me/context — the caller's working context for an AI agent.
  *
  * One payload, three consumers: the chat module injects it into the system
@@ -540,22 +514,13 @@ router.get("/context", requireSpaceContext(), async (c) => {
   // stays open — a role without runs still needs its identity and org.
   const mayReadRuns = canReadRuns((p) => permissions.has(p));
   const mayReadIntegrations = permissions.has("integrations:read");
-  const rawRequestedSkills = c.req.query("skills");
-  let requestedSkillIds: string[] = [];
-  if (rawRequestedSkills !== undefined) {
-    const parsed = requestedSkillsSchema.safeParse(rawRequestedSkills);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]?.message ?? "Invalid skills parameter", "skills");
-    }
-    requestedSkillIds = parsed.data;
-  }
   // Resolved once for both hint listings: `home_writable` is what tells the
   // model whether a draft-only package is THIS caller's to run, and computing
   // it needs the caller's reach over every space, not the package rows.
   const accessible = await packageAccessSpaces(c);
   const homeWritable = (pkg: Parameters<typeof homeWireForCaller>[0]) =>
     homeWireForCaller(pkg, accessible).home_writable;
-  const [connections, runnable, activeSkills, requestedSkills, recentRuns] = await Promise.all([
+  const [connections, runnable, activeSkills, recentRuns] = await Promise.all([
     mayReadIntegrations
       ? listUsableIntegrationsForActor(scope, actor)
       : Promise.resolve([] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>),
@@ -565,10 +530,6 @@ router.get("/context", requireSpaceContext(), async (c) => {
     canReadSkills
       ? listActiveSkills(scope, { homeWritable })
       : Promise.resolve({ skills: [], truncated: false, total: 0 }),
-    // Same gate as the catalogue: without it, nothing about skills at all.
-    canReadSkills
-      ? resolveSkillsByIds(scope, requestedSkillIds, { homeWritable })
-      : Promise.resolve([]),
     // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
     // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).
     mayReadRuns
@@ -592,7 +553,6 @@ router.get("/context", requireSpaceContext(), async (c) => {
     skills: activeSkills.skills,
     skills_truncated: activeSkills.truncated,
     skills_total: activeSkills.total,
-    requested_skills: requestedSkills,
   });
 });
 

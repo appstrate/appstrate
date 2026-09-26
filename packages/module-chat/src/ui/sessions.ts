@@ -8,12 +8,8 @@
 
 import type { InfiniteData } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
-import {
-  DEFAULT_SKILL_SELECTION,
-  type ChatSkillMode,
-  type ChatSkillSelection,
-  type SkillHint,
-} from "../skills.ts";
+import type { ChatSkillMode } from "@appstrate/db/schema";
+import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
 import type { GetHeaders } from "./runtime-context.ts";
 
 /** Fresh session id, minted client-side (`chs_` shape) — re-exported from the shared module. */
@@ -162,7 +158,7 @@ interface StoredMessage {
 }
 
 /** A conversation as the detail route serves it: history + skill selection. */
-export interface SessionHistory {
+interface SessionHistory {
   messages: UIMessage[];
   skills: ChatSkillSelection;
 }
@@ -193,28 +189,4 @@ export async function loadHistory(
     messages: (body.messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage),
     skills: { skillMode: body.skill_mode, pinnedSkills: body.pinned_skills },
   };
-}
-
-/** The fields read off an `OrgPackageItem` row of the space's skill listing. */
-interface SkillListRow {
-  id: string;
-  name: string;
-  description: string | null;
-  version: string | null;
-}
-
-/** The space's active skills, the ones the picker chooses from. */
-export async function fetchSkills(getHeaders: GetHeaders | null | undefined): Promise<SkillHint[]> {
-  const res = await fetch("/api/packages/skills", {
-    credentials: "include",
-    headers: headers(getHeaders),
-  });
-  if (!res.ok) throw new Error(`Failed to load skills (HTTP ${res.status})`);
-  const body = (await res.json()) as { data: SkillListRow[] };
-  return body.data.map((row) => ({
-    packageId: row.id,
-    display_name: row.name,
-    description: row.description,
-    version: row.version,
-  }));
 }

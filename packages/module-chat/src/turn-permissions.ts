@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ChatSkillMode } from "./skills.ts";
+import type { ChatSkillMode } from "@appstrate/db/schema";
 
 /**
  * The permissions a chat turn acts with: the caller's own, minus `agents:write`

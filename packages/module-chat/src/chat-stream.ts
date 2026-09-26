@@ -36,7 +36,7 @@ import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
 import { turnPermissions } from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 import { chatSkillModeValues } from "@appstrate/db/schema";
-import { packageIdSchema } from "@appstrate/core/validation";
+import { scopedNameRegex } from "@appstrate/core/validation";
 import { DEFAULT_SKILL_SELECTION, MAX_PINNED_SKILLS, type ChatSkillSelection } from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
@@ -153,7 +153,9 @@ export const chatStreamSchema = z
     /** The conversation's skill selection; absent = the one stored on the session. */
     skill_mode: z.enum(chatSkillModeValues).optional(),
     pinned_skills: z
-      .array(packageIdSchema)
+      .array(
+        z.string().regex(scopedNameRegex, { error: "Must be a package id in @scope/name form" }),
+      )
       .max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} chosen skills` })
       .optional(),
   })

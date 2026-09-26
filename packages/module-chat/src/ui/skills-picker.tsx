@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Skill picker: the conversation's skill mode and chosen skills. Local selection
-// seeded once; nothing is written here — the next turn carries it.
+// Skill picker: the conversation's skill mode and chosen skills. Controlled;
+// nothing is written here — the next turn carries the selection.
 
 import { useState } from "react";
+import type { ChatSkillMode } from "@appstrate/db/schema";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpenIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -17,15 +18,10 @@ import {
   TooltipTrigger,
 } from "@appstrate/ui/components/tooltip";
 import { cn } from "@appstrate/ui/cn";
-import {
-  injectsSkills,
-  MAX_PINNED_SKILLS,
-  type ChatSkillMode,
-  type ChatSkillSelection,
-} from "../skills.ts";
-import { skillPickerRows, togglePinned } from "./chat-skills.ts";
+import { injectsSkills, MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
+import { fetchSkills, skillPickerRows, togglePinned } from "./chat-skills.ts";
 import { useChatHost, type GetHeaders } from "./runtime-context.ts";
-import { fetchSkills, spaceIdFromHeaders } from "./sessions.ts";
+import { spaceIdFromHeaders } from "./sessions.ts";
 
 /** Every mode in display order, with its copy; a `Record`, so a new mode must be added here. */
 const MODE_COPY: Record<ChatSkillMode, { label: string; hint: string }> = {
@@ -37,20 +33,20 @@ const MODES = Object.keys(MODE_COPY) as ChatSkillMode[];
 
 interface SkillsPickerProps {
   getHeaders: GetHeaders | undefined;
-  initialSelection: ChatSkillSelection;
-  /** Every change, for the next turn to carry. */
+  selection: ChatSkillSelection;
   onChange: (selection: ChatSkillSelection) => void;
 }
 
-export function SkillsPicker({ getHeaders, initialSelection, onChange }: SkillsPickerProps) {
+export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerProps) {
   const { t, can } = useChatHost();
   const [open, setOpen] = useState(false);
-  const [selection, setSelection] = useState(initialSelection);
-  // Space-scoped: the listing reads `X-Space-Id`, so the key carries the space.
   const spaceId = spaceIdFromHeaders(getHeaders);
   const readable = !!spaceId && can("skills:read");
   const catalogue = useQuery({
-    queryKey: ["chat", "skills", spaceId],
+    // Under the shell's `["packages","skills"]` prefix, so its invalidations on a
+    // skill change reach this entry; `consumer` keeps it a separate cache entry
+    // (a different projection of the same route), and the space scopes it.
+    queryKey: ["packages", "skills", { consumer: "chat" }, spaceId],
     queryFn: () => fetchSkills(getHeaders),
     enabled: readable,
     staleTime: 60_000,
@@ -67,13 +63,8 @@ export function SkillsPicker({ getHeaders, initialSelection, onChange }: SkillsP
   const choosing = injectsSkills(selection.skillMode);
   const inUse = choosing ? pinned.length : 0;
 
-  const apply = (next: ChatSkillSelection) => {
-    setSelection(next);
-    onChange(next);
-  };
-
   const togglePin = (packageId: string) => {
-    apply({ ...selection, pinnedSkills: togglePinned(pinned, packageId) });
+    onChange({ ...selection, pinnedSkills: togglePinned(pinned, packageId) });
   };
 
   return (
@@ -132,7 +123,7 @@ export function SkillsPicker({ getHeaders, initialSelection, onChange }: SkillsP
           value={selection.skillMode}
           onValueChange={(mode) => {
             if (mode !== selection.skillMode) {
-              apply({ ...selection, skillMode: mode as ChatSkillMode });
+              onChange({ ...selection, skillMode: mode as ChatSkillMode });
             }
           }}
           className="mt-2 shrink-0"
