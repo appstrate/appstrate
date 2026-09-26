@@ -1021,6 +1021,7 @@ describe("OAuth client CRUD", () => {
     const [foreign] = await db
       .insert(integrationOauthClients)
       .values({
+        orgId: otherCtx.orgId,
         spaceId: otherCtx.defaultSpaceId,
         integrationId: "@myorg/gmail",
         authKey: "google",

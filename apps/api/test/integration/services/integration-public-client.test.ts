@@ -113,6 +113,7 @@ describe("public OAuth client is declared, not inferred", () => {
     const [row] = await db
       .insert(integrationOauthClients)
       .values({
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION,
         authKey: AUTH_KEY,
@@ -276,7 +277,7 @@ describe("public OAuth client is declared, not inferred", () => {
         clientId: "cid",
         clientSecret: "shh",
       });
-      const rotated = await updateIntegrationOAuthClient(scope, created.id, {
+      const rotated = await updateIntegrationOAuthClient(scope, INTEGRATION, created.id, {
         clientId: "cid",
         redirectUri: "https://example.com/cb",
       });
@@ -292,7 +293,7 @@ describe("public OAuth client is declared, not inferred", () => {
         clientId: "cid",
         clientSecret: "shh",
       });
-      const rotated = await updateIntegrationOAuthClient(scope, created.id, {
+      const rotated = await updateIntegrationOAuthClient(scope, INTEGRATION, created.id, {
         clientId: "cid",
         tokenEndpointAuthMethod: "none",
       });
@@ -311,7 +312,7 @@ describe("public OAuth client is declared, not inferred", () => {
         clientSecret: "shh",
       });
       const before = (await storedRow(created.id)).clientSecretEncrypted;
-      const updated = await updateIntegrationOAuthClient(scope, created.id, {
+      const updated = await updateIntegrationOAuthClient(scope, INTEGRATION, created.id, {
         clientId: "cid",
         tokenEndpointAuthMethod: "client_secret_basic",
       });
@@ -330,7 +331,7 @@ describe("public OAuth client is declared, not inferred", () => {
         tokenEndpointAuthMethod: "none",
       });
       await expect(
-        updateIntegrationOAuthClient(scope, created.id, {
+        updateIntegrationOAuthClient(scope, INTEGRATION, created.id, {
           clientId: "cid",
           tokenEndpointAuthMethod: "client_secret_post",
         }),

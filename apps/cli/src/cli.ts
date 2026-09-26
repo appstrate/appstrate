@@ -1031,7 +1031,7 @@ program
   .description("Upgrade the running appstrate binary in place (curl channel only — issue #249).")
   .option(
     "--release <version>",
-    "Pin a specific release version (default: latest from GitHub Releases).",
+    "Pin a specific release version (default: latest, from the signed channel manifest).",
   )
   .option("-f, --force", "Reinstall even if the current version equals the target.")
   .action(async (opts) => {

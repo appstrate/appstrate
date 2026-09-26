@@ -28,6 +28,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `SKILL.md` is already in context. REST permissions are unchanged. Refusals
   carry the REST status and problem body (403 without `skills:read`, else 404).
 
+- **Integration OAuth clients can be registered once for the whole
+  organization** (#1264). `/api/org-integrations/{scope}/{name}/...` (list,
+  register, rotate, delete, set default; `org-integrations:configure`, owner and
+  admin, session-only) manages org-level clients that every space inherits;
+  connect resolves space > org > system.
+  `POST /api/integrations/{packageId}/oauth-clients/{clientId}/promote`
+  (`integrations:configure` and `org-integrations:configure`) moves a space
+  client to the org without re-entering its secret; its connections keep
+  working. Deleting an org client deletes the connections it minted in every
+  space of the org. Auto-provisioned (DCR/CIMD) clients stay per space.
+  Limitation: a space that had chosen the system client over its own clients
+  inherits the org default once the org flags one.
+
+### Changed
+
+- **BREAKING (API): a space's integration OAuth client routes return and
+  accept only that space's clients and the default it inherits** (#1264).
+  `GET /api/integrations/{packageId}/auths/{authKey}/clients` lists the space's
+  own clients plus the one inherited default (org or system), no other org or
+  system client, and is reachable with `integrations:read` (API keys included).
+  `PUT …/auths/{authKey}/default-client` answers `400` for a system client that
+  is not the inherited default. `PUT`/`DELETE …/oauth-clients/{clientId}` answer
+  `404` when the client does not belong to `{packageId}`.
+  `IntegrationOAuthClient.spaceId` is nullable (`null` = org client), and a
+  client descriptor's `source` gains `"org"`.
+
+- **"latest" now comes from a signed channel manifest, not the GitHub Releases
+  API** (#1271). `appstrate self-update`, the dev CLI's `runner install` /
+  `runner update` daemon download, and `scripts/bootstrap.sh` /
+  `scripts/bootstrap-runner.sh` (when `APPSTRATE_VERSION` is `latest` or left
+  unrendered) read `https://get.appstrate.dev/channels/latest.json`
+  (`{ schema: 1, channel: "latest", tag: "v…" }`) and its `.minisig`, verified
+  against the pinned release key before the body is parsed. No GitHub API call,
+  so no 60 req/h rate limit. Behaviour changes: an unpinned `self-update` now
+  needs minisign even when the CLI is already up to date;
+  `APPSTRATE_SKIP_VERIFY=1` together with `latest` is refused — pin a version;
+  `publish-installer.yml` only moves the root installers and the manifest
+  forward by SemVer, so re-publishing an older release no longer rolls them
+  back.
+
 ### Fixed
 
 - **Runs on an aliased model backed by the OpenCode Go provider no longer fail

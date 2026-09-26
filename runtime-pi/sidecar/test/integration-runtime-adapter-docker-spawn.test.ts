@@ -458,6 +458,13 @@ describe("docker adapter spawn — delivery.files copy", () => {
 });
 
 describe("docker adapter — runner peer attribution (#1458)", () => {
+  /** A peer at `address`; the docker attribution ignores everything else. */
+  const at = (address: string) => ({
+    address,
+    port: 40000,
+    listener: { address: "172.18.0.10", port: 8080 },
+  });
+
   async function withRunId<T>(runId: string | undefined, body: () => Promise<T>): Promise<T> {
     const previous = process.env.RUN_ID;
     if (runId === undefined) delete process.env.RUN_ID;
@@ -493,10 +500,10 @@ describe("docker adapter — runner peer attribution (#1458)", () => {
           b: { Name: "appstrate-agent", IPv4Address: "172.18.0.2/16" },
         };
 
-        const attribute = adapter.peerAttribution()!;
-        expect(await attribute("172.18.0.3")).toBe("@tractr/gmail");
-        expect(await attribute("172.18.0.2")).toBeNull();
-        expect(await attribute("172.18.0.9")).toBeNull();
+        const attribute = adapter.peerAttribution();
+        expect(await attribute(at("172.18.0.3"))).toBe("@tractr/gmail");
+        expect(await attribute(at("172.18.0.2"))).toBeNull();
+        expect(await attribute(at("172.18.0.9"))).toBeNull();
         expect(calls.find((c) => c.args[0] === "network")!.args).toEqual([
           "network",
           "inspect",
@@ -507,12 +514,13 @@ describe("docker adapter — runner peer attribution (#1458)", () => {
     );
   });
 
-  it("cannot attribute peers without a per-run network", async () => {
+  it("attributes no peer to a runner without a per-run network, and inspects nothing", async () => {
     await withRunId(undefined, () =>
-      withFakeDocker(async () => {
+      withFakeDocker(async (calls) => {
         const adapter = dockerAdapter();
         await adapter.prepare("run-peers-2");
-        expect(adapter.peerAttribution()).toBeNull();
+        expect(await adapter.peerAttribution()(at("127.0.0.1"))).toBeNull();
+        expect(calls.some((c) => c.args[0] === "network")).toBe(false);
       }),
     );
   });

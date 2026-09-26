@@ -1,5 +1,5 @@
 {
-  "id": "2dac2219-c5f8-4945-98aa-820f9dd01e70",
+  "id": "77ddf6c1-e197-4c50-9adc-84ec649f201a",
   "prevId": "b3997376-1ed1-4ebc-a2ab-5238850386f8",
   "version": "7",
   "dialect": "postgresql",
@@ -2925,13 +2925,6 @@
           "notNull": true,
           "default": false
         },
-        "chat_enforced": {
-          "name": "chat_enforced",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "enabled": {
           "name": "enabled",
           "type": "boolean",
@@ -5262,11 +5255,17 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "space_id": {
           "name": "space_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "integration_package_id": {
           "name": "integration_package_id",
@@ -5431,23 +5430,87 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_ioc_one_org_default": {
+          "name": "idx_ioc_one_org_default",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "integration_package_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "auth_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"integration_oauth_clients\".\"is_default\" AND \"integration_oauth_clients\".\"space_id\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_integration_oauth_clients_org_lookup": {
+          "name": "idx_integration_oauth_clients_org_lookup",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "integration_package_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "auth_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
-        "integration_oauth_clients_space_id_spaces_id_fk": {
-          "name": "integration_oauth_clients_space_id_spaces_id_fk",
-          "tableFrom": "integration_oauth_clients",
-          "tableTo": "spaces",
-          "columnsFrom": ["space_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "integration_oauth_clients_integration_package_id_packages_id_fk": {
           "name": "integration_oauth_clients_integration_package_id_packages_id_fk",
           "tableFrom": "integration_oauth_clients",
           "tableTo": "packages",
           "columnsFrom": ["integration_package_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "integration_oauth_clients_org_id_organizations_id_fk": {
+          "name": "integration_oauth_clients_org_id_organizations_id_fk",
+          "tableFrom": "integration_oauth_clients",
+          "tableTo": "organizations",
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "integration_oauth_clients_space_id_spaces_id_fk": {
+          "name": "integration_oauth_clients_space_id_spaces_id_fk",
+          "tableFrom": "integration_oauth_clients",
+          "tableTo": "spaces",
+          "columnsFrom": ["space_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -5464,6 +5527,10 @@
         "ioc_public_iff_no_secret": {
           "name": "ioc_public_iff_no_secret",
           "value": "(\"integration_oauth_clients\".\"token_endpoint_auth_method\" = 'none' AND \"integration_oauth_clients\".\"client_secret_encrypted\" = '') OR (\"integration_oauth_clients\".\"token_endpoint_auth_method\" IS DISTINCT FROM 'none' AND \"integration_oauth_clients\".\"client_secret_encrypted\" <> '')"
+        },
+        "ioc_auto_provisioned_is_space": {
+          "name": "ioc_auto_provisioned_is_space",
+          "value": "NOT \"integration_oauth_clients\".\"auto_provisioned\" OR \"integration_oauth_clients\".\"space_id\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false
@@ -8947,6 +9014,20 @@
           "primaryKey": false,
           "notNull": false
         },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
         "skill_mode": {
           "name": "skill_mode",
           "type": "chat_skill_mode",
@@ -8961,20 +9042,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'::text[]"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
         }
       },
       "indexes": {

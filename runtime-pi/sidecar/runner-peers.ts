@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Which runner, if any, a sidecar listener was reached from (#1458), keyed on
- * source IP from `docker network inspect` (a runner has no IP until started):
- * a miss re-reads once, only while a registered runner was never seen.
+ * Which runner, if any, a sidecar listener was reached from (#1458). Each
+ * adapter attributes its own runners; the docker one ({@link createRunnerPeers})
+ * keys on source IP from `docker network inspect` (a runner has no IP until
+ * started): a miss re-reads once, only while a registered runner was never seen.
  */
 
+import type { Peer } from "./helpers.ts";
 import { logger } from "./logger.ts";
 
 /** Runner's integration id; `null` = not a runner, `undefined` = lookup failed (refuse). */
-export type PeerAttribution = (remoteAddress: string) => Promise<string | null | undefined>;
+export type PeerAttribution = (peer: Peer) => Promise<string | null | undefined>;
+
+/** Attribution where no runner can exist (before any adapter is prepared). */
+export const noRunnerPeers: PeerAttribution = async () => null;
 
 export interface RunnerPeers {
   register(containerName: string, integrationId: string): void;
@@ -66,7 +71,7 @@ export function createRunnerPeers(options: {
       runners.set(containerName, integrationId);
       members = null;
     },
-    async integrationOf(ip) {
+    async integrationOf({ address: ip }) {
       if (runners.size === 0) return null;
       const wasCached = members !== null;
       const current = load();
@@ -84,19 +89,19 @@ export function createRunnerPeers(options: {
 
 /** Agent forward-proxy peer rule: refuses runners (they have their own listener) and failed lookups. */
 export async function admitsAgentProxyPeer(
-  attribute: PeerAttribution | null,
-  remoteAddress: string,
+  attribute: PeerAttribution,
+  peer: Peer,
 ): Promise<boolean> {
-  return attribute === null || (await attribute(remoteAddress)) === null;
+  return (await attribute(peer)) === null;
 }
 
-/** Transparent-plane peer check: the policy of the runner at a peer IP, `null` for anyone else. */
+/** Transparent-plane peer check: the policy of the runner a peer belongs to, `null` for anyone else. */
 export function policyForRunnerPeer<P>(
-  peers: RunnerPeers,
+  attribute: PeerAttribution,
   policies: ReadonlyMap<string, P>,
-): (remoteAddress: string) => Promise<P | null> {
-  return async (remoteAddress) => {
-    const integrationId = await peers.integrationOf(remoteAddress);
+): (peer: Peer) => Promise<P | null> {
+  return async (peer) => {
+    const integrationId = await attribute(peer);
     return typeof integrationId === "string" ? (policies.get(integrationId) ?? null) : null;
   };
 }

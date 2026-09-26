@@ -121,6 +121,7 @@ describe("credential-proxy integration-resolver", () => {
     const [oauthClient] = await db
       .insert(integrationOauthClients)
       .values({
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION_ID,
         authKey: "primary",

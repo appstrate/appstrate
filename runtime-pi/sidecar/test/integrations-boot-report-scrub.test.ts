@@ -21,6 +21,7 @@ import { describe, it, expect } from "bun:test";
 import { zipArtifact } from "@appstrate/core/zip";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations, scrubStderrLine } from "../integrations-boot.ts";
+import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import { installPassthroughRunnerExec } from "./helpers/runner-exec.ts";
 
@@ -44,7 +45,7 @@ function localSpec(integrationId: string): IntegrationSpawnSpec {
 
 async function boot(spec: IntegrationSpawnSpec, fetchFn: typeof fetch) {
   const previous = process.env.INTEGRATION_RUNTIME_ADAPTER;
-  process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
+  process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
   // The process adapter refuses to spawn a local runner unless a
   // privilege-drop wrapper is configured (it would otherwise be a same-uid
   // child of the sidecar). The stderr case below needs a real subprocess, so
@@ -115,7 +116,7 @@ describe("boot report — third-party failure text is scrubbed", () => {
 
     const previousTmp = process.env.TMPDIR;
     const previousAdapter = process.env.INTEGRATION_RUNTIME_ADAPTER;
-    process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
+    process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
     // Non-existent, so `prepareRunCa`'s own mkdtemp rejects with a message
     // that quotes the path.
     process.env.TMPDIR = `/nonexistent-Bearer-${SECRET}/`;

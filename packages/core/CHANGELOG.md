@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   space, while the caller holds `chat:write` there, and serves a draft only at
   the `lockVersion` injected (409 `injected_draft_changed` once it moved).
 
+- **`org-integrations:configure`** (`@appstrate/core/permissions`, #1264) — a new
+  org-level core resource: managing the org-wide integration OAuth clients (and the
+  org-tier default among them) that every space inherits. The org half of
+  `integrations:configure`, which now covers per-space clients and defaults only.
+  Session-only like it: the platform grants it to `owner` and `admin` and never to
+  an API key.
+
 ### Changed
 
 - **`RunOrchestrator.initialize()` may be called again after it rejects**

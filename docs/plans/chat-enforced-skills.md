@@ -10,7 +10,7 @@ the placement row, so the activation rule stays the only rule.
 ## Storage
 
 `space_packages.chat_enforced boolean NOT NULL DEFAULT false` (migration
-`0075`). It is meaningful for skills only. Like every placement setting, it
+`0076`). It is meaningful for skills only. Like every placement setting, it
 survives deactivation: a switched-off skill keeps its flag, is not injected, and
 comes back enforced when switched on again. It shows up on the wire as
 `SpacePackage.chat_enforced` and on the library placement.

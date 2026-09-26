@@ -19,6 +19,7 @@
 import { describe, it, expect } from "bun:test";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations } from "../integrations-boot.ts";
+import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 
 const INTEGRATION_ID = "@tractr/local-integration";
 const SERVER_ID = "@tractr/local-server";
@@ -47,7 +48,7 @@ async function boot(spec: IntegrationSpawnSpec) {
   }) as unknown as typeof fetch;
 
   const previous = process.env.INTEGRATION_RUNTIME_ADAPTER;
-  process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
+  process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
   try {
     const result = await bootIntegrations(
       [spec],

@@ -37,6 +37,7 @@ import { createSpaFallbackHandler } from "./routes/spa.ts";
 import { staticCacheControl } from "./lib/static-cache.ts";
 import healthRouter, { bootGate, markServerReady } from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
+import { createOrgIntegrationsRouter } from "./routes/org-integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
 import { createLlmProxyRouter, createRunLlmProxyRouter } from "./routes/llm-proxy.ts";
 import { LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT } from "@appstrate/runner-pi";
@@ -372,6 +373,7 @@ app.route("/api/library", createLibraryRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
 app.route("/api/integrations", createIntegrationsRouter());
+app.route("/api/org-integrations", createOrgIntegrationsRouter());
 app.route("/api/credential-proxy", createCredentialProxyRouter());
 app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
 

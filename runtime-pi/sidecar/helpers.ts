@@ -372,20 +372,52 @@ export { matchesAuthorizedUri, stripUserInfoAndFragment } from "@appstrate/afps-
 /** Deadline for an egress listener's pre-splice phase; the relay's idle timeout governs after. */
 export const PREAMBLE_TIMEOUT_MS = 10_000;
 
-export type PeerCheck = (remoteAddress: string) => Promise<boolean>;
+/** One end of a TCP connection, IPv4-mapped addresses unwrapped. */
+export interface Endpoint {
+  address: string;
+  port: number;
+}
+
+/** Who connected to a listener (its address and source port), and the listener end it reached. */
+export interface Peer extends Endpoint {
+  listener: Endpoint;
+}
+
+export type PeerCheck = (peer: Peer) => Promise<boolean>;
 
 /** TCP-level half of the egress policy — all a blind tunnel can check. */
 export type AuthorityPolicy = Pick<EgressPolicy, "allowsAuthority">;
 
-/** The socket's peer IP (IPv4-mapped `::ffff:a.b.c.d` unwrapped), or undefined once detached. */
-export function peerAddress(socket: Socket): string | undefined {
-  const address = socket.remoteAddress;
+/** `address` with an IPv4-mapped `::ffff:a.b.c.d` unwrapped. */
+function unwrapIpv4Mapped(address: string | undefined): string | undefined {
   if (!address) return undefined;
   return /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address)?.[1] ?? address;
 }
 
-/** Resolve the peer gate for `socket`; an unknown address or a failing check refuses. */
-export async function peerAdmitted(socket: Socket, isPeerAllowed: PeerCheck): Promise<boolean> {
+/** The socket's peer IP (IPv4-mapped unwrapped), or undefined once detached. */
+export function peerAddress(socket: Socket): string | undefined {
+  return unwrapIpv4Mapped(socket.remoteAddress);
+}
+
+/** The socket's {@link Peer}, or undefined once detached (any of the four ends unknown). */
+export function socketPeer(socket: Socket): Peer | undefined {
   const address = peerAddress(socket);
-  return address !== undefined && (await isPeerAllowed(address).catch(() => false));
+  const port = socket.remotePort;
+  const listenerAddress = unwrapIpv4Mapped(socket.localAddress);
+  const listenerPort = socket.localPort;
+  if (
+    address === undefined ||
+    port === undefined ||
+    listenerAddress === undefined ||
+    listenerPort === undefined
+  ) {
+    return undefined;
+  }
+  return { address, port, listener: { address: listenerAddress, port: listenerPort } };
+}
+
+/** Resolve the peer gate for `socket`; an unknown peer or a failing check refuses. */
+export async function peerAdmitted(socket: Socket, isPeerAllowed: PeerCheck): Promise<boolean> {
+  const peer = socketPeer(socket);
+  return peer !== undefined && (await isPeerAllowed(peer).catch(() => false));
 }

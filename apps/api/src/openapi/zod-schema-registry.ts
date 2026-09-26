@@ -631,6 +631,24 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     jsonSchema: toJsonSchema(setDefaultClientSchema),
     description: "Select the default OAuth client for an integration auth",
   },
+  {
+    method: "POST",
+    path: "/api/org-integrations/{scope}/{name}/auths/{authKey}/oauth-clients",
+    jsonSchema: toJsonSchema(oauthClientCreateSchema),
+    description: "Register an org-level integration OAuth client",
+  },
+  {
+    method: "PUT",
+    path: "/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}",
+    jsonSchema: toJsonSchema(oauthClientUpdateSchema),
+    description: "Rotate an org-level integration OAuth client",
+  },
+  {
+    method: "PUT",
+    path: "/api/org-integrations/{scope}/{name}/auths/{authKey}/default-client",
+    jsonSchema: toJsonSchema(setDefaultClientSchema),
+    description: "Select the org-level default OAuth client for an integration auth",
+  },
 
   // ─── Member integration pins (routes/me.ts) ─────────────────────────────
   {

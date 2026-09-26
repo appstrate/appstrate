@@ -414,6 +414,13 @@ const config: KnipConfig = {
         "src/modules/firecracker/guest/supervisor.ts",
         "src/modules/firecracker/runner/daemon.ts",
         "src/modules/firecracker/scripts/dev/smoke.ts",
+        // The smoke's #1547 guest probe programs: `smoke-runner-egress.ts`
+        // reads each off disk by path and bundles it (`Bun.build`) into the
+        // guest — a runner's `server.js`, the agent's `bun -e` argument — so
+        // no import edge reaches them. Their shared `helpers.js` is reached
+        // through their own imports.
+        "src/modules/firecracker/scripts/dev/runner-egress-probes/runner.js",
+        "src/modules/firecracker/scripts/dev/runner-egress-probes/agent.js",
       ],
       /**
        * Same dynamic `MODULES` load: declared so the workspace resolves, but

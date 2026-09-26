@@ -21,6 +21,7 @@ import {
   buildCaEnvBlock,
   type IntegrationRuntimeAdapter,
 } from "../integration-runtime-adapter.ts";
+import { noRunnerPeers } from "../runner-peers.ts";
 
 function fakeAdapter(id: string): IntegrationRuntimeAdapter {
   return {
@@ -31,7 +32,7 @@ function fakeAdapter(id: string): IntegrationRuntimeAdapter {
     async spawn() {
       throw new Error("not spawned in this test");
     },
-    peerAttribution: () => null,
+    peerAttribution: () => noRunnerPeers,
     async shutdown() {},
   };
 }

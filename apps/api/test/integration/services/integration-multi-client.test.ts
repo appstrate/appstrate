@@ -83,6 +83,7 @@ describe("integration multi-client", () => {
     const [row] = await db
       .insert(integrationOauthClients)
       .values({
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION,
         authKey: AUTH_KEY,
@@ -474,7 +475,7 @@ describe("integration multi-client", () => {
 
     function customClient(isDefault: boolean): ResolvedOAuthConnect {
       return {
-        customClients: [
+        spaceClients: [
           {
             id: "11111111-1111-4111-8111-111111111111",
             spaceId: ctx.defaultSpaceId,
@@ -491,6 +492,7 @@ describe("integration multi-client", () => {
             updatedAt: "2026-01-01T00:00:00.000Z",
           },
         ],
+        orgClients: [],
       };
     }
 
@@ -532,11 +534,11 @@ describe("integration multi-client", () => {
     });
 
     /** Build a ResolvedOAuthConnect carrying N custom clients. */
-    function customClients(
+    function spaceClients(
       specs: Array<{ id: string; clientId: string; isDefault: boolean }>,
     ): ResolvedOAuthConnect {
       return {
-        customClients: specs.map((s) => ({
+        spaceClients: specs.map((s) => ({
           id: s.id,
           spaceId: ctx.defaultSpaceId,
           integration_package_id: INTEGRATION,
@@ -551,6 +553,7 @@ describe("integration multi-client", () => {
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
         })),
+        orgClients: [],
       };
     }
 
@@ -560,7 +563,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         LOCAL_MANIFEST,
         OAUTH2_AUTH,
-        customClients([
+        spaceClients([
           { id: "11111111-1111-4111-8111-111111111111", clientId: "a", isDefault: false },
           { id: "22222222-2222-4222-8222-222222222222", clientId: "b", isDefault: true },
         ]),
@@ -590,6 +593,7 @@ describe("integration multi-client", () => {
     it("rejects a second auto-provisioned client for the same auth (one-auto)", async () => {
       async function seedAuto(clientId: string): Promise<void> {
         await db.insert(integrationOauthClients).values({
+          orgId: ctx.orgId,
           spaceId: ctx.defaultSpaceId,
           integrationId: INTEGRATION,
           authKey: AUTH_KEY,

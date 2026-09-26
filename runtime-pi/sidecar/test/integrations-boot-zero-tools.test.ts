@@ -20,6 +20,7 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { ApiCallToolDeps } from "../mcp.ts";
 import { TokenBudget } from "../token-budget.ts";
 import { bootIntegrations } from "../integrations-boot.ts";
+import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 
 const INTEGRATION_ID = "@quiz-room/google-business-profile";
 
@@ -117,7 +118,7 @@ function healthySpec(): IntegrationSpawnSpec {
 
 async function boot(spec: IntegrationSpawnSpec) {
   const previousAdapter = process.env.INTEGRATION_RUNTIME_ADAPTER;
-  process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
+  process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
   try {
     return await bootIntegrations(
       [spec],

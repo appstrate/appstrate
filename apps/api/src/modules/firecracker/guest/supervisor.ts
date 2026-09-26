@@ -7,9 +7,9 @@
  * Responsibilities, in order:
  *
  *   1. Read the launch spec from the read-only config drive (/config).
- *   2. Apply the in-guest firewall that isolates the agent's egress from
- *      the sidecar's — the microVM-internal counterpart of the Docker
- *      credential-isolation boundary.
+ *   2. Apply the in-guest firewall that confines the agent's and the
+ *      integration runners' egress to the sidecar — the microVM-internal
+ *      counterpart of the Docker credential-isolation boundary.
  *   3. Launch the sidecar (uid 1000) and the agent (uid 1001) as separate
  *      unprivileged users, so the agent cannot read the sidecar's
  *      environment (credentials) via /proc.
@@ -29,11 +29,16 @@ import { constants as osConstants } from "node:os";
 // Wire contract shared with the host-side producer (vm-config.ts's
 // buildGuestConfig). Type-only: erased by `bun build`.
 import type { GuestConfig } from "./guest-config.ts";
-import { buildGuestFirewallScript, GUEST_SIDECAR_UID, MMDS_IPV4_ADDRESS } from "./firewall.ts";
+import {
+  buildGuestFirewallScript,
+  GUEST_RUNNER_UIDS,
+  GUEST_SIDECAR_UID,
+  MMDS_IPV4_ADDRESS,
+} from "./firewall.ts";
 
 const GUEST_AGENT_USER = "pi"; // uid 1001, baked into the rootfs
 const SIDECAR_BIN = "/usr/local/bin/sidecar";
-/** setuid(1002) wrapper the sidecar uses to spawn integration runners. */
+/** Setuid wrapper the sidecar uses to spawn each integration runner under its own pool uid. */
 const RUNNER_EXEC_WRAPPER = "/usr/local/bin/appstrate-runner-exec";
 /** The image's ENTRYPOINT: the launcher hands the secrets to the entrypoint over stdin. */
 const AGENT_ARGV = [
@@ -118,20 +123,29 @@ interface Child {
  * `harden` additionally sets no_new_privs and empties the capability
  * bounding set — the agent must never regain privileges through a setuid
  * exec. The sidecar is NOT hardened: it legitimately execs the setuid
- * runner wrapper to drop its integration runners to uid 1002.
+ * runner wrapper to drop each integration runner to its own pool uid.
+ *
+ * `ambientCaps` keeps capabilities across the uid change: setpriv sets
+ * PR_SET_KEEPCAPS itself, raises them in the inheritable then the ambient
+ * set, and the kernel carries ambient caps over the (non-setuid) exec.
  */
 function spawnAs(
   uidOrUser: string,
   argv: string[],
   env: Record<string, string>,
   cwd: string,
-  opts: { harden: boolean } = { harden: true },
+  opts: { harden: boolean; ambientCaps?: string[] } = { harden: true },
 ): Child {
   const isNumeric = /^\d+$/.test(uidOrUser);
   const privArgs = isNumeric
     ? ["--reuid", uidOrUser, "--regid", uidOrUser, "--clear-groups"]
     : ["--reuid", uidOrUser, "--regid", uidOrUser, "--init-groups"];
   if (opts.harden) privArgs.push("--no-new-privs", "--bounding-set", "-all");
+  if (opts.ambientCaps?.length) {
+    // setpriv takes a comma list with a sign on each entry: +a,+b.
+    const caps = opts.ambientCaps.map((cap) => `+${cap}`).join(",");
+    privArgs.push("--inh-caps", caps, "--ambient-caps", caps);
+  }
   const proc: ChildProcess = spawn("setpriv", [...privArgs, "--", ...argv], {
     cwd,
     // The platform-built env maps don't carry PATH; inherit the guest's
@@ -261,12 +275,28 @@ async function main(): Promise<void> {
   const sidecar = spawnAs(
     GUEST_SIDECAR_UID,
     [SIDECAR_BIN],
-    // The wrapper path rides the env (not the adapter's own config): the
-    // process adapter is shared with host process-mode, where runners
-    // stay plain children of the sidecar.
-    { ...cfg.sidecar.env, APPSTRATE_RUNNER_EXEC: RUNNER_EXEC_WRAPPER },
+    // The wrapper path and the runner uid pool ride the env (not the
+    // adapter's own config): the process adapter is shared with host
+    // process-mode, where runners stay plain children of the sidecar.
+    {
+      ...cfg.sidecar.env,
+      APPSTRATE_RUNNER_EXEC: RUNNER_EXEC_WRAPPER,
+      APPSTRATE_RUNNER_UIDS: GUEST_RUNNER_UIDS,
+    },
     "/tmp",
-    { harden: false },
+    // net_bind_service: the runners' transparent plane (DNS responder on
+    // 127.0.0.1:53, SNI/Host splicers on :443/:80) sits on low ports only the
+    // sidecar may hold, so neither the agent nor a runner can squat them.
+    // kill: lets the sidecar SIGTERM/SIGKILL a runner process on its pool uid
+    // at teardown, which uid 1000 could not otherwise signal. It does not reach
+    // descendants the runner forked; their uid stays attributed to the same
+    // integration until the run ends, so they gain nothing. Both only widen
+    // the guest's most trusted workload (it holds every credential). The
+    // runners never hold either: the kernel clears the ambient set on the exec
+    // of the setuid wrapper, whose setuid to the pool uid clears permitted and
+    // effective (inheritable may keep the bits — inert under no_new_privs, no
+    // file caps).
+    { harden: false, ambientCaps: ["net_bind_service", "kill"] },
   );
   log(`sidecar pid ${sidecar.pid}`);
 

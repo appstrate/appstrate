@@ -11,7 +11,7 @@
  * long-lived (bun:sqlite state survives across separate tool calls) and that it
  * genuinely runs on Bun (system_info).
  *
- * Runs under `INTEGRATION_RUNTIME_ADAPTER=process`: bun servers spawn as host
+ * Runs on the process adapter (its hermetic test registration): bun servers spawn as host
  * subprocesses via the process adapter (`HOST_INTERPRETER_BY_TYPE["bun"]`), no
  * Docker. The spec is built directly (server-only: no api_call deps, no MITM) so
  * the test needs neither a platform DB nor openssl.
@@ -25,6 +25,7 @@ import { validateManifest } from "@appstrate/core/validation";
 import { mcpServerManifestSchema } from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations } from "../integrations-boot.ts";
+import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 import { installPassthroughRunnerExec } from "./helpers/runner-exec.ts";
 
 const FIXTURE_DIR = path.join(import.meta.dir, "fixtures/bun-toolkit");
@@ -89,7 +90,7 @@ async function call(
 describe("@appstrate/bun-toolkit — complex bun integration (e2e)", () => {
   it("boots as a bun subprocess (process mode) and exercises Bun-native tools", async () => {
     const prevAdapter = process.env.INTEGRATION_RUNTIME_ADAPTER;
-    process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
+    process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
     // The process adapter refuses a local runner it cannot drop privilege
     // for; this e2e wants the real bun subprocess, so it supplies the
     // wrapper the Firecracker guest supervisor supplies in production.

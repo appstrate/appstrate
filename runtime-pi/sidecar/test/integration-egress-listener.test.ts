@@ -314,8 +314,8 @@ describe("integration-egress-listener (#543)", () => {
     const peers: string[] = [];
     let policyConsulted = false;
     const { handle, events } = await makeListener({
-      isPeerAllowed: async (ip) => {
-        peers.push(ip);
+      isPeerAllowed: async ({ address }) => {
+        peers.push(address);
         return false;
       },
       egressPolicy: {

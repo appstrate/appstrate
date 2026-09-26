@@ -124,8 +124,12 @@ export interface IntegrationRuntimeAdapter {
   prepare(runId: string): Promise<RuntimeAdapterRunContext>;
   /** Spawn one integration MCP server. Returns the JSON-RPC transport. */
   spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration>;
-  /** Runner attribution of listener peers, valid after `prepare()`; `null` = allow-all. */
-  peerAttribution(): PeerAttribution | null;
+  /**
+   * Which of this adapter's runners a listener peer is, valid after `prepare()`:
+   * the per-integration listeners admit only their own runner, the transparent
+   * plane serves that runner's policy, the agent's forward proxy refuses runners.
+   */
+  peerAttribution(): PeerAttribution;
   /** Tear down everything spawned through this adapter. Must be idempotent. */
   shutdown(): Promise<void>;
 }

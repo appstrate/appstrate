@@ -56,7 +56,7 @@ import type { CredentialBundle } from "@appstrate/connect/connect";
 
 import { McpHost } from "./mcp-host.ts";
 import { logger } from "./logger.ts";
-import type { HostResolver } from "./helpers.ts";
+import type { HostResolver, PeerCheck } from "./helpers.ts";
 import { createOpensslCertGenerator } from "./ca-cert-openssl.ts";
 import { createCertMinter, type CertMinter } from "./integration-cert-minter.ts";
 import {
@@ -829,9 +829,7 @@ async function spawnAndConnectLocalIntegration(params: {
   let egressCtx: RuntimeEgressContext | null = null;
   const policy = compileEgressPolicy(spec.egress ?? { authorizedUris: [], allowAllUris: false });
   const attribute = adapter.peerAttribution();
-  const isPeerAllowed = attribute
-    ? async (ip: string) => (await attribute(ip)) === spec.integrationId
-    : async () => true;
+  const isPeerAllowed: PeerCheck = async (peer) => (await attribute(peer)) === spec.integrationId;
   // The MITM listener is mounted only when this integration wants MITM, a CA
   // came up, AND the caller hoisted a source. When mounted, the shared
   // `source` is what the connect-login hook drives — surfaced back to the

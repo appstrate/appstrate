@@ -322,8 +322,8 @@ describe("peer gate", () => {
     echo.server.on("connection", () => upstreamConnections++);
     const peers: string[] = [];
     const proxy = makeProxy({
-      isPeerAllowed: async (ip) => {
-        peers.push(ip);
+      isPeerAllowed: async ({ address }) => {
+        peers.push(address);
         return false;
       },
     });

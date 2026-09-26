@@ -1,12 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
+import type { Peer } from "../helpers.ts";
 import {
   admitsAgentProxyPeer,
   createRunnerPeers,
+  noRunnerPeers,
   policyForRunnerPeer,
   type PeerAttribution,
 } from "../runner-peers.ts";
+
+/** A peer at `address`; the docker attribution ignores everything else. */
+const at = (address: string): Peer => ({
+  address,
+  port: 40000,
+  listener: { address: "172.18.0.10", port: 8080 },
+});
 
 /** `docker network inspect` stdout for a network with these `name → ip` members. */
 function inspectOutput(members: Record<string, string>): string {
@@ -38,16 +47,16 @@ describe("createRunnerPeers", () => {
     const { inspect } = fakeInspect({ "runner-a": "172.18.0.3", agent: "172.18.0.2" });
     const peers = createRunnerPeers({ network: NETWORK, inspect });
     peers.register("runner-a", "@tractr/a");
-    expect(await peers.integrationOf("172.18.0.3")).toBe("@tractr/a");
-    expect(await peers.integrationOf("172.18.0.2")).toBeNull();
-    expect(await peers.integrationOf("172.18.0.99")).toBeNull();
+    expect(await peers.integrationOf(at("172.18.0.3"))).toBe("@tractr/a");
+    expect(await peers.integrationOf(at("172.18.0.2"))).toBeNull();
+    expect(await peers.integrationOf(at("172.18.0.99"))).toBeNull();
   });
 
   it("answers null without an inspect while no runner is registered", async () => {
     const { state, inspect } = fakeInspect({ agent: "172.18.0.2" });
     state.fail = true;
     const peers = createRunnerPeers({ network: NETWORK, inspect });
-    expect(await peers.integrationOf("172.18.0.2")).toBeNull();
+    expect(await peers.integrationOf(at("172.18.0.2"))).toBeNull();
     expect(state.calls).toBe(0);
   });
 
@@ -56,11 +65,11 @@ describe("createRunnerPeers", () => {
     const peers = createRunnerPeers({ network: NETWORK, inspect });
     peers.register("runner-a", "@tractr/a");
     await Promise.all([
-      peers.integrationOf("172.18.0.3"),
-      peers.integrationOf("172.18.0.2"),
-      peers.integrationOf("172.18.0.3"),
+      peers.integrationOf(at("172.18.0.3")),
+      peers.integrationOf(at("172.18.0.2")),
+      peers.integrationOf(at("172.18.0.3")),
     ]);
-    await peers.integrationOf("172.18.0.2");
+    await peers.integrationOf(at("172.18.0.2"));
     expect(state.calls).toBe(1);
   });
 
@@ -68,11 +77,11 @@ describe("createRunnerPeers", () => {
     const { state, inspect } = fakeInspect({ agent: "172.18.0.2", "runner-a": "172.18.0.3" });
     const peers = createRunnerPeers({ network: NETWORK, inspect });
     peers.register("runner-a", "@tractr/a");
-    expect(await peers.integrationOf("172.18.0.2")).toBeNull();
+    expect(await peers.integrationOf(at("172.18.0.2"))).toBeNull();
     // The register drops the cached table: the next lookup sees the new runner.
     state.members = { ...state.members, "runner-b": "172.18.0.4" };
     peers.register("runner-b", "@tractr/b");
-    expect(await peers.integrationOf("172.18.0.4")).toBe("@tractr/b");
+    expect(await peers.integrationOf(at("172.18.0.4"))).toBe("@tractr/b");
     expect(state.calls).toBe(2);
   });
 
@@ -81,14 +90,14 @@ describe("createRunnerPeers", () => {
     const peers = createRunnerPeers({ network: NETWORK, inspect });
     peers.register("runner-c", "@tractr/c");
     // Registered before `docker start`: not a member yet, so each miss re-reads.
-    expect(await peers.integrationOf("172.18.0.5")).toBeNull();
-    expect(await peers.integrationOf("172.18.0.5")).toBeNull();
+    expect(await peers.integrationOf(at("172.18.0.5"))).toBeNull();
+    expect(await peers.integrationOf(at("172.18.0.5"))).toBeNull();
     expect(state.calls).toBe(2);
     state.members = { agent: "172.18.0.2", "runner-c": "172.18.0.5" };
-    expect(await peers.integrationOf("172.18.0.5")).toBe("@tractr/c");
+    expect(await peers.integrationOf(at("172.18.0.5"))).toBe("@tractr/c");
     expect(state.calls).toBe(3);
     // Every runner seen: the next miss is answered from the cache.
-    expect(await peers.integrationOf("172.18.0.9")).toBeNull();
+    expect(await peers.integrationOf(at("172.18.0.9"))).toBeNull();
     expect(state.calls).toBe(3);
   });
 
@@ -98,14 +107,14 @@ describe("createRunnerPeers", () => {
     peers.register("runner-a", "@tractr/a");
     peers.register("runner-b", "@tractr/b");
     state.members = { "runner-b": "172.18.0.4", agent: "172.18.0.2" };
-    expect(await peers.integrationOf("172.18.0.4")).toBe("@tractr/b");
+    expect(await peers.integrationOf(at("172.18.0.4"))).toBe("@tractr/b");
     // runner-a was never seen: a miss re-reads, and now sees it.
     state.members = { "runner-a": "172.18.0.3", "runner-b": "172.18.0.4" };
-    expect(await peers.integrationOf("172.18.0.3")).toBe("@tractr/a");
+    expect(await peers.integrationOf(at("172.18.0.3"))).toBe("@tractr/a");
     expect(state.calls).toBe(2);
     // runner-a exits: it was seen, so strangers no longer trigger re-reads.
     state.members = { "runner-b": "172.18.0.4" };
-    for (let i = 0; i < 5; i++) expect(await peers.integrationOf("10.9.9.9")).toBeNull();
+    for (let i = 0; i < 5; i++) expect(await peers.integrationOf(at("10.9.9.9"))).toBeNull();
     expect(state.calls).toBe(2);
   });
 
@@ -114,16 +123,16 @@ describe("createRunnerPeers", () => {
     const peers = createRunnerPeers({ network: NETWORK, inspect });
     peers.register("runner-a", "@tractr/a");
     state.fail = true;
-    expect(await peers.integrationOf("172.18.0.3")).toBeUndefined();
-    expect(await peers.integrationOf("172.18.0.2")).toBeUndefined();
+    expect(await peers.integrationOf(at("172.18.0.3"))).toBeUndefined();
+    expect(await peers.integrationOf(at("172.18.0.2"))).toBeUndefined();
     state.fail = false;
-    expect(await peers.integrationOf("172.18.0.3")).toBe("@tractr/a");
+    expect(await peers.integrationOf(at("172.18.0.3"))).toBe("@tractr/a");
   });
 
   it("fails closed on unparseable inspect output", async () => {
     const peers = createRunnerPeers({ network: NETWORK, inspect: async () => "not json" });
     peers.register("runner-a", "@tractr/a");
-    expect(await peers.integrationOf("172.18.0.3")).toBeUndefined();
+    expect(await peers.integrationOf(at("172.18.0.3"))).toBeUndefined();
   });
 });
 
@@ -138,12 +147,12 @@ describe("policyForRunnerPeer", () => {
     peers.register("runner-a", "@tractr/a");
     peers.register("runner-b", "@tractr/b");
     const policyA = { allowsAuthority: () => true };
-    const policyFor = policyForRunnerPeer(peers, new Map([["@tractr/a", policyA]]));
-    expect(await policyFor("172.18.0.3")).toBe(policyA);
+    const policyFor = policyForRunnerPeer(peers.integrationOf, new Map([["@tractr/a", policyA]]));
+    expect(await policyFor(at("172.18.0.3"))).toBe(policyA);
     // A runner without a transparent-plane policy, the agent, a stranger.
-    expect(await policyFor("172.18.0.4")).toBeNull();
-    expect(await policyFor("172.18.0.2")).toBeNull();
-    expect(await policyFor("10.9.9.9")).toBeNull();
+    expect(await policyFor(at("172.18.0.4"))).toBeNull();
+    expect(await policyFor(at("172.18.0.2"))).toBeNull();
+    expect(await policyFor(at("10.9.9.9"))).toBeNull();
   });
 });
 
@@ -153,10 +162,10 @@ describe("admitsAgentProxyPeer", () => {
     async () =>
       result;
 
-  it("admits non-runners (or no attribution yet); refuses runners and failed lookups", async () => {
-    expect(await admitsAgentProxyPeer(null, "172.18.0.3")).toBe(true);
-    expect(await admitsAgentProxyPeer(attributing(null), "172.18.0.2")).toBe(true);
-    expect(await admitsAgentProxyPeer(attributing("@tractr/a"), "172.18.0.3")).toBe(false);
-    expect(await admitsAgentProxyPeer(attributing(undefined), "172.18.0.2")).toBe(false);
+  it("admits non-runners; refuses runners and failed lookups", async () => {
+    expect(await admitsAgentProxyPeer(noRunnerPeers, at("172.18.0.3"))).toBe(true);
+    expect(await admitsAgentProxyPeer(attributing(null), at("172.18.0.2"))).toBe(true);
+    expect(await admitsAgentProxyPeer(attributing("@tractr/a"), at("172.18.0.3"))).toBe(false);
+    expect(await admitsAgentProxyPeer(attributing(undefined), at("172.18.0.2"))).toBe(false);
   });
 });
