@@ -66,8 +66,8 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #     the `pi-sdk.ts` barrel)             the real backing, so pi-ai keeps deriving
 #                                         every vendor quirk itself: the five
 #                                         `./api/*` subpaths an alias can be backed
-#                                         by, plus its registry (`./providers/all`,
-#                                         via `@appstrate/runner-pi/pi-model`).
+#                                         by, its registry (`./providers/all`) and
+#                                         the root's `normalizeContext`.
 #   - @appstrate/runner-pi/runtime-tools      canonical run_history / recall_memory
 #                                             descriptors (name + description +
 #                                             parameter JSON Schema), imported by

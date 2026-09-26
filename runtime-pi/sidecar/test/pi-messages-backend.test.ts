@@ -20,6 +20,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 // barrel guard, and asking pi-ai's OWN classifier is the point — a copy of its
 // regex here would pass forever after the upstream one changed.
 import { isRetryableAssistantError } from "@earendil-works/pi-ai";
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
 import type { ModelSwap } from "../helpers.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
@@ -128,7 +129,10 @@ const BACKINGS: Backing[] = [
 const CONTEXT_WINDOW = 200_000;
 const MAX_TOKENS = 32_768;
 
-/** The platform proxy's auth — the only headers the re-originated call may carry. */
+/**
+ * The platform proxy's auth: the handler itself adds no other header. pi-ai's
+ * provider layer may add its own (OpenCode's session header).
+ */
 const PROXY_HEADERS = { authorization: "Bearer run-token" };
 
 function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessagesBackendDeps {
@@ -162,7 +166,10 @@ function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessage
  * dispatcher with `onPayload`, so what is captured is what the production path
  * would have sent — not a re-implementation of it.
  */
-async function originatedPayload(backing: Backing): Promise<Record<string, unknown>> {
+async function originatedPayload(
+  backing: Backing,
+  body = CLIENT_BODY,
+): Promise<Record<string, unknown>> {
   let payload: unknown;
   const capture: BackingStreamFn = (model, context, options) =>
     streamBacking(model, context, {
@@ -177,7 +184,7 @@ async function originatedPayload(backing: Backing): Promise<Record<string, unkno
   const res = handlePiMessagesRequest(
     depsFor(backing, capture),
     new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
-    CLIENT_BODY,
+    body,
   );
   await res.text();
   expect(payload).toBeDefined();
@@ -269,6 +276,25 @@ describe("re-originated request shape", () => {
   it("sends the REAL model id upstream, never the alias", async () => {
     const payload = await originatedPayload(BACKINGS[0]!);
     expect(payload["model"]).toBe("deepseek-chat");
+  });
+
+  // The container sends a normalized transcript (system prompt inside `messages`),
+  // not the legacy `systemPrompt` field the fixtures above use.
+  it("forwards the wire transcript's system prompt exactly once", async () => {
+    const prompt = "You are the wire-shaped system prompt.";
+    const payload = await originatedPayload(
+      BACKINGS[0]!,
+      JSON.stringify({
+        model: "appstrate-medium",
+        context: {
+          messages: [
+            { role: "system", content: prompt, timestamp: 0 },
+            { role: "user", content: "hi", timestamp: 0 },
+          ],
+        },
+      }),
+    );
+    expect(JSON.stringify(payload).split(prompt)).toHaveLength(2);
   });
 });
 
@@ -1266,19 +1292,6 @@ describe("handlePiMessagesRequest", () => {
  */
 describe("transient upstream failures", () => {
   /**
-   * Bun's `typeof fetch` carries a static `preconnect` beside the call
-   * signature; forward the real one so a stub is a faithful drop-in.
-   */
-  function asFetch(
-    fn: (
-      input: Parameters<typeof fetch>[0],
-      init: Parameters<typeof fetch>[1],
-    ) => Promise<Response>,
-  ): typeof fetch {
-    return Object.assign(fn, { preconnect: fetch.preconnect });
-  }
-
-  /**
    * Answer `statuses` in order (repeating the last), recording each call.
    * `retry-after-ms: 1` keeps a real backoff sleep sub-millisecond.
    */
@@ -1607,6 +1620,93 @@ describe("pi-ai version drift", () => {
     expect(forwarded).toEqual({ modelHeaders: undefined, optionHeaders: PROXY_HEADERS });
   });
 });
+
+/**
+ * Quirks pi-ai applies at its PROVIDER layer, not in the per-API serializer:
+ * OpenCode answers 400 `MissingSessionID` without `x-opencode-session` (#1583).
+ * Read off the request that reached the socket, so the whole dispatch counts.
+ */
+describe("provider-layer quirks", () => {
+  /**
+   * Every request the handler sends upstream, then — with `reference` — the one
+   * pi-ai's own `Models` dispatch sends for the SAME model, context and options,
+   * through the same redirecting transport.
+   */
+  async function upstreamRequests(
+    backing: Backing,
+    sessionId?: string,
+    reference = false,
+  ): Promise<Request[]> {
+    const requests: Request[] = [];
+    const fetchImpl = asFetch(async (input, init) => {
+      requests.push(
+        input instanceof Request ? new Request(input, init) : new Request(String(input), init),
+      );
+      return new Response("{}", { status: 400, headers: { "content-type": "application/json" } });
+    });
+    let call: Parameters<BackingStreamFn> | undefined;
+    const capture: BackingStreamFn = (...args) => {
+      call = args;
+      return streamBacking(...args);
+    };
+    const res = handlePiMessagesRequest(
+      { ...depsFor(backing, capture), fetchImpl },
+      new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
+      JSON.stringify({ model: "appstrate-medium", context: CONTEXT, options: { sessionId } }),
+    );
+    await res.text();
+    expect(requests).toHaveLength(1);
+    if (reference) {
+      const [model, context, options] = call!;
+      // The handler's signal is spent once its stream ends; the transport is not.
+      await builtinModels()
+        .streamSimple(model, context, { ...options, signal: undefined })
+        .result();
+      expect(requests).toHaveLength(2);
+    }
+    return requests;
+  }
+
+  it("sends the container's session id as `x-opencode-session` to an OpenCode backing", async () => {
+    const [request] = await upstreamRequests(
+      BACKINGS.find((b) => b.name === "opencode-go")!,
+      "session-1583",
+    );
+    expect(request!.headers.get("x-opencode-session")).toBe("session-1583");
+  });
+
+  for (const backing of BACKINGS) {
+    it(`sends ${backing.name} the request pi-ai's own dispatch sends`, async () => {
+      const [sidecar, direct] = await upstreamRequests(backing, "session-1583", true);
+      expect(sidecar!.url).toBe(direct!.url);
+      expect(Object.fromEntries(sidecar!.headers)).toEqual(Object.fromEntries(direct!.headers));
+    });
+  }
+
+  // A gateway's derived `model.provider` is `openai`, a Responses-only provider:
+  // without the catalog guard its dispatch would send completions to `/responses`.
+  it("keeps a single-API provider from taking a shape its catalog lacks", async () => {
+    const gateway: Backing = {
+      name: "openai-compatible gateway",
+      providerId: null,
+      apiShape: "openai-completions",
+      modelId: "house-model",
+      baseUrl: "https://llm.gateway.test/v1",
+    };
+    const [request] = await upstreamRequests(gateway);
+    expect(new URL(request!.url).pathname).toBe("/internal/llm-proxy/x/chat/completions");
+  });
+});
+
+/**
+ * Bun's `typeof fetch` carries a static `preconnect` beside the call
+ * signature; forward the real one so a stub is a faithful drop-in.
+ */
+function asFetch(
+  fn: (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => Promise<Response>,
+): typeof fetch {
+  return Object.assign(fn, { preconnect: fetch.preconnect });
+}
 
 /**
  * A stand-in for pi-ai's `AssistantMessageEventStream` that replays a fixed
