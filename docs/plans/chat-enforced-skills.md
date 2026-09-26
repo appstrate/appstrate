@@ -1,187 +1,127 @@
 # Space-enforced skills in the chat
 
-Implements issue #1586. Follows #1494 (`docs/plans/chat-skills.md`).
+Implements issue #1586. Builds on #1494 (`docs/plans/chat-skills.md`).
 
-## Goal
+A space imposes skills on every chat conversation held in it: each is injected
+in full on every turn, whatever the skill mode and the member's `skills:*`
+grants, and cannot be removed from the composer. Enforcement is a property of
+the placement row, so the activation rule stays the only rule.
 
-A space imposes skills on every chat conversation held in it: injected in full
-in every turn, whatever the skill mode, whatever the member's `skills:*`
-grants, not removable from the composer. Enforcement is a property of the
-placement row, so the activation rule stays the one rule.
+## Storage
 
-## Decisions
+`space_packages.chat_enforced boolean NOT NULL DEFAULT false` (migration
+`0075`). It is meaningful for skills only. Like every placement setting, it
+survives deactivation: a switched-off skill keeps its flag, is not injected, and
+comes back enforced when switched on again. It shows up on the wire as
+`SpacePackage.chat_enforced` and on the library placement.
 
-| Question                                | Decision                                                                 |
-| --------------------------------------- | ------------------------------------------------------------------------ |
-| Where                                   | `space_packages.chat_enforced`, skills only                              |
-| Gate                                    | the PATCH's `configure` gate = `skills:write` in the space               |
-| Content                                 | latest published version (`latest` dist-tag), never the draft            |
-| Authority                               | platform, not the caller: a new `PlatformServices` entry                 |
-| Load failure                            | the turn is refused (503), before anything is persisted                  |
-| Cap                                     | `MAX_ENFORCED_SKILLS = 3`, total within `SKILLS_CONTENT_BUDGET_CHARS`    |
-| Precedence                              | enforced first, then chosen; a pin naming an enforced skill is dropped   |
-| Names for members without `skills:read` | visible, through a chat-module read                                      |
-| Audit                                   | `package.chat_enforced` / `package.chat_released`, on actual change only |
+## Enforcing: `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}`
 
-## Steps
+`chat_enforced: boolean` in the body.
 
-Each step is one commit, green on its own (`bun run check` + the tests it
-touches).
+- **Gate:** the route's single `configure` gate, which for a skill is
+  `skills:write` in the space. It runs before the body is parsed.
+- **Refusals:**
 
-### 1. Schema — migration `0075`
+  | Status | Code                           | When                                                                                               |
+  | ------ | ------------------------------ | -------------------------------------------------------------------------------------------------- |
+  | 400    | `chat_enforced_not_skill`      | the package is not a skill                                                                         |
+  | 404    | `not_found`                    | the package is not placed in the space                                                             |
+  | 409    | `no_published_version`         | the skill has no `latest` published version                                                        |
+  | 409    | `enforced_skills_limit`        | more than `MAX_ENFORCED_CHAT_SKILLS` (3) flagged rows in the space, deactivated ones included      |
+  | 409    | `enforced_skills_budget`       | the flagged skills' published `SKILL.md` bodies exceed `CHAT_SKILLS_CONTENT_BUDGET_CHARS` (64 000) |
+  | 422    | `version_artifact_unavailable` | the skill's own published archive cannot be read                                                   |
 
-- `packages/db/src/schema/packages.ts`: `chatEnforced: boolean("chat_enforced").notNull().default(false)`
-  on `spacePackages`, with a comment: skills only, read by the chat with
-  platform authority, kept across deactivation like every placement setting.
-- `bun run db:generate` → `packages/db/drizzle/0075_space_packages_chat_enforced.sql`
-  - snapshot; `packages/db/schema-catalog.txt` gains one line.
-- No data rewrite: the default is the current behaviour.
+- **Setting `true`:** runs in one transaction under the advisory lock
+  `space-chat-enforced:<spaceId>` (`withChatEnforcementLock`). The flag is
+  written first, then checked (`assertChatEnforceable`); a refusal rolls the
+  whole patch back, and two concurrent enforcements cannot both pass the cap.
+- **Setting `false`:** a plain write, with no lock and no check.
+- **Audit:** `package.chat_enforced` / `package.chat_released`
+  (`resourceType: "package"`, `after: { spaceId }`), written only when the
+  stored value actually changed.
 
-### 2. Shared constants and the core contract
+Both constants live in `@appstrate/core/chat-contract`, so the PATCH and the
+chat agree on them.
 
-- `packages/core/src/chat-contract.ts`:
-  - `CHAT_SKILLS_CONTENT_BUDGET_CHARS = 64_000` and `MAX_ENFORCED_CHAT_SKILLS = 3`
-    — moved here because the API's PATCH and the chat module must agree on
-    them; `module-chat/src/skills.ts` re-imports instead of defining.
-  - `interface EnforcedChatSkill { packageId; displayName; version: string | null; content: string | null }`
-    — `content: null` = enforced but no published version readable now
-    (deleted, unreadable archive): the chat renders a notice.
-- `packages/core/src/module.ts` `PlatformServices`:
-  `loadEnforcedChatSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkill[]>`,
-  documented: platform authority, active ∧ enforced, sorted by id, latest
-  published, throws on failure (the caller refuses the turn).
-- `packages/core/CHANGELOG.md` `[Unreleased]` entry; update
-  `packages/core/test/export-surface.test.ts` expectations if the new exports
-  are listed there.
+## Reading: `loadEnforcedChatSkills`
 
-### 3. API — the service
+`ctx.services.loadEnforcedChatSkills(orgId, spaceId)` is implemented in
+`apps/api/src/services/chat-enforced-skills.ts` and runs with platform authority.
 
-- New `apps/api/src/services/chat-enforced-skills.ts`:
-  - `listEnforcedSkillIds(scope)`: `packages` ⟕ `spacePackages` (+ shares, via
-    `placementRowJoin` / `placementShareJoin`) where `type = 'skill'`,
-    `chatEnforced`, `orgOrSystemFilter`, `notEphemeralFilter`,
-    `activeHereSql(spaceId)`, ordered by id. Reuse `activePackagesFilter` if it
-    can be exported from `space-packages.ts` instead of restating it.
-  - `loadEnforcedChatSkills(orgId, spaceId)`: ids above, then per id
-    `getVersionDetail(id, "latest")` + `requirePublishedArchive("skill", …)` +
-    `decodeSkillMarkdown` — the path `loadPublishedDefinition`
-    (`routes/packages.ts:895`) already runs. Extract that projection into a
-    service function both call rather than importing from a route file.
-  - `enforcedSkillsContentLength(orgId, spaceId, tx)` for the PATCH checks.
-- `apps/api/src/lib/modules/registry.ts` `buildPlatformServices`: wire
-  `loadEnforcedChatSkills`.
+- It returns the space's **active** skills whose placement is flagged, ordered
+  by id.
+- Each comes as `EnforcedChatSkill { packageId, name, version, content }` at its
+  `latest` published version, never the draft.
+- A skill with nothing published, or whose archive is unreadable, comes back
+  with `content: null`. The turn then renders a notice ("required by this space
+  but not available here") instead of the skill.
+- Any other failure rejects. The chat module's deps wrapper
+  (`buildChatPlatformDeps`) turns that rejection into a
+  **503 `enforced_skills_unavailable`**.
 
-### 4. API — the PATCH
+## The turn
 
-`apps/api/src/routes/spaces.ts`:
+`handleChatStream` starts the read at the beginning of phase B, in parallel with
+the session upsert, keyed on the space the router entered. The result is joined
+with the caller-context block. A 503 refuses the turn after the admission gate,
+but before the model binding, capacity, the user message, the active-stream
+marker and the MCP session.
 
-- `updatePackageSchema`: `chat_enforced: z.boolean().optional()`.
-- After `gateSpacePackageWrite(…, "configure")` (which already returns the
-  type): `chat_enforced` on a non-skill → 400 `chat_enforce_not_skill`.
-- `chat_enforced: true` on a row not yet enforced: one transaction, advisory
-  lock `space-chat-enforced:${spaceId}` (same shape as `withPackageDraftLock`),
-  then in order:
-  - `latest` absent → 409 `no_published_version`;
-  - enforced count ≥ `MAX_ENFORCED_CHAT_SKILLS` → 409 `enforced_skills_limit`;
-  - current enforced total + this skill's latest `SKILL.md` >
-    `CHAT_SKILLS_CONTENT_BUDGET_CHARS` → 409 `enforced_skills_budget`;
-  - write the flag in the same transaction. `updateSpacePackage` takes an
-    optional `tx`.
-- `false`: plain write, no lock.
-- Audit via `recordAuditFromContext`, only when the stored value changed:
-  `package.chat_enforced` / `package.chat_released`, `resourceType: "package"`,
-  `after: { spaceId }`.
-- `spacePackageSelect` (`services/space-packages.ts:527`) projects
-  `chat_enforced`; so do `listSpacePackages` and `getSpacePackage`.
-- `services/package-library.ts` placement wire object (≈ l. 243) carries
-  `chat_enforced`.
-- OpenAPI: `SpacePackage` (`openapi/schemas.ts:340`), the PATCH body
-  (`openapi/paths/spaces.ts:549`), the library placement
-  (`openapi/schemas.ts:2354`), the new 400/409 codes. `bun run openapi:baseline`.
+`## Skills` is rendered by `formatSkillsSection`, which the context block
+appends on every path. The enforced skills survive both degradations of
+`/api/me/context`: the identity-only block on a 400, and the section alone on
+any other failure. The section appears whenever the space enforces skills,
+whatever `readsSkills`. Its order:
 
-### 5. Chat module — reading and the prompt
+1. the strict note, if the mode is `strict`;
+2. the enforced lead line and one `<skill id version>` block per enforced skill,
+   in id order;
+3. the `auto` listing, minus the enforced ids, only when `readsSkills`;
+4. the chosen lead line and blocks;
+5. the notices.
 
-- `platform-services.ts`: `ChatPlatformDeps.loadEnforcedSkills`, captured from
-  `ctx.services`.
-- `chat-stream.ts`: start `deps.loadEnforcedSkills(orgId, spaceId)` in phase B,
-  in parallel with the caller context, NOT inside `buildCallerContextBlock`
-  (whose 400 fallback and `""` degradation would drop it). A rejection →
-  problem response 503 `enforced_skills_unavailable`, raised before the user
-  message is persisted and before the MCP session opens.
-- `skills.ts` `resolveChatSkills(selection, contents, enforced)`:
-  - enforced first, spending the budget; `content: null` or over budget →
-    notice ("required by this space but not available / does not fit");
-  - chosen pins minus enforced ids, then as today;
-  - `MAX_PINNED_SKILLS` unchanged, enforced do not count.
-- `prompt.ts`:
-  - Extract the `## Skills` rendering out of `formatCallerContext` into
-    `formatSkillsSection(...)`, appended by the caller whether or not the
-    context block rendered — the only way the enforced skills survive the
-    identity-only fallback and the `""` degradation.
-  - New `SKILLS_ENFORCED_LEAD`: required by this space in every conversation;
-    win over chosen skills on conflict; only `SKILL.md` is provided, sibling
-    files are not reachable unless `getSkill` is on the turn.
-  - Section rendered when there are enforced skills, whatever `readsSkills`.
-  - `auto` catalogue: drop enforced ids.
-  - `SKILLS_STRICT_NOTE`: name the enforced skills as part of the limit; the
-    user lifts only their own restriction, not the space's.
-  - Byte stability: enforced sorted by id, same `skillBlock` format
-    (`<skill id version>`).
-- New read route in `routes.ts`: `GET /api/chat/enforced-skills` (space from
-  the router's entry, gated `chat:write`), answering
-  `{ data: [{ id, name, version }] }` — names only, from the same service
-  (`content` stripped). OpenAPI in `module-chat/src/openapi.ts`.
+- **Budget and dedupe:** enforced skills spend the shared budget first. A pin
+  naming an enforced skill is dropped without a notice. Enforced skills do not
+  count toward `MAX_PINNED_SKILLS`.
+- **Lead line:** the enforced skills win over a chosen skill on conflict, and
+  only `SKILL.md` is provided.
+- **Strict mode:** the note says the conversation is limited to the space's
+  skills plus the user's, and that the user lifts only their own restriction.
+  `turnPermissions` is unchanged: `strict` still strips every `skills:*`.
+- **Cache:** nothing in the section varies per turn. The prompt stays
+  byte-identical for a given session state. Enforcing, releasing or publishing a
+  new version costs each active session in the space one cache miss.
 
-`turnPermissions` does not change: `strict` still strips `skills:*`.
+## `GET /api/chat/enforced-skills`
 
-### 6. UI
+Answers the names for the space the router entered:
+`{ object: "list", data: [{ id, name, version }] }`. It never returns content,
+because a member without `skills:read` may call it.
 
-- `apps/web/src/components/package-library.tsx`: on a skill row placed in the
-  space, a switch "Imposer dans le chat" next to the activation checkbox
-  (≈ l. 456). Enabled when published and the caller holds `skills:write` in
-  the space; turning it on opens a confirmation stating the disclosure
-  ("le contenu du skill sera visible par tous les membres qui discutent dans
-  cet espace, quels que soient leurs droits sur les skills"). 409 codes mapped
-  to French messages. i18n keys flat (`web-i18n` convention).
-- `packages/module-chat/src/ui/skills-picker.tsx`: query
-  `["chat","enforced-skills",spaceId]`; enforced rows first, checked,
-  disabled, badge "Imposé par l'espace"; excluded from the choosable rows and
-  from the pin cap.
-- When the picker is not mounted (`canPinSkills` false), a read-only indicator
-  in the composer lists the enforced names. Mounted on `chat:write` alone.
+It is gated `chat:write`, like the turn, and rate-limited at 120/min. A load
+failure answers the same 503.
 
-### 7. Tests
+## UI
 
-- Unit (`module-chat/test`): `resolveChatSkills` — enforced first, budget
-  shared, pin/enforced dedupe, `content: null` notice; prompt — section present
-  without `readsSkills`, `auto` does not list enforced, strict note, byte
-  stability across two renders, section survives the identity-only fallback.
-- Integration (`apps/api/test`, label `integration`):
-  - PATCH: 403 without `skills:write`, 404 unplaced, 400 non-skill, 409 draft
-    only, 409 cap, 409 budget, concurrent enforcements (two parallel PATCH at
-    cap − 1 → one 409), audit written once on change and not on a repeat.
-  - Service: draft edited after publish → published content served; skill
-    deactivated → absent; re-activated → present; published versions deleted
-    → `content: null`.
-  - Chat turn: member with `chat:write` only → enforced `SKILL.md` in the
-    system prompt; `strict` token without `skills:*`; service throws → 503 and
-    no message persisted.
-- e2e (`e2e/tests/chat/skills.ui.spec.ts`): library toggle with confirmation;
-  picker shows the locked row.
-
-### 8. Docs
-
-- `docs/plans/chat-skills.md`: a "Space-enforced skills" section in the model
-  table (the enforced column spans all three modes).
-- This file rewritten to describe the delivered state before merge.
-
-## Risks
-
-- **Cache**: every enforce/release/publish costs each active session in the
-  space one miss — accepted, stated in the issue.
-- **TTFT**: one more read in phase B, in parallel; one indexed query plus one
-  archive read per enforced skill (≤ 3). Measure against the phase-B timing
-  already logged.
-- **Core surface**: the new `PlatformServices` member is a contract change for
-  out-of-tree module hosts that build `PlatformServices` themselves (none
-  known); CHANGELOG under `[Unreleased]`, shipped with the next core release.
+- **Library** (`apps/web/src/components/package-library.tsx`): on a skill row of
+  the space, an "Imposé dans le chat" checkbox.
+  - Turning it on needs `skills:write` in the space (no personal-space
+    exemption), the skill active there, and a published version: the library
+    package row carries `published`, and the box is disabled with a hint
+    ("Publiez une version du skill d'abord") when it is false. Turning it off
+    needs `skills:write` only, so a flag kept on a switched-off or unpublished
+    skill can still be released.
+  - Turning it on opens a confirmation that discloses the effect: the published
+    `SKILL.md` becomes visible to every member who chats in the space. Turning
+    it off asks for nothing.
+  - A version deleted between the read and the click still gets the server's
+    409 `no_published_version`. Each 409 has a French message.
+- **Picker** (`packages/module-chat/src/ui/skills-picker.tsx`): it reads
+  `["chat","enforced-skills",spaceId]`.
+  - Enforced rows come first, checked and disabled, with the badge "Imposée par
+    l'espace".
+  - They are excluded from the choosable rows and from the pin cap.
+- **Read-only indicator:** a member with `chat:write` but no picker (no
+  `skills:read`) sees the enforced names in the composer
+  (`EnforcedSkillsIndicator`).

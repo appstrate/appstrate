@@ -39,8 +39,8 @@ the turn's. In parallel:
   the content — by construction the definition any other reader gets (the
   draft when writable, else the latest published version).
 
-The injected `SKILL.md`s share one budget, `SKILLS_CONTENT_BUDGET_CHARS`
-(64 000), spent in stored order: what weighs on the context is the sum, so one
+The injected `SKILL.md`s share one budget, `CHAT_SKILLS_CONTENT_BUDGET_CHARS`
+(64 000, `@appstrate/core/chat-contract`), spent in stored order: what weighs on the context is the sum, so one
 long skill passes while the whole fits. A chosen skill that is not active, whose
 read fails, or that does not fit what is left renders one notice line instead.
 At most `MAX_PINNED_SKILLS` (5) chosen skills: every one is in every turn.
@@ -66,6 +66,16 @@ The system prompt is ONE `cache_control` block: what renders there is
 byte-identical across turns for the same session state (the chosen skills are
 stored sorted, no clocks, no counters). Changing the mode or the chosen skills, or editing a chosen skill,
 may miss the cache once.
+
+## Space-enforced skills
+
+A space can impose skills on every conversation held in it (#1586,
+`docs/plans/chat-enforced-skills.md`). They sit above the three modes: injected
+in full in `auto`, `manual` and `strict` alike, before the chosen skills and out
+of the shared budget first, read with the platform's authority rather than the
+caller's, so no `skills:*` grant is needed. `strict` is unchanged: its turn
+still holds no `skills:*`, and its note names the space's skills as part of the
+restriction the user cannot lift.
 
 ## Per-conversation choice
 
@@ -124,6 +134,7 @@ detail, and sends only what the user changed.
   leaves them out, and `strict` has no tool to read them.
 - A `/skill` mention that loads a body into one message (#1309 open question
   5): `manual` covers it; propose it on its own if usage asks.
-- Per-space default skills or mode inherited by new sessions.
+- Per-space default mode inherited by new sessions (per-space skills: see
+  "Space-enforced skills" above).
 - A dedicated `load_skill` MCP tool — measure `getSkill` first.
 - `resolved_skill_versions` on runs and `dependency_overrides` (#1165).
