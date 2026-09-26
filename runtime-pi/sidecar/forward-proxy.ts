@@ -44,7 +44,7 @@ interface ForwardProxyDeps {
 
 export interface ForwardProxyResult {
   server: HttpServer;
-  ready: Promise<void>; // resolves when the port is bound
+  ready: Promise<void>; // resolves when the port is bound, rejects if it cannot be (EADDRINUSE)
   readySync: boolean; // synchronous check
   address: () => { port: number; host: string };
 }
@@ -399,8 +399,12 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   });
 
   let readySyncFlag = false;
-  const readyPromise = new Promise<void>((resolve) => {
+  const readyPromise = new Promise<void>((resolve, reject) => {
+    // A listen failure is a proxy that never comes up: reject, so the caller
+    // can stop instead of serving the agent with nothing on its HTTP_PROXY.
+    server.once("error", reject);
     server.listen(listenPort, listenHost, () => {
+      server.off("error", reject);
       readySyncFlag = true;
       resolve();
     });

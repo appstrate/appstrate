@@ -215,6 +215,15 @@ const proxy = createForwardProxy({
   listenPort: env.forwardProxyPort,
   isPeerAllowed: (ip) => admitsAgentProxyPeer(peerAttribution, ip),
 });
+// The platform notices a sidecar that EXITS (#1561), not one alive without its
+// proxy — whose port another process may then be holding for the agent's traffic.
+proxy.ready.catch((err: unknown) => {
+  logger.error("Forward proxy could not bind, exiting", {
+    port: env.forwardProxyPort,
+    error: err instanceof Error ? err.message : String(err),
+  });
+  process.exit(1);
+});
 // One cache per sidecar process — a sidecar serves a single run, so
 // cross-run pollution is impossible.
 const oauthTokenCache = new OAuthTokenCache({
