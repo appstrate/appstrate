@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `/api/org-integrations/*` — org-level integration OAuth clients (#1264):
- * inherited by every space of the org, overridden by a space's own client.
+ * HTTP surface of org-level integration OAuth clients (#1264):
+ * `/api/org-integrations/*` and the space-tier promote route. The resolution
+ * cascade itself is covered by `test/integration/services/integration-org-clients.test.ts`.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -10,20 +11,16 @@ import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import {
-  addOrgMember,
   authHeaders,
   createTestContext,
-  createTestUser,
+  memberContext,
   orgOnlyHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedApiKey, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { auditEvents, integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import {
-  initSystemIntegrations,
-  __resetSystemIntegrationsForTest,
-} from "../../../src/services/integration-client-registry.ts";
+import { __resetSystemIntegrationsForTest } from "../../../src/services/integration-client-registry.ts";
 
 const app = getTestApp();
 
@@ -94,7 +91,6 @@ interface Descriptor {
   source: string;
   client_id: string;
   is_default: boolean;
-  default_selectable: boolean;
 }
 
 const ORG_BASE = "/api/org-integrations/@myorg/gmail";
@@ -103,12 +99,14 @@ const SPACE_BASE = "/api/integrations/@myorg/gmail";
 describe("/api/org-integrations — org-level OAuth clients", () => {
   let ctx: TestContext;
   let json: Record<string, string>;
+  let spaceJson: Record<string, string>;
 
   beforeEach(async () => {
     await truncateAll();
     __resetSystemIntegrationsForTest();
     ctx = await createTestContext({ orgSlug: "myorg" });
     json = orgOnlyHeaders(ctx, { "Content-Type": "application/json" });
+    spaceJson = authHeaders(ctx, { "Content-Type": "application/json" });
     await seedIntegration(ctx.orgId, oauthManifest("@myorg/gmail"));
   });
 
@@ -129,7 +127,7 @@ describe("/api/org-integrations — org-level OAuth clients", () => {
   async function createSpaceClient(clientId: string): Promise<string> {
     const res = await app.request(`${SPACE_BASE}/auths/google/oauth-clients`, {
       method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      headers: spaceJson,
       body: JSON.stringify({ client_id: clientId, client_secret: "s3cret" }),
     });
     expect(res.status).toBe(201);
@@ -144,78 +142,62 @@ describe("/api/org-integrations — org-level OAuth clients", () => {
 
   const listOrg = () => list(`${ORG_BASE}/auths/google/clients`, orgOnlyHeaders(ctx));
   const listSpace = () => list(`${SPACE_BASE}/auths/google/clients`, authHeaders(ctx));
+  const promote = (clientId: string, headers: Record<string, string> = authHeaders(ctx)) =>
+    app.request(`${SPACE_BASE}/oauth-clients/${clientId}/promote`, { method: "POST", headers });
 
-  it("registers, lists, rotates and deletes an org client", async () => {
-    const id = await createOrgClient("org-app");
-
+  it("registers, lists, sets the default, rotates and deletes org clients", async () => {
+    const a = await createOrgClient("org-a");
+    const b = await createOrgClient("org-b");
     expect(await listOrg()).toEqual([
       expect.objectContaining({
-        client_ref: id,
+        client_ref: a,
         source: "org",
-        client_id: "org-app",
+        client_id: "org-a",
         is_default: true,
-        default_selectable: true,
+      }),
+      expect.objectContaining({
+        client_ref: b,
+        source: "org",
+        client_id: "org-b",
+        is_default: false,
       }),
     ]);
 
-    const rotated = await app.request(`${ORG_BASE}/oauth-clients/${id}`, {
+    const setDefault = await app.request(`${ORG_BASE}/auths/google/default-client`, {
       method: "PUT",
       headers: json,
-      body: JSON.stringify({ client_id: "org-app-2" }),
+      body: JSON.stringify({ client_ref: b }),
+    });
+    expect(setDefault.status).toBe(200);
+    const relisted = ((await setDefault.json()) as { data: Descriptor[] }).data;
+    expect(relisted.filter((c) => c.is_default).map((c) => c.client_ref)).toEqual([b]);
+
+    const rotated = await app.request(`${ORG_BASE}/oauth-clients/${a}`, {
+      method: "PUT",
+      headers: json,
+      body: JSON.stringify({ client_id: "org-a-2" }),
     });
     expect(rotated.status).toBe(200);
-    expect(((await rotated.json()) as { client_id: string }).client_id).toBe("org-app-2");
+    expect(((await rotated.json()) as { client_id: string }).client_id).toBe("org-a-2");
 
-    const deleted = await app.request(`${ORG_BASE}/oauth-clients/${id}`, {
+    const deleted = await app.request(`${ORG_BASE}/oauth-clients/${a}`, {
       method: "DELETE",
       headers: orgOnlyHeaders(ctx),
     });
     expect(deleted.status).toBe(204);
-    expect(await listOrg()).toEqual([]);
-  });
+    expect((await listOrg()).map((c) => c.client_ref)).toEqual([b]);
 
-  it("sets the org default among org clients, then falls back to the system client", async () => {
-    initSystemIntegrations([
-      {
-        id: "@myorg/gmail",
-        clients: [
-          { id: "gmail-system", auth_key: "google", client_id: "sys", client_secret: "sys-s" },
-        ],
-      },
-    ]);
-    await createOrgClient("a");
-    const b = await createOrgClient("b");
-    const setDefault = (ref: string) =>
-      app.request(`${ORG_BASE}/auths/google/default-client`, {
-        method: "PUT",
-        headers: json,
-        body: JSON.stringify({ client_ref: ref }),
-      });
-
-    const res = await setDefault(b);
-    expect(res.status).toBe(200);
-    const clients = ((await res.json()) as { data: Descriptor[] }).data;
-    expect(clients.filter((c) => c.is_default).map((c) => c.client_ref)).toEqual([b]);
-    expect(clients.every((c) => c.default_selectable)).toBe(true);
-
-    expect((await setDefault("gmail-system")).status).toBe(200);
-    expect((await listOrg()).find((c) => c.is_default)?.client_ref).toBe("gmail-system");
-    const flagged = await db
-      .select({ id: integrationOauthClients.id })
-      .from(integrationOauthClients)
-      .where(eq(integrationOauthClients.isDefault, true));
-    expect(flagged).toHaveLength(0);
-  });
-
-  it("refuses a space client as the org default (400)", async () => {
-    await createOrgClient("org-app");
-    const spaceClient = await createSpaceClient("space-app");
-    const res = await app.request(`${ORG_BASE}/auths/google/default-client`, {
-      method: "PUT",
-      headers: json,
-      body: JSON.stringify({ client_ref: spaceClient }),
-    });
-    expect(res.status).toBe(400);
+    const [audit] = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.orgId, ctx.orgId),
+          eq(auditEvents.action, "integration.oauth_client.deleted"),
+        ),
+      );
+    expect(audit?.spaceId).toBeNull();
+    expect(audit?.after).toMatchObject({ deletedConnections: 0 });
   });
 
   it("keeps the tiers apart on the by-id routes (404 both ways)", async () => {
@@ -230,13 +212,12 @@ describe("/api/org-integrations — org-level OAuth clients", () => {
 
     const viaSpace = await app.request(`${SPACE_BASE}/oauth-clients/${orgClient}`, {
       method: "PUT",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      headers: spaceJson,
       body: JSON.stringify({ client_id: "hijack" }),
     });
     expect(viaSpace.status).toBe(404);
 
-    const rows = await db.select().from(integrationOauthClients);
-    expect(rows).toHaveLength(2);
+    expect(await db.select().from(integrationOauthClients)).toHaveLength(2);
   });
 
   it("404s an integration of another org and a non-UUID client id", async () => {
@@ -280,9 +261,8 @@ describe("/api/org-integrations — org-level OAuth clients", () => {
   });
 
   it("forbids a member session (403)", async () => {
-    const member = await createTestUser({ email: "member@myorg.test" });
-    await addOrgMember(ctx.orgId, member.id, "member");
-    const headers = { Cookie: member.cookie, "X-Org-Id": ctx.orgId };
+    const member = await memberContext(ctx, "member");
+    const headers = orgOnlyHeaders(member);
 
     const listed = await app.request(`${ORG_BASE}/auths/google/clients`, { headers });
     expect(listed.status).toBe(403);
@@ -321,64 +301,16 @@ describe("/api/org-integrations — org-level OAuth clients", () => {
     expect(await db.select().from(integrationOauthClients)).toHaveLength(1);
   });
 
-  it("deleting an org client deletes its connections in every space of the org", async () => {
-    const orgClient = await createOrgClient("org-app");
-    const spaceClient = await createSpaceClient("space-app");
-    const second = await seedSpace({ orgId: ctx.orgId, name: "Second" });
-    const conn = (spaceId: string, accountId: string, clientRef: string) => ({
-      integrationId: "@myorg/gmail",
-      authKey: "google",
-      accountId,
-      spaceId,
-      userId: ctx.user.id,
-      credentialsEncrypted: "enc",
-      clientRef,
-    });
-    await db
-      .insert(integrationConnections)
-      .values([
-        conn(ctx.defaultSpaceId, "a@x.test", orgClient),
-        conn(second.id, "b@x.test", orgClient),
-        conn(ctx.defaultSpaceId, "c@x.test", spaceClient),
-      ]);
-
-    const res = await app.request(`${ORG_BASE}/oauth-clients/${orgClient}`, {
-      method: "DELETE",
-      headers: orgOnlyHeaders(ctx),
-    });
-    expect(res.status).toBe(204);
-
-    const left = await db.select().from(integrationConnections);
-    expect(left.map((c) => c.clientRef)).toEqual([spaceClient]);
-
-    const [audit] = await db
-      .select()
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.orgId, ctx.orgId),
-          eq(auditEvents.action, "integration.oauth_client.deleted"),
-        ),
-      );
-    expect(audit?.spaceId).toBeNull();
-    expect(audit?.after).toMatchObject({ deletedConnections: 2 });
-  });
-
-  it("a space with no client of its own inherits the org client, and connect uses it", async () => {
+  it("a space with no client of its own lists and connects with the org client", async () => {
     const orgClient = await createOrgClient("org-app");
 
     expect(await listSpace()).toEqual([
-      expect.objectContaining({
-        client_ref: orgClient,
-        source: "org",
-        is_default: true,
-        default_selectable: true,
-      }),
+      expect.objectContaining({ client_ref: orgClient, source: "org", is_default: true }),
     ]);
 
     const res = await app.request(`${SPACE_BASE}/auths/google/connect/oauth2`, {
       method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      headers: spaceJson,
       body: "{}",
     });
     expect(res.status).toBe(200);
@@ -386,25 +318,98 @@ describe("/api/org-integrations — org-level OAuth clients", () => {
     expect(url.searchParams.get("client_id")).toBe("org-app");
   });
 
-  it("a space client overrides the org client; the org client stays selectable as inherited default", async () => {
-    const orgClient = await createOrgClient("org-app");
-    const spaceClient = await createSpaceClient("space-app");
+  describe("POST /api/integrations/{packageId}/oauth-clients/{clientId}/promote", () => {
+    it("moves a space client to the org; its connections stay listed", async () => {
+      const client = await createSpaceClient("space-app");
+      await db.insert(integrationConnections).values({
+        integrationId: "@myorg/gmail",
+        authKey: "google",
+        accountId: "a@x.test",
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        credentialsEncrypted: "enc",
+        clientRef: client,
+      });
 
-    const clients = await listSpace();
-    expect(clients.find((c) => c.is_default)?.client_ref).toBe(spaceClient);
-    expect(clients.find((c) => c.client_ref === orgClient)).toMatchObject({
-      source: "org",
-      is_default: false,
-      default_selectable: true,
+      const res = await promote(client);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ id: client, spaceId: null, client_id: "space-app" });
+
+      const [row] = await db
+        .select()
+        .from(integrationOauthClients)
+        .where(eq(integrationOauthClients.id, client));
+      expect(row).toMatchObject({ spaceId: null, isDefault: true });
+      expect(await listSpace()).toEqual([
+        expect.objectContaining({ client_ref: client, source: "org", is_default: true }),
+      ]);
+
+      const conns = await app.request(`${SPACE_BASE}/connections`, { headers: authHeaders(ctx) });
+      expect(conns.status).toBe(200);
+      expect(((await conns.json()) as { data: { client_ref: string }[] }).data).toEqual([
+        expect.objectContaining({ client_ref: client, needs_reconnection: false }),
+      ]);
+
+      const [audit] = await db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.action, "integration.oauth_client.promoted"));
+      expect(audit?.resourceId).toBe(`@myorg/gmail#google#${client}`);
     });
 
-    const res = await app.request(`${SPACE_BASE}/auths/google/default-client`, {
-      method: "PUT",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_ref: orgClient }),
+    it("403s a space admin who lacks org-integrations:configure", async () => {
+      const client = await createSpaceClient("space-app");
+      const spaceAdmin = await memberContext(ctx, "member", "admin");
+
+      expect((await promote(client, authHeaders(spaceAdmin))).status).toBe(403);
+      const [row] = await db
+        .select()
+        .from(integrationOauthClients)
+        .where(eq(integrationOauthClients.id, client));
+      expect(row?.spaceId).toBe(ctx.defaultSpaceId);
     });
-    expect(res.status).toBe(200);
-    const after = ((await res.json()) as { data: Descriptor[] }).data;
-    expect(after.find((c) => c.is_default)?.client_ref).toBe(orgClient);
+
+    it("404s a client of another space, an org client and a non-UUID id", async () => {
+      const second = await seedSpace({ orgId: ctx.orgId, name: "Second" });
+      const [foreign] = await db
+        .insert(integrationOauthClients)
+        .values({
+          orgId: ctx.orgId,
+          spaceId: second.id,
+          integrationId: "@myorg/gmail",
+          authKey: "google",
+          clientId: "second-app",
+          clientSecretEncrypted: "enc",
+        })
+        .returning({ id: integrationOauthClients.id });
+      const orgClient = await createOrgClient("org-app");
+
+      expect((await promote(foreign!.id)).status).toBe(404);
+      expect((await promote(orgClient)).status).toBe(404);
+      expect((await promote("not-a-uuid")).status).toBe(404);
+    });
+
+    it("400s an auto-provisioned (DCR/CIMD) client", async () => {
+      await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
+      const [auto] = await db
+        .insert(integrationOauthClients)
+        .values({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: "@myorg/remote-mcp",
+          authKey: "oauth",
+          clientId: "dcr-client",
+          clientSecretEncrypted: "",
+          tokenEndpointAuthMethod: "none",
+          autoProvisioned: true,
+        })
+        .returning({ id: integrationOauthClients.id });
+
+      const res = await app.request(
+        `/api/integrations/@myorg/remote-mcp/oauth-clients/${auto!.id}/promote`,
+        { method: "POST", headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(400);
+    });
   });
 });

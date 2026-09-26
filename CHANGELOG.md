@@ -12,13 +12,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   organization** (#1264). `/api/org-integrations/{packageId}/...` (list,
   register, rotate, delete, set default; `org-integrations:configure`, owner and
   admin, session-only) manages org-level clients that every space inherits. A
-  space's own client still wins: connect resolves space > org > system. On
-  `GET /api/integrations/.../clients` a descriptor's `source` gains `"org"` and
-  a new `default_selectable` field says whether the space may pick it as its
-  default (its own clients, and the default it inherits);
-  `IntegrationOAuthClient.spaceId` is `null` for an org client. Deleting an org
-  client deletes the connections it minted in every space of the org.
-  Auto-provisioned (DCR/CIMD) clients stay per space.
+  space either uses its own clients or inherits the org's choice: connect
+  resolves space > org > system. `GET /api/integrations/.../clients` now lists
+  the space's own clients plus the one default it inherits (`source: "org"` or
+  `"built-in"`); other org and system clients are no longer listed there, and
+  every listed client is a valid default. `IntegrationOAuthClient.spaceId` is
+  `null` for an org client. `POST /api/integrations/{packageId}/oauth-clients/{clientId}/promote`
+  (`integrations:configure` and `org-integrations:configure`) moves an existing
+  space client to the org without re-entering its secret; its connections keep
+  working. Deleting an org client deletes the connections it minted in every
+  space of the org. Auto-provisioned (DCR/CIMD) clients stay per space.
+  Limitation: a space that had chosen the system client over its own clients
+  inherits the org default once the org flags one.
 
 ### Fixed
 

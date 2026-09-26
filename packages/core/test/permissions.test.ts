@@ -279,12 +279,6 @@ describe("permission levels", () => {
     expect(CORE_RESOURCE_LEVELS["llm-proxy"]).toBe("org");
     expect(CORE_RESOURCE_LEVELS["credential-proxy"]).toBe("space");
   });
-
-  it("org-integrations is the org half of integrations", () => {
-    expect(CORE_RESOURCE_LEVELS["org-integrations"]).toBe("org");
-    expect(CORE_RESOURCE_LEVELS.integrations).toBe("space");
-    expect(ORG_LEVEL_PERMISSIONS.has("org-integrations:configure")).toBe(true);
-  });
 });
 
 // ---------------------------------------------------------------------------

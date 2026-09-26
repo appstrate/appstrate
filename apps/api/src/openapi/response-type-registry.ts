@@ -158,6 +158,13 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     description: "PUT .../oauth-clients/{clientId} 200 ↔ IntegrationOAuthClient",
   },
   {
+    path: "/api/integrations/{packageId}/oauth-clients/{clientId}/promote",
+    method: "post",
+    status: "200",
+    sharedTypeName: "IntegrationOAuthClient",
+    description: "POST .../oauth-clients/{clientId}/promote 200 ↔ IntegrationOAuthClient",
+  },
+  {
     path: "/api/org-integrations/{packageId}/auths/{authKey}/oauth-clients",
     method: "post",
     status: "201",

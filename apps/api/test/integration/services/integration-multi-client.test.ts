@@ -475,7 +475,7 @@ describe("integration multi-client", () => {
 
     function customClient(isDefault: boolean): ResolvedOAuthConnect {
       return {
-        customClients: [
+        spaceClients: [
           {
             id: "11111111-1111-4111-8111-111111111111",
             spaceId: ctx.defaultSpaceId,
@@ -534,11 +534,11 @@ describe("integration multi-client", () => {
     });
 
     /** Build a ResolvedOAuthConnect carrying N custom clients. */
-    function customClients(
+    function spaceClients(
       specs: Array<{ id: string; clientId: string; isDefault: boolean }>,
     ): ResolvedOAuthConnect {
       return {
-        customClients: specs.map((s) => ({
+        spaceClients: specs.map((s) => ({
           id: s.id,
           spaceId: ctx.defaultSpaceId,
           integration_package_id: INTEGRATION,
@@ -563,7 +563,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         LOCAL_MANIFEST,
         OAUTH2_AUTH,
-        customClients([
+        spaceClients([
           { id: "11111111-1111-4111-8111-111111111111", clientId: "a", isDefault: false },
           { id: "22222222-2222-4222-8222-222222222222", clientId: "b", isDefault: true },
         ]),

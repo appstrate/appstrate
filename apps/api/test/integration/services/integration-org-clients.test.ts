@@ -20,6 +20,7 @@ import {
   ensureIntegrationOAuthClient,
   getIntegrationAuthStatuses,
   listIntegrationClients,
+  promoteIntegrationOAuthClient,
   resolveConnectClient,
   resolveIntegrationClientById,
   setDefaultIntegrationClient,
@@ -135,6 +136,7 @@ describe("org-level integration OAuth clients", () => {
     clientId: string;
     isDefault?: boolean;
     orgId?: string;
+    autoProvisioned?: boolean;
   }): Promise<string> {
     const [row] = await db
       .insert(integrationOauthClients)
@@ -146,6 +148,7 @@ describe("org-level integration OAuth clients", () => {
         clientId: opts.clientId,
         clientSecretEncrypted: encryptCredentials({ client_secret: `${opts.clientId}-secret` }),
         isDefault: opts.isDefault ?? false,
+        autoProvisioned: opts.autoProvisioned ?? false,
       })
       .returning({ id: integrationOauthClients.id });
     return row!.id;
@@ -267,46 +270,43 @@ describe("org-level integration OAuth clients", () => {
   });
 
   describe("lists", () => {
-    it("org list: org clients + system, org-tier default, every client selectable", async () => {
-      seedSystemClient();
+    const rows = (clients: Awaited<ReturnType<typeof listIntegrationClients>>) =>
+      clients.map((c) => [c.client_ref, c.source, c.is_default]);
+
+    it("org list: the inherited system default, then the org's own clients", async () => {
+      seedSystemClient(true);
       const orgRow = await seedClient({ spaceId: null, clientId: "org-client" });
       await seedClient({ spaceId: spaceA.spaceId, clientId: "space-a", isDefault: true });
-      const clients = await listIntegrationClients(org, INTEGRATION, AUTH_KEY);
-      expect(
-        clients.map((c) => [c.client_ref, c.source, c.is_default, c.default_selectable]),
-      ).toEqual([
-        [SYSTEM_ID, "built-in", true, true],
-        [orgRow, "org", false, true],
+      expect(rows(await listIntegrationClients(org, INTEGRATION, AUTH_KEY))).toEqual([
+        [SYSTEM_ID, "built-in", true],
+        [orgRow, "org", false],
       ]);
     });
 
-    it("space list: custom, org and built-in; own and inherited-default rows selectable", async () => {
+    it("space list: the inherited org default, then the space's own clients", async () => {
       seedSystemClient();
       const orgDefault = await seedClient({ spaceId: null, clientId: "org-d", isDefault: true });
-      const orgOther = await seedClient({ spaceId: null, clientId: "org-o" });
+      await seedClient({ spaceId: null, clientId: "org-o" });
       const own = await seedClient({
         spaceId: spaceA.spaceId,
         clientId: "space-a",
         isDefault: true,
       });
-      const clients = await listIntegrationClients(spaceA, INTEGRATION, AUTH_KEY);
-      const byRef = new Map(clients.map((c) => [c.client_ref, c]));
-      expect(byRef.get(own)).toMatchObject({
-        source: "custom",
-        is_default: true,
-        default_selectable: true,
-      });
-      expect(byRef.get(orgDefault)).toMatchObject({
-        source: "org",
-        is_default: false,
-        default_selectable: true,
-      });
-      expect(byRef.get(orgOther)).toMatchObject({ source: "org", default_selectable: false });
-      expect(byRef.get(SYSTEM_ID)).toMatchObject({
-        source: "built-in",
-        is_default: false,
-        default_selectable: false,
-      });
+      expect(rows(await listIntegrationClients(spaceA, INTEGRATION, AUTH_KEY))).toEqual([
+        [orgDefault, "org", false],
+        [own, "custom", true],
+      ]);
+      expect(rows(await listIntegrationClients(spaceB, INTEGRATION, AUTH_KEY))).toEqual([
+        [orgDefault, "org", true],
+      ]);
+    });
+
+    it("space list: an unflagged own client is not listed twice as the inherited default", async () => {
+      const own = await seedClient({ spaceId: spaceA.spaceId, clientId: "space-a" });
+      await seedClient({ spaceId: null, clientId: "org-o" });
+      expect(rows(await listIntegrationClients(spaceA, INTEGRATION, AUTH_KEY))).toEqual([
+        [own, "custom", true],
+      ]);
     });
   });
 
@@ -368,16 +368,13 @@ describe("org-level integration OAuth clients", () => {
       expect(await spaceDefault()).toBe(SYSTEM_ID);
     });
 
-    it("org tier: only the first system client (the inherited default) is selectable", async () => {
+    it("org tier: a system client other than the inherited default is a 400", async () => {
       seedSystemClient(true);
-      const orgRow = await seedClient({ spaceId: null, clientId: "org-client", isDefault: true });
-      const selectable = (await listIntegrationClients(org, INTEGRATION, AUTH_KEY))
-        .filter((c) => c.default_selectable)
-        .map((c) => c.client_ref);
-      expect(selectable.sort()).toEqual([orgRow, SYSTEM_ID].sort());
+      await seedClient({ spaceId: null, clientId: "org-client", isDefault: true });
       await expect(
         setDefaultIntegrationClient(org, INTEGRATION, AUTH_KEY, SYSTEM_ID_2),
       ).rejects.toMatchObject({ status: 400 });
+      await setDefaultIntegrationClient(org, INTEGRATION, AUTH_KEY, SYSTEM_ID);
     });
 
     it("org tier: a space client or an unknown ref is a 400", async () => {
@@ -415,10 +412,24 @@ describe("org-level integration OAuth clients", () => {
       ).rejects.toMatchObject({ status: 400 });
     });
 
-    it("rejects an auto-provisioned (DCR/CIMD) auth", async () => {
-      await expect(
-        createIntegrationOAuthClient(org, REMOTE, "oauth", { clientId: "x", clientSecret: "s" }),
-      ).rejects.toMatchObject({ status: 400 });
+    it("rejects a manual client on an auto-provisioned (DCR/CIMD) auth at both tiers", async () => {
+      for (const owner of [org, spaceA]) {
+        await expect(
+          createIntegrationOAuthClient(owner, REMOTE, "oauth", {
+            clientId: "x",
+            clientSecret: "s",
+          }),
+        ).rejects.toMatchObject({ status: 400 });
+      }
+      // The DCR path itself still registers its space client.
+      const dcr = await createIntegrationOAuthClient(
+        spaceA,
+        REMOTE,
+        "oauth",
+        { clientId: "dcr", clientSecret: "", tokenEndpointAuthMethod: "none" },
+        { autoProvisioned: true },
+      );
+      expect(dcr).toMatchObject({ spaceId: spaceA.spaceId, autoProvisioned: true });
     });
 
     it("rejects an integration of another org", async () => {
@@ -481,6 +492,71 @@ describe("org-level integration OAuth clients", () => {
         .from(integrationConnections)
         .where(eq(integrationConnections.clientRef, orgRow));
       expect(left).toEqual([{ spaceId: otherSpace.spaceId }]);
+    });
+  });
+
+  describe("promote", () => {
+    it("moves a space client to the org; pinned connections still resolve from every space", async () => {
+      const id = await seedClient({
+        spaceId: spaceA.spaceId,
+        clientId: "space-a",
+        isDefault: true,
+      });
+      await seedConnection(spaceA.spaceId, ctx.user.id, id);
+      const promoted = await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id);
+      expect(promoted).toMatchObject({ id, spaceId: null, isDefault: true, client_id: "space-a" });
+      for (const scope of [spaceA, spaceB]) {
+        expect(
+          await resolveIntegrationClientById(id, scope.spaceId, INTEGRATION, AUTH_KEY, undefined),
+        ).toMatchObject({ clientId: "space-a", clientSecret: "space-a-secret" });
+      }
+      const [conn] = await db
+        .select({ clientRef: integrationConnections.clientRef })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.spaceId, spaceA.spaceId));
+      expect(conn?.clientRef).toBe(id);
+    });
+
+    it("keeps the org's existing default", async () => {
+      const orgDefault = await seedClient({ spaceId: null, clientId: "org-d", isDefault: true });
+      const id = await seedClient({
+        spaceId: spaceA.spaceId,
+        clientId: "space-a",
+        isDefault: true,
+      });
+      expect(await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id)).toMatchObject({
+        spaceId: null,
+        isDefault: false,
+      });
+      const clients = await listIntegrationClients(org, INTEGRATION, AUTH_KEY);
+      expect(clients.find((c) => c.is_default)?.client_ref).toBe(orgDefault);
+    });
+
+    it("404s another space's client, an org client and another integration's id", async () => {
+      const spaceBRow = await seedClient({ spaceId: spaceB.spaceId, clientId: "space-b" });
+      const orgRow = await seedClient({ spaceId: null, clientId: "org-client" });
+      const own = await seedClient({ spaceId: spaceA.spaceId, clientId: "space-a" });
+      for (const [id, pkg] of [
+        [spaceBRow, INTEGRATION],
+        [orgRow, INTEGRATION],
+        [own, REMOTE],
+      ] as const) {
+        await expect(promoteIntegrationOAuthClient(spaceA, pkg, id)).rejects.toMatchObject({
+          status: 404,
+        });
+      }
+    });
+
+    it("400s an auto-provisioned client", async () => {
+      const id = await seedClient({
+        spaceId: spaceA.spaceId,
+        clientId: "dcr",
+        isDefault: true,
+        autoProvisioned: true,
+      });
+      await expect(promoteIntegrationOAuthClient(spaceA, INTEGRATION, id)).rejects.toMatchObject({
+        status: 400,
+      });
     });
   });
 

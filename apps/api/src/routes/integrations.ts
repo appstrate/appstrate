@@ -17,6 +17,7 @@
  *   - `POST   /:packageId/auths/:authKey/oauth-clients`  — admin: register a custom OAuth client
  *   - `PUT    /:packageId/oauth-clients/:clientId`   — admin: rotate a custom OAuth client
  *   - `DELETE /:packageId/oauth-clients/:clientId`   — admin: delete a custom OAuth client
+ *   - `POST   /:packageId/oauth-clients/:clientId/promote` — admin: move it to the org tier
  *   - `POST   /:packageId/auths/:authKey/connect/session` — Porte A: mint a hosted
  *       Connect portal session (interactive, auth-type-agnostic). Primary surface.
  *   - `POST   /:packageId/auths/:authKey/connect/oauth2`  — Porte B (programmatic):
@@ -42,7 +43,7 @@
  * connect-window handler can detect completion and refresh.
  */
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import {
@@ -73,7 +74,7 @@ import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-err
 import { requirePermission } from "../middleware/require-permission.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
-import { getSpaceScope } from "../lib/scope.ts";
+import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import { recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
 import { listIntegrations } from "../services/integration-service.ts";
 import {
@@ -84,6 +85,7 @@ import {
   getIntegrationConnectionCredentialFields,
   listIntegrationClients,
   listIntegrationConnections,
+  promoteIntegrationOAuthClient,
   readIntegrationAuth,
   resolveIntegrationActivations,
   serializeIntegrationConnection,
@@ -310,10 +312,7 @@ export const oauthClientUpdateSchema = oauthClientSchema
     path: ["client_secret"],
   });
 
-// Body → service input, shared by the space routes here and the org routes
-// (`routes/org-integrations.ts`).
-
-export function toOAuthClientCreateInput(body: z.infer<typeof oauthClientCreateSchema>) {
+function toOAuthClientCreateInput(body: z.infer<typeof oauthClientCreateSchema>) {
   return {
     clientId: body.client_id,
     // `?? ""` is reachable only for a declared public client: the schema
@@ -327,7 +326,7 @@ export function toOAuthClientCreateInput(body: z.infer<typeof oauthClientCreateS
   };
 }
 
-export function toOAuthClientUpdateInput(body: z.infer<typeof oauthClientUpdateSchema>) {
+function toOAuthClientUpdateInput(body: z.infer<typeof oauthClientUpdateSchema>) {
   return {
     clientId: body.client_id,
     ...(body.client_secret !== undefined ? { clientSecret: body.client_secret } : {}),
@@ -339,11 +338,97 @@ export function toOAuthClientUpdateInput(body: z.infer<typeof oauthClientUpdateS
 }
 
 /** A custom client id is a row UUID: anything else cannot exist → 404. */
-export function assertOAuthClientRowId(clientId: string): string {
+function assertOAuthClientRowId(clientId: string): string {
   if (!z.uuid().safeParse(clientId).success) {
     throw notFound(`OAuth client '${clientId}' not found`);
   }
   return clientId;
+}
+
+/**
+ * The OAuth client handlers of one tier, registered on the same paths by this
+ * router (space) and `routes/org-integrations.ts` (org); the audit row's
+ * `spaceId` tells the tiers apart. Each router registers them itself so the
+ * `verify:openapi` route scan sees every path.
+ */
+export function oauthClientHandlers(scopeOf: (c: Context<AppEnv>) => SpaceScope | OrgScope) {
+  return {
+    async list(c: Context<AppEnv>) {
+      const packageId = c.req.param("packageId")!;
+      const authKey = c.req.param("authKey")!;
+      const scope = scopeOf(c);
+      // 404 an unknown integration/auth rather than list nothing (the org tier's service does).
+      if ("spaceId" in scope) await readIntegrationAuth(scope, packageId, authKey);
+      return c.json(listResponse(await listIntegrationClients(scope, packageId, authKey)));
+    },
+
+    async setDefault(c: Context<AppEnv>) {
+      const packageId = c.req.param("packageId")!;
+      const authKey = c.req.param("authKey")!;
+      const scope = scopeOf(c);
+      const body = await readJsonBody(c, setDefaultClientSchema);
+      await setDefaultIntegrationClient(scope, packageId, authKey, body.client_ref);
+      await recordAuditFromContext(c, {
+        action: "integration.default_client.set",
+        resourceType: "integration",
+        resourceId: `${packageId}#${authKey}`,
+      });
+      return c.json(listResponse(await listIntegrationClients(scope, packageId, authKey)));
+    },
+
+    async create(c: Context<AppEnv>) {
+      const packageId = c.req.param("packageId")!;
+      const authKey = c.req.param("authKey")!;
+      const body = await readJsonBody(c, oauthClientCreateSchema);
+      const client = await createIntegrationOAuthClient(
+        scopeOf(c),
+        packageId,
+        authKey,
+        toOAuthClientCreateInput(body),
+      );
+      await recordAuditFromContext(c, {
+        action: "integration.oauth_client.created",
+        resourceType: "integration",
+        resourceId: `${packageId}#${authKey}#${client.id}`,
+      });
+      return c.json(toPublicClient(client), 201);
+    },
+
+    async rotate(c: Context<AppEnv>) {
+      const packageId = c.req.param("packageId")!;
+      const clientId = assertOAuthClientRowId(c.req.param("clientId")!);
+      const body = await readJsonBody(c, oauthClientUpdateSchema);
+      const client = await updateIntegrationOAuthClient(
+        scopeOf(c),
+        packageId,
+        clientId,
+        toOAuthClientUpdateInput(body),
+      );
+      await recordAuditFromContext(c, {
+        action: "integration.oauth_client.rotated",
+        resourceType: "integration",
+        resourceId: `${packageId}#${client.auth_key}#${clientId}`,
+      });
+      return c.json(toPublicClient(client));
+    },
+
+    async remove(c: Context<AppEnv>) {
+      const packageId = c.req.param("packageId")!;
+      const clientId = assertOAuthClientRowId(c.req.param("clientId")!);
+      const { deletedConnections } = await deleteIntegrationOAuthClient(
+        scopeOf(c),
+        packageId,
+        clientId,
+      );
+      await recordAuditFromContext(c, {
+        action: "integration.oauth_client.deleted",
+        resourceType: "integration",
+        resourceId: `${packageId}#${clientId}`,
+        after: { deletedConnections },
+      });
+      return c.body(null, 204);
+    },
+  };
 }
 
 // ─────────────────────────────────────────────
@@ -617,137 +702,41 @@ export function createIntegrationsRouter() {
 
   // ─── OAuth client registration (admin) ─────
 
-  // List every OAuth client this space resolves for the auth: its own custom
-  // (BYO-app) clients, the org-level ones it inherits and any env-provided
-  // system clients, with `source`, which is the default and which may be made
-  // the default here. Secrets are never returned. Drives the admin clients
-  // CRUD table (register/rotate/delete/set-default). New connections always use
-  // the default — there is no per-connect picker.
+  // The space's OAuth clients plus the default it inherits (org or system); new
+  // connections always use the default — there is no per-connect picker.
+  // Deleting a client deletes the connections it minted.
+  const clients = oauthClientHandlers(getSpaceScope);
+  const configure = requirePermission("integrations", "configure");
   router.get(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/clients",
     requirePermission("integrations", "read"),
-    async (c) => {
-      const packageId = c.req.param("packageId")!;
-      const authKey = c.req.param("authKey")!;
-      const scope = getSpaceScope(c);
-      // Resolve the integration + auth first so an unknown integration/auth 404s
-      // (the spec declares 404 here) instead of leaking an empty client list.
-      await readIntegrationAuth(scope, packageId, authKey);
-      const clients = await listIntegrationClients(scope, packageId, authKey);
-      return c.json(listResponse(clients));
-    },
+    clients.list,
   );
-
-  // Choose which OAuth client is the default for new connections on this auth
-  // (the model-provider `setDefaultModel` analogue). Selecting one of the
-  // space's own clients flags it default; selecting the inherited default (org
-  // or system client) un-flags the space's clients so the cascade falls back to
-  // it. Any other org/system client is a 400. Returns the refreshed
-  // clients list so the UI re-badges the default without a second fetch.
   router.put(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/default-client",
-    requirePermission("integrations", "configure"),
-    async (c) => {
-      const packageId = c.req.param("packageId")!;
-      const authKey = c.req.param("authKey")!;
-      const scope = getSpaceScope(c);
-      const body = await readJsonBody(c, setDefaultClientSchema);
-      await setDefaultIntegrationClient(scope, packageId, authKey, body.client_ref);
-      await recordAuditFromContext(c, {
-        action: "integration.default_client.set",
-        resourceType: "integration",
-        resourceId: `${packageId}#${authKey}`,
-      });
-      const clients = await listIntegrationClients(scope, packageId, authKey);
-      return c.json(listResponse(clients));
-    },
+    configure,
+    clients.setDefault,
   );
+  router.post("/:packageId{@[^/]+/[^/]+}/auths/:authKey/oauth-clients", configure, clients.create);
+  router.put("/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId", configure, clients.rotate);
+  router.delete("/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId", configure, clients.remove);
 
-  // Register a NEW custom (BYO-app) OAuth client for this auth — repeatable, so
-  // an org can hold N clients per auth (model-provider pattern). The first one
-  // becomes the default; subsequent ones are non-default until promoted via
-  // PUT .../default-client. Returns the created client (secret omitted).
+  // Move one of this space's clients to the org tier; its row id is kept, so
+  // the connections it minted keep refreshing.
   router.post(
-    "/:packageId{@[^/]+/[^/]+}/auths/:authKey/oauth-clients",
-    requirePermission("integrations", "configure"),
-    async (c) => {
-      const packageId = c.req.param("packageId")!;
-      const authKey = c.req.param("authKey")!;
-      const scope = getSpaceScope(c);
-      const body = await readJsonBody(c, oauthClientCreateSchema);
-      // Reject a manual client on an auto-provisioned (remote MCP) auth. Its
-      // token endpoint only accepts a DCR/CIMD-acquired public client, so a
-      // hand-entered client_id points at the wrong OAuth server and, once
-      // stored, silently disables auto-registration (ensureIntegrationOAuthClient
-      // returns the stale client instead of running DCR) — surfacing later as an
-      // opaque `invalid_client` at the authorize redirect. The UI hides the form
-      // for these auths; this guards the API/curl path too.
-      const { manifest, auth } = await readIntegrationAuth(scope, packageId, authKey);
-      if (usesAutoProvisionedClient(manifest, auth)) {
-        throw invalidRequest(
-          `Integration '${packageId}' auth '${authKey}' provisions its OAuth client automatically at connect time (DCR/CIMD); a manual client must not be registered. Connect without supplying credentials, or delete the existing client to restore auto-registration.`,
-        );
-      }
-      const client = await createIntegrationOAuthClient(
-        scope,
-        packageId,
-        authKey,
-        toOAuthClientCreateInput(body),
-      );
-      await recordAuditFromContext(c, {
-        action: "integration.oauth_client.created",
-        resourceType: "integration",
-        resourceId: `${packageId}#${authKey}#${client.id}`,
-      });
-      return c.json(toPublicClient(client), 201);
-    },
-  );
-
-  // Rotate one custom client's credentials in place, by its id. Auto-provisioned
-  // (DCR) clients are machine-managed and rejected by the service.
-  router.put(
-    "/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId",
-    requirePermission("integrations", "configure"),
+    "/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId/promote",
+    configure,
+    requirePermission("org-integrations", "configure"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const clientId = assertOAuthClientRowId(c.req.param("clientId")!);
-      const scope = getSpaceScope(c);
-      const body = await readJsonBody(c, oauthClientUpdateSchema);
-      const client = await updateIntegrationOAuthClient(
-        scope,
-        packageId,
-        clientId,
-        toOAuthClientUpdateInput(body),
-      );
+      const client = await promoteIntegrationOAuthClient(getSpaceScope(c), packageId, clientId);
       await recordAuditFromContext(c, {
-        action: "integration.oauth_client.rotated",
+        action: "integration.oauth_client.promoted",
         resourceType: "integration",
         resourceId: `${packageId}#${client.auth_key}#${clientId}`,
       });
       return c.json(toPublicClient(client));
-    },
-  );
-
-  // Delete one custom client by its id. If it was the default, the resolution
-  // cascade falls to the system client (no auto-promotion). Connections pinned
-  // to this client are deleted with it (they can never refresh once its
-  // credentials are gone) — the audit `after.deletedConnections` records how
-  // many.
-  router.delete(
-    "/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId",
-    requirePermission("integrations", "configure"),
-    async (c) => {
-      const packageId = c.req.param("packageId")!;
-      const clientId = assertOAuthClientRowId(c.req.param("clientId")!);
-      const scope = getSpaceScope(c);
-      const { deletedConnections } = await deleteIntegrationOAuthClient(scope, packageId, clientId);
-      await recordAuditFromContext(c, {
-        action: "integration.oauth_client.deleted",
-        resourceType: "integration",
-        resourceId: `${packageId}#${clientId}`,
-        after: { deletedConnections },
-      });
-      return c.body(null, 204);
     },
   );
 

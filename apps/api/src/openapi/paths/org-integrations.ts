@@ -33,9 +33,9 @@ export const orgIntegrationsPaths = {
       tags: ["Integrations"],
       summary: "List the org-level OAuth clients of an integration auth",
       description:
-        "Returns the org's own clients (`org`) plus any platform-provided system " +
-        "clients (`built-in`), with the org-tier default. Every entry is " +
-        "`default_selectable`. Secrets are never returned. Only oauth2 auths " +
+        "Returns the org's own clients (`org`, oldest first) plus the default it " +
+        "inherits, the platform-provided system client (`built-in`), if any. " +
+        "`is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths " +
         "whose client is not auto-provisioned (DCR/CIMD) have an org tier; " +
         `any other auth is a 400. ${PERMISSION_NOTE}`,
       parameters: [{ $ref: "#/components/parameters/XOrgId" }, packageIdParam, authKeyParam],
@@ -59,7 +59,7 @@ export const orgIntegrationsPaths = {
       description:
         "Selecting an org client flags it default for every space that has not " +
         "flagged one of its own; selecting the system client un-flags the org's " +
-        "clients. Returns the refreshed org clients list. " +
+        "clients. Any other `client_ref` is a 400. Returns the refreshed org clients list. " +
         PERMISSION_NOTE,
       parameters: [{ $ref: "#/components/parameters/XOrgId" }, packageIdParam, authKeyParam],
       requestBody: jsonBody(setDefaultClientBodySchema),

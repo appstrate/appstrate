@@ -50,7 +50,7 @@ import {
 } from "./integration-client-registry.ts";
 import { isActiveHere } from "./package-activation.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
-import { mergeSystemAndDb, setExactlyOneDefault, isUuid } from "../lib/db-helpers.ts";
+import { setExactlyOneDefault, isUuid, type DbOrTx } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import { ApiError, notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
 import {
@@ -106,7 +106,7 @@ interface IntegrationOAuthClientWithSecret extends IntegrationOAuthClient {
   /** Row PK — the connection's `client_ref` when this custom client mints it. */
   id: string;
   clientSecret: string;
-  /** Whether this client is the default of its tier (space or org). */
+  /** Whether this custom client is the default for new connections (else system). */
   isDefault: boolean;
   /** `true` for a DCR/CIMD-minted machine client (remote MCP public client). */
   autoProvisioned: boolean;
@@ -128,10 +128,6 @@ function lookupAuth(
   return auth;
 }
 
-/**
- * A space reads the integrations placed in it; an org reads every integration
- * it can resolve (org-owned or system).
- */
 async function loadManifestOrThrow(
   scope: SpaceScope | OrgScope,
   packageId: string,
@@ -607,24 +603,19 @@ export function toPublicClient(client: IntegrationOAuthClientWithSecret): Integr
   return rest;
 }
 
-/**
- * The tier a custom client row belongs to: a space (`SpaceScope`) or its org
- * (`OrgScope`, stored as `space_id IS NULL`). Resolution is space > org > system.
- */
+/** A client row's tier: a space, or its org (stored as `space_id IS NULL`). */
 type ClientOwner = SpaceScope | OrgScope;
 
 function isSpaceOwner(owner: ClientOwner): owner is SpaceScope {
   return "spaceId" in owner;
 }
 
-/** Rows of `owner`'s own tier. */
 function tierFilter(owner: ClientOwner): SQL {
   return isSpaceOwner(owner)
     ? eq(integrationOauthClients.spaceId, owner.spaceId)
     : and(eq(integrationOauthClients.orgId, owner.orgId), isNull(integrationOauthClients.spaceId))!;
 }
 
-/** Rows of `owner`'s tier for one integration auth. */
 function tierAuthFilter(owner: ClientOwner, packageId: string, authKey: string): SQL {
   return and(
     tierFilter(owner),
@@ -633,7 +624,6 @@ function tierAuthFilter(owner: ClientOwner, packageId: string, authKey: string):
   )!;
 }
 
-/** One row of `owner`'s tier, by id, for `packageId`. */
 function clientByIdFilter(owner: ClientOwner, packageId: string, clientId: string): SQL {
   return and(
     tierFilter(owner),
@@ -642,7 +632,6 @@ function clientByIdFilter(owner: ClientOwner, packageId: string, clientId: strin
   )!;
 }
 
-/** Rows a space can use: its own and its org's. */
 function spaceVisibleFilter(scope: SpaceScope): SQL {
   return and(
     eq(integrationOauthClients.orgId, scope.orgId),
@@ -650,24 +639,20 @@ function spaceVisibleFilter(scope: SpaceScope): SQL {
   )!;
 }
 
-/**
- * Tier guard for the list and set-default paths. Space: the space is the
- * caller's. Org: the auth is one an org client may serve ({@link assertClientAuth}).
- */
 async function assertOwnerInScope(
   owner: ClientOwner,
   packageId: string,
   authKey: string,
 ): Promise<void> {
   if (isSpaceOwner(owner)) return assertSpaceInScope(owner);
-  assertClientAuth(owner, await loadManifestOrThrow(owner, packageId), authKey);
+  assertClientAuth(await loadManifestOrThrow(owner, packageId), authKey);
 }
 
-/** A client serves an oauth2 auth; an auto-provisioned (DCR/CIMD) one only per space. */
+/** oauth2 auths only; a manual client on a DCR/CIMD auth would shadow auto-registration. */
 function assertClientAuth(
-  owner: ClientOwner,
   manifest: IntegrationManifest,
   authKey: string,
+  autoProvisioned = false,
 ): void {
   const auth = lookupAuth(manifest, authKey) as AfpsManifestAuth;
   if (auth.type !== "oauth2") {
@@ -675,17 +660,14 @@ function assertClientAuth(
       `Cannot register an OAuth client for auth '${authKey}' (type '${auth.type}' is not oauth2)`,
     );
   }
-  if (!isSpaceOwner(owner) && usesAutoProvisionedClient(manifest, auth)) {
+  if (!autoProvisioned && usesAutoProvisionedClient(manifest, auth)) {
     throw invalidRequest(
-      `Integration '${manifest.name}' auth '${authKey}' provisions its OAuth client per space at connect time (DCR/CIMD); it cannot have an organization-level client.`,
+      `Integration '${manifest.name}' auth '${authKey}' provisions its OAuth client automatically at connect time (DCR/CIMD); a manual client must not be registered. Connect without supplying credentials, or delete the existing client to restore auto-registration.`,
     );
   }
 }
 
-/**
- * The custom clients `owner` resolves for `(packageId, authKey)`, decrypted and
- * oldest-first: a space gets its own rows and its org's, an org its own.
- */
+/** `owner`'s custom clients for the auth, decrypted, oldest-first; a space also sees its org's. */
 async function loadClientTiers(
   owner: ClientOwner,
   packageId: string,
@@ -710,9 +692,8 @@ async function loadClientTiers(
 }
 
 /**
- * The effective default client across tiers — the one rule shared by connect,
- * both lists and set-default. A flagged space client, else the flagged org
- * client, else the system client, else the first space then org client.
+ * The effective default (connect, lists, set-default): flagged space client ?? flagged
+ * org client ?? system client ?? first space client ?? first org client.
  */
 function pickDefault<C extends { isDefault: boolean }, S>(
   space: readonly C[],
@@ -729,20 +710,16 @@ function pickDefault<C extends { isDefault: boolean }, S>(
   );
 }
 
-/**
- * The default `owner`'s tier falls back to when none of its own clients is
- * flagged — the one client outside the tier its default may point at.
- */
+/** The {@link pickDefault} of `owner`'s tier when none of its own clients is flagged. */
 function inheritedDefault<C extends { isDefault: boolean }, S>(
   owner: ClientOwner,
   space: readonly C[],
   org: readonly C[],
   system: S | null,
 ): C | S | null {
-  const cleared = (clients: readonly C[]) => clients.map((c) => ({ ...c, isDefault: false }));
   return isSpaceOwner(owner)
-    ? pickDefault(cleared(space), org, system)
-    : pickDefault(space, cleared(org), system);
+    ? (org.find((c) => c.isDefault) ?? system ?? space[0] ?? org[0] ?? null)
+    : (system ?? org[0] ?? null);
 }
 
 /**
@@ -768,13 +745,14 @@ async function getAutoProvisionedClient(
   return row ? projectClientWithSecret(row) : null;
 }
 
-/** Whether a client of `owner`'s tier is currently flagged default for this auth. */
-async function hasDefaultCustomClient(
+/** Whether any custom client for this auth is currently flagged default. */
+async function hasTierDefault(
   owner: ClientOwner,
   packageId: string,
   authKey: string,
+  executor: DbOrTx = db,
 ): Promise<boolean> {
-  const [row] = await db
+  const [row] = await executor
     .select({ id: integrationOauthClients.id })
     .from(integrationOauthClients)
     .where(
@@ -864,14 +842,13 @@ export function encodeClientAuthForStorage(input: {
 }
 
 /**
- * Register a NEW OAuth2 client for an integration auth in `owner`'s tier (a
- * space, or its org with `space_id` NULL) — one of the N custom (BYO-app)
- * clients (model-provider pattern). Always an INSERT (no upsert): a fresh
- * client id is minted each time so multiple clients coexist.
+ * Register a NEW space or org OAuth2 client for an integration auth — one of
+ * the N custom (BYO-app) clients (model-provider pattern). Always an INSERT (no
+ * upsert): a fresh client id is minted each time so multiple clients coexist.
  *
- * `is_default` is set to `true` only when no other client of the tier is
- * already the default (mirrors `org-models` first-credential-wins); the partial
- * uniques `idx_ioc_one_default` / `idx_ioc_one_org_default` are the backstop.
+ * `is_default` is set to `true` only when no client of its tier is already the
+ * default (mirrors `org-models` first-credential-wins); the DB partial unique
+ * `idx_ioc_one_default` (space) / `idx_ioc_one_org_default` (org) is the backstop.
  *
  * Creation always supplies `clientSecret` (blank means "register a public
  * client"), so `encodeClientAuthForStorage` never returns the preserve
@@ -898,14 +875,12 @@ export async function createIntegrationOAuthClient(
   opts: { autoProvisioned?: boolean } = {},
 ): Promise<IntegrationOAuthClientWithSecret> {
   if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
-  assertClientAuth(owner, await loadManifestOrThrow(owner, packageId), authKey);
-
   const autoProvisioned = opts.autoProvisioned ?? false;
+  assertClientAuth(await loadManifestOrThrow(owner, packageId), authKey, autoProvisioned);
+
   // An auto-provisioned client is the sole client for its auth → default. A
   // classic client wins the default only when none already holds it.
-  const isDefault = autoProvisioned
-    ? true
-    : !(await hasDefaultCustomClient(owner, packageId, authKey));
+  const isDefault = autoProvisioned ? true : !(await hasTierDefault(owner, packageId, authKey));
 
   // Creation always supplies the field (blank means "register a public
   // client"), so the encoder never returns the preserve sentinel here.
@@ -936,11 +911,10 @@ export async function createIntegrationOAuthClient(
 }
 
 /**
- * Rotate an existing custom client's credentials in place, by its id. The row
- * must belong to `owner`'s tier and to `packageId` (escalation guard) — a
- * client id of another space, of the org tier from a space (or vice versa), or
- * of another integration is a 404. `is_default` / `auto_provisioned` are not
- * touched here (default selection is `setDefaultIntegrationClient`'s job).
+ * Rotate an existing custom client's credentials in place, by its id. Scoped to
+ * `owner`'s tier and `packageId` (escalation guard) — any other client id is a 404.
+ * `is_default` / `auto_provisioned` are not touched here
+ * (default selection is `setDefaultIntegrationClient`'s job).
  *
  * An omitted `clientSecret` PRESERVES the stored pair — except when the caller
  * also declares a secret-based `tokenEndpointAuthMethod`, which is a change
@@ -1039,6 +1013,42 @@ export async function updateIntegrationOAuthClient(
   return projectClientWithSecret(row);
 }
 
+/** Move a space client to its org tier; same id, so pinned connections keep refreshing. */
+export async function promoteIntegrationOAuthClient(
+  scope: SpaceScope,
+  packageId: string,
+  clientId: string,
+): Promise<IntegrationOAuthClientWithSecret> {
+  await assertSpaceInScope(scope);
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(integrationOauthClients)
+      .where(clientByIdFilter(scope, packageId, clientId))
+      .limit(1);
+    if (!existing) {
+      throw notFound(`OAuth client '${clientId}' not found`);
+    }
+    if (existing.autoProvisioned) {
+      throw invalidRequest(
+        `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot leave its space.`,
+      );
+    }
+    const orgHasDefault = await hasTierDefault(
+      { orgId: scope.orgId },
+      packageId,
+      existing.authKey,
+      tx,
+    );
+    const [row] = await tx
+      .update(integrationOauthClients)
+      .set({ spaceId: null, isDefault: !orgHasDefault, updatedAt: new Date() })
+      .where(eq(integrationOauthClients.id, existing.id))
+      .returning();
+    return projectClientWithSecret(row!);
+  });
+}
+
 /**
  * A connect-time client resolved from a credential source — either an
  * env-provided system client or a custom (space or org) client. The
@@ -1135,15 +1145,15 @@ function customConnectClient(client: IntegrationOAuthClientWithSecret): Resolved
 
 /**
  * Resolve WHICH OAuth client a connect flow uses, and its credentials — the
- * single home for the client-selection precedence. New connections always use
- * the default ({@link pickDefault}): the flagged space client, else the flagged
- * org client, else the default system client, else the first space then org
- * client. Auto-provisioned remote-MCP auths (DCR/CIMD) keep their own space
- * client and are never served by a system or org entry. Throws the
- * operator-facing error when no client can be resolved. The returned
- * `clientRef` is pinned on the connection so token refresh resolves the same
- * credentials. Choosing the default is an admin action
- * (`setDefaultIntegrationClient`), not a connect-time argument.
+ * single home for the client-selection precedence (previously inlined in
+ * `OAuth2Strategy.begin`). New connections always use the **default**
+ * ({@link pickDefault}) — there is no per-connect picker.
+ * Auto-provisioned remote-MCP auths (DCR/CIMD) keep their own (custom) client
+ * and are never served by a system or org entry. Throws the operator-facing error when
+ * no client can be resolved. The returned `clientRef` is pinned on the
+ * connection so token refresh resolves the same credentials. The choice of
+ * which client is the default is an admin action (`setDefaultIntegrationClient`,
+ * the model-provider `setDefaultModel` analogue), not a connect-time argument.
  */
 export function resolveConnectClient(
   integrationId: string,
@@ -1154,7 +1164,7 @@ export function resolveConnectClient(
 ): ResolvedConnectClient {
   const autoProvisioned = usesAutoProvisionedClient(manifest, auth);
   const system = autoProvisioned ? null : getDefaultSystemIntegrationClient(integrationId, authKey);
-  const picked = pickDefault(resolved.customClients, resolved.orgClients, system);
+  const picked = pickDefault(resolved.spaceClients, resolved.orgClients, system);
   if (picked) {
     return "isDefault" in picked ? customConnectClient(picked) : systemConnectClient(picked);
   }
@@ -1182,12 +1192,11 @@ export function resolveConnectClient(
  * credentials that mint/refresh a connection's tokens. The token-refresh
  * counterpart of `resolveConnectClient` — and the direct analogue of the
  * model-provider `loadInferenceCredentials`: try the system registry by id
- * first, then `integration_oauth_clients` by id.
+ * first, then the `integration_oauth_clients` table by id.
  *
- * SECURITY: the custom lookup is scoped to `(integrationId, authKey)` and to
- * rows `spaceId` can use — its own, or its org's org-level rows — so a custom
- * id of another space, org, integration or auth never resolves, the same
- * re-validation the system branch applies. Returns `null`
+ * SECURITY: the custom lookup is scoped to `(spaceId or its org, integrationId,
+ * authKey)` so a custom id belonging to another space/org/integration/auth never
+ * resolves — the same re-validation the system branch applies. Returns `null`
  * when the id resolves to neither (since-removed client, remapped system entry,
  * cross-scope id) → the caller skips refresh (surfaces needs_reconnection).
  *
@@ -1303,8 +1312,8 @@ export async function resolveIntegrationClientById(
 
 /**
  * A client available to connect an integration auth — surfaced in the UI so a
- * user can see the shared system client, the org's and the space's own (BYO)
- * clients, and which one is the default. Secrets are never included.
+ * user can see the shared system client and/or the org's own (BYO) client and
+ * which one is the default. Secrets are never included.
  */
 interface IntegrationClientDescriptor {
   /** `client_ref` to pass back at connect time. */
@@ -1321,8 +1330,6 @@ interface IntegrationClientDescriptor {
   client_id: string;
   /** True for the client used when no explicit `client_ref` is given at connect. */
   is_default: boolean;
-  /** Whether `setDefaultIntegrationClient` accepts this client at the listed tier. */
-  default_selectable: boolean;
   /** True for a DCR/CIMD machine client — read-only in the UI (no manual edit). */
   auto_provisioned: boolean;
   /** True when the client carries a non-empty secret (confidential client). */
@@ -1354,11 +1361,9 @@ function fingerprintSystemClientId(clientId: string): string {
 }
 
 /**
- * List the OAuth clients `owner` resolves for `(packageId, authKey)`, secrets
- * omitted. A space lists its own clients (`"custom"`), its org's (`"org"`) and
- * the system clients (`"built-in"`); an org lists its own and the system ones.
- * `is_default` is the tier's effective default ({@link pickDefault}).
- * `default_selectable`: the tier's own clients and its {@link inheritedDefault}.
+ * List the OAuth clients `owner` may make its default for `(packageId, authKey)`,
+ * secrets omitted: its {@link inheritedDefault} (when not its own) then its own
+ * clients, oldest-first. `is_default` marks the effective default.
  */
 export async function listIntegrationClients(
   owner: ClientOwner,
@@ -1367,59 +1372,54 @@ export async function listIntegrationClients(
 ): Promise<IntegrationClientDescriptor[]> {
   await assertOwnerInScope(owner, packageId, authKey);
   const { space, org } = await loadClientTiers(owner, packageId, authKey);
-  const systemDefs = listSystemIntegrationClientsFor(packageId, authKey);
-  const system = systemDefs[0] ?? null;
+  const system = getDefaultSystemIntegrationClient(packageId, authKey);
+  const own = isSpaceOwner(owner) ? space : org;
   const defaultRef = pickDefault(space, org, system)?.id;
-  const inheritedRef = inheritedDefault(owner, space, org, system)?.id;
-  // System entries first; a DB row colliding with a system id is skipped
-  // (system wins), matching the system-first `resolveIntegrationClientById`.
-  return mergeSystemAndDb<
-    SystemIntegrationClientDefinition,
-    IntegrationOAuthClientWithSecret,
-    IntegrationClientDescriptor
-  >({
-    system: new Map(systemDefs.map((def) => [def.id, def] as const)),
-    rows: [...space, ...org],
-    mapSystem: (id, def) => ({
-      client_ref: id,
+  const inherited = inheritedDefault(owner, space, org, system);
+  const listed: Array<IntegrationOAuthClientWithSecret | SystemIntegrationClientDefinition> =
+    inherited && !own.some((c) => c.id === inherited.id) ? [inherited, ...own] : own;
+  return listed.map((c) => describeClient(c, c.id === defaultRef));
+}
+
+function describeClient(
+  client: IntegrationOAuthClientWithSecret | SystemIntegrationClientDefinition,
+  isDefault: boolean,
+): IntegrationClientDescriptor {
+  if (!("isDefault" in client)) {
+    return {
+      client_ref: client.id,
       source: "built-in",
       // Never expose the real system client_id (deployment secret) — only an
       // opaque, stable fingerprint for the UI to show/diff.
-      client_id: fingerprintSystemClientId(def.clientId),
-      is_default: id === defaultRef,
-      default_selectable: id === inheritedRef,
+      client_id: fingerprintSystemClientId(client.clientId),
+      is_default: isDefault,
       auto_provisioned: false,
-      has_client_secret: def.clientSecret !== undefined,
+      has_client_secret: client.clientSecret !== undefined,
       // The entry's own declaration, `null` when it defers to the manifest —
-      // never inferred from the secret.
-      token_endpoint_auth_method: def.tokenEndpointAuthMethod ?? null,
+      // mirroring the custom row's nullable column below. Same rule as every
+      // other consumer: read the declaration, never infer it from the secret.
+      token_endpoint_auth_method: client.tokenEndpointAuthMethod ?? null,
       redirect_uri: null,
-    }),
-    mapRow: (row) => ({
-      client_ref: row.id,
-      source: row.spaceId === null ? "org" : "custom",
-      client_id: row.client_id,
-      is_default: row.id === defaultRef,
-      // Own row: a space row listed for a space, an org row listed for the org.
-      default_selectable: (row.spaceId !== null) === isSpaceOwner(owner) || row.id === inheritedRef,
-      auto_provisioned: row.autoProvisioned,
-      has_client_secret: row.has_client_secret,
-      token_endpoint_auth_method: row.token_endpoint_auth_method,
-      redirect_uri: row.redirect_uri,
-    }),
-  });
+    };
+  }
+  return {
+    client_ref: client.id,
+    source: client.spaceId === null ? "org" : "custom",
+    client_id: client.client_id,
+    is_default: isDefault,
+    auto_provisioned: client.autoProvisioned,
+    has_client_secret: client.has_client_secret,
+    token_endpoint_auth_method: client.token_endpoint_auth_method,
+    redirect_uri: client.redirect_uri,
+  };
 }
 
 /**
- * Choose the default OAuth client of `owner`'s tier for new connections on
- * `(integration, auth)` — the model-provider `setDefaultModel` analogue. At most
- * one client per tier is flagged (`idx_ioc_one_default` /
- * `idx_ioc_one_org_default`):
- *   - `clientRef` is a client of the tier → flag it, clear the others.
- *   - `clientRef` is the tier's {@link inheritedDefault} (space: org or system
- *     client; org: system client) → clear the tier's flags.
- * Anything else is a 400, never silently stored. Clear-then-set runs in one
- * transaction so the partial unique never sees two defaults mid-flight.
+ * Choose the default OAuth client of `owner`'s tier for new connections — the
+ * model-provider `setDefaultModel` analogue: an own client is flagged (the others
+ * cleared), the tier's {@link inheritedDefault} clears its flags, anything else is
+ * rejected, never silently stored. Clear-then-set runs in one transaction so the
+ * partial unique never sees two defaults mid-flight.
  */
 export async function setDefaultIntegrationClient(
   owner: ClientOwner,
@@ -1444,7 +1444,7 @@ export async function setDefaultIntegrationClient(
   const authScope = tierAuthFilter(owner, integrationId, authKey);
   const now = new Date();
   await setExactlyOneDefault({
-    // Clear every default of the tier first so the partial unique never sees two.
+    // Clear every custom default first so the partial unique never sees two.
     clear: (tx) =>
       tx
         .update(integrationOauthClients)
@@ -1479,8 +1479,8 @@ export interface ResolvedOAuthConnect {
    * registered and dynamic registration is either not opted-in or unavailable —
    * the caller surfaces the "register an OAuth client" / provisioning error.
    */
-  customClients: IntegrationOAuthClientWithSecret[];
-  /** The org-level clients the space inherits — always empty for an auto-provisioned auth. */
+  spaceClients: IntegrationOAuthClientWithSecret[];
+  /** The org's clients the space inherits — empty for an auto-provisioned auth. */
   orgClients: IntegrationOAuthClientWithSecret[];
   /** Discovered/declared issuer (overrides the manifest when set). */
   issuer?: string;
@@ -1588,12 +1588,12 @@ export async function ensureIntegrationOAuthClient(
   auth: AfpsManifestAuth,
   redirectUri: string,
 ): Promise<ResolvedOAuthConnect> {
-  // Classic path: not a remote MCP oauth2 auth — load ALL space and org clients
-  // (the connect resolver picks the default); endpoints come from the manifest
-  // in the caller.
+  // Classic path: not a remote MCP oauth2 auth — load ALL space and org clients (the
+  // connect resolver picks the default among the N); endpoints come from the
+  // manifest in the caller.
   if (!usesAutoProvisionedClient(manifest, auth)) {
     const { space, org } = await loadClientTiers(scope, packageId, authKey);
-    return { customClients: space, orgClients: org };
+    return { spaceClients: space, orgClients: org };
   }
 
   // Auto-provisioned path: there is exactly one machine client (DCR/CIMD).
@@ -1648,7 +1648,7 @@ export async function ensureIntegrationOAuthClient(
   // on internal hosts. The token endpoint is fetched server-side at exchange,
   // so drop any blocked endpoint before threading it into the connect state.
   const resolved: ResolvedOAuthConnect = {
-    customClients: existing ? [existing] : [],
+    spaceClients: existing ? [existing] : [],
     orgClients: [],
     ...(issuer ? { issuer } : {}),
     ...(safeUrl(endpoints.authorizationEndpoint)
@@ -1700,7 +1700,7 @@ export async function ensureIntegrationOAuthClient(
   // Narrow the concurrency window: re-check in case a parallel Connect just
   // registered a client for the same (space, package, authKey).
   const racedClient = await getAutoProvisionedClient(scope, packageId, authKey);
-  if (racedClient) return { ...resolved, customClients: [racedClient] };
+  if (racedClient) return { ...resolved, spaceClients: [racedClient] };
 
   const host = (() => {
     try {
@@ -1825,7 +1825,7 @@ export async function ensureIntegrationOAuthClient(
             authKey,
             clientId: winner.client_id,
           });
-          return { ...resolved, customClients: [winner] };
+          return { ...resolved, spaceClients: [winner] };
         }
       }
       throw insertErr;
@@ -1835,7 +1835,7 @@ export async function ensureIntegrationOAuthClient(
       authKey,
       clientId: registration.clientId,
     });
-    return { ...resolved, customClients: [client] };
+    return { ...resolved, spaceClients: [client] };
   } catch (err) {
     if (err instanceof DynamicClientRegistrationError) {
       logger.warn("auto-DCR: dynamic client registration failed", {
@@ -1889,17 +1889,10 @@ export async function ensureIntegrationOAuthClient(
 }
 
 /**
- * Delete one custom client by its id; the row must belong to `owner`'s tier and
- * to `packageId` (escalation guard, else 404). If it was the default, no
- * auto-promotion — the resolution cascade falls to the next tier (or the admin
- * re-picks a default), matching the model-provider behaviour.
- *
- * Connections pinned to the client are deleted in the same transaction: the
- * credentials that minted their tokens are gone, so they could never refresh
- * again — as deleting an OAuth app at the IdP revokes its tokens. A space
- * client can only mint connections of its space; an org client, those of every
- * space of the org. `client_ref` is the row's UUID, never a system id, so the
- * match is exact. The pg_notify DELETE trigger clears live UI badges.
+ * Delete one custom client by its id, scoped to `owner`'s tier and `packageId`
+ * (escalation guard). If it was the default, no auto-promotion — the resolution
+ * cascade simply falls to the next tier (or the admin re-picks a default);
+ * this matches the model-provider behaviour and keeps the operation predictable.
  */
 export async function deleteIntegrationOAuthClient(
   owner: ClientOwner,
@@ -1921,6 +1914,16 @@ export async function deleteIntegrationOAuthClient(
     if (deleted.length === 0) {
       throw notFound(`OAuth client '${clientId}' not found`);
     }
+    // Cascade: every connection pinned to this client is now dead — the
+    // client_id/secret that minted its tokens is gone, so it can never refresh
+    // again (resolveIntegrationClientById → null → needs_reconnection forever).
+    // Industry standard mirrors this: deleting an OAuth app at the IdP
+    // (GitHub/Google) revokes all tokens it issued. We delete the orphaned
+    // connections in the SAME transaction rather than leave un-refreshable
+    // zombies. `client_ref` holds this client's UUID PK — globally unique and
+    // never collides with a non-UUID system id — so the tier-scoped
+    // match is exact. The pg_notify DELETE trigger fires `connection_update`
+    // so live UI badges clear without a manual publish.
     const deletedConns = await tx
       .delete(integrationConnections)
       .where(and(eq(integrationConnections.clientRef, clientId), connectionSpaces))
@@ -2833,7 +2836,6 @@ export async function getIntegrationAuthStatuses(
   const activation = (await resolveIntegrationActivations([packageId], scope.spaceId)).get(
     packageId,
   )!;
-  // Space rows and the org rows the space inherits.
   const oauthClients = await db
     .select({ authKey: integrationOauthClients.authKey })
     .from(integrationOauthClients)

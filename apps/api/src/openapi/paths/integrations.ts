@@ -169,7 +169,6 @@ export const integrationClientsListSchema = {
           "source",
           "client_id",
           "is_default",
-          "default_selectable",
           "auto_provisioned",
           "has_client_secret",
           "token_endpoint_auth_method",
@@ -181,7 +180,7 @@ export const integrationClientsListSchema = {
             type: "string",
             enum: ["built-in", "org", "custom"],
             description:
-              "`custom` = the space's own client, `org` = an org-level client inherited by every space of the org, `built-in` = a platform-provided system client. Resolution: space > org > system.",
+              "`custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.",
           },
           client_id: {
             type: "string",
@@ -190,12 +189,8 @@ export const integrationClientsListSchema = {
           },
           is_default: {
             type: "boolean",
-            description: "True for the client that mints new connections at the listed tier.",
-          },
-          default_selectable: {
-            type: "boolean",
             description:
-              "Whether PUT .../default-client accepts this client at the listed tier: the tier's own clients, plus the default it inherits (a space: the org or system default; an org: the system client).",
+              "True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client.",
           },
           auto_provisioned: { type: "boolean" },
           has_client_secret: { type: "boolean" },
@@ -717,20 +712,49 @@ export const integrationsPaths = {
       },
     },
   },
+  "/api/integrations/{packageId}/oauth-clients/{clientId}/promote": {
+    post: {
+      operationId: "promoteIntegrationOAuthClient",
+      tags: ["Integrations"],
+      summary: "Promote a space OAuth client to the org level",
+      description:
+        "Moves one of this space's custom clients to the org level (`spaceId: " +
+        "null`), inherited by every space of the org. It keeps its id and secret, " +
+        "so the connections it minted keep working; it becomes the org default " +
+        "when the org has none. Auto-provisioned (DCR/CIMD) clients stay per " +
+        "space (400). Requires both `integrations:configure` and " +
+        "`org-integrations:configure`, which are never granted to an API key.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+        clientIdParam,
+      ],
+      responses: {
+        "200": {
+          description: "Promoted; the client, now org-level",
+          headers: STD_RESPONSE_HEADERS,
+          content: { "application/json": { schema: oauthClientSchema } },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/integrations/{packageId}/auths/{authKey}/clients": {
     get: {
       operationId: "listIntegrationClients",
       tags: ["Integrations"],
       summary: "List the OAuth clients registered for an integration auth",
       description:
-        "Returns the clients this space resolves for the auth: its own custom " +
-        "(BYO-app) clients (`custom`), the org-level clients it inherits (`org`) " +
-        "and any platform-provided system clients (`built-in`), with which is " +
-        "the default (space > org > system) and which may be made the default " +
-        "here (`default_selectable`). Secrets are never returned. Drives the " +
-        "admin clients CRUD table; new connections always use the default (no " +
-        "per-connect picker). Org-level clients are managed on " +
-        "`/api/org-integrations`.",
+        "Returns this space's own custom (BYO-app) clients (`custom`, oldest " +
+        "first) plus the ONE default it inherits — the org default (`org`), else " +
+        "the system client (`built-in`) — when that is not one of its own. Other " +
+        "org and system clients are not listed: a space either uses its own " +
+        "clients or inherits the org's choice. `is_default` marks the client new " +
+        "connections use (no per-connect picker). Secrets are never returned. " +
+        "Org-level clients are managed on `/api/org-integrations`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -758,8 +782,8 @@ export const integrationsPaths = {
         "(the model-provider `setDefaultModel` analogue). Selecting one of the " +
         "space's own clients flags it default; selecting the default the space " +
         "inherits (the org default, else the system client) un-flags the space's " +
-        "clients so the cascade falls back to it. Any other `org` / `built-in` " +
-        "client is a 400 (`default_selectable: false`). Existing connections are bound " +
+        "clients so the space inherits it again. Any other `client_ref` is a 400. " +
+        "Existing connections are bound " +
         "to the client that minted them and are unaffected. Returns the refreshed " +
         "clients list. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [

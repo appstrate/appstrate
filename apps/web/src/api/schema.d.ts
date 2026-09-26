@@ -1494,7 +1494,7 @@ export interface paths {
         };
         /**
          * List the OAuth clients registered for an integration auth
-         * @description Returns the clients this space resolves for the auth: its own custom (BYO-app) clients (`custom`), the org-level clients it inherits (`org`) and any platform-provided system clients (`built-in`), with which is the default (space > org > system) and which may be made the default here (`default_selectable`). Secrets are never returned. Drives the admin clients CRUD table; new connections always use the default (no per-connect picker). Org-level clients are managed on `/api/org-integrations`.
+         * @description Returns this space's own custom (BYO-app) clients (`custom`, oldest first) plus the ONE default it inherits — the org default (`org`), else the system client (`built-in`) — when that is not one of its own. Other org and system clients are not listed: a space either uses its own clients or inherits the org's choice. `is_default` marks the client new connections use (no per-connect picker). Secrets are never returned. Org-level clients are managed on `/api/org-integrations`.
          */
         get: operations["listIntegrationClients"];
         put?: never;
@@ -1577,7 +1577,7 @@ export interface paths {
         get?: never;
         /**
          * Set the default OAuth client for an integration auth
-         * @description Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting one of the space's own clients flags it default; selecting the default the space inherits (the org default, else the system client) un-flags the space's clients so the cascade falls back to it. Any other `org` / `built-in` client is a 400 (`default_selectable: false`). Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Requires `integrations:configure`, which is never granted to an API key.
+         * @description Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting one of the space's own clients flags it default; selecting the default the space inherits (the org default, else the system client) un-flags the space's clients so the space inherits it again. Any other `client_ref` is a 400. Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Requires `integrations:configure`, which is never granted to an API key.
          */
         put: operations["setDefaultIntegrationClient"];
         post?: never;
@@ -1708,6 +1708,26 @@ export interface paths {
          * @description Deletes one of this space's custom clients by id (an org-level client id is a 404 here), with the connections it minted. If it was the default, the cascade re-resolves (org default, else system client) with no auto-promotion. Requires `integrations:configure`, which is never granted to an API key.
          */
         delete: operations["deleteIntegrationOAuthClient"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/oauth-clients/{clientId}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote a space OAuth client to the org level
+         * @description Moves one of this space's custom clients to the org level (`spaceId: null`), inherited by every space of the org. It keeps its id and secret, so the connections it minted keep working; it becomes the org default when the org has none. Auto-provisioned (DCR/CIMD) clients stay per space (400). Requires both `integrations:configure` and `org-integrations:configure`, which are never granted to an API key.
+         */
+        post: operations["promoteIntegrationOAuthClient"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2620,7 +2640,7 @@ export interface paths {
         };
         /**
          * List the org-level OAuth clients of an integration auth
-         * @description Returns the org's own clients (`org`) plus any platform-provided system clients (`built-in`), with the org-tier default. Every entry is `default_selectable`. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (DCR/CIMD) have an org tier; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.
+         * @description Returns the org's own clients (`org`, oldest first) plus the default it inherits, the platform-provided system client (`built-in`), if any. `is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (DCR/CIMD) have an org tier; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.
          */
         get: operations["listOrgIntegrationClients"];
         put?: never;
@@ -2641,7 +2661,7 @@ export interface paths {
         get?: never;
         /**
          * Set the org-level default OAuth client of an integration auth
-         * @description Selecting an org client flags it default for every space that has not flagged one of its own; selecting the system client un-flags the org's clients. Returns the refreshed org clients list. Requires `org-integrations:configure`, which is never granted to an API key.
+         * @description Selecting an org client flags it default for every space that has not flagged one of its own; selecting the system client un-flags the org's clients. Any other `client_ref` is a 400. Returns the refreshed org clients list. Requires `org-integrations:configure`, which is never granted to an API key.
          */
         put: operations["setOrgDefaultIntegrationClient"];
         post?: never;
@@ -11881,16 +11901,14 @@ export interface operations {
                         data: {
                             client_ref: string;
                             /**
-                             * @description `custom` = the space's own client, `org` = an org-level client inherited by every space of the org, `built-in` = a platform-provided system client. Resolution: space > org > system.
+                             * @description `custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.
                              * @enum {string}
                              */
                             source: "built-in" | "org" | "custom";
                             /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
-                            /** @description True for the client that mints new connections at the listed tier. */
+                            /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
                             is_default: boolean;
-                            /** @description Whether PUT .../default-client accepts this client at the listed tier: the tier's own clients, plus the default it inherits (a space: the org or system default; an org: the system client). */
-                            default_selectable: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
                             /**
@@ -12168,16 +12186,14 @@ export interface operations {
                         data: {
                             client_ref: string;
                             /**
-                             * @description `custom` = the space's own client, `org` = an org-level client inherited by every space of the org, `built-in` = a platform-provided system client. Resolution: space > org > system.
+                             * @description `custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.
                              * @enum {string}
                              */
                             source: "built-in" | "org" | "custom";
                             /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
-                            /** @description True for the client that mints new connections at the listed tier. */
+                            /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
                             is_default: boolean;
-                            /** @description Whether PUT .../default-client accepts this client at the listed tier: the tier's own clients, plus the default it inherits (a space: the org or system default; an org: the system client). */
-                            default_selectable: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
                             /**
@@ -12680,6 +12696,63 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    promoteIntegrationOAuthClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
+                clientId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Promoted; the client, now org-level */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         */
+                        id: string;
+                        /** @description Owning space; `null` for an org-level client, inherited by every space. */
+                        spaceId: string | null;
+                        integration_package_id: string;
+                        auth_key: string;
+                        client_id: string;
+                        has_client_secret: boolean;
+                        /**
+                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
+                         * @enum {string|null}
+                         */
+                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
+                        redirect_uri: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                        /** Format: date-time */
+                        updatedAt: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
@@ -15701,16 +15774,14 @@ export interface operations {
                         data: {
                             client_ref: string;
                             /**
-                             * @description `custom` = the space's own client, `org` = an org-level client inherited by every space of the org, `built-in` = a platform-provided system client. Resolution: space > org > system.
+                             * @description `custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.
                              * @enum {string}
                              */
                             source: "built-in" | "org" | "custom";
                             /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
-                            /** @description True for the client that mints new connections at the listed tier. */
+                            /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
                             is_default: boolean;
-                            /** @description Whether PUT .../default-client accepts this client at the listed tier: the tier's own clients, plus the default it inherits (a space: the org or system default; an org: the system client). */
-                            default_selectable: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
                             /**
@@ -15767,16 +15838,14 @@ export interface operations {
                         data: {
                             client_ref: string;
                             /**
-                             * @description `custom` = the space's own client, `org` = an org-level client inherited by every space of the org, `built-in` = a platform-provided system client. Resolution: space > org > system.
+                             * @description `custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.
                              * @enum {string}
                              */
                             source: "built-in" | "org" | "custom";
                             /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
-                            /** @description True for the client that mints new connections at the listed tier. */
+                            /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
                             is_default: boolean;
-                            /** @description Whether PUT .../default-client accepts this client at the listed tier: the tier's own clients, plus the default it inherits (a space: the org or system default; an org: the system client). */
-                            default_selectable: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
                             /**
