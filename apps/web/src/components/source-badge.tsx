@@ -8,15 +8,18 @@ import { Badge } from "@appstrate/ui/components/badge";
  * clients, models, model-provider credentials, proxies): `built-in` (a
  * platform/env entry, read-only), `auto-provisioned` (a DCR/CIMD machine
  * client, read-only), `org` (an integration OAuth client inherited from the
- * organization) or `custom` (the org's — or space's — own row). One component so the
- * wording + variant never drift across surfaces.
+ * organization) or `custom` (the org's own row, or with `spaceTier` the space's
+ * own integration client). One component so the wording + variant never drift
+ * across surfaces.
  */
 export function SourceBadge({
   source,
   autoProvisioned = false,
+  spaceTier = false,
 }: {
   source: "built-in" | "org" | "custom";
   autoProvisioned?: boolean;
+  spaceTier?: boolean;
 }) {
   const { t } = useTranslation("settings");
   if (source === "built-in") {
@@ -28,5 +31,5 @@ export function SourceBadge({
   if (autoProvisioned) {
     return <Badge variant="outline">{t("source.autoProvisioned")}</Badge>;
   }
-  return <Badge variant="outline">{t("source.custom")}</Badge>;
+  return <Badge variant="outline">{t(spaceTier ? "source.space" : "source.custom")}</Badge>;
 }

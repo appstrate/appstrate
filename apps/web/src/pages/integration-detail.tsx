@@ -57,13 +57,28 @@ const INTEGRATION_TABS = [
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Trash2, ShieldCheck, Plus, Pencil, Check, X, ChevronRight } from "lucide-react";
+import {
+  Trash2,
+  ShieldCheck,
+  Plus,
+  Pencil,
+  Check,
+  X,
+  ChevronRight,
+  ArrowUpFromLine,
+} from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@appstrate/ui/components/tooltip";
 import {
   Table,
   TableHeader,
@@ -98,6 +113,7 @@ import {
   useCreateIntegrationOAuthClient,
   useRotateIntegrationOAuthClient,
   useDeleteIntegrationOAuthClient,
+  usePromoteIntegrationOAuthClient,
   useUpdateIntegrationConnection,
   useUpdateIntegrationSettings,
   useIntegrationPins,
@@ -354,10 +370,9 @@ function OAuthClientModal({
  * a manual escape hatch (opt-in) covers the rare server needing a pre-registered
  * public client. Secrets are never returned by the endpoint.
  *
- * `tier` picks the routes: `space` lists the space's own clients plus the
- * inherited org and system ones (only its own are editable; the default is
- * settable where `default_selectable`); `org` manages the org's clients,
- * inherited by every space.
+ * `tier` picks the routes: each lists the tier's own clients (editable) plus
+ * the one default it inherits; any listed row can be made the default. `space`
+ * rows can be promoted to the org, whose clients every space inherits.
  */
 function ClientsTable({
   tier,
@@ -381,10 +396,13 @@ function ClientsTable({
   const platformRedirectUri = detail?.platform_redirect_uri ?? "";
   const setDefault = useSetDefaultIntegrationClient(tier);
   const del = useDeleteIntegrationOAuthClient(tier);
+  const promote = usePromoteIntegrationOAuthClient();
+  const { can } = usePermissions();
   const [modal, setModal] = useState<
     { mode: "create" } | { mode: "rotate"; client: IntegrationClient } | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState<IntegrationClient | null>(null);
+  const [confirmPromote, setConfirmPromote] = useState<IntegrationClient | null>(null);
   // Auto-provisioned auths hide the manual register button by default — their
   // token endpoint only accepts a DCR/CIMD-acquired client, so a hand-entered
   // one usually points at the wrong server and disables auto-registration. Keep
@@ -399,8 +417,8 @@ function ClientsTable({
   // exactly the setup this display exists to get right. New connections always
   // use the default client, so that client's override is the one that decides.
   const effectiveRedirectUri = rows.find((c) => c.is_default)?.redirect_uri || platformRedirectUri;
-  // Choosing a default only matters when more than one row may be picked here.
-  const canChooseDefault = rows.filter((c) => c.default_selectable).length > 1;
+  // Choosing a default only matters when there is more than one row.
+  const canChooseDefault = rows.length > 1;
   // The rows this tier owns (edit/delete); the others are inherited.
   const ownSource = tier === "space" ? "custom" : "org";
   // Both tables share the page, and an org row shows in both: prefix the org
@@ -410,6 +428,8 @@ function ClientsTable({
   // Classic auths always allow registering more custom clients; auto-provisioned
   // auths only via the opt-in escape hatch (and only when none is registered yet).
   const canRegister = !autoProvisioned || (showManual && !hasAutoClient);
+  // Auto-provisioned auths have no org tier (their clients are per space).
+  const canPromote = tier === "space" && !autoProvisioned && can("org-integrations:configure");
 
   return (
     <div
@@ -452,6 +472,11 @@ function ClientsTable({
       {tier === "org" && (
         <p className="text-muted-foreground mb-2 text-xs">{t("integration.clients.orgHint")}</p>
       )}
+      {tier === "space" && rows.some((c) => c.source === "org") && (
+        <p className="text-muted-foreground mb-2 text-xs">
+          {t("integration.clients.inheritedOrgHint")}
+        </p>
+      )}
 
       {autoProvisioned && !hasAutoClient && (
         <p
@@ -488,6 +513,7 @@ function ClientsTable({
                       <SourceBadge
                         source={client.source}
                         autoProvisioned={client.auto_provisioned}
+                        spaceTier
                       />
                     </TableCell>
                     <TableCell className="font-mono text-xs">{client.client_id}</TableCell>
@@ -496,7 +522,7 @@ function ClientsTable({
                         isDefault={client.is_default}
                         defaultLabel={t("integration.clients.default")}
                         setLabel={t("integration.clients.setDefault.action")}
-                        canSetDefault={canChooseDefault && client.default_selectable}
+                        canSetDefault={canChooseDefault}
                         disabled={setDefault.isPending}
                         onSetDefault={() =>
                           setDefault.mutate({
@@ -509,6 +535,29 @@ function ClientsTable({
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {editable && canPromote && (
+                          <TooltipProvider delayDuration={300}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0"
+                                  onClick={() => setConfirmPromote(client)}
+                                  disabled={promote.isPending}
+                                  data-testid={`oauth-client-promote-${client.client_ref}`}
+                                  aria-label={t("integration.clients.promote.action")}
+                                >
+                                  <ArrowUpFromLine size={14} />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {t("integration.clients.promote.action")}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
                         {editable && (
                           <Button
                             type="button"
@@ -587,6 +636,21 @@ function ClientsTable({
           del.mutate(
             { params: { path: { packageId, clientId: confirmDelete.client_ref } } },
             { onSuccess: () => setConfirmDelete(null) },
+          );
+        }}
+      />
+      <ConfirmModal
+        open={confirmPromote !== null}
+        onClose={() => setConfirmPromote(null)}
+        title={t("integration.clients.promote.action")}
+        description={t("integration.clients.promote.confirm")}
+        variant="default"
+        isPending={promote.isPending}
+        onConfirm={() => {
+          if (!confirmPromote) return;
+          promote.mutate(
+            { params: { path: { packageId, clientId: confirmPromote.client_ref } } },
+            { onSuccess: () => setConfirmPromote(null) },
           );
         }}
       />

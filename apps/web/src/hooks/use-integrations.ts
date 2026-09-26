@@ -316,11 +316,11 @@ function useClientMutationSuccess(messageKey: string) {
 }
 
 /**
- * OAuth clients available to connect this auth, each with `source` and which
- * is the default. Space tier: space custom + inherited org + system clients,
- * `default_selectable` marking what the space may pick. Org tier: org custom +
- * system clients. Secrets are never returned. New connections always use the
- * default — there is no per-connect picker.
+ * OAuth clients a tier may pick as its default, each with `source` and which
+ * is the default: the tier's own clients plus the one default it inherits (org
+ * or system). Secrets are never returned. New connections always use the
+ * default — there is no per-connect picker. The org tier is gated at the call
+ * site (`org-integrations:configure`).
  */
 export function useIntegrationClients(
   tier: IntegrationClientTier,
@@ -329,7 +329,6 @@ export function useIntegrationClients(
 ) {
   const spaceScope = useIntegrationsReadScope();
   const orgScope = useOrgOnlyScope();
-  const { can } = usePermissions();
   const path = { packageId: packageId ?? "", authKey: authKey ?? "" };
   const ready = !!packageId && !!authKey;
   // One typed query per tier (literal paths keep the client typed); only the
@@ -348,7 +347,7 @@ export function useIntegrationClients(
     ORG_CLIENTS,
     { params: { path, header: orgScope.header } },
     {
-      enabled: tier === "org" && orgScope.enabled && can("org-integrations:configure") && ready,
+      enabled: tier === "org" && orgScope.enabled && ready,
       select: (envelope): IntegrationClient[] => envelope.data,
     },
   );
@@ -407,6 +406,24 @@ export function useSetDefaultIntegrationClient(tier: IntegrationClientTier) {
               "/api/org-integrations/{packageId}/auths/{authKey}/default-client",
               vars,
             );
+      return data;
+    },
+    onSuccess,
+  });
+}
+
+/**
+ * Move one of the space's own clients to the org tier, inherited by every
+ * space. Its id is unchanged, so existing connections keep working.
+ */
+export function usePromoteIntegrationOAuthClient() {
+  const onSuccess = useClientMutationSuccess("integration.clients.promote.success");
+  return useMutation({
+    mutationFn: async (vars: { params: ClientPath }) => {
+      const { data } = await client.POST(
+        "/api/integrations/{packageId}/oauth-clients/{clientId}/promote",
+        vars,
+      );
       return data;
     },
     onSuccess,
