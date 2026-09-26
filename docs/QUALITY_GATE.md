@@ -33,7 +33,7 @@ re-introduce with one careless edit to `knip.config.ts`.
 Until then, `bun run check` failed locally on `//#verify:dead-code` with ~161
 "unused exports", ~284 "unused exported types" and 6 "unused files" — on an
 untouched `main` as well as on any branch. None of it was real, and because the
-`pre-push` hook runs `bun run check`, it blocked every local push.
+`pre-push` hook then ran `bun run check`, it blocked every local push.
 
 The cause was read out of knip 5.88.1's `dist/` — the version pinned when this
 was diagnosed. Each claim below was re-verified against **6.32.2**'s

@@ -19,9 +19,9 @@
  *
  * ─── Why this is NOT in `bun run check` ──────────────────────────────
  *
- * `bun run check` is the `pre-push` hook. `bun audit` posts the lockfile's
+ * `bun run check` must stay runnable offline. `bun audit` posts the lockfile's
  * package set to the npm bulk-advisory endpoint, so wiring it into `check`
- * would make every push require the network and fail on a plane. It runs as a
+ * would make the local gate require the network and fail on a plane. It runs as a
  * CI job instead (`.github/workflows/security.yml`), and `bun run audit:deps`
  * runs the identical check locally.
  *
