@@ -26,7 +26,6 @@ import {
   type TranscriptContext,
 } from "@earendil-works/pi-ai";
 import type { AliasBackingApiShape } from "@appstrate/core/model-swap";
-import { trimTrailingSlashes } from "@appstrate/runner-pi/llm-proxy-routes";
 
 export type {
   Api,
@@ -56,29 +55,20 @@ const BACKING_STREAMS = {
   "openai-responses": openaiResponses,
 } as const satisfies Record<AliasBackingApiShape, unknown>;
 
-const BUILTIN_PROVIDERS = builtinProviders();
-const PROVIDER_BY_ID = new Map(BUILTIN_PROVIDERS.map((provider) => [provider.id, provider]));
-const PROVIDER_BY_BASE_URL = new Map(
-  BUILTIN_PROVIDERS.flatMap((provider) =>
-    provider.getModels().map((record) => [trimTrailingSlashes(record.baseUrl), provider] as const),
-  ),
-);
+const PROVIDERS = new Map(builtinProviders().map((provider) => [provider.id, provider]));
 
 /**
- * Stream through pi-ai's built-in provider (by catalog endpoint, else `model.provider`) when
- * its catalog serves `model.api` — `compat.streamSimple`'s check — so provider-layer quirks
- * apply; else the raw per-API stream, whose cast holds as only a model of that `api` reaches it.
+ * Stream the normalized transcript through the built-in provider `model.provider` when its
+ * catalog serves `model.api`, as pi-ai's `compat.streamSimple` does, so provider-layer quirks
+ * apply; else through pi-ai's `model.api` stream (sound cast: that entry's key IS `model.api`).
  */
 export function streamBacking(
   model: Model<Api>,
   context: Context,
   options: SimpleStreamOptions,
 ): AssistantMessageEventStream {
-  // Providers take the branded `TranscriptContext`; the container's is already one.
   const transcript = normalizeContext(context);
-  const provider =
-    PROVIDER_BY_BASE_URL.get(trimTrailingSlashes(model.baseUrl)) ??
-    PROVIDER_BY_ID.get(model.provider);
+  const provider = PROVIDERS.get(model.provider);
   if (provider?.getModels().some((record) => record.api === model.api)) {
     return provider.streamSimple(model, transcript, options);
   }

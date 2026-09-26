@@ -88,9 +88,9 @@ options}`, rebuilds the REAL backing's pi-ai `Model` record from the private
 swap descriptor and Pi's registry record for it (`backing.providerId` is the
 Pi provider key, `null` for a gateway), streams it through pi-ai, and projects the resulting
 `AssistantMessageEvent`s down to `PiMessagesEvent`s. The call goes through pi-ai's built-in provider
-for the backing's endpoint in Pi's catalog, else for `model.provider`, so provider-layer quirks such as
-OpenCode's `x-opencode-session` apply as on a direct run (#1583). It falls back to the raw per-API
-`streamSimple` when no provider matches or the provider's catalog lacks the backing's API shape. Everything else in that
+for `model.provider` when that provider's catalog serves the backing's API shape — the same dispatch
+pi-ai's own `compat.streamSimple` applies — so provider-layer quirks such as OpenCode's
+`x-opencode-session` apply. Otherwise it goes through the raw per-API `streamSimple`. Everything else in that
 handler (header swap, body forward, response passthrough) serves non-aliased
 runs only. **No quirk table is mirrored anywhere**: Pi's registry, `detectCompat`
 and every per-vendor serializer keep running inside pi-ai, one process to the

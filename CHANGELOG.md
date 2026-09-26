@@ -10,9 +10,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Runs on an aliased model backed by OpenCode no longer fail with
   `400 MissingSessionID`** (#1583). The sidecar now re-originates an aliased
-  call through pi-ai's provider for the backing's endpoint, so provider-level
-  headers such as `x-opencode-session` reach the upstream call — including an
-  `openai-compatible` / `anthropic-compatible` model pointed at OpenCode.
+  call through the backing's pi-ai provider, so provider-level headers such as
+  `x-opencode-session` reach the upstream call. A deployment that set
+  `"aliased": false` on its system model in `SYSTEM_PROVIDER_KEYS` as a
+  workaround can restore the alias, which keeps the backing hidden from the
+  agent container.
 
 ## [1.0.0-beta.62] - 2026-09-25
 

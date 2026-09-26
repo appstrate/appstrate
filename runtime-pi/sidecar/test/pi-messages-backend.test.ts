@@ -165,7 +165,10 @@ function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessage
  * dispatcher with `onPayload`, so what is captured is what the production path
  * would have sent — not a re-implementation of it.
  */
-async function originatedPayload(backing: Backing): Promise<Record<string, unknown>> {
+async function originatedPayload(
+  backing: Backing,
+  body = CLIENT_BODY,
+): Promise<Record<string, unknown>> {
   let payload: unknown;
   const capture: BackingStreamFn = (model, context, options) =>
     streamBacking(model, context, {
@@ -180,7 +183,7 @@ async function originatedPayload(backing: Backing): Promise<Record<string, unkno
   const res = handlePiMessagesRequest(
     depsFor(backing, capture),
     new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
-    CLIENT_BODY,
+    body,
   );
   await res.text();
   expect(payload).toBeDefined();
@@ -278,18 +281,8 @@ describe("re-originated request shape", () => {
   // not the legacy `systemPrompt` field the fixtures above use.
   it("forwards the wire transcript's system prompt exactly once", async () => {
     const prompt = "You are the wire-shaped system prompt.";
-    let payload: unknown;
-    const capture: BackingStreamFn = (model, context, options) =>
-      streamBacking(model, context, {
-        ...options,
-        onPayload: (next: unknown) => {
-          payload = next;
-          throw new Error("payload captured");
-        },
-      });
-    const res = handlePiMessagesRequest(
-      depsFor(BACKINGS[0]!, capture),
-      new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
+    const payload = await originatedPayload(
+      BACKINGS[0]!,
       JSON.stringify({
         model: "appstrate-medium",
         context: {
@@ -300,7 +293,6 @@ describe("re-originated request shape", () => {
         },
       }),
     );
-    await res.text();
     expect(JSON.stringify(payload).split(prompt)).toHaveLength(2);
   });
 });
@@ -1634,13 +1626,6 @@ describe("pi-ai version drift", () => {
  * Read off the request that reached the socket, so the whole dispatch counts.
  */
 describe("provider-layer quirks", () => {
-  const GATEWAY: Backing = {
-    name: "openai-compatible gateway",
-    providerId: null,
-    apiShape: "openai-completions",
-    modelId: "house-model",
-    baseUrl: "https://llm.gateway.test/v1",
-  };
   const OPENCODE = BACKINGS.find((b) => b.name === "opencode-go")!;
 
   async function upstreamRequest(backing: Backing, sessionId?: string): Promise<Request> {
@@ -1666,12 +1651,6 @@ describe("provider-layer quirks", () => {
     expect(request.headers.get("x-opencode-session")).toBe("session-1583");
   });
 
-  it("sends it to a gateway pointed at OpenCode's endpoint too", async () => {
-    const gateway = { ...GATEWAY, baseUrl: "https://opencode.ai/zen/go/v1" };
-    const request = await upstreamRequest(gateway, "session-1583");
-    expect(request.headers.get("x-opencode-session")).toBe("session-1583");
-  });
-
   it("adds no session header to an OpenCode backing when the request carries none", async () => {
     const request = await upstreamRequest(OPENCODE);
     expect(request.headers.has("x-opencode-session")).toBe(false);
@@ -1682,16 +1661,17 @@ describe("provider-layer quirks", () => {
     expect(request.headers.has("x-opencode-session")).toBe(false);
   });
 
-  // A gateway's derived `model.provider` is `openai`, whose built-in provider
-  // speaks Responses: dispatching through it would hit `/responses`.
-  it("dispatches a gateway elsewhere through the raw API, not a derived provider", async () => {
-    const request = await upstreamRequest(GATEWAY, "session-1583");
-    expect(new URL(request.url).pathname).toBe("/internal/llm-proxy/x/chat/completions");
-    expect(request.headers.has("x-opencode-session")).toBe(false);
-  });
-
-  it("falls back to the raw API when the provider's catalog does not serve the shape", async () => {
-    const request = await upstreamRequest({ ...GATEWAY, providerId: "openai" }, "session-1583");
+  // A gateway's derived `model.provider` is `openai`, a Responses-only provider:
+  // without the catalog guard its dispatch would send completions to `/responses`.
+  it("keeps a single-API provider from taking a shape its catalog lacks", async () => {
+    const gateway: Backing = {
+      name: "openai-compatible gateway",
+      providerId: null,
+      apiShape: "openai-completions",
+      modelId: "house-model",
+      baseUrl: "https://llm.gateway.test/v1",
+    };
+    const request = await upstreamRequest(gateway);
     expect(new URL(request.url).pathname).toBe("/internal/llm-proxy/x/chat/completions");
   });
 });

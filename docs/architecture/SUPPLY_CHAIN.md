@@ -44,8 +44,7 @@ The entire import surface, after this hardening, is **four barrel files** and `p
 
 Every other module imports these symbols from its package-local barrel, never
 from the SDK directly — except `packages/runner-pi/src/pi-model.ts`, which imports
-Pi's model registry (`pi-ai/providers/all`; the sidecar barrel imports it too, for Pi's
-providers) and the root `calculateCost` /
+Pi's model registry (`pi-ai/providers/all`) and the root `calculateCost` /
 `getSupportedThinkingLevels` to build and price every platform `Model` from Pi's
 record. It stays off the barrel so only `@appstrate/runner-pi/pi-model` consumers
 load the registry: the agent container, the sidecar, the CLI and the API process
