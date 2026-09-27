@@ -444,9 +444,6 @@ export function runPiChat(input: PiChatInput): Response {
         // `baseUrl`: pi-ai builds every request URL from `model.baseUrl` (which
         // already points at the llm-proxy) and picks the serializer from
         // `model.api`, so declaring either on the provider would be dead weight.
-        // `registerProvider` (not `setRuntimeApiKey`) keeps that placeholder
-        // synchronous and purely in-memory — no credential-state sync on the
-        // turn's critical path.
         // Every remaining construction await is bounded the same way. The MCP
         // client is adopted by now, so the outer `finally` still tears it down
         // on an abort here; what `untilAborted` adds is that the abort is
@@ -455,15 +452,9 @@ export function runPiChat(input: PiChatInput): Response {
         const modelRuntime = await untilAborted(
           ModelRuntime.create(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS),
         );
-        if (modelBinding.authMode === "proxy") {
-          modelRuntime.registerProvider(modelBinding.provider, {
-            apiKey: modelBinding.runtimeApiKey,
-          });
-        } else {
-          await untilAborted(
-            setPiRuntimeCredential(modelRuntime, modelBinding.provider, modelBinding.runtimeApiKey),
-          );
-        }
+        await untilAborted(
+          setPiRuntimeCredential(modelRuntime, modelBinding.provider, modelBinding.runtimeApiKey),
+        );
         timings.runtimeMs = Date.now() - runtimeStartedAt;
 
         const generationExtensions =
