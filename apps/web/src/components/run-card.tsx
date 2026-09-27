@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { FileInput, FileOutput, Shield } from "lucide-react";
@@ -9,6 +10,35 @@ import { Badge, MetaBadge } from "./status-badge";
 import { RunDuration } from "./run-duration";
 import { RunTrigger } from "./run-trigger";
 import { formatDateField } from "../lib/format-date";
+import { useFiles } from "../hooks/use-files";
+import { FilePreview } from "./file-preview";
+import { MimeIcon } from "./file-tile";
+
+/**
+ * The one file a run produced, on its card: name and type icon, opening the
+ * preview. Only asked for when the run produced exactly one (a count the card
+ * already has), which is also when the run page features it.
+ */
+function ProducedFile({ runId }: { runId: string }) {
+  const [open, setOpen] = useState(false);
+  const { data } = useFiles({ runId, purpose: "agent_output", limit: 1 });
+  const file = data?.data[0];
+  if (!file) return null;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        disabled={!file.capabilities.preview}
+        className="bg-background hover:bg-accent relative z-10 mt-3 flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs"
+      >
+        <MimeIcon mime={file.mime} className="text-muted-foreground size-4 shrink-0" />
+        <span className="text-foreground truncate">{file.name}</span>
+      </button>
+      {open && <FilePreview file={file} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
 
 /** A second, genuinely card-shaped reading of the rows already fetched by RunList. */
 export function RunCard({ run, agentName }: { run: EnrichedRun; agentName: string }) {
@@ -20,7 +50,20 @@ export function RunCard({ run, agentName }: { run: EnrichedRun; agentName: strin
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
-            <h2 className="truncate text-sm font-medium">{agentName}</h2>
+            <h2 className="truncate text-sm font-medium">
+              {/* The card's link, stretched over it so the file button can sit inside. */}
+              {href ? (
+                <Link
+                  to={href}
+                  state={{ runNumber: run.runNumber }}
+                  className="after:absolute after:inset-0"
+                >
+                  {agentName}
+                </Link>
+              ) : (
+                agentName
+              )}
+            </h2>
             {run.runNumber != null && (
               <span className="text-muted-foreground shrink-0 font-mono text-xs">
                 #{run.runNumber}
@@ -43,6 +86,8 @@ export function RunCard({ run, agentName }: { run: EnrichedRun; agentName: strin
         </div>
         <Badge status={run.status} unread={run.unread} />
       </div>
+
+      {run.file_counts.output === 1 && <ProducedFile runId={run.id} />}
 
       {run.error && (
         <p className="text-destructive mt-3 line-clamp-2 font-mono text-xs" title={run.error}>
@@ -83,16 +128,14 @@ export function RunCard({ run, agentName }: { run: EnrichedRun; agentName: strin
     </>
   );
 
-  const className = cn(
-    "border-border bg-card flex h-full min-h-36 flex-col rounded-lg border p-4 transition-colors",
-    href && "hover:bg-accent/50",
-  );
-
-  return href ? (
-    <Link className={className} to={href} state={{ runNumber: run.runNumber }}>
+  return (
+    <div
+      className={cn(
+        "border-border bg-card relative flex h-full min-h-36 flex-col rounded-lg border p-4 transition-colors",
+        href && "hover:bg-accent/50",
+      )}
+    >
       {content}
-    </Link>
-  ) : (
-    <div className={className}>{content}</div>
+    </div>
   );
 }

@@ -16,6 +16,7 @@
  */
 
 import type { ReactElement } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
@@ -33,9 +34,11 @@ export const STARTED_AT = "2026-07-01T10:00:00.000Z";
 
 export function render(node: ReactElement): string {
   return renderToStaticMarkup(
-    <I18nextProvider i18n={i18n}>
-      <MemoryRouter>{node}</MemoryRouter>
-    </I18nextProvider>,
+    <QueryClientProvider client={new QueryClient()}>
+      <I18nextProvider i18n={i18n}>
+        <MemoryRouter>{node}</MemoryRouter>
+      </I18nextProvider>
+    </QueryClientProvider>,
   );
 }
 
