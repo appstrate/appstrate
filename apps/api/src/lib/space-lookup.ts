@@ -52,7 +52,7 @@ const SPACE_CONTEXT_COLUMNS = {
  * row, and must throw rather than 404 (header, key and row would still agree).
  * Paths reading the id from a row assert the shape themselves: the three
  * default-space fallbacks (`requireSpaceContext`, the module applier behind
- * `enterSpaceContext`, `resolveMcpSpaceRow`).
+ * `enterSpaceContext`, `enterMcpSpace`).
  */
 export async function validateSpaceInOrg(
   spaceId: string,

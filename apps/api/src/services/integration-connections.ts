@@ -2608,8 +2608,15 @@ interface UsableIntegration {
 export async function listUsableIntegrationsForActor(
   scope: SpaceScope,
   actor: Actor,
+  opts?: {
+    /** The admitted `c.get("space")`, read on `(id, orgId)`: naming this scope proves space∈org. */
+    admittedSpace?: { readonly id: string; readonly orgId: string };
+  },
 ): Promise<UsableIntegration[]> {
-  await assertSpaceInScope(scope);
+  const admitted = opts?.admittedSpace;
+  if (admitted?.id !== scope.spaceId || admitted.orgId !== scope.orgId) {
+    await assertSpaceInScope(scope);
+  }
   const rows = await db
     .select({
       integrationId: integrationConnections.integrationId,

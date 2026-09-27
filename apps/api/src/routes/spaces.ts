@@ -52,8 +52,7 @@ import {
   personaMemberships,
 } from "../lib/view-as.ts";
 import { resolveSpaceRole, toSpaceRoleWire, type SpaceRoleRef } from "../lib/space-role.ts";
-import { applySpacePermissions } from "../middleware/space-context.ts";
-import { validateSpaceInOrg } from "../lib/space-lookup.ts";
+import { enterSpaceById } from "../middleware/space-context.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
   activatePackage,
@@ -250,10 +249,7 @@ function requireSpaceFromParam(param: "id" | "spaceId") {
   // space the PATH names, not in the space the request entered — a reader of
   // the route table cannot see that from the mounts alone.
   return markSpaceRescope(async (c: Context<AppEnv>, next: Next) => {
-    const spaceId = c.req.param(param)!;
-    const space = await validateSpaceInOrg(spaceId, c.get("orgId"));
-    if (!space) throw notFound(`Space '${spaceId}' not found in this organization`);
-    await applySpacePermissions(c, space);
+    await enterSpaceById(c, c.req.param(param)!, c.get("orgId"));
     return next();
   });
 }

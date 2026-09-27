@@ -517,18 +517,22 @@ router.get("/context", requireSpaceContext(), async (c) => {
   // Resolved once for both hint listings: `home_writable` is what tells the
   // model whether a draft-only package is THIS caller's to run, and computing
   // it needs the caller's reach over every space, not the package rows.
-  const accessible = await packageAccessSpaces(c);
-  const homeWritable = (pkg: Parameters<typeof homeWireForCaller>[0]) =>
-    homeWireForCaller(pkg, accessible).home_writable;
+  // `packageAccessSpaces` is memoized per request, so each listing awaits it.
+  const withHomeWritable = async () => {
+    const accessible = await packageAccessSpaces(c);
+    return (pkg: Parameters<typeof homeWireForCaller>[0]) =>
+      homeWireForCaller(pkg, accessible).home_writable;
+  };
   const [connections, runnable, activeSkills, recentRuns] = await Promise.all([
     mayReadIntegrations
-      ? listUsableIntegrationsForActor(scope, actor)
+      ? // The middleware admitted this space in this org; that row is the proof.
+        listUsableIntegrationsForActor(scope, actor, { admittedSpace: c.get("space") })
       : Promise.resolve([] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>),
     canRun
-      ? listRunnableAgents(scope, { homeWritable })
+      ? withHomeWritable().then((homeWritable) => listRunnableAgents(scope, { homeWritable }))
       : Promise.resolve({ agents: [], truncated: false, total: 0 }),
     canReadSkills
-      ? listActiveSkills(scope, { homeWritable })
+      ? withHomeWritable().then((homeWritable) => listActiveSkills(scope, { homeWritable }))
       : Promise.resolve({ skills: [], truncated: false, total: 0 }),
     // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
     // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).

@@ -86,6 +86,10 @@ describe("persona-sensitive call sites", () => {
           "joins the caller's rows only when no persona is set; the overlay replaces them otherwise",
         ],
         [
+          "apps/api/src/middleware/space-context.ts",
+          "`enterSpaceById` joins the caller's rows only when no persona is set; a preview goes through `callerSpaceAccess`",
+        ],
+        [
           "apps/api/src/routes/realtime.ts",
           "SSE runs outside the pipeline; it overlays explicitly",
         ],

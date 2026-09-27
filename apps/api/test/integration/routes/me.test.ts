@@ -10,7 +10,7 @@
  * preserves the zero-footprint test invariant.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
@@ -25,6 +25,7 @@ import { db } from "../../helpers/db.ts";
 import { assertDbHas } from "../../helpers/assertions.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+import { listUsableIntegrationsForActor } from "../../../src/services/integration-connections.ts";
 
 const app = getTestApp();
 
@@ -309,6 +310,44 @@ describe("Me API (/api/me)", () => {
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/me/context");
       expect(res.status).toBe(401);
+    });
+
+    // `integration_connections` has no org column: the listing proves the
+    // space∈org itself, unless handed the row the request was ADMITTED on for
+    // exactly that (space, org) — the middleware read it filtered on both.
+    describe("listUsableIntegrationsForActor — the admitted space", () => {
+      const actor = () => ({ type: "user" as const, id: ctx.user.id });
+
+      it("does not re-read the space the request was admitted on", async () => {
+        const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+        const selects = spyOn(db, "select");
+        try {
+          await listUsableIntegrationsForActor(scope, actor());
+          const unproven = selects.mock.calls.length;
+          selects.mockClear();
+          await listUsableIntegrationsForActor(scope, actor(), {
+            admittedSpace: { id: ctx.defaultSpaceId, orgId: ctx.orgId },
+          });
+          expect(selects.mock.calls.length).toBe(unproven - 1);
+        } finally {
+          selects.mockRestore();
+        }
+      });
+
+      it("still proves a scope the admitted row does not name", async () => {
+        const other = await createTestContext();
+        const foreign = { orgId: ctx.orgId, spaceId: other.defaultSpaceId };
+        const admittedSpace = { id: ctx.defaultSpaceId, orgId: ctx.orgId };
+        await expect(
+          listUsableIntegrationsForActor(foreign, actor(), { admittedSpace }),
+        ).rejects.toMatchObject({ status: 404 });
+        // Same space id, another org: the org half is checked too.
+        await expect(
+          listUsableIntegrationsForActor(foreign, actor(), {
+            admittedSpace: { id: other.defaultSpaceId, orgId: other.orgId },
+          }),
+        ).rejects.toMatchObject({ status: 404 });
+      });
     });
   });
 

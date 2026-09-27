@@ -60,12 +60,8 @@ import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib
 import { getActor } from "../../lib/actor.ts";
 import { assertSpaceId } from "../../lib/ids.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
-import { applySpacePermissions } from "../../middleware/space-context.ts";
-import {
-  defaultSpaceForOrg,
-  validateSpaceInOrg,
-  type SpaceContextRow,
-} from "../../lib/space-lookup.ts";
+import { applySpacePermissions, enterSpaceById } from "../../middleware/space-context.ts";
+import { defaultSpaceForOrg } from "../../lib/space-lookup.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
 import { logger } from "../../lib/logger.ts";
 import { getPublicAppOrigin } from "../../lib/public-url.ts";
@@ -289,18 +285,14 @@ function forwardAuthHeaders(src: Headers): Headers {
  * default the in-process sub-dispatch also lands on. This keeps the direct
  * service call in lockstep with what a dispatched REST route would resolve.
  */
-async function resolveMcpSpaceRow(c: Context<AppEnv>, orgId: string): Promise<SpaceContextRow> {
+async function enterMcpSpace(c: Context<AppEnv>, orgId: string): Promise<void> {
   const pinned = c.get("spaceId");
   const headerSpace = c.req.header("X-Space-Id");
   if (pinned && headerSpace && headerSpace !== pinned) {
     throw forbidden("X-Space-Id does not match authenticated space");
   }
   const explicit = pinned ?? headerSpace;
-  if (explicit) {
-    const space = await validateSpaceInOrg(explicit, orgId);
-    if (!space) throw notFound(`Space '${explicit}' not found in this organization`);
-    return space;
-  }
+  if (explicit) return enterSpaceById(c, explicit, orgId);
   const active = await defaultSpaceForOrg(orgId);
   if (!active) throw invalidRequest("No space available for this organization.");
   // Default-space fallback: the id comes straight off the `spaces` row and
@@ -308,7 +300,7 @@ async function resolveMcpSpaceRow(c: Context<AppEnv>, orgId: string): Promise<Sp
   // here. Same reason as the twin fallback in `requireSpaceContext` — an
   // un-migrated `spaces` table would otherwise slip in unnoticed.
   assertSpaceId(active.id);
-  return active;
+  await applySpacePermissions(c, active);
 }
 
 /**
@@ -438,7 +430,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   app.use(MCP_PATH, async (c, next) => {
     const orgId = c.get("orgId");
     if (!orgId) return next();
-    await applySpacePermissions(c, await resolveMcpSpaceRow(c, orgId));
+    await enterMcpSpace(c, orgId);
     return next();
   });
   app.use(MCP_PATH, requireModulePermission("mcp", "read"));
