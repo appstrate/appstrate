@@ -22,6 +22,7 @@ import * as React from "react";
 import { makeAssistantToolUI, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import {
   BookOpenIcon,
+  BracesIcon,
   Loader2Icon,
   PencilIcon,
   PlayIcon,
@@ -31,7 +32,10 @@ import {
   ZapIcon,
   type LucideIcon,
 } from "lucide-react";
+import { Button } from "@appstrate/ui/components/button";
+import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { Modal } from "./modal.tsx";
+import { useChatHost } from "./runtime-context.ts";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
@@ -40,6 +44,7 @@ import {
   extractAgentLabel,
   extractRunFiles,
   extractRunId,
+  extractRunOutput,
   extractRunPackageId,
   extractRunStatus,
   isRunLaunchOp,
@@ -239,6 +244,31 @@ export function ToolCallCard({
 type AnyToolProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
 
 /**
+ * A finished run's detail: its structured output as labelled facts, the raw
+ * input/output/metadata JSON one toggle away. The chat has no output schema to
+ * hand (inline runs declare an open one), so the labels are the field keys.
+ */
+function RunOutputDetails({
+  output,
+  raw,
+}: {
+  output: Record<string, unknown>;
+  raw: React.ReactNode;
+}) {
+  const { t } = useChatHost();
+  const [showJson, setShowJson] = React.useState(false);
+  return (
+    <div className="space-y-4">
+      {showJson ? raw : <StructuredOutput value={output} />}
+      <Button variant="outline" size="sm" onClick={() => setShowJson((v) => !v)}>
+        <BracesIcon />
+        {showJson ? t("run.output.showFields") : t("run.output.showJson")}
+      </Button>
+    </div>
+  );
+}
+
+/**
  * Render run-launch tool calls as in-chat run progress while launch/run state is
  * available.
  *
@@ -272,13 +302,15 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
       {agentLabel ?? "Run"}
     </span>
   );
-  const details = (
+  const output = React.useMemo(() => extractRunOutput(props.result), [props.result]);
+  const rawDetails = (
     <div className="space-y-4">
       <DetailSection title="Entrée" value={props.args} />
       <DetailSection title="Sortie" value={unwrapped} />
       <DetailSection title="Métadonnées" value={meta} />
     </div>
   );
+  const details = output ? <RunOutputDetails output={output} raw={rawDetails} /> : rawDetails;
   // Run-page link needs package id. The result normally carries it; for agent
   // runs the label is also the package id (`@scope/name`), so it is a safe fallback.
   // Inline labels are manifest names, not package ids, so they wait for result/fetch.

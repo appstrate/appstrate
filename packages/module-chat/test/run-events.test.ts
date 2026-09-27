@@ -11,6 +11,7 @@ import {
   extractAgentLabel,
   extractRunFiles,
   extractRunId,
+  extractRunOutput,
   extractRunPackageId,
   extractRunStatus,
   isRunAutoPresentEligible,
@@ -99,6 +100,10 @@ describe("run-events helpers", () => {
     expect(extractAgentLabel({ kind: "inline", manifest: {} })).toBe("Run inline");
     expect(extractAgentLabel({})).toBeUndefined();
 
+    expect(extractRunOutput({ result: { output: { total: 3 } } })).toEqual({ total: 3 });
+    expect(extractRunOutput({ body: { result: { output: { total: 3 } } } })).toEqual({ total: 3 });
+    expect(extractRunOutput({ result: { output: {} } })).toBeUndefined();
+    expect(extractRunOutput({ id: "run_1", status: "pending" })).toBeUndefined();
     expect(extractRunPackageId({ body: { packageId: "@acme/writer" } })).toBe("@acme/writer");
     expect(extractRunPackageId({ packageId: "@acme/writer" })).toBe("@acme/writer");
     expect(extractRunPackageId({ body: { package_id: "@acme/snake" } })).toBe("@acme/snake");

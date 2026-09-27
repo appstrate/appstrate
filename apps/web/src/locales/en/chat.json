@@ -77,5 +77,7 @@
   "list.time.months_one": "{{count}} mo",
   "list.time.months_other": "{{count}} mo",
   "list.time.years_one": "{{count}} yr",
-  "list.time.years_other": "{{count}} yr"
+  "list.time.years_other": "{{count}} yr",
+  "run.output.showJson": "Show JSON",
+  "run.output.showFields": "Show fields"
 }

@@ -620,6 +620,20 @@ export function resolveAttachmentContent(
   return typeof uri === "string" ? { kind: "inert", uri } : { kind: "inert" };
 }
 
+/**
+ * The run's structured output from a launch result, when it carries one:
+ * `run_and_wait` answers `result.output` at the top level, a run resource read
+ * through `invoke_operation` nests it under `body`. An empty object is no output.
+ */
+export function extractRunOutput(result: unknown): Record<string, unknown> | undefined {
+  const unwrapped = asRecord(unwrapResult(result));
+  if (!unwrapped) return undefined;
+  const output =
+    asRecord(asRecord(unwrapped.result)?.output) ??
+    asRecord(asRecord(asRecord(unwrapped.body)?.result)?.output);
+  return output && Object.keys(output).length > 0 ? output : undefined;
+}
+
 /** Run package id from a launch result (`body.packageId`, then top-level). */
 export function extractRunPackageId(result: unknown): string | undefined {
   const unwrapped = asRecord(unwrapResult(result));

@@ -951,5 +951,7 @@
   "detail.draftReadOnly": "No published version: you are reading the author's work in progress. It cannot be run until a version is published.",
   "error.draftNotWritable": "The draft is the author's working copy: only someone who can edit this package may run it. Run the latest published version instead.",
   "run.overrides.versionPublished": "Latest published version",
-  "detail.integrationInactive": "Integration not active in this space — activate it to connect."
+  "detail.integrationInactive": "Integration not active in this space — activate it to connect.",
+  "run.outputShowJson": "Show JSON",
+  "run.outputShowFields": "Show fields"
 }

@@ -77,5 +77,7 @@
   "list.time.months_one": "{{count}} mois",
   "list.time.months_other": "{{count}} mois",
   "list.time.years_one": "{{count}} an",
-  "list.time.years_other": "{{count}} ans"
+  "list.time.years_other": "{{count}} ans",
+  "run.output.showJson": "Voir le JSON",
+  "run.output.showFields": "Voir les champs"
 }

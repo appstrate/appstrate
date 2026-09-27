@@ -5,7 +5,10 @@ import { useTranslation } from "react-i18next";
 import { BrainCircuit, Braces, FileOutput, LoaderCircle } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
+import { Button } from "@appstrate/ui/components/button";
+import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { useFiles } from "../../hooks/use-files";
+import { usePackageDetail } from "../../hooks/use-packages";
 import { classifyRunResults } from "../../lib/run-results";
 import { AgentDetailSectionHeader, AgentDetailSplit } from "../agent-detail/agent-detail-split";
 import { DocumentListPanel } from "../document-list-panel";
@@ -36,6 +39,14 @@ export function RunResultsView({
   const { t } = useTranslation("agents");
   const [requestedSection, setRequestedSection] = useState<ResultsSectionId>("production");
   const documentsQuery = useFiles({ runId: run.id, limit: 100 });
+  // The labels of the structured output: an inline run carries its manifest,
+  // an agent run reads its package (the same query the page already made, so
+  // this is a cache hit, and skipped for inline shadows, which would 404).
+  const isInline = packageId.startsWith("@inline/");
+  const { data: agent } = usePackageDetail("agent", isInline ? undefined : packageId);
+  const outputSchema = isInline
+    ? (run.inline_manifest?.output as { schema?: unknown } | undefined)?.schema
+    : agent?.output?.schema;
   const outputDocuments = useMemo(
     () =>
       (documentsQuery.data?.data ?? []).filter((document) => document.purpose === "agent_output"),
@@ -128,7 +139,7 @@ export function RunResultsView({
       );
     }
     if (activeSection.id === "structured") {
-      return output ? <JsonView data={output} /> : null;
+      return output ? <StructuredOutputBody output={output} schema={outputSchema} /> : null;
     }
     return <MemoryPanel packageId={packageId} runId={run.id} />;
   })();
@@ -171,5 +182,26 @@ export function RunResultsView({
         </div>
       </section>
     </AgentDetailSplit>
+  );
+}
+
+/** The output as labelled facts, its raw JSON one toggle away. */
+function StructuredOutputBody({
+  output,
+  schema,
+}: {
+  output: Record<string, unknown>;
+  schema: unknown;
+}) {
+  const { t } = useTranslation("agents");
+  const [showJson, setShowJson] = useState(false);
+  return (
+    <div className="space-y-4">
+      {showJson ? <JsonView data={output} /> : <StructuredOutput value={output} schema={schema} />}
+      <Button variant="outline" size="sm" onClick={() => setShowJson((v) => !v)}>
+        <Braces />
+        {showJson ? t("run.outputShowFields") : t("run.outputShowJson")}
+      </Button>
+    </div>
   );
 }
