@@ -7,29 +7,10 @@ import { formatBytes } from "@appstrate/core/format";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { FileDto } from "../hooks/use-files";
 import { documentExpiryInfo, documentRunHref } from "../lib/documents";
+import { mimeKind } from "../lib/files";
 import { formatDateField } from "../lib/format-date";
 import type { DataColumn } from "./data-table";
 import { TableRowActions } from "./table-row-actions";
-
-function mimeKind(mime: string): string {
-  const normalized = mime.split(";", 1)[0]?.toLowerCase() ?? mime.toLowerCase();
-  if (normalized === "application/pdf") return "pdf";
-  if (normalized === "text/csv") return "csv";
-  if (normalized.includes("json")) return "json";
-  if (normalized.startsWith("image/")) return "image";
-  if (normalized.startsWith("audio/")) return "audio";
-  if (normalized.startsWith("video/")) return "video";
-  if (normalized.startsWith("text/")) return "text";
-  if (
-    normalized.includes("zip") ||
-    normalized.includes("gzip") ||
-    normalized.includes("tar") ||
-    normalized.includes("compressed")
-  )
-    return "archive";
-  if (normalized.includes("spreadsheet") || normalized.includes("excel")) return "spreadsheet";
-  return "file";
-}
 
 export function useDocumentColumns({
   pendingKeepId,

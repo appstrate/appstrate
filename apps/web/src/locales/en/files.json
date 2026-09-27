@@ -53,5 +53,10 @@
   "preview.unavailable": "This file cannot be previewed.",
   "storage.usedUnlimited": "{{used}} used",
   "storage.usedOfLimit": "{{used}} used of {{limit}}",
-  "storage.limitReached": "Storage limit reached. New uploads and agent outputs are blocked until you free up space; existing files are unaffected."
+  "storage.limitReached": "Storage limit reached. New uploads and agent outputs are blocked until you free up space; existing files are unaffected.",
+  "artifact.copy": "Copy content",
+  "artifact.copied": "Copied",
+  "artifact.copyFailed": "Could not copy the content.",
+  "artifact.fullscreen": "Full screen",
+  "artifact.exitFullscreen": "Exit full screen"
 }

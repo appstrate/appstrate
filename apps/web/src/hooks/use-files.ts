@@ -141,6 +141,31 @@ export function useFileDownload() {
 }
 
 /**
+ * Copy a text file's content to the clipboard (the Artifact frame's "copy").
+ * Same authenticated read as the download, parsed as text; `true` once the
+ * clipboard holds it, so the caller can say so.
+ */
+export function useFileTextCopy() {
+  const { t } = useTranslation("files");
+  return useCallback(
+    async (id: string) => {
+      try {
+        const { data } = await client.GET("/api/files/{id}/content", {
+          params: { path: { id } },
+          parseAs: "text",
+        });
+        await navigator.clipboard.writeText(data ?? "");
+        return true;
+      } catch {
+        toast.error(t("artifact.copyFailed"));
+        return false;
+      }
+    },
+    [t],
+  );
+}
+
+/**
  * Authenticated image preview: a stored file's bytes → an object URL for an
  * `<img src>`, revoked on unmount / id change. `null` while loading or on
  * failure, so callers fall back to a placeholder. Cookie auth alone is not

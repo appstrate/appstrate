@@ -12,7 +12,6 @@
   "context.tabs.files": "Files",
   "context.tabs.info": "Info",
   "context.preview.empty": "Select a file from the conversation or the Files tab to preview it here.",
-  "context.preview.openModal": "Open preview in a modal",
   "context.file.untitled": "File",
   "context.runs.empty": "No run has been launched from this conversation yet.",
   "context.files.empty": "No file is linked to this conversation yet.",

@@ -37,7 +37,7 @@ import { useFileImageSrc, type FileDto } from "../hooks/use-files";
  * deadline. Amber inside the 7-day warning window (or already past), muted
  * otherwise. Sub-day deadlines read in hours, everything else in whole days.
  */
-function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
+export function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
   const { t } = useTranslation("files");
   const info = fileExpiryInfo(expiresAt);
   if (!info) return null;
@@ -65,7 +65,7 @@ function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
  * the helper) keeps `react-hooks/static-components` happy — the rule flags a
  * component derived from a helper call during render.
  */
-function MimeIcon({ mime, className }: { mime: string; className?: string }) {
+export function MimeIcon({ mime, className }: { mime: string; className?: string }) {
   return createElement(mimeIconFor(mime), { className });
 }
 

@@ -4,13 +4,11 @@ import type { Dispatch, ReactNode } from "react";
 import {
   ActivityIcon,
   ChevronRightIcon,
-  DownloadIcon,
   ExternalLinkIcon,
   EyeIcon,
   FileIcon,
   FilesIcon,
   InfoIcon,
-  Maximize2Icon,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -24,9 +22,8 @@ import {
 } from "@appstrate/ui/components/tooltip";
 import { $api } from "../../api/client";
 import { Badge } from "../../components/status-badge";
-import { FilePreview } from "../../components/file-preview";
-import { FileViewer } from "../../components/file-viewer";
-import { useFile, useFileDownload, useFiles } from "../../hooks/use-files";
+import { FileArtifact } from "../../components/file-artifact";
+import { useFile, useFiles } from "../../hooks/use-files";
 import { useOrgOnlyScope, useOrgScope } from "../../hooks/use-org-scope";
 import { formatDateField } from "../../lib/format-date";
 import type {
@@ -101,44 +98,22 @@ function PanelState({ children }: { children: ReactNode }) {
   );
 }
 
-function PreviewTab({ file, onOpenModal }: { file: SidebarFile | null; onOpenModal: () => void }) {
+function PreviewTab({ file }: { file: SidebarFile | null }) {
   const { t } = useTranslation(["chat", "files"]);
-  const download = useFileDownload();
   const { data, isLoading, error } = useFile(file?.id ?? "");
 
   if (!file) return <PanelState>{t("context.preview.empty", { ns: "chat" })}</PanelState>;
 
-  const name = file.name || data?.name || t("context.file.untitled", { ns: "chat" });
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-medium" title={name}>
-          {name}
-        </span>
-        {data?.downloadable ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8"
-            aria-label={t("row.download", { ns: "files" })}
-            onClick={() => void download(file.id, name)}
-          >
-            <DownloadIcon className="size-4" />
-          </Button>
-        ) : null}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8"
-          aria-label={t("context.preview.openModal", { ns: "chat" })}
-          onClick={onOpenModal}
-        >
-          <Maximize2Icon className="size-4" />
-        </Button>
-      </div>
-      <div className="flex min-h-0 flex-1 p-3">
-        <FileViewer fileId={file.id} file={data} isLoading={isLoading} error={error} />
-      </div>
+    <div className="flex h-full min-h-0 p-3">
+      <FileArtifact
+        fileId={file.id}
+        file={data}
+        isLoading={isLoading}
+        error={error}
+        fallbackName={file.name || t("context.file.untitled", { ns: "chat" })}
+        className="flex-1"
+      />
     </div>
   );
 }
@@ -354,12 +329,7 @@ export function ConversationSidebar({
             </Button>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
-            {state.activeTab === "preview" ? (
-              <PreviewTab
-                file={state.selectedFile}
-                onOpenModal={() => dispatch({ type: "open-modal" })}
-              />
-            ) : null}
+            {state.activeTab === "preview" ? <PreviewTab file={state.selectedFile} /> : null}
             {state.activeTab === "runs" ? (
               <ConversationRuns conversationId={conversationId} active />
             ) : null}
@@ -371,9 +341,6 @@ export function ConversationSidebar({
             ) : null}
           </div>
         </aside>
-      ) : null}
-      {state.modalFile ? (
-        <FilePreview file={state.modalFile} onClose={() => dispatch({ type: "close-modal" })} />
       ) : null}
     </>
   );

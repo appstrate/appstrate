@@ -189,3 +189,24 @@ export function fileExpiryInfo(
     expired: diffMs <= 0,
   };
 }
+
+/** The `type.<kind>` locale suffix a file's mime reads as. */
+export function mimeKind(mime: string): string {
+  const normalized = mime.split(";", 1)[0]?.toLowerCase() ?? mime.toLowerCase();
+  if (normalized === "application/pdf") return "pdf";
+  if (normalized === "text/csv") return "csv";
+  if (normalized.includes("json")) return "json";
+  if (normalized.startsWith("image/")) return "image";
+  if (normalized.startsWith("audio/")) return "audio";
+  if (normalized.startsWith("video/")) return "video";
+  if (normalized.startsWith("text/")) return "text";
+  if (
+    normalized.includes("zip") ||
+    normalized.includes("gzip") ||
+    normalized.includes("tar") ||
+    normalized.includes("compressed")
+  )
+    return "archive";
+  if (normalized.includes("spreadsheet") || normalized.includes("excel")) return "spreadsheet";
+  return "file";
+}

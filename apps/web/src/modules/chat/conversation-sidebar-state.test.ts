@@ -57,30 +57,17 @@ describe("conversation sidebar state", () => {
     });
   });
 
-  it("opens the modal only as an explicit second action", () => {
-    const selected = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
-      type: "show-file",
-      file: file("file_a"),
-    });
-    expect(selected.modalFile).toBeNull();
-
-    const modal = conversationSidebarReducer(selected, { type: "open-modal" });
-    expect(modal.modalFile).toEqual(file("file_a"));
-  });
-
   it("clears file state on navigation but keeps the user's panel layout", () => {
     const state: ConversationSidebarState = {
       expanded: false,
       activeTab: "runs",
       selectedFile: file("file_a"),
-      modalFile: file("file_a"),
     };
 
     expect(conversationSidebarReducer(state, { type: "conversation-change" })).toEqual({
       expanded: false,
       activeTab: "runs",
       selectedFile: null,
-      modalFile: null,
     });
   });
 });

@@ -11,22 +11,18 @@ export interface ConversationSidebarState {
   expanded: boolean;
   activeTab: ConversationSidebarTab;
   selectedFile: SidebarFile | null;
-  modalFile: SidebarFile | null;
 }
 
 export type ConversationSidebarAction =
   | { type: "toggle" }
   | { type: "select-tab"; tab: ConversationSidebarTab }
   | { type: "show-file"; file: SidebarFile }
-  | { type: "open-modal" }
-  | { type: "close-modal" }
   | { type: "conversation-change" };
 
 export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
   expanded: false,
   activeTab: "preview",
   selectedFile: null,
-  modalFile: null,
 };
 
 /**
@@ -50,11 +46,7 @@ export function conversationSidebarReducer(
         activeTab: "preview",
         selectedFile: action.file,
       };
-    case "open-modal":
-      return state.selectedFile ? { ...state, modalFile: state.selectedFile } : state;
-    case "close-modal":
-      return state.modalFile ? { ...state, modalFile: null } : state;
     case "conversation-change":
-      return { ...state, selectedFile: null, modalFile: null };
+      return { ...state, selectedFile: null };
   }
 }
