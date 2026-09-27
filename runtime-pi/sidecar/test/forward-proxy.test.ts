@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, afterEach, spyOn } from "bun:test";
 import { createServer } from "node:http";
 import type { Server as HttpServer, IncomingMessage, ServerResponse } from "node:http";
 import { connect as netConnect } from "node:net";
 import { createForwardProxy, type ForwardProxyResult } from "../forward-proxy.ts";
+import { logger } from "../logger.ts";
 
 // Track servers for cleanup
 const servers: (HttpServer | ForwardProxyResult)[] = [];
@@ -333,18 +334,40 @@ describe("peer gate", () => {
 
   it("refuses a plain HTTP request from a runner peer before any upstream work", async () => {
     const { echo, port, peers, upstream } = await refusingProxy();
-    const res = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/x`);
-    expect(res.status).toBe(403);
-    expect(peers).toEqual(["127.0.0.1"]);
-    expect(upstream()).toBe(0);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const res = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/x`);
+      expect(res.status).toBe(403);
+      expect(peers).toEqual(["127.0.0.1"]);
+      expect(upstream()).toBe(0);
+      expect(warn).toHaveBeenCalledWith("forward proxy event", {
+        kind: "request-refused",
+        target: `http://127.0.0.1:${echo.port}/x`,
+        reason: "peer-not-allowed",
+        peer: "127.0.0.1",
+      });
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("refuses a CONNECT from a runner peer before any upstream work", async () => {
     const { echo, port, peers, upstream } = await refusingProxy();
-    const res = await connectViaProxy(port, `127.0.0.1:${echo.port}`);
-    expect(res.statusCode).toBe(403);
-    expect(peers).toEqual(["127.0.0.1"]);
-    expect(upstream()).toBe(0);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const res = await connectViaProxy(port, `127.0.0.1:${echo.port}`);
+      expect(res.statusCode).toBe(403);
+      expect(peers).toEqual(["127.0.0.1"]);
+      expect(upstream()).toBe(0);
+      expect(warn).toHaveBeenCalledWith("forward proxy event", {
+        kind: "tunnel-refused",
+        target: `127.0.0.1:${echo.port}`,
+        reason: "peer-not-allowed",
+        peer: "127.0.0.1",
+      });
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

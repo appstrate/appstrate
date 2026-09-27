@@ -13,6 +13,7 @@ import {
   resolveAndCheckHost,
   OUTBOUND_TIMEOUT_MS,
   HOP_BY_HOP_HEADERS,
+  peerAddress,
   peerAdmitted,
   type HostResolver,
   type PeerCheck,
@@ -378,10 +379,20 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     }
   }
 
-  // Peer gate on BOTH paths, before any upstream work.
+  // Peer gate on BOTH paths, before any upstream work. A refusal is logged
+  // with the same `peer-not-allowed` reason the integration listeners emit, so
+  // a runner reaching for the agent's proxy shows up in the sidecar log (#1548).
+  const refusePeer = (kind: "request-refused" | "tunnel-refused", target: string, socket: Socket) =>
+    logger.warn("forward proxy event", {
+      kind,
+      target,
+      reason: "peer-not-allowed",
+      peer: peerAddress(socket),
+    });
   const server = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
     void peerAdmitted(req.socket, deps.isPeerAllowed).then((ok) => {
       if (ok) return handleRequest(req, res);
+      refusePeer("request-refused", req.url ?? "", req.socket);
       res.writeHead(403);
       res.end("Blocked: peer not allowed");
     });
@@ -389,6 +400,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   server.on("connect", (req: IncomingMessage, clientSocket: Socket, head: Buffer) => {
     void peerAdmitted(clientSocket, deps.isPeerAllowed).then((ok) => {
       if (ok) return handleConnect(req, clientSocket, head);
+      refusePeer("tunnel-refused", req.url ?? "", clientSocket);
       clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       clientSocket.destroy();
     });
