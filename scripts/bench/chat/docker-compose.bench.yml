@@ -1,0 +1,74 @@
+# Chat benchmark data tier — production's shape (PostgreSQL 16, Redis 7, MinIO)
+# on host ports of its own, under its own compose project, so a bench never
+# touches a developer's data or ports. Started and torn down by `run.ts`; see
+# README.md. Endpoints and credentials are mirrored in `server.ts`'s
+# `PROD_LIKE_ENV`.
+name: appstrate-bench
+
+services:
+  postgres:
+    image: postgres:16.8-alpine
+    # The settings of docker-compose.yml's `appstrate-postgres` that shape query latency.
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "work_mem=16MB"
+      - "-c"
+      - "synchronous_commit=off"
+      - "-c"
+      - "effective_cache_size=512MB"
+    environment:
+      POSTGRES_USER: bench
+      POSTGRES_PASSWORD: bench
+      POSTGRES_DB: bench
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bench -d bench"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "127.0.0.1:56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  minio:
+    # Pinned with docker-compose.yml's `appstrate-minio` (refresh recipe there).
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: benchadmin
+      MINIO_ROOT_PASSWORD: benchadmin-secret
+      MINIO_BROWSER: "off"
+    ports:
+      - "127.0.0.1:59000:9000"
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  minio-init:
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+    entrypoint:
+      - sh
+      - -c
+      - |
+        mc alias set local http://minio:9000 benchadmin benchadmin-secret && mc mb --ignore-existing local/bench
