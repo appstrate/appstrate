@@ -681,7 +681,7 @@ describe("runPiChat against a stub provider", () => {
     // probes `input.platformMcp.fetch`. The two hops AFTER it — engine →
     // `buildPlatformMcpTools`, and that → `createMcpHttpClient` — were only
     // ever evaluated on their falsy branch, because every fixture in this file
-    // built `platformMcp` without a `fetch`. Deleting either conditional spread
+    // built `platformMcp` without a `fetch`. Dropping the fetch on either hop
     // left the whole suite green while production silently went back to opening
     // real loopback TCP connections per turn — and kept using them for every
     // `tools/call` after the handshake, since the override lives for the

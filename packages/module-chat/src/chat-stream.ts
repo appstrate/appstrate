@@ -673,8 +673,8 @@ export async function handleChatStream(
         platformMcp: {
           url: platformMcpUrl(origin, orgId),
           headers: mcpHeaders,
-          // Same in-process seam the preamble reads through: the engine's three
-          // MCP hops re-enter the platform app directly instead of opening real
+          // Same in-process seam the preamble reads through: the engine's MCP
+          // hops re-enter the platform app directly instead of opening real
           // loopback sockets back into this process. Auth and RBAC still run on
           // every hop, so the scoped bearer above is exactly as load-bearing.
           fetch: platformFetch,

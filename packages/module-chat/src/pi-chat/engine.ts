@@ -82,9 +82,9 @@ export interface PiChatInput {
   /**
    * Platform HTTP MCP server (meta-tools) — the engine opens its own client.
    *
-   * `fetch` is the transport for that handshake: production hands in the
-   * platform's in-process dispatch so the three JSON-RPC hops re-enter the Hono
-   * app directly rather than opening real loopback sockets to this same process.
+   * `fetch` is the transport for that client: production hands in the
+   * platform's in-process dispatch so its JSON-RPC hops re-enter the Hono app
+   * directly rather than opening real loopback sockets to this same process.
    * Omitted → global `fetch`.
    */
   platformMcp: { url: string; headers: Record<string, string>; fetch?: typeof fetch };
@@ -305,7 +305,7 @@ export function runPiChat(input: PiChatInput): Response {
         // and the Pi SDK's value graph. They are independent — the SDK import
         // reads no MCP result — so they run together rather than back to back.
         // The SDK module evaluation is the expensive half on a cold process
-        // (~200 ms, see `pi-sdk.ts`); the handshake is three JSON-RPC hops.
+        // (~200 ms, see `pi-sdk.ts`); the handshake is two dispatched JSON-RPC hops.
         //
         // A MCP failure is a genuine misconfiguration (the chat's value IS the
         // tools) — let it propagate to `onError`.

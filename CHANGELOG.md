@@ -18,6 +18,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   re-checks the space the request was admitted on. Together, 115 to 150 ms
   off the chat's first visible token in the #1601 benchmark. Responses
   are unchanged, refusals included.
+- **A chat turn's MCP handshake sends two requests to the platform, not four**
+  (#1601). Each one pays the full pipeline: auth, a Redis rate-limit round
+  trip, the space lookups and a server rebuild. The endpoint is stateless, so
+  `notifications/initialized` (always a bare `202`) and the client's SSE `GET`
+  (always a `405`) are now answered in the chat itself. Measured on the first
+  visible token: 34 to 53 ms sooner.
 
 ### Fixed
 

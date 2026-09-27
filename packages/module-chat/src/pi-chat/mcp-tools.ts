@@ -155,14 +155,14 @@ interface BuildPlatformMcpToolsOptions {
   turnBudget: PiTurnBudget;
   /**
    * Transport for every platform hop the tool layer makes. Production passes the
-   * platform's in-process dispatch, so the MCP handshake (`initialize` /
-   * `notifications/initialized` / `tools/list`) AND each `run_and_wait`'s launch
-   * POST + poll loop re-enter the Hono app directly instead of opening real
-   * loopback TCP connections to this same process. `run_and_wait` is the heavier
-   * half by far — the handshake is three hops per turn, a single run is one
-   * launch plus a poll per ~55 s of wait. Auth and RBAC still run on every hop —
-   * `dispatch` goes through the full pipeline — so this trades sockets for
-   * latency, not safety.
+   * platform's in-process dispatch, so the MCP hops (`initialize`, `tools/list`,
+   * `tools/call` — the rest is answered locally, see `answerStatelessHopsLocally`)
+   * AND each `run_and_wait`'s launch POST + poll loop re-enter the Hono app
+   * directly instead of opening real loopback TCP connections to this same
+   * process. `run_and_wait` is the heavier half by far — the handshake is two
+   * hops per turn, a single run is one launch plus a poll per ~55 s of wait.
+   * Auth and RBAC still run on every hop — `dispatch` goes through the full
+   * pipeline — so this trades sockets for latency, not safety.
    *
    * Omitted (tests, and any caller without a dispatcher) → global `fetch`, i.e.
    * the previous behaviour.
@@ -196,6 +196,47 @@ export function withTurnBudgetNote(result: PiToolResult, budget: PiTurnBudget): 
 }
 
 /**
+ * Answer, without a hop, the two handshake requests the platform MCP server
+ * could only answer one way. Each hop costs the full pipeline (auth, a Redis
+ * rate-limit round trip, the space lookups, a server rebuild).
+ *
+ * - `notifications/initialized` → `202`, empty. The endpoint is stateless
+ *   (`sessionIdGenerator: undefined` in `apps/api/src/modules/mcp/router.ts`,
+ *   server rebuilt per request, closed after it). The SDK transport answers any
+ *   request-free POST with a bare 202 (`webStandardStreamableHttp.js`), and the
+ *   notification's only handler is `oninitialized`, which `createMcpServer`
+ *   never sets. So the real hop changes nothing but a rate-limit counter —
+ *   and it was the one handshake request no abort reaches (`connectWithSignal`
+ *   in `@appstrate/mcp-transport`).
+ * - The SDK client's standalone SSE `GET` → `405` with `Allow: POST`, what the
+ *   router's catch-all throws for every non-POST verb. The SDK client reads only
+ *   the status: it cancels the body and treats 405 as "no stream offered".
+ *
+ * Everything else, `initialize` and `tools/list` included, goes to `next`.
+ */
+function answerStatelessHopsLocally(next: typeof fetch): typeof fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const method = init?.method?.toUpperCase();
+    if (method === "GET") {
+      return new Response(null, { status: 405, headers: { Allow: "POST" } });
+    }
+    // Substring gate first: every `tools/call` body rides this fetch too.
+    const body = init?.body;
+    if (
+      method === "POST" &&
+      typeof body === "string" &&
+      body.includes('"notifications/initialized"')
+    ) {
+      const msg = JSON.parse(body) as { id?: unknown; method?: unknown };
+      if (msg.method === "notifications/initialized" && msg.id === undefined) {
+        return new Response(null, { status: 202 });
+      }
+    }
+    return next(input, init);
+  }) as typeof fetch;
+}
+
+/**
  * Open the platform MCP client, discover its tools, and build one Pi extension
  * factory per tool. Caller owns the returned `close()` (call it in the turn's
  * finally). Throws if the MCP handshake or tool listing fails — the chat's whole
@@ -214,7 +255,7 @@ export async function buildPlatformMcpTools(
     // never settles wedges it, and without the signal the turn's stop button
     // and its deadline are both inert for the SDK's full 60 s request timeout.
     signal: opts.signal,
-    ...(opts.fetch ? { fetch: opts.fetch } : {}),
+    fetch: answerStatelessHopsLocally(opts.fetch ?? fetch),
   });
 
   let listed: Awaited<ReturnType<AppstrateMcpClient["listTools"]>>;
