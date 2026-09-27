@@ -7,8 +7,9 @@
  * The MCP handshake has always ridden it. `run_and_wait` did not: its ctx took
  * no transport and closed over the global `fetch`, so the launch POST and the
  * whole poll loop opened real loopback sockets back into this same process —
- * on the tool that makes by far the most hops (two handshake calls per turn,
- * versus one launch plus a poll per ~55 s of wait, per run).
+ * on the tool that makes by far the most hops (two handshake calls on a turn
+ * whose surface is not cached, one lazy `initialize` on a cached turn that
+ * calls a tool, versus one launch plus a poll per ~55 s of wait, per run).
  *
  * The stub origin here is deliberately `http://127.0.0.1:1`, a port nothing
  * listens on: a hop that escapes the seam does not silently succeed against a
@@ -120,17 +121,22 @@ function seamFetch(forwarded: string[] = []) {
   return { fetch: impl, seen, rpc, toolCalls };
 }
 
+/** One turn's tool layer over `transport`. */
+function buildTurn(transport: ReturnType<typeof seamFetch>) {
+  return buildPlatformMcpTools({
+    url: MCP_URL,
+    headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
+    writeChunk: () => {},
+    signal: new AbortController().signal,
+    turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
+    fetch: transport.fetch,
+  });
+}
+
 describe("buildPlatformMcpTools fetch seam", () => {
   it("routes the run_and_wait launch AND poll through the injected fetch", async () => {
     const transport = seamFetch();
-    const built = await buildPlatformMcpTools({
-      url: MCP_URL,
-      headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
-      writeChunk: () => {},
-      signal: new AbortController().signal,
-      turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
-      fetch: transport.fetch,
-    });
+    const built = await buildTurn(transport);
 
     try {
       const { pi, tools } = capturePi();
@@ -161,40 +167,9 @@ describe("buildPlatformMcpTools fetch seam", () => {
     }
   });
 
-  it("answers notifications/initialized and the standalone SSE GET without a hop", async () => {
-    const transport = seamFetch();
-    const built = await buildPlatformMcpTools({
-      url: MCP_URL,
-      headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
-      writeChunk: () => {},
-      signal: new AbortController().signal,
-      turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
-      fetch: transport.fetch,
-    });
-
-    try {
-      // The SSE GET is fired, not awaited, after the initialized notification
-      // settles: yield a macrotask so a GET that escaped would already be seen.
-      await new Promise((resolve) => setTimeout(resolve, 0));
-
-      expect(built.extensionFactories).toHaveLength(1);
-      expect(transport.rpc).toEqual(["initialize", "tools/list"]);
-      expect(transport.seen.filter((h) => h.method !== "POST")).toEqual([]);
-    } finally {
-      await built.close();
-    }
-  });
-
-  it("forwards a tools/call whose arguments carry the literal notifications/initialized", async () => {
+  it("answers notifications/initialized and the SSE GET locally, but forwards a tools/call naming it", async () => {
     const transport = seamFetch(["invoke_operation"]);
-    const built = await buildPlatformMcpTools({
-      url: MCP_URL,
-      headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
-      writeChunk: () => {},
-      signal: new AbortController().signal,
-      turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
-      fetch: transport.fetch,
-    });
+    const built = await buildTurn(transport);
 
     try {
       const { pi, tools } = capturePi();
@@ -207,7 +182,10 @@ describe("buildPlatformMcpTools fetch seam", () => {
       const args = { method: "notifications/initialized" };
       await invoke!.execute("call_1", args);
 
+      // The handshake's notification and its standalone SSE GET (fired, not
+      // awaited, after it) never reached the transport; the tool call did.
       expect(transport.rpc).toEqual(["initialize", "tools/list", "tools/call"]);
+      expect(transport.seen.filter((h) => h.method !== "POST")).toEqual([]);
       expect(transport.toolCalls).toMatchObject([{ name: "invoke_operation", arguments: args }]);
     } finally {
       await built.close();

@@ -24,6 +24,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `notifications/initialized` (always a bare `202`) and the client's SSE `GET`
   (always a `405`) are now answered in the chat itself. Measured on the first
   visible token: 34 to 53 ms sooner.
+- **A chat turn skips the MCP handshake when its permissions were seen before**
+  (#1601). The server instructions and tool descriptors depend only on the
+  permission list the turn's bearer carries, so the process caches them per
+  list (64 lists at most, 5 minutes each) and opens the MCP client on the
+  first tool call instead. On such a turn a broken MCP endpoint no longer fails
+  the turn before the model is called: it surfaces as the error of the tool
+  call that needed it, and the list leaves the cache, so the next turn
+  handshakes up front and fails there, as before. Measured on the first
+  visible token: 180 to 201 ms sooner
+  (`mcpHandshakeMs` from ~200 ms to ~1 ms). The `chat turn construction` log
+  line gains `mcpSurfaceCached`.
 
 ### Fixed
 

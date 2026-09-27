@@ -27,6 +27,7 @@ import { isAttachmentUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
 import { listModels, pickModel } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
+import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
@@ -654,6 +655,7 @@ export async function handleChatStream(
     "x-org-id": orgId,
   };
   mcpHeaders["x-space-id"] = spaceId;
+  const mcpUrl = platformMcpUrl(origin, orgId);
   try {
     const response = await finalize(
       runEngine({
@@ -671,13 +673,14 @@ export async function handleChatStream(
         system,
         generation: generationSettings,
         platformMcp: {
-          url: platformMcpUrl(origin, orgId),
+          url: mcpUrl,
           headers: mcpHeaders,
-          // Same in-process seam the preamble reads through: the engine's MCP
-          // hops re-enter the platform app directly instead of opening real
+          // Same in-process seam the preamble reads through: the engine's
+          // MCP hops re-enter the platform app directly instead of opening real
           // loopback sockets back into this process. Auth and RBAC still run on
           // every hop, so the scoped bearer above is exactly as load-bearing.
           fetch: platformFetch,
+          surfaceKey: platformMcpSurfaceKey(mcpUrl, permissions),
         },
         // Decoupled from the request connection (see `generation` above).
         abortSignal: generation.signal,

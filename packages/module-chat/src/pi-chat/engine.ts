@@ -82,12 +82,17 @@ export interface PiChatInput {
   /**
    * Platform HTTP MCP server (meta-tools) — the engine opens its own client.
    *
-   * `fetch` is the transport for that client: production hands in the
-   * platform's in-process dispatch so its JSON-RPC hops re-enter the Hono app
-   * directly rather than opening real loopback sockets to this same process.
+   * `fetch` is the transport for that handshake: production hands in the
+   * platform's in-process dispatch so the JSON-RPC hops re-enter the Hono
+   * app directly rather than opening real loopback sockets to this same process.
    * Omitted → global `fetch`.
    */
-  platformMcp: { url: string; headers: Record<string, string>; fetch?: typeof fetch };
+  platformMcp: {
+    url: string;
+    headers: Record<string, string>;
+    fetch?: typeof fetch;
+    surfaceKey?: string;
+  };
   /** Aborts when the turn is explicitly stopped (decoupled from client disconnect). */
   abortSignal: AbortSignal;
   /** Maps a thrown error to a client-safe message. */
@@ -305,7 +310,7 @@ export function runPiChat(input: PiChatInput): Response {
         // and the Pi SDK's value graph. They are independent — the SDK import
         // reads no MCP result — so they run together rather than back to back.
         // The SDK module evaluation is the expensive half on a cold process
-        // (~200 ms, see `pi-sdk.ts`); the handshake is two dispatched JSON-RPC hops.
+        // (~200 ms, see `pi-sdk.ts`); the handshake is two JSON-RPC hops, or none.
         //
         // A MCP failure is a genuine misconfiguration (the chat's value IS the
         // tools) — let it propagate to `onError`.
@@ -317,11 +322,9 @@ export function runPiChat(input: PiChatInput): Response {
         const construction = Promise.allSettled([
           timed(
             buildMcpTools({
-              url: platformMcp.url,
-              headers: platformMcp.headers,
+              ...platformMcp,
               writeChunk: write,
               signal: turnAbort.signal,
-              ...(platformMcp.fetch ? { fetch: platformMcp.fetch } : {}),
               // Budget seam: the turn deadline bounds every run_and_wait, and the
               // live step count feeds the per-step budget note the model reads.
               turnBudget: {
@@ -680,7 +683,11 @@ export function runPiChat(input: PiChatInput): Response {
         unsubscribe?.();
         // Once per turn, on every exit, so a turn that died in construction
         // still reports how far it got (`null` past that point).
-        logger.info("chat turn construction", { chatSessionId: input.chatSessionId, ...timings });
+        logger.info("chat turn construction", {
+          chatSessionId: input.chatSessionId,
+          mcpSurfaceCached: mcpTools?.surfaceCached ?? null,
+          ...timings,
+        });
         // BOUNDED, for the same reason the session abort above is: this is the
         // last await between the producer and its return, so an MCP close that
         // never settles (a transport whose teardown waits on a peer that is

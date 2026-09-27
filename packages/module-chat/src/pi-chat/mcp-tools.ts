@@ -30,6 +30,7 @@ import {
 } from "../connect-offer.ts";
 import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
+import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
 
@@ -117,6 +118,7 @@ interface PlatformMcpTools {
   extensionFactories: ExtensionFactory[];
   /** Server usage guidance (MCP `instructions`), to append to the system prompt. */
   instructions?: string;
+  surfaceCached: boolean;
   /** Idempotent teardown of the MCP client. */
   close(): Promise<void>;
 }
@@ -155,19 +157,20 @@ interface BuildPlatformMcpToolsOptions {
   turnBudget: PiTurnBudget;
   /**
    * Transport for every platform hop the tool layer makes. Production passes the
-   * platform's in-process dispatch, so the MCP hops (`initialize`, `tools/list`,
-   * `tools/call` — the rest is answered locally, see `answerStatelessHopsLocally`)
-   * AND each `run_and_wait`'s launch POST + poll loop re-enter the Hono app
-   * directly instead of opening real loopback TCP connections to this same
-   * process. `run_and_wait` is the heavier half by far — the handshake is two
-   * hops per turn, a single run is one launch plus a poll per ~55 s of wait.
-   * Auth and RBAC still run on every hop — `dispatch` goes through the full
-   * pipeline — so this trades sockets for latency, not safety.
+   * platform's in-process dispatch, so the MCP handshake (`initialize` /
+   * `tools/list`) AND each `run_and_wait`'s launch
+   * POST + poll loop re-enter the Hono app directly instead of opening real
+   * loopback TCP connections to this same process. `run_and_wait` is the heavier
+   * half by far — the handshake is at most two hops per turn, a single run is one
+   * launch plus a poll per ~55 s of wait. Auth and RBAC still run on every hop —
+   * `dispatch` goes through the full pipeline — so this trades sockets for
+   * latency, not safety.
    *
    * Omitted (tests, and any caller without a dispatcher) → global `fetch`, i.e.
    * the previous behaviour.
    */
   fetch?: typeof fetch;
+  surfaceKey?: string;
 }
 
 /**
@@ -196,23 +199,8 @@ export function withTurnBudgetNote(result: PiToolResult, budget: PiTurnBudget): 
 }
 
 /**
- * Answer, without a hop, the two handshake requests the platform MCP server
- * could only answer one way. Each hop costs the full pipeline (auth, a Redis
- * rate-limit round trip, the space lookups, a server rebuild).
- *
- * - `notifications/initialized` → `202`, empty. The endpoint is stateless
- *   (`sessionIdGenerator: undefined` in `apps/api/src/modules/mcp/router.ts`,
- *   server rebuilt per request, closed after it). The SDK transport answers any
- *   request-free POST with a bare 202 (`webStandardStreamableHttp.js`), and the
- *   notification's only handler is `oninitialized`, which `createMcpServer`
- *   never sets. So the real hop changes nothing but a rate-limit counter —
- *   and it was the one handshake request no abort reaches (`connectWithSignal`
- *   in `@appstrate/mcp-transport`).
- * - The SDK client's standalone SSE `GET` → `405` with `Allow: POST`, what the
- *   router's catch-all throws for every non-POST verb. The SDK client reads only
- *   the status: it cancels the body and treats 405 as "no stream offered".
- *
- * Everything else, `initialize` and `tools/list` included, goes to `next`.
+ * The stateless MCP server answers these one way: `notifications/initialized` → 202 (its
+ * transport's reply to any request-free POST; no `oninitialized`), SSE `GET` → 405.
  */
 function answerStatelessHopsLocally(next: typeof fetch): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -220,7 +208,6 @@ function answerStatelessHopsLocally(next: typeof fetch): typeof fetch {
     if (method === "GET") {
       return new Response(null, { status: 405, headers: { Allow: "POST" } });
     }
-    // Substring gate first: every `tools/call` body rides this fetch too.
     const body = init?.body;
     if (
       method === "POST" &&
@@ -241,33 +228,57 @@ function answerStatelessHopsLocally(next: typeof fetch): typeof fetch {
  * factory per tool. Caller owns the returned `close()` (call it in the turn's
  * finally). Throws if the MCP handshake or tool listing fails — the chat's whole
  * value is the meta-tools, so a failure here is a genuine misconfiguration, not
- * a silently-degraded no-tools chat.
+ * a silently-degraded no-tools chat. On a cache hit the client opens on the first
+ * `tools/call`; a failed lazy connect fails that call and evicts the entry unless
+ * the turn was stopped, so the next turn handshakes eagerly and fails loudly.
  */
 export async function buildPlatformMcpTools(
   opts: BuildPlatformMcpToolsOptions,
 ): Promise<PlatformMcpTools> {
-  const client = await createMcpHttpClient(opts.url, {
-    clientInfo: { name: "appstrate-chat-pi", version: "1.0" },
-    extraHeaders: opts.headers,
-    // The HANDSHAKE, not only the `listTools` below. In production `opts.fetch`
-    // is the platform's in-process dispatch, so `initialize` re-enters the same
-    // process — a DB pool exhausted by concurrent runs or a module hook that
-    // never settles wedges it, and without the signal the turn's stop button
-    // and its deadline are both inert for the SDK's full 60 s request timeout.
-    signal: opts.signal,
-    fetch: answerStatelessHopsLocally(opts.fetch ?? fetch),
-  });
+  const connect = () =>
+    createMcpHttpClient(opts.url, {
+      clientInfo: { name: "appstrate-chat-pi", version: "1.0" },
+      extraHeaders: opts.headers,
+      // `initialize` re-enters this process and can wedge: the turn's signal (not a
+      // tool call's — a lazy connect is shared) keeps stop and deadline live.
+      signal: opts.signal,
+      fetch: answerStatelessHopsLocally(opts.fetch ?? fetch),
+    });
 
-  let listed: Awaited<ReturnType<AppstrateMcpClient["listTools"]>>;
-  try {
-    listed = await client.listTools({ signal: opts.signal });
-  } catch (err) {
-    await client.close().catch(() => {});
-    throw err;
+  const { surfaceKey } = opts;
+  const cached = surfaceKey === undefined ? undefined : platformMcpSurfaceCache.get(surfaceKey);
+  let surface: PlatformMcpSurface;
+  let client: Promise<AppstrateMcpClient> | undefined;
+  if (cached) {
+    surface = cached;
+  } else {
+    const opened = await connect();
+    try {
+      const listed = await opened.listTools({ signal: opts.signal });
+      surface = { tools: listed.tools, instructions: opened.client.getInstructions() };
+    } catch (err) {
+      await opened.close().catch(() => {});
+      throw err;
+    }
+    client = Promise.resolve(opened);
+    if (surfaceKey !== undefined) platformMcpSurfaceCache.set(surfaceKey, surface);
   }
 
+  let closed = false;
+  const getClient = (): Promise<AppstrateMcpClient> => {
+    if (closed) return Promise.reject(new Error("platform MCP client already closed"));
+    client ??= connect().catch((err: unknown) => {
+      client = undefined;
+      if (surfaceKey !== undefined && !opts.signal.aborted) {
+        platformMcpSurfaceCache.delete(surfaceKey);
+      }
+      throw err;
+    });
+    return client;
+  };
+
   const runOrigin = new URL(opts.url).origin;
-  const extensionFactories = listed.tools.map((tool) =>
+  const extensionFactories = surface.tools.map((tool) =>
     tool.name === RUN_AND_WAIT_TOOL
       ? makeRunAndWaitExtension(tool, {
           origin: runOrigin,
@@ -279,30 +290,41 @@ export async function buildPlatformMcpTools(
           signal: opts.signal,
           turnBudget: opts.turnBudget,
         })
-      : makeForwardExtension(tool, client, opts.signal, opts.turnBudget),
+      : makeForwardExtension(tool, getClient, opts.signal, opts.turnBudget),
   );
 
-  let closed = false;
   const close = async () => {
     if (closed) return;
     closed = true;
-    await client
-      .close()
+    // A connect still in flight is waited out, then closed: nothing else would.
+    const open = await client?.catch(() => undefined);
+    await open
+      ?.close()
       .catch((err) => logger.warn("chat pi mcp close failed", { err: String(err) }));
   };
 
-  const instructions = client.client.getInstructions();
   return {
     extensionFactories,
-    ...(instructions ? { instructions } : {}),
+    ...(surface.instructions ? { instructions: surface.instructions } : {}),
+    surfaceCached: cached !== undefined,
     close,
   };
+}
+
+/** `work`, or `signal`'s abort reason; `work` goes on, as the turn's tool calls share it. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
 
 /** Generic forwarding Pi tool: verbatim `tools/call` → adapted Pi result. */
 function makeForwardExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
-  client: AppstrateMcpClient,
+  getClient: () => Promise<AppstrateMcpClient>,
   signal: AbortSignal,
   turnBudget: PiTurnBudget,
 ): ExtensionFactory {
@@ -316,9 +338,11 @@ function makeForwardExtension(
         (tool.inputSchema as Record<string, unknown>) ?? { type: "object" },
       ),
       async execute(_toolCallId: string, params: unknown, execSignal?: AbortSignal) {
+        const callSignal = execSignal ?? signal;
+        const client = await untilAborted(getClient(), callSignal);
         const result = await client.callTool(
           { name: tool.name, arguments: (params as Record<string, unknown>) ?? {} },
-          { signal: execSignal ?? signal },
+          { signal: callSignal },
         );
         return withTurnBudgetNote(mcpResultToPi(result as never), turnBudget);
       },
