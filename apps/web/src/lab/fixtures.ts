@@ -589,7 +589,7 @@ export const runs: Run[] = [
     status: "running",
     input: {
       trimestre: "2026-Q2",
-      documents: ["document://doc_lab_3"],
+      documents: ["appfile://doc_lab_3"],
       notifier: "olivier@tractr.net",
     },
     proxy_label: "Sortie Europe",
@@ -623,7 +623,7 @@ export const runs: Run[] = [
     status: "success",
     runNumber: 130,
     started_at: ago(46),
-    input: { trimestre: "2026-Q1", documents: ["document://doc_lab_3"] },
+    input: { trimestre: "2026-Q1", documents: ["appfile://doc_lab_3"] },
     result: {
       output: {
         trimestre: "2026-Q1",
@@ -645,7 +645,7 @@ export const runs: Run[] = [
     completed_at: ago(2_879),
     duration: 54_000,
     error: "Le relevé Mastercard ne contenait pas la colonne de devise attendue.",
-    input: { trimestre: "2025-Q4", documents: ["document://doc_lab_3"] },
+    input: { trimestre: "2025-Q4", documents: ["appfile://doc_lab_3"] },
     file_counts: { input: 1, output: 0 },
   }),
   makeRun({
@@ -656,7 +656,7 @@ export const runs: Run[] = [
     completed_at: ago(4_290),
     duration: 1_800_000,
     error: "Le rapprochement a dépassé la durée maximale de 30 minutes.",
-    input: { trimestre: "2025-Q4", documents: ["document://doc_lab_3"] },
+    input: { trimestre: "2025-Q4", documents: ["appfile://doc_lab_3"] },
   }),
   makeRun({
     id: "run_03",
@@ -692,6 +692,7 @@ export const runs: Run[] = [
     runNumber: 96,
     started_at: ago(430),
     completed_at: ago(425),
+    file_counts: { input: 0, output: 1 },
   }),
   makeRun({
     id: "run_05",
@@ -753,7 +754,7 @@ export const runs: Run[] = [
         risque_principal: "Renouvellement automatique sans préavis de rappel",
       },
     },
-    file_counts: { input: 1, output: 0 },
+    file_counts: { input: 1, output: 3 },
     duration: 21_000,
     cost: 0.05,
     runNumber: 94,
@@ -1122,6 +1123,56 @@ export const chatHistory = {
           {
             type: "text",
             text: "Le run #199 (Compta trimestrielle) a échoué hier à 21:43 après 124 s : le relevé de mars manquait dans le dossier Drive du trimestre.",
+          },
+        ],
+      },
+    },
+    {
+      id: "msg_05",
+      content: {
+        role: "user",
+        parts: [
+          {
+            type: "text",
+            text: "Relis le contrat de prestation et sors-moi les points à négocier.",
+          },
+        ],
+      },
+    },
+    {
+      // A run the chat launched and waited for, as `run_and_wait` persists it:
+      // the card fetches run_07 and its produced files, so the chips, the
+      // structured output and the file preview can all be looked at.
+      id: "msg_06",
+      content: {
+        role: "assistant",
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolName: "run_and_wait",
+            toolCallId: "call_contract_review",
+            state: "output-available",
+            input: {
+              kind: "inline",
+              manifest: { display_name: "Relecture d'un contrat" },
+              prompt: "Relis ce contrat de service et écris les points à négocier dans outputs/.",
+            },
+            output: {
+              id: "run_07",
+              packageId: "@inline/r-8f2c41",
+              status: "success",
+              done: true,
+              result: {
+                output: {
+                  clauses_a_confirmer: 4,
+                  risque_principal: "Renouvellement automatique sans préavis de rappel",
+                },
+              },
+            },
+          },
+          {
+            type: "text",
+            text: "J’ai relu le contrat : quatre clauses sont à négocier, la plus risquée est le renouvellement automatique. Le détail est dans les trois fichiers ci-dessus.",
           },
         ],
       },
@@ -1688,12 +1739,54 @@ export const qboMcpServerLatestVersion: Json200<
 
 type LabDocument = Json200<"/api/files", "get">["data"][number];
 
+/** Where the chat's inline run (`run_07`) puts its deliverables. */
+const chatRun = {
+  run_id: "run_07",
+  packageId: "@inline/r-8f2c41",
+  chat_session_id: "chat_01",
+} as const;
+
+function previewableRow(
+  id: string,
+  name: string,
+  mime: string,
+  preview_kind: "html" | "text",
+  size: number,
+  owner: { run_id: string; packageId: string; chat_session_id?: string },
+): LabDocument {
+  return {
+    object: "file",
+    id,
+    uri: `appfile://${id}`,
+    purpose: "agent_output",
+    spaceId: APP_ID,
+    chat_session_id: null,
+    ...owner,
+    name,
+    mime,
+    size,
+    downloadable: true,
+    capabilities: {
+      visible: true,
+      metadata: true,
+      download: true,
+      preview: true,
+      keep: true,
+      delete: true,
+    },
+    previewable: true,
+    preview_kind,
+    expiresAt: ago(-20_000),
+    createdAt: ago(430),
+  };
+}
+
 /** Everything a tile can draw: an image, a spreadsheet, a PDF, and an upload. */
 const documentRows: LabDocument[] = [
   {
     object: "file",
     id: "doc_lab_1",
-    uri: "document://doc_lab_1",
+    uri: "appfile://doc_lab_1",
     purpose: "agent_output",
     spaceId: APP_ID,
     run_id: "run_02",
@@ -1720,7 +1813,7 @@ const documentRows: LabDocument[] = [
   {
     object: "file",
     id: "doc_lab_2",
-    uri: "document://doc_lab_2",
+    uri: "appfile://doc_lab_2",
     purpose: "agent_output",
     spaceId: APP_ID,
     run_id: "run_02",
@@ -1747,7 +1840,7 @@ const documentRows: LabDocument[] = [
   {
     object: "file",
     id: "doc_lab_3",
-    uri: "document://doc_lab_3",
+    uri: "appfile://doc_lab_3",
     purpose: "user_upload",
     spaceId: APP_ID,
     run_id: null,
@@ -1777,7 +1870,7 @@ const documentRows: LabDocument[] = [
     // the one row that proves the tile does not assume it may show everything.
     object: "file",
     id: "doc_lab_4",
-    uri: "document://doc_lab_4",
+    uri: "appfile://doc_lab_4",
     purpose: "user_upload",
     spaceId: APP_ID,
     run_id: "run_03",
@@ -1800,6 +1893,16 @@ const documentRows: LabDocument[] = [
     expiresAt: null,
     createdAt: ago(15_000),
   },
+  // One file per remaining preview kind, so every branch of the viewer can be
+  // looked at: an HTML report featured alone on run_04, and three deliverables
+  // of the chat's inline run (run_07), which the conversation's run card lists.
+  previewableRow("doc_lab_5", "synthese-hebdo-2026-S38.html", "text/html", "html", 18_432, {
+    run_id: "run_04",
+    packageId: "@tractr/wiki-brain",
+  }),
+  previewableRow("doc_lab_6", "points-a-negocier.md", "text/markdown", "text", 2_310, chatRun),
+  previewableRow("doc_lab_7", "clauses-relevees.csv", "text/csv", "text", 1_184, chatRun),
+  previewableRow("doc_lab_8", "synthese-contrat.json", "application/json", "text", 642, chatRun),
 ];
 
 export const documents: Json200<"/api/files", "get"> = {
@@ -1822,6 +1925,109 @@ const THUMBNAIL_PNG_BASE64 =
 export function thumbnailPng(): Uint8Array {
   const binary = atob(THUMBNAIL_PNG_BASE64);
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+}
+
+/**
+ * What `GET /api/files/{id}/content` answers, and what `preview_url` points at,
+ * by file name.
+ *
+ * The real `preview_url` is a signed route the browser loads directly (an
+ * iframe `src`, an `<img src>`, a plain `fetch` for text), none of which goes
+ * through the patched `window.fetch` unless it is under `/api/`. A `data:` URL
+ * is the one address all four can load with no server, so the lab mints those.
+ */
+const FILE_TEXT: Record<string, { mime: string; text: string }> = {
+  "synthese-hebdo-2026-S38.html": {
+    mime: "text/html",
+    text: `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Synthèse</title>
+<style>body{font:15px/1.6 system-ui,sans-serif;margin:32px;color:#18181b}h1{font-size:22px}
+table{border-collapse:collapse}td,th{border:1px solid #e7e7eb;padding:6px 10px;text-align:left}</style>
+</head><body><h1>Synthèse de la semaine 38</h1>
+<p>Trois décisions, deux relances, un risque à surveiller sur le chantier Tastet.</p>
+<table><tr><th>Sujet</th><th>État</th></tr><tr><td>Refonte UX</td><td>En cours</td></tr>
+<tr><td>Compta Q2</td><td>Livrée</td></tr></table></body></html>`,
+  },
+  "points-a-negocier.md": {
+    mime: "text/markdown",
+    text: `# Points à négocier
+
+1. **Renouvellement automatique** : aucun préavis de rappel, demander 60 jours.
+2. **Pénalités de retard** : plafonnées côté client seulement.
+3. **Propriété intellectuelle** : la clause 9.2 cède aussi les outils internes.
+4. **Juridiction** : Ontario, alors que les deux parties sont au Québec.
+`,
+  },
+  "clauses-relevees.csv": {
+    mime: "text/csv",
+    text: `clause,article,risque,action
+Renouvellement automatique,4.1,élevé,négocier un préavis de 60 jours
+Pénalités de retard,7.3,moyen,rendre la clause réciproque
+Propriété intellectuelle,9.2,élevé,exclure les outils internes
+Juridiction,14.1,faible,demander le Québec
+`,
+  },
+  "synthese-contrat.json": {
+    mime: "application/json",
+    text: `{
+  "clauses_a_confirmer": 4,
+  "risque_principal": "Renouvellement automatique sans préavis de rappel",
+  "echeance_resiliation": "2027-01-31"
+}
+`,
+  },
+};
+
+/**
+ * A one-page PDF, built rather than pasted so its cross-reference offsets are
+ * right: Chrome's viewer renders a hand-typed PDF with wrong offsets, but not
+ * every viewer forgives it.
+ */
+function buildPdf(line: string): string {
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${line.length + 44} >>\nstream\nBT /F1 18 Tf 72 760 Td (${line}) Tj ET\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let body = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  objects.forEach((object, i) => {
+    offsets.push(body.length);
+    body += `${i + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xref = body.length;
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  body += offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("");
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return body;
+}
+
+const PDF_TEXT = buildPdf("Releve Mastercard - juin 2026");
+
+/** Keyed by name: the heavy scenario's copies carry an `N-` prefix. */
+function textOf(row: LabDocument) {
+  return FILE_TEXT[row.name.replace(/^\d+-/, "")];
+}
+
+/** The bytes `GET /api/files/{id}/content` answers with, and their type. */
+export function fileContent(row: LabDocument): { body: unknown; contentType: string } {
+  const text = textOf(row);
+  if (text) return { body: text.text, contentType: text.mime };
+  if (row.mime === "application/pdf") return { body: PDF_TEXT, contentType: row.mime };
+  if (row.mime.startsWith("image/")) return { body: thumbnailPng(), contentType: row.mime };
+  return { body: new Uint8Array([0x50, 0x4b, 0x03, 0x04]), contentType: row.mime };
+}
+
+/** The `preview_url` a single-file read mints, or null when not previewable. */
+export function previewUrl(row: LabDocument): string | null {
+  if (!row.previewable) return null;
+  if (row.preview_kind === "image") return `data:${row.mime};base64,${THUMBNAIL_PNG_BASE64}`;
+  if (row.preview_kind === "pdf") return `data:application/pdf;base64,${btoa(PDF_TEXT)}`;
+  const text = textOf(row);
+  if (!text) return null;
+  const mime = row.preview_kind === "html" ? "text/html" : "text/plain";
+  return `data:${mime};charset=utf-8,${encodeURIComponent(text.text)}`;
 }
 
 /** Enough to make the gallery's "load more" reachable. */
@@ -1902,9 +2108,18 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
       schema: {
         type: "object",
         properties: {
-          transactions_processed: { type: "integer" },
-          missing_documents: { type: "integer" },
-          status: { type: "string" },
+          trimestre: { type: "string", title: "Trimestre" },
+          transactions_rapprochees: {
+            type: "integer",
+            title: "Transactions rapprochées",
+            description: "Lignes du relevé associées à une pièce justificative.",
+          },
+          ecarts_a_valider: {
+            type: "integer",
+            title: "Écarts à valider",
+            description: "Montants qui ne correspondent à aucune facture.",
+          },
+          total_depenses_cad: { type: "number", title: "Total des dépenses (CAD)" },
         },
       },
     },
@@ -1935,9 +2150,18 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
     schema: {
       type: "object",
       properties: {
-        transactions_processed: { type: "integer" },
-        missing_documents: { type: "integer" },
-        status: { type: "string" },
+        trimestre: { type: "string", title: "Trimestre" },
+        transactions_rapprochees: {
+          type: "integer",
+          title: "Transactions rapprochées",
+          description: "Lignes du relevé associées à une pièce justificative.",
+        },
+        ecarts_a_valider: {
+          type: "integer",
+          title: "Écarts à valider",
+          description: "Montants qui ne correspondent à aucune facture.",
+        },
+        total_depenses_cad: { type: "number", title: "Total des dépenses (CAD)" },
       },
     } as never,
   },

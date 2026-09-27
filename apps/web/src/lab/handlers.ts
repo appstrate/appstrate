@@ -33,6 +33,10 @@ export type LabResponse = {
 
 type Handler = (url: URL, scenario: Scenario, headers: Headers, body: unknown) => LabResponse;
 
+function labFile(id: string | undefined) {
+  return [...f.documents.data, ...f.heavyDocuments].find((file) => file.id === id);
+}
+
 type LabEndUser = f.Json200<"/api/end-users/{id}", "get">;
 type EndUserPatch = f.JsonRequest<"/api/end-users/{id}", "patch">;
 type LabAgentDetail = f.Json200<"/api/packages/agents/{scope}/{name}", "get">;
@@ -1000,16 +1004,17 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     // The gallery pages with `limit` + an accumulator on the caller's side, so
     // the handler has to honour the query or "load more" asks forever.
     method: "GET",
-    pattern: /^\/api\/documents$/,
+    pattern: /^\/api\/files$/,
     handler: (url, s) => {
       const all = list(f.documents.data, s, f.heavyDocuments);
       const purpose = url.searchParams.get("purpose");
       const runId = url.searchParams.get("run_id");
+      const chatSessionId = url.searchParams.get("context_chat_session_id");
       const run = runId ? f.runs.find((candidate) => candidate.id === runId) : undefined;
       const inputDocumentIds = new Set<string>();
       const collectInputDocumentIds = (value: unknown) => {
-        if (typeof value === "string" && value.startsWith("document://")) {
-          inputDocumentIds.add(value.slice("document://".length));
+        if (typeof value === "string" && value.startsWith("appfile://")) {
+          inputDocumentIds.add(value.slice("appfile://".length));
           return;
         }
         if (Array.isArray(value)) {
@@ -1024,6 +1029,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
       const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
       const filtered = all.filter((document) => {
         if (purpose && document.purpose !== purpose) return false;
+        if (chatSessionId && document.chat_session_id !== chatSessionId) return false;
         if (runId && document.run_id !== runId && !inputDocumentIds.has(document.id)) {
           return false;
         }
@@ -1047,15 +1053,23 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
-    pattern: /^\/api\/documents\/[^/]+\/content$/,
+    pattern: /^\/api\/files\/[^/]+\/content$/,
     handler: (url) => {
-      const id = /\/documents\/([^/]+)\/content$/.exec(url.pathname)?.[1] ?? "";
-      const row = [...f.documents.data, ...f.heavyDocuments].find((d) => d.id === id);
+      const row = labFile(/\/files\/([^/]+)\/content$/.exec(url.pathname)?.[1]);
       // The real route echoes the stored mime and refuses a row the caller may
       // not download; both matter here, since that is what the tile branches on.
       if (!row || !row.capabilities.download) return { status: 403, body: {} };
-      if (!row.mime.startsWith("image/")) return { status: 200, body: {} };
-      return { status: 200, body: f.thumbnailPng(), contentType: row.mime };
+      return { status: 200, ...f.fileContent(row) };
+    },
+  },
+  {
+    // The single-file read is the one that mints `preview_url`.
+    method: "GET",
+    pattern: /^\/api\/files\/[^/]+$/,
+    handler: (url) => {
+      const row = labFile(/\/files\/([^/]+)$/.exec(url.pathname)?.[1]);
+      if (!row) return { status: 404, body: {} };
+      return { status: 200, body: { ...row, preview_url: f.previewUrl(row) } };
     },
   },
   {
