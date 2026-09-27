@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The agent's forward proxy logs the runners it refuses** (#1548). It
+  answered a runner peer with a 403 and wrote nothing, so the one runner-egress
+  refusal missing from the sidecar log was this one; it now logs
+  `forward proxy event` (`request-refused` or `tunnel-refused`,
+  `reason: "peer-not-allowed"`, the target and the peer address), like the
+  integration listeners.
+- **The sidecar no longer warns `integration boot wait exceeded` on runs whose
+  integrations booted in time** (#1548). The 30 s deadline was never disarmed,
+  so every run that outlived it logged the warning operators are told to look
+  for when an agent cannot see an integration.
+
 ## [1.0.0-beta.63] - 2026-09-26
 
 ### Operators
