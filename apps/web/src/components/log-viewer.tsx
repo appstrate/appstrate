@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  Braces,
   Copy,
   Check,
   CheckCircle2,
@@ -46,6 +47,11 @@ import {
   type ToolExecutionStatus,
 } from "./log-utils";
 import { Modal } from "./modal";
+import { ItemList } from "./item-list";
+import { EmptyState } from "./page-states";
+import { Badge } from "./status-badge";
+import { formatDateField } from "../lib/format-date";
+import { historyRuns, recalledMemories } from "../lib/runtime-tool-results";
 import { ListToolbar, type FilterSpec } from "./list-toolbar";
 
 const levelIconConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
@@ -173,15 +179,82 @@ function ToolDetailsModal({
             {entry.result !== undefined && (
               <section className="flex flex-col gap-2">
                 <h3 className="text-sm font-medium">{t("log.result")}</h3>
-                <pre className="bg-muted text-foreground/80 overflow-x-auto rounded-md p-3 font-mono text-xs break-words whitespace-pre-wrap select-text">
-                  {formatStructuredValue(entry.result)}
-                </pre>
+                <ToolResult key={entry.id} tool={entry.tool} result={entry.result} />
               </section>
             )}
           </div>
         </ScrollArea>
       )}
     </Modal>
+  );
+}
+
+/**
+ * A tool's result. The two first-party memory tools read as the items they
+ * returned (a memory's text, a past run's status and date); anything else, and
+ * the raw payload of those two, is the JSON as the runner logged it.
+ */
+function ToolResult({ tool, result }: { tool: string; result: unknown }) {
+  const { t } = useTranslation("agents");
+  const [showJson, setShowJson] = useState(false);
+  const memories = tool === "recall_memory" ? recalledMemories(result) : null;
+  const runs = tool === "run_history" ? historyRuns(result) : null;
+  const raw = (
+    <pre className="bg-muted text-foreground/80 overflow-x-auto rounded-md p-3 font-mono text-xs break-words whitespace-pre-wrap select-text">
+      {formatStructuredValue(result)}
+    </pre>
+  );
+  if (!memories && !runs) return raw;
+  let items = raw;
+  if (!showJson && memories) {
+    items = (
+      <ItemList
+        items={memories}
+        itemKey={(memory) => memory.id}
+        empty={<EmptyState compact icon={Info} message={t("log.recalledNone")} />}
+        renderItem={(memory) => (
+          <div className="rounded-md border px-3 py-2 text-sm">
+            <p className="whitespace-pre-wrap">{memory.content}</p>
+            {memory.createdAt && (
+              <p className="text-muted-foreground mt-1 text-xs">
+                {formatDateField(memory.createdAt)}
+              </p>
+            )}
+          </div>
+        )}
+      />
+    );
+  } else if (!showJson && runs) {
+    items = (
+      <ItemList
+        items={runs}
+        itemKey={(run) => run.id}
+        empty={<EmptyState compact icon={Info} message={t("log.historyNone")} />}
+        renderItem={(run) => (
+          <div className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
+            {run.status && <Badge status={run.status} />}
+            <span className="font-mono text-xs">{run.id}</span>
+            <span className="text-muted-foreground ml-auto text-xs tabular-nums">
+              {[
+                run.date && formatDateField(run.date),
+                run.duration != null && formatDuration(run.duration),
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          </div>
+        )}
+      />
+    );
+  }
+  return (
+    <div className="space-y-3">
+      {items}
+      <Button variant="outline" size="sm" onClick={() => setShowJson((v) => !v)}>
+        <Braces />
+        {showJson ? t("run.outputShowFields") : t("run.outputShowJson")}
+      </Button>
+    </div>
   );
 }
 
@@ -984,7 +1057,10 @@ export function LogEntryInspector({
                 <InspectorCode label={t("log.arguments")} value={entry.args} />
               )}
               {entry.result !== undefined && (
-                <InspectorCode label={t("log.result")} value={entry.result} />
+                <section className="space-y-2">
+                  <h3 className="text-sm font-medium">{t("log.result")}</h3>
+                  <ToolResult key={entry.id} tool={entry.tool} result={entry.result} />
+                </section>
               )}
               {entry.detail && entry.args === undefined && (
                 <InspectorText label={t("log.details")} value={entry.detail} />

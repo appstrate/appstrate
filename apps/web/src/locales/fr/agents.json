@@ -953,5 +953,7 @@
   "run.overrides.versionPublished": "Dernière version publiée",
   "detail.integrationInactive": "Intégration non active dans cet espace — activez-la pour la connecter.",
   "run.outputShowJson": "Voir le JSON",
-  "run.outputShowFields": "Voir les champs"
+  "run.outputShowFields": "Voir les champs",
+  "log.recalledNone": "Aucun souvenir retrouvé.",
+  "log.historyNone": "Aucun run précédent."
 }

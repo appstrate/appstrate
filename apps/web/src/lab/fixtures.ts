@@ -2303,8 +2303,76 @@ export const runLogs: Json200<"/api/runs/{id}/logs", "get"> = {
       } as unknown as components["schemas"]["RunLog"]["data"],
       createdAt: ago(1),
     },
+    // The two first-party memory tools, answered the way the sidecar answers
+    // them (an MCP text part holding the platform's JSON), so the journal's
+    // tool detail can be looked at listing what they returned.
+    ...runtimeToolRows(
+      "recall_memory",
+      { q: "relevé" },
+      {
+        memories: [
+          {
+            id: 12,
+            content: "Les relevés Mastercard de BNC arrivent en CSV depuis mai 2026.",
+            createdAt: ago(20_000),
+          },
+          {
+            id: 9,
+            content: "Olivier range les factures Stripe dans « Finances / Stripe ».",
+            createdAt: ago(45_000),
+          },
+        ],
+      },
+    ),
+    ...runtimeToolRows(
+      "run_history",
+      { limit: 2 },
+      {
+        object: "list",
+        data: [
+          { id: "run_02", status: "success", date: ago(46), duration: 124_000 },
+          { id: "run_ante", status: "success", date: ago(130_000), duration: 98_000 },
+        ],
+        hasMore: false,
+      },
+    ),
   ],
 };
+
+function runtimeToolRows(tool: string, args: unknown, body: unknown) {
+  const data = (extra: object) =>
+    ({
+      tool,
+      toolCallId: `call_${tool}`,
+      ...extra,
+    }) as unknown as components["schemas"]["RunLog"]["data"];
+  return [
+    {
+      id: 0,
+      runId: "run_01",
+      type: "progress",
+      level: "info",
+      event: "tool.call",
+      message: `Tool: ${tool}`,
+      data: data({ args }),
+      createdAt: ago(1),
+    },
+    {
+      id: 0,
+      runId: "run_01",
+      type: "progress",
+      level: "info",
+      event: "tool.result",
+      message: `Tool result: ${tool}`,
+      data: data({
+        isError: false,
+        result: { content: [{ type: "text", text: JSON.stringify(body) }] },
+        durationMs: 180,
+      }),
+      createdAt: ago(1),
+    },
+  ] as const;
+}
 
 type Persistence = Json200<"/api/agents/{scope}/{name}/persistence", "get">;
 

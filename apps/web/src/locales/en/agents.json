@@ -953,5 +953,7 @@
   "run.overrides.versionPublished": "Latest published version",
   "detail.integrationInactive": "Integration not active in this space — activate it to connect.",
   "run.outputShowJson": "Show JSON",
-  "run.outputShowFields": "Show fields"
+  "run.outputShowFields": "Show fields",
+  "log.recalledNone": "No memory recalled.",
+  "log.historyNone": "No previous run."
 }
