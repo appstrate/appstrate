@@ -3976,7 +3976,8 @@ said otherwise.
    `makeAssistantToolUI` for them would never render. Where their results are
    actually seen is the run journal: `ToolDetailsModal` in `log-viewer.tsx`,
    which prints the result as JSON. Cards there (the `item-list.tsx` row
-   shape) are the real version of this item, and need a decision of their own.
+   shape) are the real version of this item: built 26 September, see item 6 of
+   "Outputs, audited against AI Elements".
 4. **DiffTable, as the body of the approval for an update.** Before/after per
    field of a PUT or PATCH, each row includable, in shadcn `Table` +
    `Checkbox`. Depends on 1, and on knowing the "before", which the tool call
@@ -4047,62 +4048,77 @@ panel next to the chat, full screen, copy, download, versions, a share link.
 `/api/files/{id}/content` (`hooks/use-files.ts`), so the Documents page, a
 run's Productions and every thumbnail hit the missing-fixture 404. The
 fixtures also carry no `preview_url`, no HTML, markdown or CSV file, and the
-chat history has no run card or file. Found by reading, confirmed by grep; the
-screens were not opened.
+chat history has no run card or file. **Fixed 26 September** (item 0 below):
+single reads mint a `data:` `preview_url` (the one address an iframe, an
+`<img>` and a plain `fetch` can all load with no server), content answers real
+bytes per type, one file exists per preview kind, and `chat_01` carries a
+`run_and_wait` turn whose run (`run_07`) produced three files. The journal's
+run logs carry a `recall_memory` and a `run_history` call.
 
 ### Verdicts
 
-| AI Elements / practice   | verdict     | what we have, and the gap                                                                                                                                                                                                                      |
-| ------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Artifact (frame)         | have, worse | The viewer, the run deliverable, the preview modal and the chat panel each draw their own header: name here, download there, maximise only in the chat. No shared frame with title, type, size, retention and one action set.                  |
-| Side panel next to chat  | have        | The conversation panel's Preview tab, opened by a click or by itself for a single deliverable. The claude.ai/canvas shape, already there.                                                                                                      |
-| Full screen              | have, worse | Only from the chat panel (maximise to a modal). The run deliverable and the Documents preview have no full-screen action.                                                                                                                      |
-| WebPreview (HTML)        | have        | Stricter than the reference: AI Elements sandboxes with `allow-same-origin` + scripts, which we refuse on purpose (see the header of `file-viewer.tsx`). No URL bar or console, and none is needed for a generated report.                     |
-| Image                    | have        | `<img>` in the viewer, thumbnails in the chat. No zoom beyond full screen, which is enough.                                                                                                                                                    |
-| PDF                      | have        | Native viewer in an iframe.                                                                                                                                                                                                                    |
-| Spreadsheets (csv/xlsx)  | have, worse | CSV is shown as raw text; xlsx is not previewable at all, though a spreadsheet is among the most common things an employee's agent produces.                                                                                                   |
-| CodeBlock                | have, worse | No highlighting and no copy on any markdown code block, chat or app; JSON and text previews are bare `<pre>`. The reference highlights with shiki, lazily, with copy and a filename header.                                                    |
-| Response (Streamdown)    | have, worse | The chat's markdown streams smoothly (better than the reference's plain stream), but lacks what Streamdown adds: highlighted code with copy, tables with copy, math and mermaid. Only the first two matter here.                               |
-| Structured output        | have, worse | A JSON tree. The agent's output schema is known (it is in the manifest), so field titles and descriptions could label the values instead of raw keys. AI Elements has no component for this (its `schema-display` documents an HTTP endpoint). |
-| Attachments              | have        | `file-attachment.tsx` already covers the reference's inline and grid variants (chip, thumbnail) with preview-or-download. No hover preview, not missed.                                                                                        |
-| Actions (copy…)          | have, worse | Copy on the assistant message and on the JSON tree. No copy on a text file's preview, no retry on a message (already noted in the first audit).                                                                                                |
-| Download                 | have        | Everywhere a file is shown, gated by capabilities.                                                                                                                                                                                             |
-| Retention                | have        | Expiry column, keep action, a clock on tiles. Better than both references, which have no notion of it.                                                                                                                                         |
-| Sources / InlineCitation | absent      | Nothing emits sources. A display component would render nothing until the engine produces `source` parts.                                                                                                                                      |
-| Versions                 | absent      | Each run's files stand alone; a report regenerated weekly is N unrelated files. claude.ai and canvas version one artifact; here that would mean grouping by agent and name, a server concept.                                                  |
-| Share link               | absent      | `?preview=<id>` is an in-app deep link for members. No link for someone outside the workspace: a server feature with a security design of its own.                                                                                             |
-| Result on run cards      | absent      | Cards and rows count files but never show what was produced.                                                                                                                                                                                   |
+| AI Elements / practice   | verdict     | what we have, and the gap                                                                                                                                                                                                  |
+| ------------------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Artifact (frame)         | have        | Since 26 September: `FileArtifact` (`components/file-artifact.tsx`) on `@appstrate/ui`'s `Artifact`, used by the run deliverable, the preview modal and the chat panel. See item 1.                                        |
+| Side panel next to chat  | have        | The conversation panel's Preview tab, opened by a click or by itself for a single deliverable. The claude.ai/canvas shape, already there.                                                                                  |
+| Full screen              | have        | The browser's own, on the frame, wherever a file is shown. It replaced the chat's second preview modal.                                                                                                                    |
+| WebPreview (HTML)        | have        | Stricter than the reference: AI Elements sandboxes with `allow-same-origin` + scripts, which we refuse on purpose (see the header of `file-viewer.tsx`). No URL bar or console, and none is needed for a generated report. |
+| Image                    | have        | `<img>` in the viewer, thumbnails in the chat. No zoom beyond full screen, which is enough.                                                                                                                                |
+| PDF                      | have        | Native viewer in an iframe.                                                                                                                                                                                                |
+| Spreadsheets (csv/xlsx)  | have, worse | CSV is shown as raw text; xlsx is not previewable at all, though a spreadsheet is among the most common things an employee's agent produces.                                                                               |
+| CodeBlock                | have, worse | No highlighting and no copy on any markdown code block, chat or app; JSON and text previews are bare `<pre>`. The reference highlights with shiki, lazily, with copy and a filename header.                                |
+| Response (Streamdown)    | have, worse | The chat's markdown streams smoothly (better than the reference's plain stream), but lacks what Streamdown adds: highlighted code with copy, tables with copy, math and mermaid. Only the first two matter here.           |
+| Structured output        | have        | Since 26 September: labelled facts (`StructuredOutput`, `@appstrate/ui`), titles and descriptions from the output schema, JSON one toggle away, in the run results and the chat's run detail. See item 4.                  |
+| Attachments              | have        | `file-attachment.tsx` already covers the reference's inline and grid variants (chip, thumbnail) with preview-or-download. No hover preview, not missed.                                                                    |
+| Actions (copy…)          | have, worse | Copy on the assistant message, the JSON tree and, since 26 September, a text file in the frame. No retry on a message (already noted in the first audit).                                                                  |
+| Download                 | have        | Everywhere a file is shown, gated by capabilities.                                                                                                                                                                         |
+| Retention                | have        | Expiry column, keep action, a clock on tiles. Better than both references, which have no notion of it.                                                                                                                     |
+| Sources / InlineCitation | absent      | Nothing emits sources. A display component would render nothing until the engine produces `source` parts.                                                                                                                  |
+| Versions                 | absent      | Each run's files stand alone; a report regenerated weekly is N unrelated files. claude.ai and canvas version one artifact; here that would mean grouping by agent and name, a server concept.                              |
+| Share link               | absent      | `?preview=<id>` is an in-app deep link for members. No link for someone outside the workspace: a server feature with a security design of its own.                                                                         |
+| Result on run cards      | have        | Since 26 September, a card whose run produced exactly one file shows it and opens its preview. Rows still only count. See item 5.                                                                                          |
 
-### What deserves building, in order (for validation, none started)
+### What deserves building, in order
 
-0. **Lab fixtures for files first**, or none of the items below can be looked
-   at: `/api/files` handlers in place of `/api/documents`, a `preview_url` on
-   each fixture, one file per preview kind (html, pdf, image, markdown, csv,
-   json, and an xlsx for the unavailable state), and a chat turn with a run
-   card that produced files. Lab only.
-1. **One Artifact frame for every place a file is shown.** Header with type
-   icon, name, size and retention; actions copy (text kinds), download, full
-   screen, open in the side panel from Studio. Used by the run deliverable, the
-   preview modal and the chat panel. Anchor: AI Elements `Artifact`
-   (`ArtifactHeader`, `ArtifactActions`, `ArtifactAction` with tooltip), a
-   150-line shadcn composition that can be taken over under Apache-2.0. Display
-   only.
+Validated 26 September. Items 0, 1, 4 and 5 are built, plus the journal item
+that closes the context-cards question of the first audit; 2 and 3 are the
+next step.
+
+0. **Lab fixtures for files. Done** (`chore(lab)`, see above). The old
+   `/api/documents` handlers are gone: nothing called them.
+1. **One Artifact frame for every place a file is shown. Done.**
+   `@appstrate/ui`'s `Artifact` is AI Elements' (Apache-2.0, notice in the file
+   header and in `packages/ui/NOTICE`) on our tokens, without its close
+   button. `FileArtifact` puts type, name, size and retention in its header,
+   and three actions: copy for text kinds, download when allowed, and the
+   browser's own full screen (`requestFullscreen` on the frame), which works
+   the same in a page, a modal and the panel and replaced the chat's second
+   preview modal. The HTML iframe is untouched: `allow-scripts` only. An
+   action's tooltip opens on hover and keyboard focus, not on a dialog's
+   autofocus. "Open in the side panel" was not built: outside the chat there is
+   no panel, and inside it a file already opens there.
 2. **Highlighted code with copy, in both markdown renderers and the text
    preview.** Anchor: AI Elements `CodeBlock` (shiki, lazy per language,
    copy); in the chat through `MarkdownTextPrimitive`'s `components` (`pre` /
    `code`). Display only; the cost is shiki's weight, which the reference
-   already loads lazily.
+   already loads lazily. Next.
 3. **CSV as a table.** Parse in the browser, render in shadcn `Table` inside the
    viewer, raw text one toggle away. Display only. **xlsx** is the same screen
    but needs either a parser dependency in the browser or a conversion on the
-   server; that choice comes first.
-4. **Structured output labelled by its schema.** Field title and description
-   from the agent's output schema, values in the fact-grid shape named in "The
-   grammar", the JSON tree kept one toggle away. Anchor: our own fact grid, not
-   AI Elements. Display only.
-5. **The produced file on the run card.** The featured deliverable's name and
-   type icon, opening the preview. Display only, from data the card's query
-   already has or one more request.
+   server; that choice comes first. Next.
+4. **Structured output labelled by its schema. Done.** `StructuredOutput`
+   (`@appstrate/ui`) in the fact-grid shape; the run page reads the schema
+   from the agent (a cache hit) or the inline manifest. The chat's run detail
+   opens on the same facts, labelled by key since no schema reaches it. Numbers
+   are printed as the run returned them, not localised.
+5. **The produced file on the run card. Done**, for exactly one produced
+   file (the count is on the card, so nothing is fetched otherwise). The card's
+   link is now stretched from its title, the `data-table` pattern, so the file
+   button can sit inside it.
+6. **`recall_memory` and `run_history` in the journal. Done.** The event
+   inspector and the tool modal list what they returned through `ItemList`,
+   JSON one toggle away (`lib/runtime-tool-results.ts` reads the MCP text part,
+   a string or an object).
 
 Not now: Sources and InlineCitation wait for the engine to emit sources;
 versions and share links are server features that need a product decision.
