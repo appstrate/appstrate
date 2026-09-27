@@ -6,7 +6,6 @@ import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts"
 import { assertSpaceId } from "../lib/ids.ts";
 import {
   defaultSpaceForOrg,
-  loadSpaceAccess,
   validateSpaceInOrg,
   type SpaceAccessSnapshot,
   type SpaceContextRow,
@@ -17,8 +16,8 @@ import {
   callerOrgRole,
   callerPersonalOwnerId,
   callerSpaceAccess,
+  callerSpaceAccessById,
   effectiveInSpace,
-  personaFor,
 } from "../lib/view-as.ts";
 import { resolveSpaceRole } from "../lib/space-role.ts";
 
@@ -85,23 +84,23 @@ export async function applySpacePermissions(
 }
 
 /**
- * Enter a space by id. With an org role and no role preview, `loadSpaceAccess` IS the
- * lookup (filtered on `(id, orgId)`, id shape-guarded like `validateSpaceInOrg`): one read.
+ * Enter a space by id: one read. A caller with an org role gets the lookup and its
+ * membership as one snapshot (`callerSpaceAccessById`); an end-user token reads the row alone.
  */
 export async function enterSpaceById(
   c: Context<AppEnv>,
   spaceId: string,
   orgId: string,
 ): Promise<void> {
-  if (c.get("orgRole") && !personaFor(c, orgId)) {
-    const access = await loadSpaceAccess(spaceId, orgId, c.get("user").id);
-    if (!access) throw spaceNotFound(spaceId);
-    c.set("space", await admitSpace(c, access.space, access));
+  if (!c.get("orgRole")) {
+    const space = await validateSpaceInOrg(spaceId, orgId);
+    if (!space) throw spaceNotFound(spaceId);
+    await applySpacePermissions(c, space);
     return;
   }
-  const space = await validateSpaceInOrg(spaceId, orgId);
-  if (!space) throw spaceNotFound(spaceId);
-  await applySpacePermissions(c, space);
+  const access = await callerSpaceAccessById(c, spaceId, orgId);
+  if (!access) throw spaceNotFound(spaceId);
+  c.set("space", await admitSpace(c, access.space, access));
 }
 
 /** Missing, another org's, private: one answer, so a 404 never confirms an id exists. */

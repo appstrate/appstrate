@@ -278,6 +278,19 @@ describe("mcp discovery + auth gate", () => {
     expect(res.headers.get("Allow")).toBe("POST");
   });
 
+  it("answers notifications/initialized with a bare 202", async () => {
+    // The chat's MCP client answers this hop itself (`answerStatelessHopsLocally`,
+    // module-chat): it may only do so while the server's reply is exactly this.
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const res = await app.request(mcpPath(headers), {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+    });
+    expect(res.status).toBe(202);
+    expect(await res.text()).toBe("");
+  });
+
   it("rejects DELETE on the per-org endpoint with 405 (no session to terminate in stateless mode)", async () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const res = await app.request(mcpPath(headers), { method: "DELETE", headers });

@@ -26,8 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   caller's membership. For a caller with an org role and no role preview, that
   second statement already filters on the org, so it is now the only one.
   `GET /api/me/context` also runs its package-access read beside the other
-  listings instead of before them, and its connections listing no longer
-  re-checks the space the request was admitted on. Together, 115 to 150 ms
+  listings instead of before them. Together, 115 to 150 ms
   off the chat's first visible token in the #1601 benchmark. Responses
   are unchanged, refusals included.
 - **A chat turn's MCP handshake sends two requests to the platform, not four**

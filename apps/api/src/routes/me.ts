@@ -525,8 +525,7 @@ router.get("/context", requireSpaceContext(), async (c) => {
   };
   const [connections, runnable, activeSkills, recentRuns] = await Promise.all([
     mayReadIntegrations
-      ? // The middleware admitted this space in this org; that row is the proof.
-        listUsableIntegrationsForActor(scope, actor, { admittedSpace: c.get("space") })
+      ? listUsableIntegrationsForActor(scope, actor)
       : Promise.resolve([] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>),
     canRun
       ? withHomeWritable().then((homeWritable) => listRunnableAgents(scope, { homeWritable }))
