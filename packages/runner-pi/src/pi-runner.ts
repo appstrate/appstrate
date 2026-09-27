@@ -186,36 +186,31 @@ export function prepareRequestedThinkingLevel(
 }
 
 /**
- * Install an ephemeral credential on Pi 0.84's ModelRuntime.
+ * Install an ephemeral, process-local credential on Pi's ModelRuntime.
  *
- * OpenAI Codex is OAuth-only in Pi's built-in catalog, so `setRuntimeApiKey`
- * deliberately refuses it. Appstrate already resolves and refreshes that
- * OAuth bearer outside Pi; a process-local provider overlay exposes the token
- * as request auth without persisting it or replacing Codex's native serializer.
- *
- * {@link ALIAS_PI_PROVIDER_KEY} needs `registerProvider` for a different
- * reason: `setRuntimeApiKey` only overlays an EXISTING provider, so a canonical
- * key pi knows no vendor for is dropped and `prepareRequest` later throws.
+ * Always a provider overlay (`registerProvider`), never `setRuntimeApiKey`:
+ * - an overlaid provider streams each model with the serializer of its OWN
+ *   `api`, while an untouched builtin streams every model with the builtin's
+ *   single api. A gateway model (no Pi provider) takes the api shape's
+ *   fallback key, and `openai` streams Responses only — an
+ *   `openai-completions` model POSTed `/responses`;
+ * - `setRuntimeApiKey` refuses OAuth-only builtins (`openai-codex`) and drops
+ *   a key Pi knows no vendor for ({@link ALIAS_PI_PROVIDER_KEY}).
+ * The chat engine registers its proxy credential the same way.
  */
 export async function setPiRuntimeCredential(
   modelRuntime: ModelRuntime,
   provider: string,
   apiKey: string,
 ): Promise<void> {
-  if (provider === ALIAS_PI_PROVIDER_KEY) {
-    // Provider-config headers are the only ones `pi-messages` puts on the wire.
-    // Alias-only: this header must never reach `openai-codex`.
-    modelRuntime.registerProvider(provider, {
-      apiKey,
-      headers: { [PI_SDK_VERSION_HEADER]: PI_SDK_VERSION },
-    });
-    return;
-  }
-  if (provider === "openai-codex") {
-    modelRuntime.registerProvider(provider, { apiKey });
-    return;
-  }
-  await modelRuntime.setRuntimeApiKey(provider, apiKey);
+  modelRuntime.registerProvider(
+    provider,
+    provider === ALIAS_PI_PROVIDER_KEY
+      ? // Provider-config headers are the only ones `pi-messages` puts on the wire.
+        // Alias-only: this header must never reach a vendor provider.
+        { apiKey, headers: { [PI_SDK_VERSION_HEADER]: PI_SDK_VERSION } }
+      : { apiKey },
+  );
 }
 
 export interface PiRunnerOptions {

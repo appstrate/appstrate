@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Runs on an `openai-compatible` model that is not aliased reach
+  `/chat/completions` again**. The agent installed its credential with
+  `setRuntimeApiKey`, which leaves Pi's builtin `openai` provider untouched,
+  and that provider streams Responses only. So a gateway model's
+  `openai-completions` call went out as `POST /responses`, and the sidecar
+  refused it with `404 Not an inference endpoint`. Every provider is now
+  registered as an overlay, which streams each model with its own api, as the
+  chat engine already did. `appstrate run` shared the bug and the fix;
+  aliased models and the chat were not affected.
 - **The agent's forward proxy logs the runners it refuses** (#1548). It
   answered a runner peer with a 403 and wrote nothing, so the one runner-egress
   refusal missing from the sidecar log was this one; it now logs

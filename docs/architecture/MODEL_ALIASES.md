@@ -79,7 +79,7 @@ naming no vendor. Because pi has no builtin for it, the credential must go in
 through `ModelRuntime.registerProvider` rather than `setRuntimeApiKey` (an
 overlay on an EXISTING provider, which for an unknown id deletes the provider
 and fails at request time with `Unknown provider`); `setPiRuntimeCredential`
-handles both that key and `openai-codex` through the same door.
+registers every provider through that one door.
 
 The **sidecar** is the `pi-messages` backend. An aliased run's inference call is
 **terminated and re-originated, never proxied**: `POST /llm/messages` — inside
