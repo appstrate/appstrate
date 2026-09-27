@@ -80,7 +80,10 @@ describe("persona-sensitive call sites", () => {
       allowlist: [
         ["apps/api/src/lib/space-role.ts", "defines `loadSpaceMember` and `membershipOn`"],
         ["apps/api/src/lib/space-lookup.ts", "defines `loadSpaceAccess`"],
-        ["apps/api/src/lib/view-as.ts", "`callerSpaceAccess`, the persona-aware accessor"],
+        [
+          "apps/api/src/lib/view-as.ts",
+          "`callerSpaceAccess` / `callerSpaceAccessById`, the persona-aware accessors",
+        ],
         [
           "apps/api/src/lib/package-access.ts",
           "joins the caller's rows only when no persona is set; the overlay replaces them otherwise",

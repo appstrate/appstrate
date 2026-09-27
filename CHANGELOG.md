@@ -6,6 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **The chat shows the model's reasoning phase instead of a blank bubble**
+  (#1601). The thinking dots disappeared as soon as the model started
+  reasoning and nothing replaced them, so a reasoning model left an empty
+  bubble until its first word: 3.2 s with a 3 s reasoning mock in Chromium,
+  67 ms now. Each run of reasoning renders as a collapsed « Réflexion… » row
+  with the dots while it is the tail of a running turn, then settles to
+  « Réflexion » once text or a tool call follows, or once the turn is stopped,
+  fails or is reloaded. The row expands to the reasoning as plain text. Models
+  that emit no reasoning keep the dots, then the answer, as before.
+
+### Changed
+
+- **Entering a space costs one query instead of two** (#1601). Every
+  space-scoped request, the MCP endpoint and the per-space `/api/spaces/{id}`
+  routes looked the space up in the org, then read it again joined to the
+  caller's membership. For a caller with an org role and no role preview, that
+  second statement already filters on the org, so it is now the only one.
+  `GET /api/me/context` also runs its package-access read beside the other
+  listings instead of before them. Together, 115 to 150 ms
+  off the chat's first visible token in the #1601 benchmark. Responses
+  are unchanged, refusals included.
+- **A chat turn's MCP handshake sends two requests to the platform, not four**
+  (#1601). Each one pays the full pipeline: auth, a Redis rate-limit round
+  trip, the space lookups and a server rebuild. The endpoint is stateless, so
+  `notifications/initialized` (always a bare `202`) and the client's SSE `GET`
+  (always a `405`) are now answered in the chat itself. Measured on the first
+  visible token: 34 to 53 ms sooner.
+- **A chat turn skips the MCP handshake when its permissions were seen before**
+  (#1601). The server instructions and tool descriptors depend only on the
+  permission list the turn's bearer carries, so the process caches them per
+  list (64 lists at most, 5 minutes each) and opens the MCP client on the
+  first tool call instead. On such a turn a broken MCP endpoint no longer fails
+  the turn before the model is called: it surfaces as the error of the tool
+  call that needed it, and the list leaves the cache, so the next turn
+  handshakes up front and fails there, as before. Measured on the first
+  visible token: 180 to 201 ms sooner
+  (`mcpHandshakeMs` from ~200 ms to ~1 ms). The `chat turn construction` log
+  line gains `mcpSurfaceCached`.
+
 ### Fixed
 
 - **Runs on an `openai-compatible` model that is not aliased reach

@@ -17,11 +17,14 @@ import {
   ActionBarPrimitive,
   AuiIf,
   useAuiState,
+  type ReasoningGroupComponent,
+  type ReasoningMessagePartComponent,
 } from "@assistant-ui/react";
 import {
   AlertTriangleIcon,
   ArrowDownIcon,
   CheckIcon,
+  ChevronRightIcon,
   CopyIcon,
   FileIcon,
   PaperclipIcon,
@@ -33,6 +36,11 @@ import {
 import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
 import { formatBytes } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
 import { MarkdownText } from "./markdown-text.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
@@ -369,24 +377,63 @@ function UserMessage() {
 // branches that aren't persisted — corrupting history on reload — so they're
 // intentionally absent.
 
-/**
- * Shown while the model hasn't produced anything visible yet. Height is pinned
- * to h-6 (24px) — exactly one prose-sm text line — so the dots→first-text swap
- * is a 0px layout change. Gated on the message actually running: a DEAD message
- * with no visible parts (e.g. a turn that errored before producing content)
- * must not animate "thinking" forever — that reads as a hung chat.
- */
-function ThinkingIndicator() {
-  const running = useAuiState((s) => s.message.status?.type === "running");
-  if (!running) return null;
+/** The turn's one status region. h-6 = one prose-sm line: whatever replaces it shifts 0px. */
+function ThinkingStatus() {
+  const { t } = useChatHost();
   return (
-    <div className="flex h-6 items-center gap-1" role="status" aria-label="L'assistant réfléchit…">
+    <div
+      className="flex h-6 items-center gap-1"
+      role="status"
+      aria-label={t("thinking.status")}
+      data-testid="chat-thinking-status"
+    >
       <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.3s]" />
       <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.15s]" />
       <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full" />
     </div>
   );
 }
+
+/** Gated on running: a dead message with no visible parts must not animate "thinking" forever. */
+function ThinkingIndicator() {
+  const running = useAuiState((s) => s.message.status?.type === "running");
+  return running ? <ThinkingStatus /> : null;
+}
+
+/**
+ * Takes over from the dots (assistant-ui hides `Empty` once the last part is reasoning).
+ * Running = message running ∧ this group is its tail, so the dots stop once a text or
+ * tool part follows. Collapsed, the parts are not mounted: a delta costs one selector.
+ */
+const ReasoningGroup: ReasoningGroupComponent = ({ endIndex, children }) => {
+  const { t } = useChatHost();
+  const running = useAuiState(
+    (s) => s.message.status?.type === "running" && endIndex === s.message.parts.length - 1,
+  );
+  return (
+    <Collapsible>
+      <div className="flex h-6 items-center gap-2">
+        <CollapsibleTrigger className="group/reasoning text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex items-center gap-1 rounded-sm text-xs transition-colors outline-none focus-visible:ring-1">
+          <ChevronRightIcon
+            aria-hidden="true"
+            className="size-3.5 shrink-0 transition-transform group-data-[state=open]/reasoning:rotate-90"
+          />
+          {running ? t("reasoning.running") : t("reasoning.done")}
+        </CollapsibleTrigger>
+        {/* A sibling of the trigger, not a child: a button's content is
+            presentational, so a live region inside it is not exposed. */}
+        {running ? <ThinkingStatus /> : null}
+      </div>
+      <CollapsibleContent className="text-muted-foreground mt-1 mb-2 ml-1.5 space-y-2 border-l-2 pl-3 text-xs leading-relaxed">
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+};
+
+const ReasoningText: ReasoningMessagePartComponent = ({ text }) => (
+  <p className="break-words whitespace-pre-wrap">{text}</p>
+);
 
 /** Always shown, not on hover, so a mid-conversation model switch is visible. */
 function TurnModelBadge() {
@@ -473,21 +520,20 @@ export function MessageError() {
   );
 }
 
+/** Module-level: assistant-ui memoizes each part on these members' identity. */
+const ASSISTANT_PART_COMPONENTS = {
+  Text: MarkdownText,
+  Reasoning: ReasoningText,
+  ReasoningGroup,
+  tools: { Fallback: ToolFallback },
+  Empty: ThinkingIndicator,
+} satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
+
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className="text-foreground text-sm leading-relaxed">
-        {/* Each tool call renders as its own card (no coalescing). Registered
-            tool UIs resolve first; unregistered tools fall back to ToolFallback.
-            Empty renders the thinking indicator while the model is still
-            working and the last part isn't text. */}
-        <MessagePrimitive.Parts
-          components={{
-            Text: MarkdownText,
-            tools: { Fallback: ToolFallback },
-            Empty: ThinkingIndicator,
-          }}
-        />
+        <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
         <TurnLimitNotice />
         <MessageError />
       </div>

@@ -279,7 +279,7 @@ Four context keys carry the answer:
 
 `makePermissionGuard` keeps reading `permissions` and nothing else. A route outside `SPACE_SCOPED_PREFIXES` sees org-level permissions only; a space-level string can therefore never be satisfied on an org route, which is the property we want (a `builder` cannot `agents:write` through a non-space path, because there is none).
 
-`requireSpaceContext` gains the membership step after `validateSpaceInOrg`: re-read the space row JOINED to the `space_members` row for `(spaceId, userId)` — one statement, §4.4 — run the resolver on that pair, write `permissions`, set `c.set("spaceRole", ref)` and `c.set("space", …)` to the row that was judged. For API-key callers the pinned space goes through the same step — the key's **creator** is the user whose membership is resolved (§7.1).
+`requireSpaceContext` gains the membership step: read the space row JOINED to the `space_members` row for `(spaceId, userId)` — one statement, §4.4; for a caller with an org role and no role preview it is also the space∈org lookup (`loadSpaceAccess` filters on `(id, orgId)`), otherwise it follows `validateSpaceInOrg` — run the resolver on that pair, write `permissions`, set `c.set("spaceRole", ref)` and `c.set("space", …)` to the row that was judged. For API-key callers the pinned space goes through the same step — the key's **creator** is the user whose membership is resolved (§7.1).
 
 `principalPermissions` is a module member, not a hook — every module that declares it contributes and the answers are unioned, which is neither dispatch mode `ModuleHooks` offers:
 

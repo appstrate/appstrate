@@ -463,6 +463,24 @@ export async function callerSpaceAccess(
   return snapshot && { space: snapshot.space, member: snapshot.member };
 }
 
+/**
+ * {@link callerSpaceAccess} from an id: one read either way. Without a preview the
+ * membership join IS the space∈org lookup (`loadSpaceAccess` filters on `(id, orgId)`).
+ */
+export async function callerSpaceAccessById(
+  c: Context<AppEnv>,
+  spaceId: string,
+  orgId: string,
+): Promise<{ space: SpaceContextRow; member: SpaceMemberRow | null } | null> {
+  const persona = personaFor(c, orgId);
+  if (persona) {
+    const space = await validateSpaceInOrg(spaceId, orgId);
+    return space && { space, member: personaSpaceMember(persona, space.id) };
+  }
+  const snapshot = await loadSpaceAccess(spaceId, orgId, c.get("user").id);
+  return snapshot && { space: snapshot.space, member: snapshot.member };
+}
+
 /** The persona overlay for multi-space reads (the listing, `package-access`), so a preview never reads the caller's own rows. */
 export function personaMemberships(
   persona: ViewAsPersona | undefined,
