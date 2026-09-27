@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **The chat shows the model's reasoning phase instead of a blank bubble**
+  (#1601). The thinking dots disappeared as soon as the model started
+  reasoning and nothing replaced them, so a reasoning model left an empty
+  bubble until its first word: 3.2 s with a 3 s reasoning mock in Chromium,
+  67 ms now. Each run of reasoning renders as a collapsed « Réflexion… » row
+  with the dots while it is the tail of a running turn, then settles to
+  « Réflexion » once text or a tool call follows, or once the turn is stopped,
+  fails or is reloaded. The row expands to the reasoning as plain text. Models
+  that emit no reasoning keep the dots, then the answer, as before.
+
 ### Changed
 
 - **Entering a space costs one query instead of two** (#1601). Every
