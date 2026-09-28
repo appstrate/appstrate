@@ -21,12 +21,19 @@ import {
   addOrgMember,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
+import {
+  seedEndUser,
+  seedPackage,
+  seedSchedule,
+  seedSpace,
+  seedSpacePackage,
+} from "../../helpers/seed.ts";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   integrationConnections,
   integrationOauthClients,
   integrationPins,
+  schedules,
 } from "@appstrate/db/schema";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 import {
@@ -547,9 +554,73 @@ describe("integration-pins-service — DB access/ownership", () => {
         expect(await memberPinSet(ctx.user.id)).toEqual([a!, b!]);
       });
 
-      it("touches no pin when the delete is refused", async () => {
+      async function scheduleWith(
+        connectionOverrides: Record<string, string[]> | null,
+        actor: { userId?: string; endUserId?: string } = { userId: memberId },
+      ): Promise<string> {
+        const row = await seedSchedule({
+          packageId: AGENT,
+          orgId: ctx.orgId,
+          spaceId: scope.spaceId,
+          ...actor,
+          connectionOverrides,
+        });
+        return row.id;
+      }
+
+      async function overridesOf(scheduleId: string): Promise<Record<string, string[]> | null> {
+        const [row] = await db
+          .select({ connectionOverrides: schedules.connectionOverrides })
+          .from(schedules)
+          .where(eq(schedules.id, scheduleId));
+        return row!.connectionOverrides;
+      }
+
+      it("prunes the owner's own schedule overrides: a set shrinks, an emptied one drops", async () => {
+        const [a, b, c] = await seedSharedConnections(3);
+        const shrinks = await scheduleWith({ [INTEGRATION]: [a!, b!] });
+        const dropsKey = await scheduleWith({ [INTEGRATION]: [b!], [OTHER_INTEGRATION]: [c!] });
+        const nulls = await scheduleWith({ [INTEGRATION]: [b!] });
+        const untouched = await scheduleWith({ [INTEGRATION]: [a!] });
+
+        await deleteIntegrationConnection(scope, b!, owner());
+
+        expect(await overridesOf(shrinks)).toEqual({ [INTEGRATION]: [a!] });
+        expect(await overridesOf(dropsKey)).toEqual({ [OTHER_INTEGRATION]: [c!] });
+        expect(await overridesOf(nulls)).toBeNull();
+        expect(await overridesOf(untouched)).toEqual({ [INTEGRATION]: [a!] });
+      });
+
+      it("keeps the id in a COLLEAGUE's schedule — it fails loudly, it never shrinks", async () => {
+        const [a, b] = await seedSharedConnections(2);
+        const colleague = await scheduleWith({ [INTEGRATION]: [a!, b!] }, { userId: ctx.user.id });
+
+        await deleteIntegrationConnection(scope, b!, owner());
+
+        expect(await overridesOf(colleague)).toEqual({ [INTEGRATION]: [a!, b!] });
+      });
+
+      it("prunes an end user's own schedules when the end user deletes", async () => {
+        const endUser = await seedEndUser({
+          orgId: ctx.orgId,
+          spaceId: scope.spaceId,
+          externalId: "ext-eu-schedule-prune",
+        });
+        const id = await seedConnection({ spaceId: scope.spaceId, endUserId: endUser.id });
+        const own = await scheduleWith({ [INTEGRATION]: [id] }, { endUserId: endUser.id });
+        // A member's schedule naming the same id is not the end user's to rewrite.
+        const member = await scheduleWith({ [INTEGRATION]: [id] });
+
+        await deleteIntegrationConnection(scope, id, { type: "end_user", id: endUser.id });
+
+        expect(await overridesOf(own)).toBeNull();
+        expect(await overridesOf(member)).toEqual({ [INTEGRATION]: [id] });
+      });
+
+      it("touches no pin and no schedule when the delete is refused", async () => {
         const [a, b] = await seedSharedConnections(2);
         await pinAs(memberId, [a!, b!]);
+        const schedule = await scheduleWith({ [INTEGRATION]: [a!, b!] });
         const stranger = { type: "user" as const, id: ctx.user.id };
 
         await expect(deleteIntegrationConnection(scope, b!, stranger)).rejects.toMatchObject({
@@ -557,14 +628,15 @@ describe("integration-pins-service — DB access/ownership", () => {
         });
 
         expect(await memberPinSet(memberId)).toEqual([a!, b!]);
+        expect(await overridesOf(schedule)).toEqual({ [INTEGRATION]: [a!, b!] });
       });
     });
 
-    it("an org default still blocks delete and unshare (409 connection_pinned)", async () => {
+    it("an ENFORCED org default blocks delete and unshare (409 connection_pinned)", async () => {
       const [id] = await seedSharedConnections(1);
       await upsertOrgDefault(scope, INTEGRATION, {
         connectionIds: [id!],
-        enforce: false,
+        enforce: true,
         createdBy: ctx.user.id,
       });
       const owner = { type: "user" as const, id: memberId };
@@ -576,6 +648,24 @@ describe("integration-pins-service — DB access/ownership", () => {
         status: 409,
         code: "connection_pinned",
       });
+    });
+
+    it("a SOFT org default blocks neither delete nor unshare — the resolver skips it", async () => {
+      const [toDelete, toUnshare] = await seedSharedConnections(2);
+      await upsertOrgDefault(scope, INTEGRATION, {
+        connectionIds: [toDelete!, toUnshare!],
+        enforce: false,
+        createdBy: ctx.user.id,
+      });
+      await deleteIntegrationConnection(scope, toDelete!, { type: "user", id: memberId });
+      expect(
+        (await updateConnectionMetadata(toUnshare!, { sharedWithOrg: false })).sharedWithOrg,
+      ).toBe(false);
+      const left = await db
+        .select({ id: integrationConnections.id })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, toDelete!));
+      expect(left).toEqual([]);
     });
 
     it("refuses to delete an OAuth client whose minted connection is pinned", async () => {

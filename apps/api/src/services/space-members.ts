@@ -358,8 +358,8 @@ export async function deleteSpaceMembershipsInOrg(
  * may unshare them. "Reaches" is {@link resolveSpaceRole}; no org membership
  * row means no access anywhere in the org.
  *
- * Deliberately NOT guarded by `assertConnectionsUnpinned`: an admin pin or org
- * default naming such a connection then fails loudly at resolution
+ * Deliberately NOT guarded by `assertConnectionsUnpinned`: an admin pin or enforced
+ * org default naming such a connection then fails loudly at resolution
  * (`pinned_connection_unavailable`) instead of blocking the access change.
  *
  * @returns the ids unshared, for the caller's audit.

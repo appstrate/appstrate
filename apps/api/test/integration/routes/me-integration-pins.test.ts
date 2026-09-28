@@ -25,10 +25,18 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedEndUser, seedApiKey } from "../../helpers/seed.ts";
+import {
+  createTestContext,
+  createTestUser,
+  addOrgMember,
+  authHeaders,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { seedPackage, seedEndUser, seedApiKey, seedSchedule } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import { integrationConnections } from "@appstrate/db/schema";
+import type { ConnectionDeleteImpact } from "../../../src/services/me-connections.ts";
+import { integrationConnections, schedules } from "@appstrate/db/schema";
+import { inArray } from "drizzle-orm";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
@@ -548,15 +556,20 @@ describe("/api/me/integration-pins", () => {
       expect(body.data.map((pin) => pin.connection_ids)).toEqual([[connectionId]]);
     });
   });
-  // ─── GET /connections/:id/pins — what a delete would shrink ───────
+  // ─── GET /connections/:id/delete-impact — what a delete would rewrite ───────
 
-  describe("GET /api/me/connections/:connectionId/pins", () => {
+  describe("GET /api/me/connections/:connectionId/delete-impact", () => {
     const OTHER_AGENT = "@pinorg/other-agent";
 
-    function pinsHolding(connectionId: string) {
-      return app.request(`/api/me/connections/${connectionId}/pins`, {
-        headers: authHeaders(ctx),
+    async function impactOf(
+      connectionId: string,
+      headers = authHeaders(ctx),
+    ): Promise<ConnectionDeleteImpact> {
+      const res = await app.request(`/api/me/connections/${connectionId}/delete-impact`, {
+        headers,
       });
+      expect(res.status).toBe(200);
+      return (await res.json()) as ConnectionDeleteImpact;
     }
 
     async function putPin(connectionIds: string[], agent = AGENT) {
@@ -572,6 +585,21 @@ describe("/api/me/integration-pins", () => {
       expect(res.status).toBe(200);
     }
 
+    function scheduleFor(
+      connectionIds: string[],
+      owner: { userId?: string; endUserId?: string },
+      name: string | null = null,
+    ) {
+      return seedSchedule({
+        packageId: AGENT,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        name,
+        ...owner,
+        connectionOverrides: { [INTEGRATION]: connectionIds },
+      });
+    }
+
     beforeEach(async () => {
       await seedPackage({
         id: OTHER_AGENT,
@@ -584,7 +612,7 @@ describe("/api/me/integration-pins", () => {
       await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OTHER_AGENT);
     });
 
-    it("lists the caller's pins naming the connection, with each set's size", async () => {
+    it("lists the caller's pins and schedules naming the connection, with each set's size", async () => {
       const [web, db2, spare] = [
         await seedConnectionFor(ctx.user.id),
         await seedConnectionFor(ctx.user.id),
@@ -592,41 +620,52 @@ describe("/api/me/integration-pins", () => {
       ];
       await putPin([web!, db2!]);
       await putPin([db2!], OTHER_AGENT);
+      const monday = await scheduleFor([db2!], { userId: ctx.user.id }, "Lundi");
 
-      const res = await pinsHolding(db2!);
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: unknown[] };
-      expect(body.data).toEqual([
-        {
-          agent_package_id: AGENT,
-          agent_display_name: "Pin Test Agent",
-          integration_package_id: INTEGRATION,
-          connection_count: 2,
-        },
-        {
-          agent_package_id: OTHER_AGENT,
-          agent_display_name: "Other",
-          integration_package_id: INTEGRATION,
-          connection_count: 1,
-        },
-      ]);
-      // A connection no pin names lists nothing.
-      expect(((await (await pinsHolding(spare!)).json()) as { data: unknown[] }).data).toEqual([]);
+      expect(await impactOf(db2!)).toEqual({
+        pins: [
+          {
+            agent_package_id: AGENT,
+            agent_display_name: "Pin Test Agent",
+            integration_package_id: INTEGRATION,
+            connection_count: 2,
+          },
+          {
+            agent_package_id: OTHER_AGENT,
+            agent_display_name: "Other",
+            integration_package_id: INTEGRATION,
+            connection_count: 1,
+          },
+        ],
+        schedules: [
+          {
+            scheduleId: monday.id,
+            schedule_name: "Lundi",
+            agent_package_id: AGENT,
+            agent_display_name: "Pin Test Agent",
+            integration_package_id: INTEGRATION,
+            connection_count: 1,
+          },
+        ],
+      });
+      // A connection nothing names lists nothing.
+      expect(await impactOf(spare!)).toEqual({ pins: [], schedules: [] });
     });
 
-    it("lists exactly the pins the delete then rewrites", async () => {
+    it("lists exactly the pins and schedules the delete then rewrites", async () => {
       const [web, gone] = [
         await seedConnectionFor(ctx.user.id),
         await seedConnectionFor(ctx.user.id),
       ];
       await putPin([web!, gone!]);
       await putPin([gone!], OTHER_AGENT);
-      const announced = (
-        (await (await pinsHolding(gone!)).json()) as {
-          data: { agent_package_id: string; connection_count: number }[];
-        }
-      ).data;
-      expect(announced.map((p) => p.agent_package_id)).toEqual([AGENT, OTHER_AGENT]);
+      const shrinks = await scheduleFor([web!, gone!], { userId: ctx.user.id });
+      const resets = await scheduleFor([gone!], { userId: ctx.user.id });
+      const announced = await impactOf(gone!);
+      expect(announced.pins.map((p) => p.agent_package_id)).toEqual([AGENT, OTHER_AGENT]);
+      expect(announced.schedules.map((s) => s.scheduleId).sort()).toEqual(
+        [shrinks.id, resets.id].sort(),
+      );
 
       const del = await app.request(`/api/me/connections/${gone}`, {
         method: "DELETE",
@@ -634,7 +673,7 @@ describe("/api/me/integration-pins", () => {
       });
       expect(del.status).toBe(204);
 
-      for (const pin of announced) {
+      for (const pin of announced.pins) {
         const res = await app.request(
           `/api/me/integration-pins?agent_package_id=${encodeURIComponent(pin.agent_package_id)}`,
           { headers: authHeaders(ctx) },
@@ -644,39 +683,52 @@ describe("/api/me/integration-pins", () => {
         expect(left).toHaveLength(pin.connection_count - 1);
         expect(left).not.toContain(gone);
       }
-      expect(((await (await pinsHolding(gone!)).json()) as { data: unknown[] }).data).toEqual([]);
+      const rows = await db
+        .select({ id: schedules.id, connectionOverrides: schedules.connectionOverrides })
+        .from(schedules)
+        .where(inArray(schedules.id, [shrinks.id, resets.id]));
+      const overrides = new Map(rows.map((r) => [r.id, r.connectionOverrides]));
+      expect(overrides.get(shrinks.id)).toEqual({ [INTEGRATION]: [web!] });
+      expect(overrides.get(resets.id)).toBeNull();
+      expect(await impactOf(gone!)).toEqual({ pins: [], schedules: [] });
     });
 
-    it("is an empty list for an id that is not a UUID", async () => {
-      const res = await pinsHolding("not-a-uuid");
-      expect(res.status).toBe(200);
-      expect(((await res.json()) as { data: unknown[] }).data).toEqual([]);
+    it("leaves out a colleague's schedule, which the delete does not rewrite", async () => {
+      const connectionId = await seedConnectionFor(ctx.user.id);
+      const colleague = await createTestUser();
+      await addOrgMember(ctx.orgId, colleague.id);
+      await scheduleFor([connectionId], { userId: colleague.id });
+      expect(await impactOf(connectionId)).toEqual({ pins: [], schedules: [] });
     });
 
-    it("is an empty list for an end user, who holds no pins", async () => {
+    it("is empty for an id that is not a UUID", async () => {
+      expect(await impactOf("not-a-uuid")).toEqual({ pins: [], schedules: [] });
+    });
+
+    it("gives an end user no pins, only its own schedules", async () => {
       const connectionId = await seedConnectionFor(ctx.user.id);
       await putPin([connectionId]);
+      await scheduleFor([connectionId], { userId: ctx.user.id });
       const endUser = await seedEndUser({
         spaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
-        externalId: "ext-eu-pins-holding",
+        externalId: "ext-eu-delete-impact",
       });
+      const own = await scheduleFor([connectionId], { endUserId: endUser.id });
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
-        name: "pins-holding-key",
+        name: "delete-impact-key",
         scopes: ["integrations:read"],
       });
-      const res = await app.request(`/api/me/connections/${connectionId}/pins`, {
-        headers: {
-          Authorization: `Bearer ${apiKey.rawKey}`,
-          "X-Space-Id": ctx.defaultSpaceId,
-          "Appstrate-User": endUser.id,
-        },
+      const impact = await impactOf(connectionId, {
+        Authorization: `Bearer ${apiKey.rawKey}`,
+        "X-Space-Id": ctx.defaultSpaceId,
+        "Appstrate-User": endUser.id,
       });
-      expect(res.status).toBe(200);
-      expect(((await res.json()) as { data: unknown[] }).data).toEqual([]);
+      expect(impact.pins).toEqual([]);
+      expect(impact.schedules.map((s) => s.scheduleId)).toEqual([own.id]);
     });
   });
 });

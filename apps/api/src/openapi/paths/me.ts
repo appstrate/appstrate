@@ -349,34 +349,35 @@ export const mePaths = {
       },
     },
   },
-  "/api/me/connections/{connectionId}/pins": {
+  "/api/me/connections/{connectionId}/delete-impact": {
     get: {
-      operationId: "listMyPinsHoldingConnection",
+      operationId: "getMyConnectionDeleteImpact",
       tags: ["Profile"],
-      summary: "The caller's member pins a connection delete would shrink",
+      summary: "The caller's pins and schedules a connection delete would rewrite",
       description:
-        "Lists the caller's own member pins whose connection set names this connection — exactly the " +
-        "pins `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before " +
-        "confirming, which agents lose it: each keeps `connection_count - 1` connections, and a pin " +
-        "left with none is removed (the agent then falls back to the default resolution). Other " +
-        "members' pins, admin pins and schedule overrides are not listed: the delete leaves them " +
-        "untouched. An id the caller pinned nowhere, or not a UUID, is an empty list. A delegated " +
-        "or end-user credential sees its bound organization (and space) only; an end user has no pins.",
+        "Lists the caller's own member pins and schedules whose connection set names this connection — " +
+        "exactly the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can " +
+        "say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a " +
+        "pin left with none is removed (the agent falls back to the default resolution), and a schedule " +
+        "override left with none drops that integration (the schedule inherits the default resolution " +
+        "for it). One schedule entry per (schedule, integration). Other members' pins and schedules, " +
+        "admin pins and org defaults are not listed: the delete leaves them untouched. An id the caller " +
+        "references nowhere, or not a UUID, answers empty lists. A delegated or end-user credential sees " +
+        "its bound organization (and space) only; an end user has no pins.",
       parameters: [
         { name: "connectionId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
-          description: "Pins naming the connection",
+          description: "References naming the connection",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["object", "data", "hasMore"],
+                required: ["pins", "schedules"],
                 properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
+                  pins: {
                     type: "array",
                     items: {
                       type: "object",
@@ -393,12 +394,38 @@ export const mePaths = {
                         connection_count: {
                           type: "integer",
                           minimum: 1,
-                          description: "Size of the stored set before the delete.",
+                          description: "Size of the pinned set before the delete.",
                         },
                       },
                     },
                   },
-                  hasMore: { type: "boolean" },
+                  schedules: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: [
+                        "scheduleId",
+                        "schedule_name",
+                        "agent_package_id",
+                        "agent_display_name",
+                        "integration_package_id",
+                        "connection_count",
+                      ],
+                      properties: {
+                        scheduleId: { type: "string" },
+                        schedule_name: { type: ["string", "null"] },
+                        agent_package_id: { type: "string" },
+                        agent_display_name: { type: "string" },
+                        integration_package_id: { type: "string" },
+                        connection_count: {
+                          type: "integer",
+                          minimum: 1,
+                          description:
+                            "Size of the schedule's override set for this integration before the delete.",
+                        },
+                      },
+                    },
+                  },
                 },
               },
             },
@@ -417,12 +444,16 @@ export const mePaths = {
       description:
         "Removes the `integration_connections` row globally. " +
         "Intent is destructive: 'I never want to use this credential anywhere again'. " +
-        "Refused with 409 `connection_pinned` while an admin pin or an org default names the connection: " +
-        "those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes " +
-        "it from the pin(s) or default first. A member pin never blocks the delete. The caller's own " +
-        "member pins drop the connection in the same transaction (a pin it empties is removed, so the " +
-        "cascade falls back); another member's pin keeps the id, and that member's next run fails with " +
-        "`pinned_connection_unavailable` until they pick again — a set never shrinks behind its owner. " +
+        "Refused with 409 `connection_pinned` while an admin pin or an enforced org default names the " +
+        "connection: those sets carry no foreign key, so the dead id would fail every consuming run. An " +
+        "admin removes it from the pin(s) or default first. Neither a member pin nor a soft org default " +
+        "blocks the delete (the resolver skips a soft default that no longer binds). The caller's own " +
+        "member pins and schedule overrides drop the connection in the same transaction — a pin it " +
+        "empties is removed and a schedule override it empties drops that integration, so the cascade " +
+        "falls back; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. " +
+        "Another member's pins and schedules keep the id, and their next run fails " +
+        "(`pinned_connection_unavailable`, `override_connection_unavailable`) until they pick again — " +
+        "a set never shrinks behind its owner. " +
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
         "drop the member pin instead (see `DELETE /api/me/integration-pins`). " +
         "With a delegated or end-user credential, only connections inside its bound " +
@@ -440,7 +471,7 @@ export const mePaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "409": {
           description:
-            "Connection is named by an admin pin or an org default (`connection_pinned`)",
+            "Connection is named by an admin pin or an enforced org default (`connection_pinned`)",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/problem+json": {

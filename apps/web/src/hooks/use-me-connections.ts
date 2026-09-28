@@ -18,6 +18,7 @@ import i18n from "../i18n";
 import { $api, client } from "../api/client";
 import { onMutationError } from "../lib/mutation-error";
 import { invalidateIntegrationQueries } from "./use-integrations";
+import { invalidateSchedules } from "./use-schedules";
 
 /**
  * Unified user-scope connection list (integration connections), grouped by
@@ -53,9 +54,10 @@ export function useDisconnectIntegrationConnection() {
   return $api.useMutation("delete", "/api/me/connections/{connectionId}", {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
-      // The caller's own member pins drop the connection; a colleague's keeps its
-      // id and shows it unavailable in their picker. Refresh both.
+      // The caller's own member pins and schedule overrides drop the connection; a
+      // colleague's keep its id and show it unavailable in their picker. Refresh both.
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
+      invalidateSchedules(qc);
       // The agent page's reuse hints + accessible-connection lists live under
       // the typed `/api/integrations…` keys — refresh the whole subtree.
       void invalidateIntegrationQueries(qc);

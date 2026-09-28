@@ -14,7 +14,8 @@ import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 process.on("unhandledRejection", () => {});
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { organizationMembers, runs, schedules } from "@appstrate/db/schema";
+import { integrationConnections, organizationMembers, runs, schedules } from "@appstrate/db/schema";
+import { Queue, type ConnectionOptions } from "bullmq";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg, addOrgMember } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace, seedSpacePackage, seedEndUser } from "../../helpers/seed.ts";
@@ -29,7 +30,10 @@ import {
   updateSchedule,
   deleteSchedule,
   triggerScheduledRun,
+  resyncScheduleJobs,
 } from "../../../src/services/scheduler.ts";
+import { deleteIntegrationConnection } from "../../../src/services/integration-connections.ts";
+import { getRedisQueueConnection } from "../../../src/lib/redis.ts";
 
 // Real BullMQ repeatable-job semantics — skipped in tier0 (in-memory queue).
 describeRequiresRedis("scheduler service", () => {
@@ -987,6 +991,56 @@ describeRequiresRedis("scheduler service", () => {
       expect(await deleteSchedule({ orgId: orgId, spaceId: defaultSpaceId }, scheduleIdInA)).toBe(
         true,
       );
+    });
+  });
+
+  // ── a connection delete re-arms the owner's schedule jobs ──
+  //
+  // The job payload freezes `connection_overrides`, and the fire reads the
+  // payload, not the row: a delete that pruned only the row would keep firing
+  // with the dead id.
+
+  describe("deleteIntegrationConnection re-arms the owner's schedule job", () => {
+    it("the job payload drops the deleted id, like the row", async () => {
+      const integrationId = `@${orgSlug}/svc`;
+      await seedPackage({ orgId, id: integrationId, type: "integration", source: "local" });
+      const [kept, gone] = await Promise.all(
+        ["kept", "gone"].map(async (label) => {
+          const [row] = await db
+            .insert(integrationConnections)
+            .values({
+              integrationId,
+              authKey: "primary",
+              accountId: `acct-${label}`,
+              spaceId: defaultSpaceId,
+              userId,
+              credentialsEncrypted: "x",
+              scopesGranted: [],
+              label,
+            })
+            .returning({ id: integrationConnections.id });
+          return row!.id;
+        }),
+      );
+      const schedule = await createSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
+        cronExpression: "0 * * * *",
+        connectionOverrides: { [integrationId]: [kept!, gone!] },
+      });
+
+      // What `DELETE /api/me/connections/:id` does: the service prunes, the route re-arms.
+      await resyncScheduleJobs(
+        await deleteIntegrationConnection({ orgId, spaceId: defaultSpaceId }, gone!, actor),
+      );
+
+      const queue = new Queue("schedules", {
+        connection: getRedisQueueConnection() as unknown as ConnectionOptions,
+      });
+      try {
+        const job = await queue.getJobScheduler(schedule.id);
+        expect(job?.template?.data?.connectionOverrides).toEqual({ [integrationId]: [kept!] });
+      } finally {
+        await queue.close();
+      }
     });
   });
 });

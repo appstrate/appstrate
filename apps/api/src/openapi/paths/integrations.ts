@@ -691,9 +691,10 @@ export const integrationsPaths = {
         "Deletes one of this space's custom clients by id (an org-level client " +
         "id is a 404 here), with the connections it minted. If it was the " +
         "default, the cascade re-resolves (org default, else system client) " +
-        "with no auto-promotion. Refused with 409 `connection_pinned` while an admin pin or an org default " +
-        "names one of the connections it minted; a member pin does not block it, and that member's next " +
-        "run fails with `pinned_connection_unavailable`. " +
+        "with no auto-promotion. Refused with 409 `connection_pinned` while an admin pin or an enforced org default " +
+        "names one of the connections it minted; neither a member pin nor a soft org default blocks it " +
+        "(that member's next run fails with `pinned_connection_unavailable`; the resolver skips the soft " +
+        "default). " +
         "Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -709,7 +710,8 @@ export const integrationsPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "A connection the client minted is named by an admin pin or an org default",
+          description:
+            "A connection the client minted is named by an admin pin or an enforced org default",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/problem+json": {
@@ -1166,8 +1168,9 @@ export const integrationsPaths = {
         "(`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; " +
         "unsharing is open to both, so a governor can withdraw a colleague's shared credentials. " +
         "Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin " +
-        "or an org default names the connection. A member pin does not block it; that member's next run " +
-        "fails with `pinned_connection_unavailable` until they pick again. A label is unique per " +
+        "or an enforced org default names the connection. Neither a member pin nor a soft org default " +
+        "blocks it: that member's next run fails with `pinned_connection_unavailable` until they pick " +
+        "again, and the resolver skips a soft default that no longer binds. A label is unique per " +
         "(space, integration), compared verbatim: renaming to one another connection holds is refused " +
         "with 409 `connection_label_taken`.",
       parameters: [
@@ -1215,7 +1218,7 @@ export const integrationsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Unsharing a connection an admin pin or an org default names (`connection_pinned`), or renaming it to a label another connection of this integration in the space holds (`connection_label_taken`)",
+            "Unsharing a connection an admin pin or an enforced org default names (`connection_pinned`), or renaming it to a label another connection of this integration in the space holds (`connection_label_taken`)",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/problem+json": {

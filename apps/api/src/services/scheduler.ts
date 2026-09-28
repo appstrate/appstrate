@@ -161,6 +161,12 @@ async function removeScheduleJob(scheduleId: string): Promise<void> {
   await (await getQueue()).removeScheduler(scheduleId);
 }
 
+/** Mirror a written row into the queue: its job is armed with the row's payload while enabled. */
+async function syncScheduleJob(row: typeof schedules.$inferSelect): Promise<void> {
+  if (row.enabled) await upsertScheduleJob(row);
+  else await removeScheduleJob(row.id);
+}
+
 /**
  * Remove the repeatable BullMQ jobs for a batch of schedules whose rows were
  * just disabled by a membership-revocation path (e.g. `removeMember`).
@@ -1115,11 +1121,7 @@ export async function updateSchedule(
   }
   const schedule = toSchedule(row);
 
-  if (row.enabled) {
-    await upsertScheduleJob(row);
-  } else {
-    await removeScheduleJob(id);
-  }
+  await syncScheduleJob(row);
 
   // Same EnrichedSchedule serializer as getSchedule/listSchedules, so the
   // update response matches the GET detail shape (actor/run counters).
@@ -1186,6 +1188,26 @@ export async function dropLockedFieldsFromSchedules(
     rewritten.push(row.id);
   }
   return rewritten;
+}
+
+/**
+ * Re-arm the jobs of rows rewritten outside {@link updateSchedule}, the way it does. Best-effort
+ * per row, after the commit that made them true: the row is the source of truth, a stale payload
+ * fails its fire loudly, and the boot sync re-arms it — so an error is logged, never rethrown.
+ */
+export async function resyncScheduleJobs(
+  rows: readonly (typeof schedules.$inferSelect)[],
+): Promise<void> {
+  for (const row of rows) {
+    try {
+      await syncScheduleJob(row);
+    } catch (err) {
+      logger.error("Failed to re-sync schedule job", {
+        scheduleId: row.id,
+        error: getErrorMessage(err),
+      });
+    }
+  }
 }
 
 export async function deleteSchedule(scope: SpaceScope, id: string): Promise<boolean> {

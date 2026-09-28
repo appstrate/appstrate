@@ -41,6 +41,7 @@ import {
   integrationOrgDefaults,
   integrationPins,
   packages,
+  schedules,
   spaces,
 } from "@appstrate/db/schema";
 import {
@@ -2732,9 +2733,9 @@ export async function listUsableIntegrationsForActor(
 }
 
 /**
- * 409 `connection_pinned` while an admin pin or org default names one of `ids` (the sets have no
- * FK).
- * A member pin never blocks: that member's next run reports `pinned_connection_unavailable`.
+ * 409 `connection_pinned` while an admin pin or an ENFORCED org default names one of `ids` (the
+ * sets have no FK). Neither a member pin nor a soft default blocks: the member's next run reports
+ * `pinned_connection_unavailable`, and the resolver skips a soft default whose set no longer binds.
  */
 export async function assertConnectionsUnpinned(
   ids: readonly string[],
@@ -2752,7 +2753,12 @@ export async function assertConnectionsUnpinned(
     db
       .select({ id: integrationOrgDefaults.id })
       .from(integrationOrgDefaults)
-      .where(arrayOverlaps(integrationOrgDefaults.connectionIds, [...ids]))
+      .where(
+        and(
+          eq(integrationOrgDefaults.enforce, true),
+          arrayOverlaps(integrationOrgDefaults.connectionIds, [...ids]),
+        ),
+      )
       .limit(1),
   ]);
   if (pins.length > 0) {
@@ -2764,7 +2770,7 @@ export async function assertConnectionsUnpinned(
   if (orgDefaults.length > 0) {
     throw conflict(
       "connection_pinned",
-      `${refused} while it is the org default for an integration. Remove it from the default first.`,
+      `${refused} while an enforced org default names it. Remove it from the default first.`,
     );
   }
 }
@@ -2772,15 +2778,19 @@ export async function assertConnectionsUnpinned(
 /**
  * Delete one connection row. Used by the "disconnect" button per auth
  * (or per account, when multi-account). In the same transaction the row
- * leaves the OWNER's own member pins — their act, so their pins follow it; a
- * pin it empties is dropped (the resolver falls back). Other members' pins keep
- * the id and fail loudly until re-picked: a set never shrinks behind them.
+ * leaves the OWNER's own member pins and schedule overrides — their act, so their
+ * references follow it; a set it empties is dropped (the resolver falls back).
+ * Other members' pins and schedules keep the id and fail loudly until re-picked:
+ * a set never shrinks behind them.
+ *
+ * @returns the rewritten schedule rows: the caller re-arms their jobs with
+ *   `resyncScheduleJobs` (scheduler — not imported here, it would close a cycle).
  */
 export async function deleteIntegrationConnection(
   scope: SpaceScope | ActorScope,
   connectionId: string,
   actor: Actor,
-): Promise<void> {
+): Promise<(typeof schedules.$inferSelect)[]> {
   // Confirm the target space belongs to the caller's org before touching
   // any connection — same escalation guard the other connection mutations run.
   // Without it a caller could pass a space id from another org and the
@@ -2807,7 +2817,7 @@ export async function deleteIntegrationConnection(
     .limit(1);
   if (!owned) throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
   await assertConnectionsUnpinned([connectionId], "Connection cannot be deleted");
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     const deleted = await tx
       .delete(integrationConnections)
       .where(
@@ -2821,7 +2831,9 @@ export async function deleteIntegrationConnection(
     if (deleted.length === 0) {
       throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
     }
-    if (actor.type === "user") await dropFromOwnMemberPins(tx, deleted[0]!.id, actor.id);
+    const id = deleted[0]!.id;
+    if (actor.type === "user") await dropFromOwnMemberPins(tx, id, actor.id);
+    return dropConnectionFromOwnSchedules(tx, id, actor);
   });
 }
 
@@ -2841,6 +2853,54 @@ async function dropFromOwnMemberPins(tx: Tx, connectionId: string, userId: strin
       updatedAt: new Date(),
     })
     .where(holding);
+}
+
+/**
+ * `connection_overrides` names `connectionId` in one of its sets. The id is a jsonpath
+ * variable, never spliced into the path.
+ */
+export function scheduleOverridesName(connectionId: string): SQL {
+  return sql`jsonb_path_exists(
+    ${schedules.connectionOverrides}, '$.*[*] ? (@ == $id)', jsonb_build_object('id', ${connectionId}::text)
+  )`;
+}
+
+/**
+ * Remove `connectionId` from the override sets of `actor`'s OWN schedules, in the caller's
+ * transaction: deleting a connection is its owner's act, so their schedules follow it. A set it
+ * empties drops its integration (the schedule then inherits the default resolution) and an
+ * emptied map is stored NULL. Another actor's schedule keeps the id and fails loudly.
+ *
+ * @returns the rewritten rows — their job payload still freezes the old overrides, so the caller
+ *   passes them to `resyncScheduleJobs` (scheduler) once the transaction has committed.
+ */
+async function dropConnectionFromOwnSchedules(
+  tx: Tx,
+  connectionId: string,
+  actor: Actor,
+): Promise<(typeof schedules.$inferSelect)[]> {
+  const held = await tx
+    .select({ id: schedules.id, connectionOverrides: schedules.connectionOverrides })
+    .from(schedules)
+    .where(and(actorFilter(actor, schedules), scheduleOverridesName(connectionId)))
+    .for("update");
+  const rewritten: (typeof schedules.$inferSelect)[] = [];
+  for (const { id, connectionOverrides } of held) {
+    const kept = Object.entries(connectionOverrides ?? {}).flatMap(([integrationId, ids]) => {
+      const rest = ids.filter((c) => c !== connectionId);
+      return rest.length > 0 ? [[integrationId, rest] as const] : [];
+    });
+    const [row] = await tx
+      .update(schedules)
+      .set({
+        connectionOverrides: kept.length > 0 ? Object.fromEntries(kept) : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schedules.id, id))
+      .returning();
+    if (row) rewritten.push(row);
+  }
+  return rewritten;
 }
 
 /**

@@ -1689,7 +1689,7 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection sets for THIS run (the run-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor).",
+                    "description": "Per-integration connection sets for THIS run (the run-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor).",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
@@ -2125,7 +2125,7 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection sets for THIS run (the run-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor).",
+                    "description": "Per-integration connection sets for THIS run (the run-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor).",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
@@ -4470,7 +4470,7 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection sets frozen on the schedule row (the schedule-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }`, 1..10 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write.",
+                    "description": "Per-integration connection sets frozen on the schedule row (the schedule-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }`, 1..10 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write.",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
@@ -5687,7 +5687,7 @@
         "operationId": "deleteIntegrationOAuthClient",
         "tags": ["Integrations"],
         "summary": "Delete a custom OAuth client",
-        "description": "Deletes one of this space's custom clients by id (an org-level client id is a 404 here), with the connections it minted. If it was the default, the cascade re-resolves (org default, else system client) with no auto-promotion. Refused with 409 `connection_pinned` while an admin pin or an org default names one of the connections it minted; a member pin does not block it, and that member's next run fails with `pinned_connection_unavailable`. Requires `integrations:configure`, which is never granted to an API key.",
+        "description": "Deletes one of this space's custom clients by id (an org-level client id is a 404 here), with the connections it minted. If it was the default, the cascade re-resolves (org default, else system client) with no auto-promotion. Refused with 409 `connection_pinned` while an admin pin or an enforced org default names one of the connections it minted; neither a member pin nor a soft org default blocks it (that member's next run fails with `pinned_connection_unavailable`; the resolver skips the soft default). Requires `integrations:configure`, which is never granted to an API key.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5735,7 +5735,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "A connection the client minted is named by an admin pin or an org default",
+            "description": "A connection the client minted is named by an admin pin or an enforced org default",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -6982,7 +6982,7 @@
         "operationId": "updateIntegrationConnectionMetadata",
         "tags": ["Integrations"],
         "summary": "Update an integration connection's label and/or shared_with_org flag",
-        "description": "The connection owner or a holder of `integrations:configure` may edit it. Sharing (`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; unsharing is open to both, so a governor can withdraw a colleague's shared credentials. Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an org default names the connection. A member pin does not block it; that member's next run fails with `pinned_connection_unavailable` until they pick again. A label is unique per (space, integration), compared verbatim: renaming to one another connection holds is refused with 409 `connection_label_taken`.",
+        "description": "The connection owner or a holder of `integrations:configure` may edit it. Sharing (`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; unsharing is open to both, so a governor can withdraw a colleague's shared credentials. Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an enforced org default names the connection. Neither a member pin nor a soft org default blocks it: that member's next run fails with `pinned_connection_unavailable` until they pick again, and the resolver skips a soft default that no longer binds. A label is unique per (space, integration), compared verbatim: renaming to one another connection holds is refused with 409 `connection_label_taken`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -7140,7 +7140,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Unsharing a connection an admin pin or an org default names (`connection_pinned`), or renaming it to a label another connection of this integration in the space holds (`connection_label_taken`)",
+            "description": "Unsharing a connection an admin pin or an enforced org default names (`connection_pinned`), or renaming it to a label another connection of this integration in the space holds (`connection_label_taken`)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8498,7 +8498,7 @@
         "operationId": "deleteOrgIntegrationOAuthClient",
         "tags": ["Integrations"],
         "summary": "Delete an org-level OAuth client",
-        "description": "Deletes one org-level client by id (a space client id is a 404 here), with every connection it minted in any space of the org. Refused with 409 `connection_pinned` while an admin pin or an org default names one of them. Requires `org-integrations:configure`, which is never granted to an API key.",
+        "description": "Deletes one org-level client by id (a space client id is a 404 here), with every connection it minted in any space of the org. Refused with 409 `connection_pinned` while an admin pin or an enforced org default names one of them. Requires `org-integrations:configure`, which is never granted to an API key.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8539,7 +8539,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "A connection the client minted is named by an admin pin or an org default",
+            "description": "A connection the client minted is named by an admin pin or an enforced org default",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -12891,12 +12891,12 @@
         }
       }
     },
-    "/api/me/connections/{connectionId}/pins": {
+    "/api/me/connections/{connectionId}/delete-impact": {
       "get": {
-        "operationId": "listMyPinsHoldingConnection",
+        "operationId": "getMyConnectionDeleteImpact",
         "tags": ["Profile"],
-        "summary": "The caller's member pins a connection delete would shrink",
-        "description": "Lists the caller's own member pins whose connection set names this connection — exactly the pins `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before confirming, which agents lose it: each keeps `connection_count - 1` connections, and a pin left with none is removed (the agent then falls back to the default resolution). Other members' pins, admin pins and schedule overrides are not listed: the delete leaves them untouched. An id the caller pinned nowhere, or not a UUID, is an empty list. A delegated or end-user credential sees its bound organization (and space) only; an end user has no pins.",
+        "summary": "The caller's pins and schedules a connection delete would rewrite",
+        "description": "Lists the caller's own member pins and schedules whose connection set names this connection — exactly the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a pin left with none is removed (the agent falls back to the default resolution), and a schedule override left with none drops that integration (the schedule inherits the default resolution for it). One schedule entry per (schedule, integration). Other members' pins and schedules, admin pins and org defaults are not listed: the delete leaves them untouched. An id the caller references nowhere, or not a UUID, answers empty lists. A delegated or end-user credential sees its bound organization (and space) only; an end user has no pins.",
         "parameters": [
           {
             "name": "connectionId",
@@ -12909,7 +12909,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Pins naming the connection",
+            "description": "References naming the connection",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -12922,13 +12922,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["object", "data", "hasMore"],
+                  "required": ["pins", "schedules"],
                   "properties": {
-                    "object": {
-                      "type": "string",
-                      "enum": ["list"]
-                    },
-                    "data": {
+                    "pins": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -12951,13 +12947,46 @@
                           "connection_count": {
                             "type": "integer",
                             "minimum": 1,
-                            "description": "Size of the stored set before the delete."
+                            "description": "Size of the pinned set before the delete."
                           }
                         }
                       }
                     },
-                    "hasMore": {
-                      "type": "boolean"
+                    "schedules": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "scheduleId",
+                          "schedule_name",
+                          "agent_package_id",
+                          "agent_display_name",
+                          "integration_package_id",
+                          "connection_count"
+                        ],
+                        "properties": {
+                          "scheduleId": {
+                            "type": "string"
+                          },
+                          "schedule_name": {
+                            "type": ["string", "null"]
+                          },
+                          "agent_package_id": {
+                            "type": "string"
+                          },
+                          "agent_display_name": {
+                            "type": "string"
+                          },
+                          "integration_package_id": {
+                            "type": "string"
+                          },
+                          "connection_count": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Size of the schedule's override set for this integration before the delete."
+                          }
+                        }
+                      }
                     }
                   }
                 }
@@ -12978,7 +13007,7 @@
         "operationId": "deleteMyConnection",
         "tags": ["Profile"],
         "summary": "Delete one of the caller's own connections (destructive)",
-        "description": "Removes the `integration_connections` row globally. Intent is destructive: 'I never want to use this credential anywhere again'. Refused with 409 `connection_pinned` while an admin pin or an org default names the connection: those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes it from the pin(s) or default first. A member pin never blocks the delete. The caller's own member pins drop the connection in the same transaction (a pin it empties is removed, so the cascade falls back); another member's pin keeps the id, and that member's next run fails with `pinned_connection_unavailable` until they pick again — a set never shrinks behind its owner. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise).",
+        "description": "Removes the `integration_connections` row globally. Intent is destructive: 'I never want to use this credential anywhere again'. Refused with 409 `connection_pinned` while an admin pin or an enforced org default names the connection: those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes it from the pin(s) or default first. Neither a member pin nor a soft org default blocks the delete (the resolver skips a soft default that no longer binds). The caller's own member pins and schedule overrides drop the connection in the same transaction — a pin it empties is removed and a schedule override it empties drops that integration, so the cascade falls back; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. Another member's pins and schedules keep the id, and their next run fails (`pinned_connection_unavailable`, `override_connection_unavailable`) until they pick again — a set never shrinks behind its owner. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise).",
         "parameters": [
           {
             "name": "connectionId",
@@ -12998,7 +13027,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "409": {
-            "description": "Connection is named by an admin pin or an org default (`connection_pinned`)",
+            "description": "Connection is named by an admin pin or an enforced org default (`connection_pinned`)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -25090,7 +25119,7 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["id", "label", "account_id", "owned_by_actor"],
+              "required": ["id", "label", "account_id", "owned_by_actor", "needs_reconnection"],
               "properties": {
                 "id": {
                   "type": "string"
@@ -25106,10 +25135,14 @@
                 "owned_by_actor": {
                   "type": "boolean",
                   "description": "True when the connection is the caller's own, false when inherited via org sharing."
+                },
+                "needs_reconnection": {
+                  "type": "boolean",
+                  "description": "True when the connection's credentials died: it is listed so the choice is complete, but a run naming it fails with `needs_reconnection` until it is reconnected."
                 }
               }
             },
-            "description": "Populated on `must_choose_connection` — the connections the caller may pick from, each carrying the fields that tell them apart; pass their `id`s back as the request body's `connection_overrides` array for that integration to retry the run."
+            "description": "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run."
           },
           "connection_id": {
             "type": "string",
@@ -27344,7 +27377,7 @@
       },
       "IntegrationAgentResolution": {
         "type": "object",
-        "description": "Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback, each layer a set and the fallback binding at most one; then a scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses.",
+        "description": "Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback, each layer a set and the fallback binding only the caller's single own connection, never a shared one; then a scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses.",
         "required": [
           "status",
           "resolved_connection_ids",

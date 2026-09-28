@@ -25,6 +25,7 @@ import {
   organizationMembers,
   organizations,
   packages,
+  schedules,
   spaces,
 } from "@appstrate/db/schema";
 import { actorFilter, type Actor } from "../lib/actor.ts";
@@ -38,6 +39,7 @@ import {
 } from "../lib/package-helpers.ts";
 import { activeHereSql } from "./package-activation.ts";
 import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
+import { scheduleOverridesName } from "./integration-connections.ts";
 
 /**
  * The authority boundary of the credential presented on `/api/me/connections`.
@@ -269,16 +271,49 @@ export interface OwnPinHoldingConnection {
   connection_count: number;
 }
 
+/** One of the caller's schedules whose override set for an integration names the connection. */
+export interface OwnScheduleHoldingConnection {
+  scheduleId: string;
+  schedule_name: string | null;
+  agent_package_id: string;
+  agent_display_name: string;
+  integration_package_id: string;
+  /**
+   * Size of that set today; the delete leaves `connection_count - 1` (0 drops the integration's
+   * override, so the schedule inherits the default resolution for it).
+   */
+  connection_count: number;
+}
+
+/** Everything of the caller's that deleting a connection rewrites. */
+export interface ConnectionDeleteImpact {
+  pins: OwnPinHoldingConnection[];
+  schedules: OwnScheduleHoldingConnection[];
+}
+
 /**
- * The caller's own member pins naming `connectionId` — exactly the rows
- * `deleteIntegrationConnection` rewrites, so the confirmation can say what the
- * delete does to each agent. A bound credential sees its org (and space) only.
+ * The caller's own member pins and schedules naming `connectionId` — exactly the
+ * rows `deleteIntegrationConnection` rewrites, so the confirmation can say what
+ * the delete does to each. A bound credential sees its org (and space) only.
  */
-export async function listOwnPinsHoldingConnection(
+export async function getConnectionDeleteImpact(
+  actor: Actor,
+  connectionId: string,
+  authority: MeConnectionAuthority,
+): Promise<ConnectionDeleteImpact> {
+  const [pins, ownSchedules] = await Promise.all([
+    listOwnPinsHoldingConnection(actor, connectionId, authority),
+    listOwnSchedulesHoldingConnection(actor, connectionId, authority),
+  ]);
+  return { pins, schedules: ownSchedules };
+}
+
+async function listOwnPinsHoldingConnection(
   actor: Actor,
   connectionId: string,
   authority: MeConnectionAuthority,
 ): Promise<OwnPinHoldingConnection[]> {
+  // Member pins are a member's own: an end user holds none.
   if (actor.type !== "user") return [];
   const rows = await db
     .select({
@@ -312,4 +347,52 @@ export async function listOwnPinsHoldingConnection(
     integration_package_id: r.integrationId,
     connection_count: r.connectionIds.length,
   }));
+}
+
+/** One entry per (schedule, integration) whose override set names the connection. */
+async function listOwnSchedulesHoldingConnection(
+  actor: Actor,
+  connectionId: string,
+  authority: MeConnectionAuthority,
+): Promise<OwnScheduleHoldingConnection[]> {
+  const rows = await db
+    .select({
+      id: schedules.id,
+      name: schedules.name,
+      agentPackageId: schedules.packageId,
+      connectionOverrides: schedules.connectionOverrides,
+      draftManifest: packages.draftManifest,
+    })
+    .from(schedules)
+    .innerJoin(packages, eq(packages.id, schedules.packageId))
+    .where(
+      and(
+        actorFilter(actor, schedules),
+        scheduleOverridesName(connectionId),
+        ...(authority.kind === "bound"
+          ? [
+              eq(schedules.orgId, authority.orgId),
+              ...(authority.spaceId ? [eq(schedules.spaceId, authority.spaceId)] : []),
+            ]
+          : []),
+      ),
+    )
+    .orderBy(asc(schedules.packageId), asc(schedules.createdAt));
+  return rows.flatMap((r) => {
+    const agentDisplayName = getPackageDisplayName({
+      id: r.agentPackageId,
+      draftManifest: r.draftManifest,
+    });
+    return Object.entries(r.connectionOverrides ?? {})
+      .filter(([, ids]) => ids.includes(connectionId))
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([integrationId, ids]) => ({
+        scheduleId: r.id,
+        schedule_name: r.name,
+        agent_package_id: r.agentPackageId,
+        agent_display_name: agentDisplayName,
+        integration_package_id: integrationId,
+        connection_count: ids.length,
+      }));
+  });
 }

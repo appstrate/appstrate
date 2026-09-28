@@ -130,7 +130,7 @@ export const orgIntegrationsPaths = {
       description:
         "Deletes one org-level client by id (a space client id is a 404 here), " +
         "with every connection it minted in any space of the org. Refused with 409 " +
-        "`connection_pinned` while an admin pin or an org default names one of them. " +
+        "`connection_pinned` while an admin pin or an enforced org default names one of them. " +
         PERMISSION_NOTE,
       parameters: [...packageParams, clientIdParam],
       responses: {
@@ -138,7 +138,8 @@ export const orgIntegrationsPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "A connection the client minted is named by an admin pin or an org default",
+          description:
+            "A connection the client minted is named by an admin pin or an enforced org default",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/problem+json": {

@@ -30,6 +30,7 @@
  *   - GET    /orgs                      — orgs the caller belongs to
  *   - GET    /connections               — the caller's integration connections
  *   - DELETE /connections/:connectionId — destructive global credential delete
+ *   - GET    /connections/:connectionId/delete-impact — the caller's pins/schedules it rewrites
  *   - GET    /integration-pins          — member-self pins for an agent
  *   - PUT    /integration-pins          — upsert a member-self pin
  *   - DELETE /integration-pins          — clear a member-self pin
@@ -47,7 +48,7 @@ import { and, eq } from "drizzle-orm";
 import {
   listMeConnections,
   type MeConnectionAuthority,
-  listOwnPinsHoldingConnection,
+  getConnectionDeleteImpact,
 } from "../services/me-connections.ts";
 import { actorFilter, getActor } from "../lib/actor.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
@@ -68,6 +69,7 @@ import {
   listUsableIntegrationsForActor,
 } from "../services/integration-connections.ts";
 import { handoffStepsFor } from "../services/connect/provisioning.ts";
+import { resyncScheduleJobs } from "../services/scheduler.ts";
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
 import { logger } from "../lib/logger.ts";
 import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
@@ -205,20 +207,25 @@ router.get("/connections", requireCeiling("integrations", "read"), async (c) => 
 });
 
 /**
- * `GET /api/me/connections/:connectionId/pins` — the caller's member pins that
- * deleting this connection would shrink, for the delete confirmation. A
- * non-UUID id is an empty list, like any id the caller pinned nowhere.
+ * `GET /api/me/connections/:connectionId/delete-impact` — the caller's own member
+ * pins and schedules that deleting this connection would rewrite, for the delete
+ * confirmation. A non-UUID id is empty lists, like any id the caller references nowhere.
  */
-router.get("/connections/:connectionId/pins", requireCeiling("integrations", "read"), async (c) => {
-  const connectionId = c.req.param("connectionId")!;
-  if (!z.uuid().safeParse(connectionId).success) return c.json(listResponse([]));
-  const pins = await listOwnPinsHoldingConnection(
-    getActor(c),
-    connectionId.toLowerCase(),
-    getMeConnectionAuthority(c),
-  );
-  return c.json(listResponse(pins));
-});
+router.get(
+  "/connections/:connectionId/delete-impact",
+  requireCeiling("integrations", "read"),
+  async (c) => {
+    const connectionId = c.req.param("connectionId")!;
+    if (!z.uuid().safeParse(connectionId).success) return c.json({ pins: [], schedules: [] });
+    return c.json(
+      await getConnectionDeleteImpact(
+        getActor(c),
+        connectionId.toLowerCase(),
+        getMeConnectionAuthority(c),
+      ),
+    );
+  },
+);
 
 /**
  * `/api/me/integration-pins` — member-self pin CRUD.
@@ -330,9 +337,10 @@ router.delete(
  * `DELETE /api/me/connections/:connectionId` — destructive global delete.
  *
  * Removes the underlying `integration_connections` row — *destructive*: "I never
- * want to use this credential anywhere again" — unless an admin pin or org default
- * names it (409 `connection_pinned`, `assertConnectionsUnpinned`). The caller's own
- * member pins drop it in the same transaction; another member's pin keeps the id.
+ * want to use this credential anywhere again" — unless an admin pin or an enforced
+ * org default names it (409 `connection_pinned`, `assertConnectionsUnpinned`). The
+ * caller's own member pins and schedule overrides drop it in the same transaction
+ * (`GET …/delete-impact` lists them beforehand); another member's keep the id.
  *
  * This is the ONLY entrypoint for that delete, and it is owner-scoped by
  * construction. Surfaced only from `/connections` (the user-owned management
@@ -408,7 +416,8 @@ router.delete(
     } else {
       scope = { spaceId: row.spaceId } satisfies ActorScope;
     }
-    await deleteIntegrationConnection(scope, connectionId, actor);
+    // Re-armed after the commit: each job payload froze the pre-delete overrides.
+    await resyncScheduleJobs(await deleteIntegrationConnection(scope, connectionId, actor));
     await recordAuditFromContext(c, {
       action: "integration.connection.deleted",
       resourceType: "integration_connection",

@@ -17,7 +17,7 @@ import { LoadingState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";
 import { ConnectionTeardownSteps } from "../../components/integration-connect/connection-teardown-steps";
-import { ConnectionPinImpact } from "../../components/integration-connect/connection-pin-impact";
+import { ConnectionDeleteImpact } from "../../components/integration-connect/connection-delete-impact";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { useCanReach } from "../../hooks/use-can-reach";
 
@@ -309,12 +309,6 @@ export function PreferencesConnectionsPage() {
     displayName: string;
     identity: string | null;
     connectionId: string;
-    /**
-     * Number of agents that consume this integration in the space —
-     * surfaced in the confirm dialog so the user understands the blast
-     * radius before deleting the connection globally.
-     */
-    reused_by_agents: number;
   } | null>(null);
 
   const totalConnections = useMemo(
@@ -394,7 +388,6 @@ export function PreferencesConnectionsPage() {
                         displayName: group.display_name,
                         identity: conn.identity,
                         connectionId: conn.connection_id,
-                        reused_by_agents: conn.reused_by_agents ?? 0,
                       })
                     }
                     onUpdateLabel={(label) =>
@@ -427,22 +420,16 @@ export function PreferencesConnectionsPage() {
         open={!!confirmState}
         onClose={() => setConfirmState(null)}
         title={t("btn.confirm", { ns: "common" })}
-        description={(() => {
-          if (!confirmState) return "";
-          const base = t("connections.deleteConfirm", {
-            name: confirmState.displayName,
-            account: confirmState.identity ?? "",
-          });
-          // Impact list surfaces the blast radius so the user can
-          // intentionally choose between deleting (here) vs changing the
-          // agent-side pick (on the agent page).
-          if (confirmState.reused_by_agents > 0) {
-            return `${base}\n\n${t("connections.deleteConfirmImpact", {
-              count: confirmState.reused_by_agents,
-            })}`;
-          }
-          return base;
-        })()}
+        // The blast radius is `ConnectionDeleteImpact` below — the caller's own
+        // pins and schedules the delete rewrites — not a second sentence here.
+        description={
+          confirmState
+            ? t("connections.deleteConfirm", {
+                name: confirmState.displayName,
+                account: confirmState.identity ?? "",
+              })
+            : ""
+        }
         isPending={disconnectIntegration.isPending}
         onConfirm={() => {
           if (!confirmState) return;
@@ -454,7 +441,7 @@ export function PreferencesConnectionsPage() {
       >
         {confirmState && (
           <>
-            <ConnectionPinImpact connectionId={confirmState.connectionId} />
+            <ConnectionDeleteImpact connectionId={confirmState.connectionId} />
             <ConnectionTeardownSteps connectionId={confirmState.connectionId} />
           </>
         )}
