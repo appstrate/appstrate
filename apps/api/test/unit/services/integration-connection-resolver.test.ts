@@ -16,12 +16,12 @@
  *   5. integration_pins (user_id = actor.id)     → member preference
  *   6. integration_org_defaults (soft)           → org-wide default
  *   7. fallback: own + shared accessible
- *      → 1 match = auto, 0 = not_connected, N = must_choose
+ *      → none = not_connected, exactly one OWN = auto, else must_choose
  */
 
 import { describe, it, expect } from "bun:test";
 import {
-  resolveConnections,
+  resolveConnections as resolveConnectionsPure,
   translateResolutionError,
   type IntegrationRequirement,
 } from "../../../src/services/integration-connection-resolver.ts";
@@ -137,6 +137,15 @@ function pin(connectionIds: string | string[], opts?: { userId?: string | null }
 /** Sugar — member pin scoped to the test's default user. */
 function memberPin(connectionIds: string | string[]): PinRow {
   return pin(connectionIds, { userId: USER_ID });
+}
+
+/**
+ * Every case acts as `USER_ID` unless it says otherwise (`actorUserId: null`):
+ * the fallback binds only the actor's OWN connection, so an actor-less call
+ * would turn every single-candidate case into `must_choose_connection`.
+ */
+function resolveConnections(input: Parameters<typeof resolveConnectionsPure>[0]) {
+  return resolveConnectionsPure({ actorUserId: USER_ID, ...input });
 }
 
 function req(
@@ -364,162 +373,260 @@ describe("resolveConnections — member pin (cascade layer 5)", () => {
   });
 
   it("end-user run (actorUserId=null) ignores all member pins", () => {
-    const c = conn({});
+    const c = conn({ userId: null, endUserId: "eu_1" });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [c],
       pins: [memberPin(c.id)],
       actorUserId: null,
+      actorEndUserId: "eu_1",
     });
     expect(result.resolved[INTEG]![0]!.source).toBe("fallback_auto");
   });
 });
 
 describe("resolveConnections — fallback (cascade layer 7)", () => {
-  it("auto-picks the single accessible connection", () => {
-    const c = conn({});
-    const result = resolveConnections({
+  const COLLEAGUE = "user_colleague";
+  const END_USER = "eu_1";
+  const own = (over: Partial<ConnectionRow> = {}) => conn(over);
+  const shared = (over: Partial<ConnectionRow> = {}) =>
+    conn({ userId: COLLEAGUE, sharedWithOrg: true, ...over });
+  const DEAD = { needsReconnection: true };
+
+  /** Bind `rows[bind]`, or raise `error` — on `rows[on]` when the error names a connection. */
+  type Verdict =
+    | { bind: number }
+    | { error: "not_connected" | "must_choose_connection" | "needs_reconnection"; on?: number };
+
+  const cases: { name: string; rows: () => ConnectionRow[]; verdict: Verdict }[] = [
+    {
+      name: "own 0, shared 0 → not_connected",
+      rows: () => [],
+      verdict: { error: "not_connected" },
+    },
+    {
+      name: "own 0, shared 1 → must_choose (a colleague's account is never picked for you)",
+      rows: () => [shared()],
+      verdict: { error: "must_choose_connection" },
+    },
+    {
+      name: "own 0, shared 2 → must_choose",
+      rows: () => [shared(), shared({ authKey: "pat" })],
+      verdict: { error: "must_choose_connection" },
+    },
+    { name: "own 1 → binds it", rows: () => [own()], verdict: { bind: 0 } },
+    {
+      name: "own 1 + shared 1 → binds the own one",
+      rows: () => [shared(), own()],
+      verdict: { bind: 1 },
+    },
+    {
+      name: "own 1 dead → needs_reconnection on it",
+      rows: () => [own(DEAD)],
+      verdict: { error: "needs_reconnection", on: 0 },
+    },
+    {
+      name: "own 1 dead + shared 1 live → needs_reconnection on the own one, no switch",
+      rows: () => [shared(), own(DEAD)],
+      verdict: { error: "needs_reconnection", on: 1 },
+    },
+    {
+      name: "own 2 (any auth shape) → must_choose",
+      rows: () => [own(), own({ authKey: "pat" })],
+      verdict: { error: "must_choose_connection" },
+    },
+    {
+      name: "own 2, one dead → must_choose (the dead one counts)",
+      rows: () => [own(DEAD), own({ authKey: "pat" })],
+      verdict: { error: "must_choose_connection" },
+    },
+    {
+      name: "own 2, both dead → must_choose",
+      rows: () => [own(DEAD), own({ authKey: "pat", ...DEAD })],
+      verdict: { error: "must_choose_connection" },
+    },
+  ];
+
+  for (const { name, rows: build, verdict } of cases) {
+    it(name, () => {
+      const rows = build();
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: rows,
+        pins: [],
+      });
+      if ("bind" in verdict) {
+        const bound = rows[verdict.bind]!;
+        expect(result.errors).toEqual([]);
+        expect(result.resolved[INTEG]).toEqual([
+          {
+            connectionId: bound.id,
+            source: "fallback_auto",
+            label: bound.label,
+            accountId: "acc_x",
+          },
+        ]);
+      } else {
+        expect(result.resolved[INTEG]).toBeUndefined();
+        expect(result.errors.map((e) => e.code)).toEqual([verdict.error]);
+        if (verdict.on !== undefined) {
+          expect(result.errors[0]!.connectionId).toBe(rows[verdict.on]!.id);
+        }
+      }
+    });
+  }
+
+  it("a colleague sharing a connection does not move a run that auto-bound my own", () => {
+    const mine = own();
+    const before = resolveConnections({
       requirements: [req(oauth2Manifest())],
-      accessibleConnections: [c],
+      accessibleConnections: [mine],
       pins: [],
     });
-    expect(result.resolved[INTEG]).toEqual([
+    const after = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [shared(), mine],
+      pins: [],
+    });
+    expect(before.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([mine.id]);
+    expect(after.errors).toEqual([]);
+    expect(after.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([mine.id]);
+    expect(after.resolved[INTEG]![0]!.source).toBe("fallback_auto");
+  });
+
+  it("my second account expiring is a choice, never a silent switch to the first", () => {
+    const first = own({ label: "Boulot" });
+    const second = own({ authKey: "pat", label: "Perso", ...DEAD });
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [first, second],
+      pins: [],
+    });
+    expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+    expect(result.errors[0]!.candidateConnections!.map((c) => [c.id, c.needsReconnection])).toEqual(
+      [
+        [first.id, false],
+        [second.id, true],
+      ],
+    );
+  });
+
+  it("an end-user with only a member's shared connection must choose — never bound to it", () => {
+    const memberShared = shared();
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [memberShared],
+      pins: [],
+      actorUserId: null,
+      actorEndUserId: END_USER,
+    });
+    expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+    expect(result.errors[0]!.message).toContain("shared by other members");
+    expect(result.errors[0]!.candidateConnections).toEqual([
       {
-        connectionId: c.id,
-        source: "fallback_auto",
-        label: c.label,
+        id: memberShared.id,
+        label: memberShared.label,
         accountId: "acc_x",
+        ownedByActor: false,
+        needsReconnection: false,
       },
     ]);
   });
 
-  it("includes shared connections in the candidate set", () => {
-    const adminShared = conn({ userId: "user_admin", sharedWithOrg: true });
+  it("control — an end-user's own connection binds over a member's shared one", () => {
+    const mine = conn({ userId: null, endUserId: END_USER });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
-      accessibleConnections: [adminShared],
+      accessibleConnections: [shared(), mine],
       pins: [],
+      actorUserId: null,
+      actorEndUserId: END_USER,
     });
-    expect(result.resolved[INTEG]![0]!.connectionId).toBe(adminShared.id);
-    expect(result.resolved[INTEG]![0]!.source).toBe("fallback_auto");
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([mine.id]);
   });
 
-  it("emits not_connected when nothing matches", () => {
+  it("must_choose lists every serving row — own and shared, live and dead — flagged", () => {
+    // What tells the candidates apart rides on each one, so a caller with no
+    // picker (API, MCP) chooses from the error alone and can skip the dead ones.
+    const mineLive = own({ label: "web", accountId: "root@web-01" });
+    const mineDead = own({ authKey: "pat", label: "db", accountId: "root@db-01", ...DEAD });
+    const theirsLive = shared({ label: "ops", accountId: "ops@corp" });
+    const theirsDead = shared({ authKey: "pat", label: "ci", accountId: "ci@corp", ...DEAD });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
-      accessibleConnections: [],
+      accessibleConnections: [mineLive, mineDead, theirsLive, theirsDead],
       pins: [],
     });
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]!.code).toBe("not_connected");
-    expect(result.errors[0]!.integrationId).toBe(INTEG);
-  });
-
-  it("emits must_choose_connection when >1 candidate (any auth shape)", () => {
-    const a = conn({});
-    const b = conn({ authKey: "pat" });
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [a, b],
-      pins: [],
-    });
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]!.code).toBe("must_choose_connection");
-    expect(result.errors[0]!.candidateConnections?.map((c) => c.id)).toEqual(
-      expect.arrayContaining([a.id, b.id]),
-    );
-  });
-
-  it("must_choose candidates carry what tells them apart, not just ids", () => {
-    // The whole point of the payload: a caller with no picker (API, MCP) must
-    // be able to choose from the error alone. Two rows differing only by label
-    // and ownership are indistinguishable by id.
-    const mine = conn({ label: "web server", accountId: "root@web-01" });
-    const shared = conn({
-      authKey: "pat",
-      label: "database",
-      accountId: "root@db-01",
-      userId: "user_other",
-      sharedWithOrg: true,
-    });
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [mine, shared],
-      pins: [],
-      actorUserId: USER_ID,
-    });
-    expect(result.errors[0]!.code).toBe("must_choose_connection");
-    expect(result.errors[0]!.candidateConnections).toEqual(
-      expect.arrayContaining([
-        { id: mine.id, label: "web server", accountId: "root@web-01", ownedByActor: true },
-        { id: shared.id, label: "database", accountId: "root@db-01", ownedByActor: false },
-      ]),
-    );
-    // …and the snake_case projection the 409 envelope carries — the wire names
-    // are what an API or MCP caller parses to pick without a second call.
-    expect(translateResolutionError(result.errors[0]!)).toMatchObject({
+    const err = result.errors[0]!;
+    expect(err.code).toBe("must_choose_connection");
+    expect(err.candidateConnections).toEqual([
+      {
+        id: mineLive.id,
+        label: "web",
+        accountId: "root@web-01",
+        ownedByActor: true,
+        needsReconnection: false,
+      },
+      {
+        id: mineDead.id,
+        label: "db",
+        accountId: "root@db-01",
+        ownedByActor: true,
+        needsReconnection: true,
+      },
+      {
+        id: theirsLive.id,
+        label: "ops",
+        accountId: "ops@corp",
+        ownedByActor: false,
+        needsReconnection: false,
+      },
+      {
+        id: theirsDead.id,
+        label: "ci",
+        accountId: "ci@corp",
+        ownedByActor: false,
+        needsReconnection: true,
+      },
+    ]);
+    // …and the snake_case projection the 409 envelope carries.
+    expect(translateResolutionError(err)).toMatchObject({
       field: `integrations.${INTEG}`,
       code: "must_choose_connection",
-      candidate_connections: expect.arrayContaining([
-        { id: mine.id, label: "web server", account_id: "root@web-01", owned_by_actor: true },
-        { id: shared.id, label: "database", account_id: "root@db-01", owned_by_actor: false },
-      ]),
+      candidate_connections: [
+        {
+          id: mineLive.id,
+          label: "web",
+          account_id: "root@web-01",
+          owned_by_actor: true,
+          needs_reconnection: false,
+        },
+        {
+          id: mineDead.id,
+          label: "db",
+          account_id: "root@db-01",
+          owned_by_actor: true,
+          needs_reconnection: true,
+        },
+        {
+          id: theirsLive.id,
+          label: "ops",
+          account_id: "ops@corp",
+          owned_by_actor: false,
+          needs_reconnection: false,
+        },
+        {
+          id: theirsDead.id,
+          label: "ci",
+          account_id: "ci@corp",
+          owned_by_actor: false,
+          needs_reconnection: true,
+        },
+      ],
     });
-  });
-
-  it("must_choose candidates relay each row's label verbatim", () => {
-    const a = conn({ accountId: "acc_a", label: "Boulot" });
-    const b = conn({ authKey: "pat", accountId: "acc_b", label: "Perso" });
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [a, b],
-      pins: [],
-      actorUserId: USER_ID,
-    });
-    expect(result.errors[0]!.candidateConnections?.map((c) => c.label)).toEqual([
-      "Boulot",
-      "Perso",
-    ]);
-  });
-
-  it("auto-resolves the single HEALTHY candidate even when a dead sibling exists", () => {
-    const dead = conn({ needsReconnection: true });
-    const healthy = conn({ authKey: "pat" });
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [dead, healthy],
-      pins: [],
-    });
-    expect(result.errors).toHaveLength(0);
-    expect(result.resolved[INTEG]![0]!.connectionId).toBe(healthy.id);
-    expect(result.resolved[INTEG]![0]!.source).toBe("fallback_auto");
-  });
-
-  it("must_choose lists only LIVE candidates (flagged ones excluded from the picker)", () => {
-    const a = conn({});
-    const b = conn({ authKey: "pat" });
-    const dead = conn({ authKey: "extra", needsReconnection: true });
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [a, b, dead],
-      pins: [],
-    });
-    expect(result.errors[0]!.code).toBe("must_choose_connection");
-    const ids = result.errors[0]!.candidateConnections!.map((c) => c.id);
-    expect(ids).toEqual(expect.arrayContaining([a.id, b.id]));
-    expect(ids).not.toContain(dead.id);
-  });
-
-  it("emits needs_reconnection when EVERY candidate is flagged", () => {
-    const d1 = conn({ needsReconnection: true });
-    const d2 = conn({ authKey: "pat", needsReconnection: true });
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [d1, d2],
-      pins: [],
-    });
-    expect(result.errors[0]!.code).toBe("needs_reconnection");
-    expect([d1.id, d2.id]).toContain(result.errors[0]!.connectionId!);
   });
 });
 

@@ -51,15 +51,17 @@ export interface ResolutionFieldError extends ValidationFieldError {
   /**
    * `must_choose_connection` — the connections the caller may pick from, each
    * carrying the fields that tell them apart (`label`, `account_id`,
-   * `owned_by_actor`). Pick some and send their `id`s back in the request's
-   * `connection_overrides` map. Ids alone would force a second round-trip
-   * through the connection list before the caller could choose.
+   * `owned_by_actor`) and `needs_reconnection` — a dead one is listed but must
+   * be reconnected before a run can use it. Pick some and send their `id`s back
+   * in the request's `connection_overrides` map. Ids alone would force a second
+   * round-trip through the connection list before the caller could choose.
    */
   candidate_connections?: {
     id: string;
     label: string;
     account_id: string;
     owned_by_actor: boolean;
+    needs_reconnection: boolean;
   }[];
   /** `needs_reconnection` / `insufficient_scopes`: the row to UPDATE in place; `auth_serves_no_selected_tool`: the member to remove. */
   connection_id?: string;

@@ -1356,7 +1356,7 @@ export type ConnectionResolutionErrorCode =
  * An id alone is opaque: a model reading the 409 has to fetch the connection
  * list to learn which uuid is the account the user named before it can retry,
  * and a human reading a log learns nothing at all. The resolver already holds
- * the rows, so denormalizing the three distinguishing fields costs no query.
+ * the rows, so denormalizing the distinguishing fields costs no query.
  *
  * `label` is user-given; `accountId` is the connect flow's own discriminator
  * and is always set, so the pair always identifies the account.
@@ -1369,6 +1369,8 @@ export interface ConnectionCandidate {
   accountId: string;
   /** True when the row is the calling actor's own, false when inherited via org sharing. */
   ownedByActor: boolean;
+  /** True when the row's credentials died: pickable, but it must be reconnected before a run can use it. */
+  needsReconnection: boolean;
 }
 
 /** One unresolved integration plus structured detail. */

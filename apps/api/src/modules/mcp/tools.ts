@@ -1058,9 +1058,10 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
             "Naming several binds them all: the run's tools then take a " +
             "required `connection` argument carrying the connection's label. This is also the " +
             "retry path for a `409 must_choose_connection` launch error — that error lists the " +
-            "ambiguous integration and its `candidate_connections`, each with a `label`, an " +
-            "`account_id` and `owned_by_actor`; pick the candidates the task needs and retry " +
-            "the SAME call with their `id`s here. Those fields are what tells the candidates " +
+            "integration and its `candidate_connections`, each with a `label`, an " +
+            "`account_id`, `owned_by_actor` and `needs_reconnection`; pick the candidates the " +
+            "task needs — never one with `needs_reconnection: true`, the run fails on it — and " +
+            "retry the SAME call with their `id`s here. Those fields are what tells the candidates " +
             "apart, so read them rather than listing connections separately. Each key is the " +
             "integration id itself (`@scope/integration`) — NOT the " +
             "`integrations.<id>` field path the error reports it under, which matches no " +

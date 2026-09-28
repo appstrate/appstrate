@@ -109,6 +109,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`@appstrate/core/api-errors`) are `string` (were `string | null`):
   `integration_connections.label` is `NOT NULL` and never empty.
 
+- **BREAKING: `ConnectionCandidate` gains a required `needsReconnection: boolean`**
+  (`@appstrate/core/integration`), mirrored as `needs_reconnection` on
+  `ResolutionFieldError.candidate_connections[]` (`@appstrate/core/api-errors`).
+  `must_choose_connection` now lists every accessible connection on a serving
+  auth, dead ones included — the list the picker shows — so a caller choosing
+  from the error can tell which candidates must be reconnected before they can
+  run. It is also raised when the actor's only candidates are connections
+  shared by other members: the fallback binds only the actor's own connection,
+  never a shared one implicitly. Code that builds a `ConnectionCandidate` must
+  set the field.
+
 - **`launchRunAndWait` (`@appstrate/core/run-and-wait-client`)**: the refusal
   of a `connection_overrides` argument that is a string or not an object now
   names the array shape (`{"@scope/integration": ["<connection_id>", ...]}`).

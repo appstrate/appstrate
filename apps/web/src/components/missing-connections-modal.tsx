@@ -62,12 +62,13 @@ export interface MissingIntegrationFieldError {
   message: string;
   /** Missing scopes — populated on insufficient_scopes for the OAuth re-consent upgrade. */
   missing_scopes?: string[];
-  /** `must_choose_connection`: rows to pick from, for API/MCP callers (the picker lists a superset). */
+  /** `must_choose_connection`: rows to pick from, dead ones flagged — for API/MCP callers; the modal renders the picker. */
   candidate_connections?: {
     id: string;
     label: string;
     account_id: string;
     owned_by_actor: boolean;
+    needs_reconnection: boolean;
   }[];
   /**
    * The dead/under-scoped connection id — populated on `needs_reconnection`
@@ -133,8 +134,8 @@ export function MissingConnectionsModal({
 
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
 
-  // must_choose rows have N>1 candidates and no auto-pick, so a re-run can't
-  // proceed until the user picks one. Other actionable rows (connect / renew /
+  // must_choose rows have no auto-pick (several own connections, or only
+  // colleagues' shared ones), so a re-run can't proceed until the user picks. Other actionable rows (connect / renew /
   // upgrade) resolve through the picker's own flow and re-run freely — a fresh
   // 409 just reopens the modal with the updated error list.
   const mustChooseIds = integrationErrors

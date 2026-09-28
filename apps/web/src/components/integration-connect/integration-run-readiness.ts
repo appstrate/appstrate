@@ -17,7 +17,7 @@ import type { IntegrationAgentResolution } from "@appstrate/shared-types";
  *
  * Status → not-usable mapping:
  *   - `none` ........... not connected (no candidate)
- *   - `must_choose` .... N>1 candidates, ambiguous pick
+ *   - `must_choose` .... no implicit pick (several own, or only shared candidates)
  *   - `needs_reconnection` connection flagged for re-consent
  *   - `stale` .......... pinned/override connection unavailable
  *   - `auto` / `pinned` / `admin_locked` resolve to a connection → OK, UNLESS

@@ -92,6 +92,7 @@ interface ValidationFieldError {
     label: string | null;
     account_id: string;
     owned_by_actor: boolean;
+    needs_reconnection: boolean;
   }[];
 }
 

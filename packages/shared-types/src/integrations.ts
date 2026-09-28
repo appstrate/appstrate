@@ -234,8 +234,9 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *
  *  - `admin_locked` — an admin pin forces the choice (dropdown disabled).
  *  - `pinned`       — the actor's own member pin resolves.
- *  - `auto`         — no pin, exactly one accessible connection.
- *  - `must_choose`  — no pin, more than one candidate (member must pick).
+ *  - `auto`         — no pin, exactly one OWN accessible connection.
+ *  - `must_choose`  — no pin, several own candidates or only colleagues' shared
+ *                     ones (a shared connection is never bound implicitly).
  *  - `none`         — no accessible connection on an auth serving the selected tools.
  *  - `stale`        — a pin or org default names a connection the run cannot use (gone, or
  *                     on an auth serving no selected tool).

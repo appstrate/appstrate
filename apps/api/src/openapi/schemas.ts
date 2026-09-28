@@ -150,7 +150,7 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["id", "label", "account_id", "owned_by_actor"],
+          required: ["id", "label", "account_id", "owned_by_actor", "needs_reconnection"],
           properties: {
             id: { type: "string" },
             label: {
@@ -167,10 +167,15 @@ export const schemas = {
               description:
                 "True when the connection is the caller's own, false when inherited via org sharing.",
             },
+            needs_reconnection: {
+              type: "boolean",
+              description:
+                "True when the connection's credentials died: it is listed so the choice is complete, but a run naming it fails with `needs_reconnection` until it is reconnected.",
+            },
           },
         },
         description:
-          "Populated on `must_choose_connection` — the connections the caller may pick from, each carrying the fields that tell them apart; pass their `id`s back as the request body's `connection_overrides` array for that integration to retry the run.",
+          "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run.",
       },
       connection_id: {
         type: "string",
@@ -1834,7 +1839,7 @@ export const schemas = {
   IntegrationAgentResolution: {
     type: "object",
     description:
-      "Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback, each layer a set and the fallback binding at most one; then a scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses.",
+      "Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback, each layer a set and the fallback binding only the caller's single own connection, never a shared one; then a scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses.",
     required: [
       "status",
       "resolved_connection_ids",

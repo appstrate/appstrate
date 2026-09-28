@@ -17,7 +17,9 @@
  *   6. integration_org_defaults (soft)         → org-wide default, all agents
  *   7. fallback: actor's accessible connections on an auth serving the
  *      selected tools = own + (shared_with_org AND space match)
- *      → 1 match → auto, 0 → not_connected, N → must_choose (never binds N)
+ *      → none → not_connected; exactly ONE OWN → auto (dead or not);
+ *        anything else → must_choose. A shared connection is never resolved
+ *        implicitly, and the fallback never binds N.
  *
  * The exported `resolveConnections()` is pure — no DB access — so it can
  * be unit-tested with mock arrays. The `resolveConnectionsForRun()`
@@ -163,9 +165,9 @@ interface ResolveConnectionsInput {
    */
   actorUserId?: string | null;
   /**
-   * Actor's `end_user.id` when the run is impersonated. Used only to
-   * decide whether a resolved-but-under-scoped connection is owned by the
-   * current actor (drives `ownedByActor` on `insufficient_scopes`).
+   * Actor's `end_user.id` when the run is impersonated. Decides, with
+   * `actorUserId`, which rows are the actor's OWN: the only ones the fallback
+   * binds, and `ownedByActor` on the errors and candidates.
    */
   actorEndUserId?: string | null;
   /**
@@ -193,7 +195,7 @@ interface ResolveConnectionsInput {
  *   4. schedule override         (package_schedules.connection_overrides)
  *   5. member pin                (pins where user_id = actor.id)      — per-agent preference
  *   6. org default SOFT          (orgDefaults[id].enforce === false)  — org-wide default
- *   7. fallback                  (actor's accessible connections on this integration)
+ *   7. fallback                  (the actor's single OWN connection, else must_choose)
  *
  * Force layers (admin pin, enforce default) sit at the top; the per-agent
  * admin pin beats the org-wide enforce default (agent-specific exception).
@@ -458,8 +460,8 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     });
   }
 
-  // 7. Fallback — actor's accessible connections on this integration,
-  // any auth shape. The chosen connection carries its own authKey.
+  // 7. Fallback — the only layer that binds without an explicit pick, so it
+  // binds only what is unambiguously the actor's: its ONE own connection.
   const candidates = args.accessibleConnections.filter(
     (c) => c.integrationId === args.integrationId,
   );
@@ -482,39 +484,25 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     });
   }
 
-  // Prefer HEALTHY candidates (not flagged needsReconnection). A dead
-  // connection must never be auto-picked when a live sibling exists, and the
-  // picker should not offer a dead option as a valid choice. So: a single
-  // healthy connection auto-resolves even if dead siblings exist, and the
-  // must_choose picker lists only live candidates.
-  const healthy = serving.filter((c) => !c.needsReconnection);
+  // A shared connection is never resolved implicitly — a colleague's account is
+  // an explicit pick (member pin, run override). Health plays no part in the
+  // choice: a lone own connection that died is reported on THAT row
+  // (`checkHealth` → needs_reconnection), and a dead second account still makes
+  // it a choice, so an expiry never silently switches the run to the other one.
+  const own = serving.filter((c) => isOwnedByActor(args, c));
+  if (own.length === 1) return bindSet(args, [own[0]!], "fallback_auto");
 
-  if (healthy.length === 1) {
-    return bindSet(args, [healthy[0]!], "fallback_auto");
-  }
-
-  if (healthy.length > 1) {
-    // >1 healthy — caller must pick. Surface the LIVE candidates, each with the
-    // fields that tell them apart (label, accountId, owned/shared), not just
-    // their ids: a caller with no picker — an API client, an MCP model reading
-    // the 409 — chooses from the error alone instead of fetching the connection
-    // list to learn which uuid is which account. The dashboard is not that
-    // caller: its modal embeds the shared picker, whose candidate list is a
-    // superset (it also offers the dead rows, with a renew button). That picker
-    // writes a member pin, so the next run skips this branch and resolves via
-    // layer 5.
-    return errorOf(args, {
-      code: "must_choose_connection",
-      message: `Multiple connections available for ${args.integrationId} — pick one.`,
-      candidateConnections: healthy.map((c) => candidateOf(args, c)),
-    });
-  }
-
-  // No healthy candidate — every accessible connection on this integration is
-  // flagged needsReconnection. Surface needs_reconnection (with one id for the
-  // reconnect CTA to UPDATE in place) rather than must_choose, which would only
-  // offer dead options. checkHealth on the first emits the canonical shape.
-  return bindSet(args, [serving[0]!], "fallback_auto");
+  // Every serving row, own and shared, live and dead — the list the picker
+  // shows — each with what tells it apart, so a caller with no picker (API
+  // client, MCP model reading the 409) chooses from the error alone.
+  return errorOf(args, {
+    code: "must_choose_connection",
+    message:
+      own.length === 0
+        ? `Integration '${args.integrationId}' has only connections shared by other members — choose one explicitly (member pin or run override), or connect your own.`
+        : `Multiple connections of yours are available for ${args.integrationId} — pick one.`,
+    candidateConnections: serving.map((c) => candidateOf(args, c)),
+  });
 }
 
 function servesAuth(args: ResolveOneArgs, authKey: string): boolean {
@@ -589,10 +577,10 @@ function oauthScopesForAuth(args: ResolveOneArgs, authKey: string): string[] {
  * Whose account a row is. Relayed on the two connection-bound connect-flow
  * codes because both remedies re-consent THAT row: the UI offers the repair
  * only to its owner, and the connect-offer mint refuses to sign claims against
- * a colleague's credential (`connectOfferTarget`). Also rides on every
- * `must_choose_connection` candidate, where it is a disambiguator rather than
- * a permission: "my account" vs "the one the org shares" is often the only
- * thing separating two otherwise identical rows.
+ * a colleague's credential (`connectOfferTarget`). Also what the fallback binds
+ * on — only an own row is ever auto-picked — and rides on every
+ * `must_choose_connection` candidate: "my account" vs "the one the org shares"
+ * is often the only thing separating two otherwise identical rows.
  */
 function isOwnedByActor(args: ResolveOneArgs, conn: ConnectionRow): boolean {
   return (
@@ -608,6 +596,7 @@ function candidateOf(args: ResolveOneArgs, conn: ConnectionRow): ConnectionCandi
     label: conn.label,
     accountId: conn.accountId,
     ownedByActor: isOwnedByActor(args, conn),
+    needsReconnection: conn.needsReconnection,
   };
 }
 
@@ -872,6 +861,7 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
             label: c.label,
             account_id: c.accountId,
             owned_by_actor: c.ownedByActor,
+            needs_reconnection: c.needsReconnection,
           })),
         }
       : {}),

@@ -21,7 +21,7 @@
  *         title: <human-readable>,
  *         message: <human-readable>,
  *         // optional smuggles:
- *         candidate_connections?: { id, label, account_id, owned_by_actor }[],
+ *         candidate_connections?: { id, label, account_id, owned_by_actor, needs_reconnection }[],
  *         connection_id?, missing_scopes?, owned_by_actor?,
  *         auth_key?, required_scopes? }
  *     ] }
@@ -51,7 +51,7 @@ import {
   seedSpaceRole,
 } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import { integrationConnections, spacePackages } from "@appstrate/db/schema";
+import { integrationConnections, integrationPins, spacePackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
@@ -142,6 +142,7 @@ interface ValidationFieldError {
     label: string | null;
     account_id: string;
     owned_by_actor: boolean;
+    needs_reconnection: boolean;
   }[];
   connection_id?: string;
   missing_scopes?: string[];
@@ -358,8 +359,20 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     expect(err!.candidate_connections).toBeDefined();
     expect([...err!.candidate_connections!].sort((a, b) => a.id.localeCompare(b.id))).toEqual(
       [
-        { id: conn1, label: "web server", account_id: "root@web-01", owned_by_actor: true },
-        { id: conn2, label: "database", account_id: "root@db-01", owned_by_actor: true },
+        {
+          id: conn1,
+          label: "web server",
+          account_id: "root@web-01",
+          owned_by_actor: true,
+          needs_reconnection: false,
+        },
+        {
+          id: conn2,
+          label: "database",
+          account_id: "root@db-01",
+          owned_by_actor: true,
+          needs_reconnection: false,
+        },
       ].sort((a, b) => a.id.localeCompare(b.id)),
     );
   });
@@ -1029,6 +1042,21 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       return (await res.json()) as ProblemDetails;
     }
 
+    /**
+     * The caller's member pin on `connectionId`. The fallback never binds a
+     * colleague's shared row on its own, so a case that needs one bound picks
+     * it explicitly, the way the dashboard picker does.
+     */
+    async function pinForCaller(connectionId: string): Promise<void> {
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: AGENT,
+        integrationId: OAUTH_INTEGRATION,
+        userId: ctx.user.id,
+        connectionIds: [connectionId],
+      });
+    }
+
     /** The one relay item this suite's fixtures always produce. */
     function relayItem(body: ProblemDetails): ValidationFieldError {
       return body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
@@ -1122,7 +1150,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
           presetRole: "operator",
           customRoleId: null,
         });
-        await seedDeadConnection(colleague.id, true);
+        await pinForCaller(await seedDeadConnection(colleague.id, true));
 
         const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });
         const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
@@ -1199,7 +1227,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
           presetRole: "operator",
           customRoleId: null,
         });
-        await seedUnderScopedConnection(colleague.id, true);
+        await pinForCaller(await seedUnderScopedConnection(colleague.id, true));
 
         const err = relayItem(await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" }));
         expect(err.code).toBe("insufficient_scopes");
