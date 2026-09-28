@@ -197,7 +197,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
     // …and the resolver snapshot the spawn loader + MITM refresh read back,
     // proving the pick was honoured rather than merely stored.
     expect(row!.resolvedConnections).toMatchObject({
-      [INTEGRATION]: [{ connectionId: picked }],
+      [INTEGRATION]: [{ connectionId: picked, source: "run_override" }],
     });
   }, 60_000);
 

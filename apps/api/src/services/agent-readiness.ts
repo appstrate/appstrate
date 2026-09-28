@@ -9,6 +9,7 @@ import type { LoadedPackage } from "../types/index.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
+  type LaunchOverrides,
 } from "./integration-connection-resolver.ts";
 import { listActiveIntegrationIds } from "./integration-connections.ts";
 import {
@@ -19,7 +20,6 @@ import {
 import { resolveDeclaredSkills } from "./package-catalog.ts";
 import { isPromptEmpty } from "@appstrate/core/validation";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
@@ -38,19 +38,13 @@ interface AgentReadinessParams {
    */
   actor: Actor | null;
   /**
-   * Caller's run-time connection picks (layer 3 of the resolver
-   * cascade). Threaded into the readiness check so the must_choose-retry
-   * UX loop in `MissingConnectionsModal` actually completes: without it,
-   * readiness re-fires must_choose on >1 candidates even when the caller
-   * already disambiguated via `connection_overrides` on the request body.
+   * The launch's connection picks — the run body's, or the firing schedule's
+   * (layer 3 of the resolver cascade). Threaded into the readiness check so the
+   * must_choose-retry UX loop in `MissingConnectionsModal` actually completes:
+   * without it, readiness re-fires must_choose on >1 candidates even when the
+   * caller already disambiguated via `connection_overrides`.
    */
-  runOverrides?: ConnectionOverrides | null;
-  /**
-   * Schedule's frozen connection picks (cascade layer 4). Plumbed for parity
-   * with `run-pipeline.ts:resolveRunConnectionsOrError` — schedules apply
-   * their overrides once at fire time, and readiness should honour them.
-   */
-  scheduleOverrides?: ConnectionOverrides | null;
+  launchOverrides?: LaunchOverrides | null;
   /**
    * Per-call-graph memo for integration manifest fetches. The run kickoff
    * path threads one Map so this readiness pass, the resolver snapshot pass,
@@ -121,7 +115,7 @@ function manifestFailureError(
 export async function collectAgentReadinessErrors(
   params: AgentReadinessParams,
 ): Promise<ValidationFieldError[]> {
-  const { agent, orgId, spaceId, actor, runOverrides, scheduleOverrides } = params;
+  const { agent, orgId, spaceId, actor, launchOverrides } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
 
@@ -246,11 +240,11 @@ export async function collectAgentReadinessErrors(
   }
 
   // Resolver enumerates own + shared connections, applies
-  // pin > run override > schedule override > fallback, and surfaces
+  // the cascade (pins, launch override, defaults, fallback), and surfaces
   // structured errors per (integration, authKey). Skipped when the caller
   // has no actor context (integration gating only applies to run kickoff).
   //
-  // `runOverrides` / `scheduleOverrides` are threaded so the must_choose
+  // `launchOverrides` is threaded so the must_choose
   // recovery loop in `MissingConnectionsModal` can complete: the user
   // picks a candidate, the modal POSTs `connection_overrides`, readiness
   // honours the pick instead of re-firing must_choose on the same N>1
@@ -267,8 +261,7 @@ export async function collectAgentReadinessErrors(
       packageId: agent.id,
       actor,
       scope: { orgId, spaceId },
-      ...(runOverrides ? { runOverrides } : {}),
-      ...(scheduleOverrides ? { scheduleOverrides } : {}),
+      ...(launchOverrides ? { launchOverrides } : {}),
       ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
       ...(refusedIntegrations.size > 0 ? { skipIntegrationIds: refusedIntegrations } : {}),
     });

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The picker when a member of the stored set is gone (deleted or unshared by
- * its owner). The server keeps refusing the set — it never binds what is left —
- * so the picker must say so, instead of showing the survivors as if they were
- * the whole selection.
+ * The picker when a member of the stored set is unusable — gone (deleted or
+ * unshared by its owner), or on an auth serving none of the selected tools. The
+ * server keeps refusing the set — it never binds what is left — so the picker
+ * must say so, instead of showing the survivors as if they were the whole
+ * selection.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -52,7 +53,8 @@ function candidate(id: string, label: string): Candidate {
 
 function resolution(overrides: Partial<Resolution>): Resolution {
   return {
-    status: "pinned",
+    source: "member_pin",
+    error_code: null,
     resolved_connection_ids: [],
     resolved_missing_scopes: [],
     admin_pinned_connection_ids: [],
@@ -97,7 +99,10 @@ const WARNING = `member-pick-unavailable-warning-${INTEGRATION}`;
 describe("IntegrationConnectionPicker — a stored member is gone", () => {
   it("counts the whole stored set and names how many are unavailable", () => {
     const html = renderPicker(
-      resolution({ status: "stale", member_pinned_connection_ids: [WEB, GONE] }),
+      resolution({
+        error_code: "pinned_connection_unavailable",
+        member_pinned_connection_ids: [WEB, GONE],
+      }),
       true,
     );
     const label = `${i18n.t("agents:detail.integrationMemberPicker.selectedCount", { count: 2 })} · ${i18n.t(
@@ -125,7 +130,7 @@ describe("IntegrationConnectionPicker — a stored member is gone", () => {
   it("keeps the menu reachable when nothing is left to pick, so the stored set can be reset", () => {
     const html = renderPicker(
       resolution({
-        status: "stale",
+        error_code: "pinned_connection_unavailable",
         member_pinned_connection_ids: [GONE],
         candidates: [],
         can_add_connection: false,
@@ -174,5 +179,77 @@ describe("IntegrationConnectionPicker — a stored member is gone", () => {
     );
     expect(html).toContain(WARNING);
     expect(html).toContain("text-amber-600");
+  });
+});
+
+describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
+  const t = (key: string, opts?: Record<string, unknown>) =>
+    i18n.t(`agents:detail.integrationMemberPicker.${key}`, opts);
+
+  it("a pinned member on an auth serving no selected tool is flagged like a gone one", () => {
+    // The candidates leave the unserving row out, as the 409 does; the one
+    // "unavailable for this agent" wording covers that cause too.
+    const html = renderPicker(
+      resolution({
+        error_code: "auth_serves_no_selected_tool",
+        member_pinned_connection_ids: [WEB, GONE],
+        resolved_connection_ids: [WEB, GONE],
+      }),
+      true,
+    );
+    expect(html).toContain(
+      `${t("selectedCount", { count: 2 })} · ${t("unavailableCount", { count: 1 })}`,
+    );
+    expect(html).toContain(t("unavailableWarning", { count: 1 }));
+  });
+
+  it("a default set on an auth serving no selected tool says so on the trigger", () => {
+    const html = renderPicker(
+      resolution({
+        source: "org_default",
+        error_code: "auth_serves_no_selected_tool",
+        resolved_connection_ids: [GONE],
+      }),
+      true,
+    );
+    expect(html).toContain(t("unservingLabel"));
+  });
+
+  it("an unpinned must_choose asks for a choice", () => {
+    const html = renderPicker(
+      resolution({ source: null, error_code: "must_choose_connection" }),
+      true,
+    );
+    expect(html).toContain(t("chooseLabel"));
+  });
+
+  it("marks a fallback-bound connection as the default", () => {
+    const html = renderPicker(
+      resolution({ source: "fallback_auto", resolved_connection_ids: [WEB] }),
+      false,
+    );
+    expect(html).toContain(t("defaultBadge"));
+  });
+
+  it("locks the dropdown on a stored admin pin, whatever the verdict names", () => {
+    // `auth_key_mismatch` names no layer, yet the admin pin would still override any pick.
+    const html = renderPicker(
+      resolution({
+        source: null,
+        error_code: "auth_key_mismatch",
+        admin_pinned_connection_ids: [WEB],
+      }),
+      true,
+    );
+    expect(html).toContain(`member-pick-locked-${INTEGRATION}`);
+  });
+
+  it("a soft org default leaves the dropdown open", () => {
+    const html = renderPicker(
+      resolution({ source: "org_default", org_default_connection_ids: [WEB] }),
+      false,
+    );
+    expect(html).not.toContain(`member-pick-locked-${INTEGRATION}`);
+    expect(html).toContain(`member-pick-${INTEGRATION}`);
   });
 });

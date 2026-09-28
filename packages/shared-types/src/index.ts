@@ -30,7 +30,6 @@ export type {
   IntegrationManifestView,
   IntegrationOAuthClient,
   IntegrationOrgDefault,
-  IntegrationPickStatus,
   IntegrationPin,
   IntegrationSummary,
   IntegrationToolCatalogEntry,

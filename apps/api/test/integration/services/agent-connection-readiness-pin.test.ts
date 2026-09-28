@@ -260,7 +260,8 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
 
     expect(readiness.errors[0]?.code).toBe("insufficient_scopes");
     const resolution = readiness.integrations[0]!.resolution;
-    expect(resolution.status).toBe("pinned");
+    expect(resolution.source).toBe("member_pin");
+    expect(resolution.error_code).toBe("insufficient_scopes");
     // The picker re-pins from this list: one id here would drop `full`.
     expect(resolution.resolved_connection_ids).toEqual([full!.id, short!.id]);
     expect(resolution.resolved_missing_scopes).toEqual(["write"]);

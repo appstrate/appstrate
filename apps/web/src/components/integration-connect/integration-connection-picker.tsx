@@ -40,6 +40,7 @@ import {
 } from "../../hooks/use-member-integration-pins";
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { connectableAuthKeys } from "./connectable-auth-keys";
+import { describeResolution } from "./integration-run-readiness";
 import {
   requiredScopesForAgent,
   MAX_CONNECTIONS_PER_INTEGRATION,
@@ -67,7 +68,7 @@ import { useCanReach } from "../../hooks/use-can-reach";
  *                 nothing is persisted until the form is. Empty = inherit.
  *
  * Locks (admin pin, enforced org default) apply identically in both modes:
- * they sit above the schedule override in the resolver cascade, so a locked
+ * they sit above the launch override in the resolver cascade, so a locked
  * set would beat a schedule pick anyway — surfacing the lock here is
  * the honest signal that the override would be ignored.
  */
@@ -176,14 +177,11 @@ export function IntegrationConnectionPicker({
 
   const {
     candidates,
-    status,
     resolved_connection_ids: resolvedConnectionIds,
-    admin_pinned_connection_ids: adminPinnedConnectionIds,
     member_pinned_connection_ids: memberPinnedConnectionIds,
-    org_default_connection_ids: orgDefaultConnectionIds,
-    org_default_enforced: orgDefaultEnforced,
     can_add_connection: canAddConnection,
   } = resolution;
+  const { lockedConnectionIds, byDefault, remedy } = describeResolution(resolution);
 
   const byId = (id: string): IntegrationCandidate | undefined =>
     candidates.find((c) => c.id === id);
@@ -192,15 +190,10 @@ export function IntegrationConnectionPicker({
       ? t("detail.integrationMemberPicker.byYou")
       : (c.owner_name ?? t("detail.integrationMemberPicker.ownerUnknown"));
 
-  // Locked when an admin force applies and the member can never override:
-  // a per-agent admin pin OR an enforced org default. Either way we render
-  // the read-only lock instead of the editable dropdown. (A schedule override
+  // Locked when an admin force is configured and the member can never override
+  // it: a per-agent admin pin OR an enforced org default. Either way we render
+  // the read-only lock instead of the editable dropdown. (A launch override
   // would lose to either at run time, so locking it here is correct too.)
-  const lockedConnectionIds = adminPinnedConnectionIds.length
-    ? adminPinnedConnectionIds
-    : orgDefaultEnforced
-      ? orgDefaultConnectionIds
-      : [];
   if (lockedConnectionIds.length > 0) {
     const label = lockedConnectionIds.map((id) => byId(id)?.label ?? id).join(" · ");
     return (
@@ -325,6 +318,8 @@ export function IntegrationConnectionPicker({
     else await refresh();
   };
 
+  // With nothing displayed, the verdict names the cause — `remove_unserving` here
+  // is a soft default whose member serves no selected tool (not a candidate).
   const triggerLabel =
     unavailableIds.length > 0
       ? `${t("detail.integrationMemberPicker.selectedCount", { count: explicitIds.length })} · ${t(
@@ -337,10 +332,10 @@ export function IntegrationConnectionPicker({
           ? t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length })
           : overrideMode
             ? t("detail.integrationMemberPicker.inherit")
-            : status === "must_choose"
+            : remedy === "choose"
               ? t("detail.integrationMemberPicker.chooseLabel")
-              : status === "stale"
-                ? t("detail.integrationMemberPicker.reconfigureLabel")
+              : remedy === "remove_unserving"
+                ? t("detail.integrationMemberPicker.unservingLabel")
                 : t("detail.integrationMemberPicker.connectLabel");
   // Amber on exactly the states that gate a run: pin mode reads the server's
   // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
@@ -414,7 +409,7 @@ export function IntegrationConnectionPicker({
           >
             <TriggerIcon className="size-3" />
             <span className="max-w-[14rem] truncate">{triggerLabel}</span>
-            {!overrideMode && status === "auto" && (
+            {!overrideMode && byDefault && (
               <span className="text-muted-foreground/70">
                 {t("detail.integrationMemberPicker.defaultBadge")}
               </span>
@@ -619,7 +614,7 @@ export function IntegrationConnectionPicker({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
-      {/* A stored member is gone: the run is refused until the set is re-picked. */}
+      {/* A stored member is unusable: the run is refused until the set is re-picked. */}
       {unavailableIds.length > 0 && (
         <div
           className="mt-1.5 flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"

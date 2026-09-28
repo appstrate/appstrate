@@ -268,8 +268,9 @@ export const mePaths = {
       summary: "Pin connections for the caller's runs of an agent",
       description:
         "Persists the caller's preference for an integration on this agent. " +
-        "Sits at cascade layer 5 — wins over a soft org default and the fallback, loses " +
-        "to an admin pin, an enforced org default and run / schedule overrides. " +
+        "Sits at cascade layer 4 — wins over a soft org default and the fallback, loses " +
+        "to an admin pin, an enforced org default and the launch override (the run's or " +
+        "the schedule's `connection_overrides`). " +
         "The body carries the WHOLE set and this write replaces it; `DELETE` clears it. " +
         "Idempotent — repeated calls rewrite the same set.",
       parameters: [
@@ -320,7 +321,7 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "Clear the caller's pin on a (agent, integration)",
       description:
-        "Removes the caller's member pin so the resolver falls back to layers 6-7 " +
+        "Removes the caller's member pin so the resolver falls back to layers 5-6 " +
         "(soft org default, then accessible connections). Idempotent — 204 even when no row exists.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },

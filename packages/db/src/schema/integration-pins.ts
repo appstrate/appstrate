@@ -8,7 +8,7 @@
  *
  *   - `user_id IS NULL` — **admin force pin**. Applies to every actor
  *     running this agent. Written via admin-only endpoints. Cannot be
- *     overridden by member pins, run/schedule overrides, or fallback.
+ *     overridden by the launch override (run or schedule), member pins, or fallback.
  *
  *   - `user_id IS NOT NULL` — **member preference pin**. The member's
  *     persisted "for MY runs of this agent, use MY connections X, Y" choice.

@@ -19,7 +19,7 @@ import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
-import { resolutionBlocksRun } from "../integration-connect/integration-run-readiness";
+import { describeResolution } from "../integration-connect/integration-run-readiness";
 
 interface AgentIntegrationsBlockProps {
   entries: AgentIntegrationEntry[];
@@ -214,7 +214,7 @@ function ManagedIntegrationCard({
       .map((id) => resolution.candidates.find((c) => c.id === id))
       .filter((c): c is IntegrationCandidate => !!c) ?? [];
   const reuseInfo =
-    resolution && resolvedConnections.length > 0 && !resolutionBlocksRun(resolution)
+    resolution && resolvedConnections.length > 0 && describeResolution(resolution).remedy === null
       ? buildReuseInfo(resolvedConnections, consumingAgents?.length ?? 0, t)
       : null;
 

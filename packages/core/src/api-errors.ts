@@ -55,6 +55,9 @@ export interface ResolutionFieldError extends ValidationFieldError {
    * be reconnected before a run can use it. Pick some and send their `id`s back
    * in the request's `connection_overrides` map. Ids alone would force a second
    * round-trip through the connection list before the caller could choose.
+   * On the credential proxy the candidates are the `X-Run-Id` run's bound set
+   * (else every own and shared connection), and the retry names one in
+   * `X-Connection-Id`.
    */
   candidate_connections?: {
     id: string;

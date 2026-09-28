@@ -49,7 +49,7 @@ import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.
 import { getInlineRunLimits } from "./run-limits.ts";
 import { validateAgentReadiness, collectAgentReadinessErrors } from "./agent-readiness.ts";
 import type { InlineRunBody } from "@appstrate/core/platform-types";
-import type { ConnectionOverrides } from "@appstrate/core/integration";
+import { runLaunchOverrides, type LaunchOverrides } from "./integration-connection-resolver.ts";
 
 export interface InlineRunPreflightResult {
   manifest: AgentManifest;
@@ -58,7 +58,7 @@ export interface InlineRunPreflightResult {
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
   /**
-   * Caller's per-integration connection picks (cascade layer 3, the run override), read off
+   * Caller's per-integration connection picks (cascade layer 3, the launch override), read off
    * the body ONCE below and carried here. Nothing else on the inline path feeds
    * them to the readiness gate, so without this a `must_choose_connection` 409
    * is inescapable here; and every consumer — both readiness branches and
@@ -66,7 +66,7 @@ export interface InlineRunPreflightResult {
    * independent read is how two passes come to disagree about which connection
    * the run uses.
    */
-  connectionOverrides: ConnectionOverrides | null;
+  launchOverrides: LaunchOverrides | null;
   /**
    * The manifest memo this preflight seeded with the PINNED integration
    * versions. Handed to the kickoff (`triggerInlineRun` → `prepareAndExecuteRun`)
@@ -199,7 +199,7 @@ export async function runInlinePreflight(params: {
 
   const modelIdOverride = body.modelId ?? null;
   const proxyIdOverride = body.proxyId ?? null;
-  const runOverrides = body.connection_overrides ?? null;
+  const launchOverrides = runLaunchOverrides(body.connection_overrides);
 
   // ----- 2. input against manifest schema (AJV) -----
   // Prompt validation is delegated entirely to agent readiness (stage 3).
@@ -260,7 +260,7 @@ export async function runInlinePreflight(params: {
         spaceId,
         actor,
         manifestCache,
-        ...(runOverrides ? { runOverrides } : {}),
+        ...(launchOverrides ? { launchOverrides } : {}),
         ...(params.connectOffers ? { connectOffers: params.connectOffers } : {}),
       });
     } else {
@@ -271,7 +271,7 @@ export async function runInlinePreflight(params: {
           spaceId,
           actor,
           manifestCache,
-          ...(runOverrides ? { runOverrides } : {}),
+          ...(launchOverrides ? { launchOverrides } : {}),
         }),
       );
     }
@@ -302,7 +302,7 @@ export async function runInlinePreflight(params: {
     effectiveInput,
     modelIdOverride,
     proxyIdOverride,
-    connectionOverrides: runOverrides,
+    launchOverrides,
     manifestCache,
   };
 }

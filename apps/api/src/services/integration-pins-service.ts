@@ -32,14 +32,9 @@ import type {
   ConsumingAgentSummary,
   IntegrationAgentResolution,
   IntegrationCandidate,
-  IntegrationPickStatus,
   IntegrationPin,
 } from "@appstrate/shared-types";
-import {
-  missingScopesForConnection,
-  manifestAuthKeySet,
-  type ConnectionResolutionSource,
-} from "@appstrate/core/integration";
+import { missingScopesForConnection } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { activatePackageWithin, isPackageActiveHere, placedRowFilter } from "./space-packages.ts";
 import { activeHereSql } from "./package-activation.ts";
@@ -63,6 +58,8 @@ import {
   resolveConnectionsForRun,
   translateResolutionError,
   isUserConnectionCreationBlocked,
+  requirementOf,
+  servingCandidates,
 } from "./integration-connection-resolver.ts";
 import type { ConnectionResolutionResult } from "@appstrate/core/integration";
 import type { IntegrationManifestCache } from "./integration-service.ts";
@@ -374,7 +371,7 @@ interface UpsertMemberPinInput {
  * Upsert a member-scope pin (`integration_pins` row with `user_id` set).
  *
  * Member writes their own preference for this (agent, integration) —
- * the persisted row the resolver sees on every run (layer 5 of the
+ * the persisted row the resolver sees on every run (layer 4 of the
  * cascade).
  */
 export async function upsertMemberPin(
@@ -580,25 +577,13 @@ async function attachOwnerNames(rows: ConnectionRow[]): Promise<AccessibleIntegr
 // ─────────────────────────── Agent-page picker resolution ─────────────────────
 
 /**
- * Map a resolver `source` to the picker's status badge. A force layer (admin
- * pin / enforced org default) reads as `admin_locked`; the actor's own member
- * pin as `pinned`; every remaining source (override / soft default / fallback)
- * is an unforced `auto`. Single definition so the `resolved` and the
- * `insufficient_scopes` branches can't drift on this mapping.
- */
-function pickStatusForSource(source: ConnectionResolutionSource): IntegrationPickStatus {
-  if (source === "admin_pin" || source === "org_default_enforced") return "admin_locked";
-  if (source === "member_pin") return "pinned";
-  return "auto";
-}
-
-/**
  * The single-source verdict for the agent-page connection picker: which
  * connection the next run would use for this (agent, integration, actor),
  * plus the candidate list and pin/blocked state the dropdown renders.
  *
- * The decision is {@link resolveConnectionsForRun}'s, never re-implemented;
- * per-candidate `missingScopes` are a display annotation on top.
+ * The decision is {@link resolveConnectionsForRun}'s, never re-implemented:
+ * `source` and `error_code` are its verdict verbatim, and per-candidate
+ * `missingScopes` are a display annotation on top.
  *
  * `agentManifest` and `resolution` are REQUIRED and caller-supplied, which is
  * load-bearing rather than stylistic. This function used to load the package
@@ -665,78 +650,41 @@ async function resolveAgentIntegrationPick(args: {
   const orgDefaultConnectionIds = orgDefault?.connection_ids ?? [];
   const orgDefaultEnforced = orgDefault?.enforce ?? false;
 
-  // Drop orphaned-auth connections: a row whose `auth_key` no longer exists in
-  // the integration's current manifest can never be delivered (the spawn
-  // resolver matches connection → auth by `authKey`). Shared `manifestAuthKeySet`
-  // keeps this guard — and its `null` = "no constraint" semantics — identical to
-  // the runtime resolver's, so the picker and the run path can't disagree about
-  // which connections are live.
-  const liveAuthKeys = manifestAuthKeySet(manifest);
-  const candidates: IntegrationCandidate[] = candidatesRaw
-    .filter((c) => liveAuthKeys === null || liveAuthKeys.has(c.auth_key))
-    .map((c) => ({
-      ...c,
-      missing_scopes: manifest
-        ? missingScopesForConnection({
-            manifest,
-            authKey: c.auth_key,
-            granted: c.scopes_granted,
-            agentTools,
-            agentScopes,
-          })
-        : [],
-      is_own:
-        actor.type === "user" ? c.owner_user_id === actor.id : c.owner_end_user_id === actor.id,
-    }));
+  // The resolver's own candidate universe (orphaned-auth guard, the dep's pinned
+  // `auth_key`, auths serving the selection), so the picker offers exactly the
+  // `must_choose_connection` candidates. No manifest → no verdict to align with.
+  const candidateRows =
+    manifest && agentEntry
+      ? servingCandidates(requirementOf(agentEntry, manifest), candidatesRaw, (c) => c.auth_key)
+      : candidatesRaw;
+  const candidates: IntegrationCandidate[] = candidateRows.map((c) => ({
+    ...c,
+    missing_scopes: manifest
+      ? missingScopesForConnection({
+          manifest,
+          authKey: c.auth_key,
+          granted: c.scopes_granted,
+          agentTools,
+          agentScopes,
+        })
+      : [],
+    is_own: actor.type === "user" ? c.owner_user_id === actor.id : c.owner_end_user_id === actor.id,
+  }));
 
   const resolved = resolution.resolved[integrationId] ?? null;
+  // Neither a set nor an error: the integration manifest could not be fetched
+  // (buildRequirement returned null, `includeInert` notwithstanding), so there
+  // is no verdict to report — both fields stay null rather than guessed.
   const err = resolution.errors.find((e) => e.integrationId === integrationId) ?? null;
 
-  let status: IntegrationPickStatus;
-  let resolvedConnectionIds: string[] = [];
-  let resolvedMissingScopes: string[] = [];
-
-  if (resolved) {
-    resolvedConnectionIds = resolved.map((r) => r.connectionId);
-    status = pickStatusForSource(resolved[0]!.source);
-  } else if (err) {
-    switch (err.code) {
-      case "insufficient_scopes":
-        resolvedConnectionIds = err.boundConnectionIds ?? [];
-        resolvedMissingScopes = err.missingScopes ?? [];
-        status = err.source ? pickStatusForSource(err.source) : "auto";
-        break;
-      case "must_choose_connection":
-        status = "must_choose";
-        break;
-      case "needs_reconnection":
-        status = "needs_reconnection";
-        break;
-      case "pinned_connection_unavailable":
-      case "override_connection_unavailable":
-        status = "stale";
-        break;
-      // Only an explicit set raises it (the fallback says `not_connected`): a pick to change.
-      case "auth_serves_no_selected_tool":
-        resolvedConnectionIds = err.boundConnectionIds ?? [];
-        status = "stale";
-        break;
-      default:
-        status = "none";
-    }
-  } else {
-    // No verdict at all — only reachable when the integration manifest couldn't
-    // be fetched (buildRequirement returned null, so the resolver never saw it,
-    // `includeInert` notwithstanding). The pin cascade can't run without the
-    // manifest; fall back to a sane label from the candidate count.
-    status = candidates.length === 1 ? "auto" : candidates.length === 0 ? "none" : "must_choose";
-    if (candidates.length === 1) resolvedConnectionIds = [candidates[0]!.id];
-  }
-
   return {
-    status,
-    resolved_connection_ids: resolvedConnectionIds,
-    resolved_missing_scopes: resolvedMissingScopes,
+    source: resolved ? resolved[0]!.source : (err?.source ?? null),
+    error_code: err?.code ?? null,
+    // A set that failed its health check is still the set the layer binds.
+    resolved_connection_ids: resolved
+      ? resolved.map((r) => r.connectionId)
+      : (err?.boundConnectionIds ?? []),
+    resolved_missing_scopes: err?.missingScopes ?? [],
     admin_pinned_connection_ids: adminPinnedConnectionIds,
     member_pinned_connection_ids: memberPinnedConnectionIds,
     org_default_connection_ids: orgDefaultConnectionIds,

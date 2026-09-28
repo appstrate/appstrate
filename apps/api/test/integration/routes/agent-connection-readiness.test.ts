@@ -83,8 +83,10 @@ function buildIntegrationManifest(id: string, required: boolean) {
 }
 
 interface ReadinessResolution {
-  status: string;
+  source: string | null;
+  error_code: string | null;
   resolved_connection_ids: string[];
+  candidates: Array<{ id: string }>;
 }
 interface ReadinessBody {
   blocks_run: boolean;
@@ -171,7 +173,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
 
     const integ = body.integrations.find((i) => i.integration_id === INTEGRATION);
     expect(integ?.run_blocking).toBe(true);
-    expect(integ?.resolution.status).toBe("none");
+    expect(integ?.resolution).toMatchObject({ source: null, error_code: "not_connected" });
 
     // Parity: the run gate rejects with 409.
     expect((await postRun()).status).toBe(409);
@@ -325,8 +327,14 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
       connection_id: ids[1],
     });
     const integ = body.integrations.find((i) => i.integration_id === INTEGRATION);
-    expect(integ!.resolution.status).toBe("stale");
+    // The precise cause and the layer that bound the set, straight from the resolver.
+    expect(integ!.resolution).toMatchObject({
+      source: "admin_pin",
+      error_code: "auth_serves_no_selected_tool",
+    });
     expect(integ!.resolution.resolved_connection_ids).toEqual(ids);
+    // The picker offers what a `must_choose_connection` 409 would: the serving member only.
+    expect(integ!.resolution.candidates.map((c) => c.id)).toEqual([ids[0]!]);
 
     const run = await postRun();
     expect(run.status).toBe(409);
@@ -335,7 +343,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     expect(item!.code).toBe("auth_serves_no_selected_tool");
   });
 
-  it("fallback with only a non-serving connection → not_connected, status none", async () => {
+  it("fallback with only a non-serving connection → not_connected, and no candidate", async () => {
     const auth = {
       type: "api_key" as const,
       authorizedUris: ["https://api.example.com/**"],
@@ -378,8 +386,10 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
       "not_connected",
     );
     const integ = body.integrations.find((i) => i.integration_id === INTEGRATION);
-    expect(integ!.resolution.status).toBe("none");
+    expect(integ!.resolution).toMatchObject({ source: null, error_code: "not_connected" });
     expect(integ!.resolution.resolved_connection_ids).toEqual([]);
+    // Candidates carry the resolver's serving-auth filter: the `backup` row serves nothing.
+    expect(integ!.resolution.candidates).toEqual([]);
   });
 });
 

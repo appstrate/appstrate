@@ -61,6 +61,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`ConnectionResolutionError.source` names the failing layer on every
+  layer-bound code** (`@appstrate/core/integration`) — no longer only on
+  `insufficient_scopes` and `auth_serves_no_selected_tool`, but also on
+  `needs_reconnection` and on an explicit layer naming an unreachable connection
+  (`pinned_connection_unavailable`, `override_connection_unavailable`). Still
+  absent when no layer bound anything (`not_connected`,
+  `must_choose_connection`, `auth_key_mismatch`). The field's type is unchanged.
+
 - **`RunOrchestrator.initialize()` may be called again after it rejects**
   (`@appstrate/core/platform-types`, #1129) — the platform retries it in the
   background with backoff until it resolves once, instead of once per process.

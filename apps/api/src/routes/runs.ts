@@ -39,6 +39,7 @@ import { stopWorkloadAndWait } from "../services/stop-workload.ts";
 import { logger } from "../lib/logger.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import type { IntegrationManifestCache } from "../services/integration-service.ts";
+import { runLaunchOverrides } from "../services/integration-connection-resolver.ts";
 import { assertExplicitModelExists } from "../services/org-models.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
@@ -133,7 +134,7 @@ const inlineRunBodySchema = z
      */
     context_files: z.array(z.unknown()).optional(),
     /**
-     * Per-integration connection picks for this run (cascade layer 3, the run override).
+     * Per-integration connection picks for this run (cascade layer 3, the launch override).
      * Declared here so the parse keeps the field for the preflight's readiness
      * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
      * it.
@@ -334,8 +335,8 @@ export function createRunsRouter() {
         // default downstream (or crash the uuid cast — see loadModel).
         await assertExplicitModelExists(orgId, modelIdOverride);
 
-        // Shared preflight: validate readiness. Threading
-        // `connectionOverrides` here is what makes the
+        // Shared preflight: validate readiness. Threading the caller's
+        // `connection_overrides` here is what makes the
         // MissingConnectionsModal retry actually work — readiness sees the
         // caller's pick and skips the must_choose error on >1 candidates.
         // Pre-fix, the readiness gate fired must_choose regardless of the
@@ -349,6 +350,7 @@ export function createRunsRouter() {
         // reads anything, so the advisory verdict and the kickoff's gates
         // judge the same versions.
         const manifestCache: IntegrationManifestCache = new Map();
+        const launchOverrides = runLaunchOverrides(connectionOverrides);
 
         await resolveRunPreflight({
           agent: effectiveAgent,
@@ -357,7 +359,7 @@ export function createRunsRouter() {
           actor,
           // Opt-in only: absent header ⇒ null ⇒ a 409 with no connect link.
           connectOffers: connectOfferPolicyFromRequest(c),
-          connectionOverrides: connectionOverrides ?? null,
+          launchOverrides,
           // Same overrides handed to `prepareAndExecuteRun` below, so the
           // preflight seeds the manifests the kickoff will freeze.
           dependencyOverrides: dependencyOverrides ?? null,
@@ -390,7 +392,7 @@ export function createRunsRouter() {
           dependencyOverrides: dependencyOverrides ?? null,
           spaceId: c.get("spaceId"),
           apiKeyId: c.get("apiKeyId") ?? undefined,
-          connectionOverrides: connectionOverrides ?? null,
+          launchOverrides,
           traceparent: runTraceparent(c),
           runnerName: runner.name,
           runnerKind: runner.kind,

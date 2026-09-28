@@ -272,7 +272,7 @@ export function RunOverridesPanel({
  * Renders the shared `IntegrationConnectionPicker` (one dropdown per
  * integration) in `override` mode: validating a set writes it into the
  * `connection_overrides` map, "inherit" clears the key. The pick freezes
- * into the schedule row on save (cascade layer 4 — below admin pins,
+ * into the schedule row on save (cascade layer 3, the launch override — below admin pins,
  * above member pins).
  *
  * Identical UX to the agent page's connection picker — same candidate

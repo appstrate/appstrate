@@ -7,7 +7,12 @@
  * side can drift the other.
  */
 
-import type { IntegrationManifest, IntegrationToolCatalogEntry } from "@appstrate/core/integration";
+import type {
+  ConnectionResolutionErrorCode,
+  ConnectionResolutionSource,
+  IntegrationManifest,
+  IntegrationToolCatalogEntry,
+} from "@appstrate/core/integration";
 
 export type IntegrationManifestView = IntegrationManifest;
 export type IntegrationManifestAuth = NonNullable<IntegrationManifest["auths"]>[string];
@@ -232,26 +237,25 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  * agent-page dropdown never re-implements (and never drifts from) the
  * "which connection does this run use?" logic.
  *
- *  - `admin_locked` — an admin pin forces the choice (dropdown disabled).
- *  - `pinned`       — the actor's own member pin resolves.
- *  - `auto`         — no pin, exactly one OWN accessible connection.
- *  - `must_choose`  — no pin, several own candidates or only colleagues' shared
- *                     ones (a shared connection is never bound implicitly).
- *  - `none`         — no accessible connection on an auth serving the selected tools.
- *  - `stale`        — a pin or org default names a connection the run cannot use (gone, or
- *                     on an auth serving no selected tool).
- *  - `needs_reconnection` — the resolved connection is flagged for re-consent.
+ * The verdict is the resolver's own vocabulary, two fields:
+ *  - `source`     — the layer that bound the set, or the layer whose set failed
+ *                   (an unreachable or unhealthy member); `null` when no layer
+ *                   bound anything (the fallback's `not_connected` /
+ *                   `must_choose_connection`, `auth_key_mismatch`) or when
+ *                   there is no verdict.
+ *  - `error_code` — why the run would be refused on this integration; `null`
+ *                   when the set binds (or there is no verdict).
+ * Both `null`: the integration manifest could not be loaded, so nothing was
+ * resolved.
  */
-export type IntegrationPickStatus =
-  "admin_locked" | "pinned" | "auto" | "must_choose" | "none" | "stale" | "needs_reconnection";
-
 export interface IntegrationAgentResolution {
-  status: IntegrationPickStatus;
-  /** The set the next run binds (the whole failing set on an under-scoped or stale verdict). */
+  source: ConnectionResolutionSource | null;
+  error_code: ConnectionResolutionErrorCode | null;
+  /** The set the next run binds (the whole failing set when a member fails its health check). */
   resolved_connection_ids: string[];
   /** Missing scopes on the one connection an under-scoped verdict names; else empty. */
   resolved_missing_scopes: string[];
-  /** Admin pin connection set (status admin_locked), else empty. */
+  /** This agent's admin pin set, else empty. */
   admin_pinned_connection_ids: string[];
   /** The actor's own member pin connection set, else empty. */
   member_pinned_connection_ids: string[];
@@ -265,6 +269,6 @@ export interface IntegrationAgentResolution {
   org_default_enforced: boolean;
   /** Whether the actor may add a connection (admin OR not blocked). */
   can_add_connection: boolean;
-  /** Own + shared connections, annotated for the dropdown. */
+  /** Own + shared connections on an auth serving the selected tools, annotated for the dropdown. */
   candidates: IntegrationCandidate[];
 }

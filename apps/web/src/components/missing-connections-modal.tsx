@@ -8,7 +8,7 @@ import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
-import { resolutionBlocksRun } from "./integration-connect/integration-run-readiness";
+import { describeResolution } from "./integration-connect/integration-run-readiness";
 import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
 
@@ -25,7 +25,7 @@ import { usePermissions } from "../hooks/use-permissions";
  * upgrade / add flows. A validated SET accumulates into the modal's per-run
  * `connection_overrides` map; the footer's "Re-run with picks" button fires
  * the parent's `onRetryWithOverrides` callback with the full
- * `{ integrationId: connectionIds[] }` map (cascade layer 3, the run override).
+ * `{ integrationId: connectionIds[] }` map (cascade layer 3, the launch override).
  *
  * Reusing the picker keeps this modal in lockstep with the dropdown — same
  * candidate list, scope/lock verdicts and connect orchestration — instead of
@@ -240,9 +240,9 @@ function MissingRow({
   );
   const entry = integrationEntries?.find((e) => e.id === packageId);
 
-  // Resolved = the run-kickoff gate would no longer reject this integration.
-  // Single predicate shared with the badge, so resolved here ⇔ not blocking there.
-  const resolved = !!resolution && !resolutionBlocksRun(resolution);
+  // Resolved = the run-kickoff gate would no longer reject this integration:
+  // the verdict carries no remedy (the reading the picker and the tab share).
+  const resolved = !!resolution && describeResolution(resolution).remedy === null;
   // The picker needs the manifest + first verdict to render fully wired; hold
   // a spinner until both land (non-structural rows with the agent in context).
   // Both reads gate on `integrations:read`: without it neither lands, so the

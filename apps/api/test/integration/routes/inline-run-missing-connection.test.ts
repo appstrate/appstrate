@@ -8,7 +8,7 @@
  * route reaches the readiness gate through a DIFFERENT path: its preflight
  * runs BEFORE `parseRequestInput`, so the caller's `connection_overrides` only
  * reach the resolver if the inline body schema declares the field AND
- * `runInlinePreflight` forwards it as `runOverrides`. While that wiring was
+ * `runInlinePreflight` forwards it as the launch override. While that wiring was
  * missing, an inline caller facing >1 candidate connection could never escape
  * the 409 — the picker had a remedy the route refused to accept. That is the
  * chat/MCP `run_and_wait` path, so the loop was unexitable there too.

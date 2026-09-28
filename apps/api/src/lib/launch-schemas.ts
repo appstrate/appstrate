@@ -19,7 +19,7 @@
  *
  *   - `connection_overrides` — agent run, inline (+ validate) and schedules all
  *     take {@link connectionOverridesSchema}. The remote surface declares none,
- *     and `run-creation.ts` relies on that: it passes `runOverrides: null` to
+ *     and `run-creation.ts` relies on that: it passes `launchOverrides: null` to
  *     the connection cascade and stamps `connectionOverrides: null` on the row,
  *     so the readiness pass and the snapshot resolve the identical cascade.
  *     Accepting the field here without threading it would break that equality.

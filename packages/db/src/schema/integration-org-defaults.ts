@@ -19,7 +19,7 @@
  *
  *   - `enforce = true` — **org-wide force**. Sits just below the per-agent
  *     admin pin: it locks the choice for every actor on every agent,
- *     beating run/schedule overrides and member pins. A per-agent admin pin
+ *     beating the launch override (run or schedule) and member pins. A per-agent admin pin
  *     still wins (the agent-specific exception).
  *
  * Resolver cascade: see `apps/api/src/services/integration-connection-resolver.ts`.

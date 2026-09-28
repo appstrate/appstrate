@@ -17,7 +17,7 @@
  *      `integrations:read`, the writes `integrations:connect`.
  *
  * Service-layer behaviour (own vs other member's connection, sharedWithOrg
- * fallback, the 7-layer cascade resolution) lives in
+ * fallback, the 6-layer cascade resolution) lives in
  * `services/integration-pins-service.test.ts` + `services/integration-
  * connection-resolver.test.ts`. This file pins the HTTP boundary only.
  */

@@ -170,7 +170,7 @@ function drop(reason: IntegrationDropReason, detail?: string): ResolveOneResult 
  *
  * Dropping is a deliberate degradation — the product supports running an
  * agent whose integrations are only partly connected (the pre-flight picker
- * models it explicitly via `IntegrationPickStatus`), so this must not throw.
+ * models it explicitly via the readiness verdict's `error_code`), so this must not throw.
  * But the caller MUST carry `dropped` somewhere the user can see it;
  * `run-context-builder.ts` → `run-pipeline.ts` turns each entry into a
  * `warn` run log. This function itself stays pure of DB writes so it remains

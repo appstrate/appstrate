@@ -160,7 +160,8 @@ describe("/api/integrations/:packageId admin surface", () => {
   // for one integration is read from `integrations[].resolution`.
 
   interface AgentResolutionDTO {
-    status: string;
+    source: string | null;
+    error_code: string | null;
     resolved_connection_ids: string[];
     resolved_missing_scopes: string[];
     admin_pinned_connection_ids: string[];
@@ -196,7 +197,8 @@ describe("/api/integrations/:packageId admin surface", () => {
       const body = await getResolution(AGENT, INTEGRATION);
 
       // Wire-shape contract — all fields present, snake_case.
-      expect(body).toHaveProperty("status");
+      expect(body).toHaveProperty("source");
+      expect(body).toHaveProperty("error_code");
       expect(body).toHaveProperty("resolved_connection_ids");
       expect(body).toHaveProperty("resolved_missing_scopes");
       expect(body).toHaveProperty("admin_pinned_connection_ids");
@@ -207,15 +209,16 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect(Array.isArray(body.candidates)).toBe(true);
 
       // With one private connection on the actor and no pin/default:
-      // resolver picks it auto → status="auto", resolved=owned connection.
-      expect(body.status).toBe("auto");
+      // the fallback binds it, and no error stands in the way.
+      expect(body.source).toBe("fallback_auto");
+      expect(body.error_code).toBeNull();
       expect(body.resolved_connection_ids).toEqual([connId]);
     });
 
-    it("returns 'none' status when actor has no accessible connection", async () => {
-      // No connection seeded — picker should surface "none".
+    it("returns not_connected, no layer, when actor has no accessible connection", async () => {
       const body = await getResolution(AGENT, INTEGRATION);
-      expect(body.status).toBe("none");
+      expect(body.source).toBeNull();
+      expect(body.error_code).toBe("not_connected");
       expect(body.candidates).toEqual([]);
     });
 
@@ -252,7 +255,7 @@ describe("/api/integrations/:packageId admin surface", () => {
     // auth_key but no tools/scopes) is still listed in the bulk readiness with a
     // resolution (includeInert), and that resolution must honour the member pin —
     // otherwise a PUT /me/integration-pins succeeds (200) but the verdict stays
-    // "must_choose" and the picker can never reflect the selection.
+    // `must_choose_connection` and the picker can never reflect the selection.
     it("honours the member pin on an INERT integration (no tools/scopes)", async () => {
       const INERT_AGENT = "@adminorg/agent-inert";
       await seedAgent({
@@ -277,7 +280,8 @@ describe("/api/integrations/:packageId admin surface", () => {
       const connB = await seedSharedConnection();
 
       const before = await getResolution(INERT_AGENT, INTEGRATION);
-      expect(before.status).toBe("must_choose");
+      expect(before.source).toBeNull();
+      expect(before.error_code).toBe("must_choose_connection");
       expect(before.resolved_connection_ids).toEqual([]);
 
       // Member pins connection B via the same endpoint the picker calls.
@@ -294,7 +298,8 @@ describe("/api/integrations/:packageId admin surface", () => {
 
       const after = await getResolution(INERT_AGENT, INTEGRATION);
       // The pin must now drive the verdict — not must_choose.
-      expect(after.status).toBe("pinned");
+      expect(after.source).toBe("member_pin");
+      expect(after.error_code).toBeNull();
       expect(after.resolved_connection_ids).toEqual([connB]);
       expect(after.member_pinned_connection_ids).toEqual([connB]);
       expect(connA).not.toBe(connB);
@@ -391,7 +396,9 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect(err.message).toContain(connB);
       expect(err.message).toContain("may have been deleted");
       const resolution = body.integrations[0]!.resolution;
-      expect(resolution.status).toBe("stale");
+      // The failing layer is named, not re-derived from the pin ids.
+      expect(resolution.source).toBe("admin_pin");
+      expect(resolution.error_code).toBe("pinned_connection_unavailable");
       expect(resolution.admin_pinned_connection_ids).toEqual([connA, connB]);
     });
 

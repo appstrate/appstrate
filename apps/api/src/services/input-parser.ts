@@ -86,7 +86,7 @@ export interface ParsedInput {
   /**
    * Per-integration connection picks for THIS run (#199).
    * Wire field `connectionOverrides` on the request body; flows into the
-   * resolver's layer 3 (run override) and is persisted on `runs.connection_overrides`.
+   * resolver's layer 3 (the launch override) and is persisted on `runs.connection_overrides`.
    */
   connectionOverrides?: ConnectionOverrides;
   /**

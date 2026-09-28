@@ -22,14 +22,17 @@ import { resolveModel } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { inferenceRouteOf } from "./run-launcher/subscription-run-policy.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
-import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
+import {
+  resolveRunConnectionsOrError,
+  type LaunchOverrides,
+} from "./integration-connection-resolver.ts";
 import {
   resolveRunIntegrationVersions,
   type IntegrationManifestCache,
   type ResolvedIntegrationVersionMap,
 } from "./integration-service.ts";
 import { assertDependencyOverrideKeysDeclared } from "../lib/launch-schemas.ts";
-import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
+import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
 import type { ModelCost } from "@appstrate/core/module";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
@@ -117,15 +120,12 @@ interface RunPipelineParams {
   /** API key ID that triggered the run (if auth via API key). */
   apiKeyId?: string;
   /**
-   * Per-integration connection set chosen by the caller for THIS run (#199): the
-   * resolver's run-override layer, persisted on `runs.connection_overrides` (audit).
+   * The resolver's launch-override layer (#199): the caller's per-integration
+   * connection sets for THIS run (`run_override`, persisted on
+   * `runs.connection_overrides` for the audit) or the firing schedule's frozen
+   * ones (`schedule_override`, already on the schedule row).
    */
-  connectionOverrides?: ConnectionOverrides | null;
-  /**
-   * Schedule-frozen overrides loaded from `package_schedules.connection_overrides`.
-   * Same shape as `connectionOverrides`, for the schedule-override layer. Scheduler path only.
-   */
-  scheduleConnectionOverrides?: ConnectionOverrides | null;
+  launchOverrides?: LaunchOverrides | null;
   /**
    * W3C `traceparent` to seed the run-execution trace tree with. Forwarded
    * into the runtime so its outbound traffic becomes child spans of the
@@ -173,8 +173,7 @@ export async function resolveRunPreflight(params: {
   spaceId: string;
   orgId: string;
   actor: Actor | null;
-  connectionOverrides?: ConnectionOverrides | null;
-  scheduleConnectionOverrides?: ConnectionOverrides | null;
+  launchOverrides?: LaunchOverrides | null;
   /**
    * The run's `dependency_overrides` — forwarded so the seeding below resolves
    * each integration to the SAME version the kickoff will. A run pinned to a
@@ -253,10 +252,7 @@ export async function resolveRunPreflight(params: {
     orgId,
     spaceId,
     actor,
-    ...(params.connectionOverrides ? { runOverrides: params.connectionOverrides } : {}),
-    ...(params.scheduleConnectionOverrides
-      ? { scheduleOverrides: params.scheduleConnectionOverrides }
-      : {}),
+    ...(params.launchOverrides ? { launchOverrides: params.launchOverrides } : {}),
     manifestCache,
     ...(params.connectOffers ? { connectOffers: params.connectOffers } : {}),
   });
@@ -456,8 +452,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
           packageId: agent.id,
           actor,
           scope: { orgId, spaceId },
-          runOverrides: params.connectionOverrides ?? null,
-          scheduleOverrides: params.scheduleConnectionOverrides ?? null,
+          launchOverrides: params.launchOverrides ?? null,
           manifestCache,
         }),
     );
@@ -615,7 +610,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         runOrigin: "platform",
         sinkSecretEncrypted: encrypt(sinkCredentials.secret),
         sinkExpiresAt: new Date(sinkCredentials.expiresAt),
-        connectionOverrides: params.connectionOverrides ?? null,
+        connectionOverrides:
+          params.launchOverrides?.source === "run_override" ? params.launchOverrides.ids : null,
         resolvedConnections,
         resolvedIntegrationVersions,
         runnerName: params.runnerName ?? null,

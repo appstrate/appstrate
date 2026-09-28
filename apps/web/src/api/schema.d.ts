@@ -254,7 +254,7 @@ export interface paths {
         };
         /**
          * Bulk integration connection readiness for an agent
-         * @description Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.
+         * @description Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true), in the resolver's own vocabulary (`source` + `error_code`), so the Connexions tab and the launch badge share one source of truth.
          */
         get: operations["getAgentConnectionReadiness"];
         put?: never;
@@ -2060,13 +2060,13 @@ export interface paths {
         get: operations["listMyIntegrationPins"];
         /**
          * Pin connections for the caller's runs of an agent
-         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 5 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and run / schedule overrides. The body carries the WHOLE set and this write replaces it; `DELETE` clears it. Idempotent — repeated calls rewrite the same set.
+         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it; `DELETE` clears it. Idempotent — repeated calls rewrite the same set.
          */
         put: operations["upsertMyIntegrationPin"];
         post?: never;
         /**
          * Clear the caller's pin on a (agent, integration)
-         * @description Removes the caller's member pin so the resolver falls back to layers 6-7 (soft org default, then accessible connections). Idempotent — 204 even when no row exists.
+         * @description Removes the caller's member pin so the resolver falls back to layers 5-6 (soft org default, then accessible connections). Idempotent — 204 even when no row exists.
          */
         delete: operations["deleteMyIntegrationPin"];
         options?: never;
@@ -5673,11 +5673,19 @@ export interface components {
             value: string;
             note?: string;
         };
-        /** @description Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback, each layer a set and the fallback binding only the caller's single own connection, never a shared one; then a scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses. */
+        /** @description Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → launch override → member pin → soft org default → fallback, each layer a set and the fallback binding only the caller's single own connection, never a shared one; then a health and scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source` + `error_code`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here. */
         IntegrationAgentResolution: {
-            /** @enum {string} */
-            status: "admin_locked" | "pinned" | "auto" | "must_choose" | "none" | "stale" | "needs_reconnection";
-            /** @description The set the next run binds. On an `insufficient_scopes` verdict and on an `auth_serves_no_selected_tool` verdict (`stale`), the whole set the winning layer tried to bind. */
+            /**
+             * @description The cascade layer that bound the set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable` — or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).
+             * @enum {string|null}
+             */
+            source: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto" | null;
+            /**
+             * @description Why a run would be refused on this integration — the same code the run-kickoff 409 carries. `null` when the set binds, and when there is no verdict.
+             * @enum {string|null}
+             */
+            error_code: "not_connected" | "needs_reconnection" | "pinned_connection_unavailable" | "override_connection_unavailable" | "must_choose_connection" | "insufficient_scopes" | "auth_key_mismatch" | "auth_serves_no_selected_tool" | null;
+            /** @description The set the next run binds. When a member fails its health check (`needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), the whole set that layer tried to bind; empty otherwise. */
             resolved_connection_ids: string[];
             /** @description Missing scopes on the one connection an `insufficient_scopes` verdict names; empty otherwise. */
             resolved_missing_scopes: string[];
@@ -5687,6 +5695,7 @@ export interface components {
             org_default_enforced: boolean;
             /** @description Whether the caller may create a connection for this integration: holds `integrations:connect`, and either holds `integrations:configure` or the space does not block member connections. */
             can_add_connection: boolean;
+            /** @description Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries. An integration with no selection keeps every auth. */
             candidates: {
                 /** Format: uuid */
                 id: string;
@@ -6253,7 +6262,7 @@ export interface components {
             message: string;
             /** @description Human-readable title; preserved from the underlying error factory. */
             title?: string;
-            /** @description Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. */
+            /** @description Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set (else every own and shared connection), and the retry names one in `X-Connection-Id`. */
             candidate_connections?: {
                 id: string;
                 /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections addresses each by its label. */
@@ -6453,7 +6462,7 @@ export interface components {
             } | null;
             /** @description ID of the model_provider_credentials row resolved at run creation (audit + cost-attribution). */
             modelCredentialId: string | null;
-            /** @description Per-integration connection picks for this run (cascade layer 3). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats the schedule override, member pins, a soft org default and the fallback. */
+            /** @description Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback. */
             connection_overrides: {
                 [key: string]: string[];
             } | null;
@@ -6507,7 +6516,7 @@ export interface components {
             model_id_override: string | null;
             proxy_id_override: string | null;
             version_override: string | null;
-            /** @description Per-integration connection picks frozen on the schedule row (cascade layer 4). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback. */
+            /** @description Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback. */
             connection_overrides: {
                 [key: string]: string[];
             } | null;
@@ -8147,7 +8156,7 @@ export interface operations {
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
-                    /** @description Per-integration connection sets for THIS run (the run-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor). */
+                    /** @description Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor). */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -8484,7 +8493,7 @@ export interface operations {
                     proxy_id_override?: string;
                     /** @description Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitting it is identical to `published` (latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent at THIS write — `403 draft_not_writable` otherwise — and is not re-checked at fire time, the way `connection_overrides` are frozen here too. The selected definition (manifest + prompt) is resolved at each fire — a schedule inheriting (`published`) on a never-published agent skips the fire and logs a warning until a version is published or `draft` is selected. */
                     version_override?: string;
-                    /** @description Per-integration connection sets frozen on the schedule row (the schedule-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write. */
+                    /** @description Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write. */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -10456,9 +10465,9 @@ export interface operations {
                 "X-Stream-Response"?: "0" | "1";
                 /** @description Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set. */
                 "X-Max-Response-Size"?: string;
-                /** @description Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary. */
+                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id is a `404`, another actor's run a `403`, a finished run a `400`. The call then reaches ONLY the connections the run's kickoff bound to the integration (admin pins, enforced defaults, member pins already applied): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
+                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the proxy uses that connection after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration. When absent (and no `X-Run-Id`), only the caller's own connections are considered: exactly one is used, none is a `404` (a shared connection is never used unless named here), several are a `409 must_choose_connection` listing the candidates to name. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -10477,7 +10486,15 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            400: components["responses"]["ValidationError"];
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, or `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
             401: {
                 headers: {
@@ -10489,19 +10506,28 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used. */
+            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description No credentials or connection for the requested integration. */
+            /** @description No credentials or connection for the requested integration — including when the caller owns none and names none (even if other members shared some), when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description `must_choose_connection` — no `X-Connection-Id` and several candidates: the `X-Run-Id` run bound several connections to the integration, or (no run) the caller owns several. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
@@ -10538,9 +10564,9 @@ export interface operations {
                 "X-Stream-Response"?: "0" | "1";
                 /** @description Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set. */
                 "X-Max-Response-Size"?: string;
-                /** @description Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary. */
+                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id is a `404`, another actor's run a `403`, a finished run a `400`. The call then reaches ONLY the connections the run's kickoff bound to the integration (admin pins, enforced defaults, member pins already applied): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
+                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the proxy uses that connection after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration. When absent (and no `X-Run-Id`), only the caller's own connections are considered: exactly one is used, none is a `404` (a shared connection is never used unless named here), several are a `409 must_choose_connection` listing the candidates to name. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -10564,7 +10590,15 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            400: components["responses"]["ValidationError"];
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, or `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
             401: {
                 headers: {
@@ -10576,19 +10610,28 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used. */
+            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description No credentials or connection for the requested integration. */
+            /** @description No credentials or connection for the requested integration — including when the caller owns none and names none (even if other members shared some), when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description `must_choose_connection` — no `X-Connection-Id` and several candidates: the `X-Run-Id` run bound several connections to the integration, or (no run) the caller owns several. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
@@ -10625,9 +10668,9 @@ export interface operations {
                 "X-Stream-Response"?: "0" | "1";
                 /** @description Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set. */
                 "X-Max-Response-Size"?: string;
-                /** @description Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary. */
+                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id is a `404`, another actor's run a `403`, a finished run a `400`. The call then reaches ONLY the connections the run's kickoff bound to the integration (admin pins, enforced defaults, member pins already applied): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
+                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the proxy uses that connection after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration. When absent (and no `X-Run-Id`), only the caller's own connections are considered: exactly one is used, none is a `404` (a shared connection is never used unless named here), several are a `409 must_choose_connection` listing the candidates to name. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -10651,7 +10694,15 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            400: components["responses"]["ValidationError"];
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, or `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
             401: {
                 headers: {
@@ -10663,19 +10714,28 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used. */
+            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description No credentials or connection for the requested integration. */
+            /** @description No credentials or connection for the requested integration — including when the caller owns none and names none (even if other members shared some), when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description `must_choose_connection` — no `X-Connection-Id` and several candidates: the `X-Run-Id` run bound several connections to the integration, or (no run) the caller owns several. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
@@ -10712,9 +10772,9 @@ export interface operations {
                 "X-Stream-Response"?: "0" | "1";
                 /** @description Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set. */
                 "X-Max-Response-Size"?: string;
-                /** @description Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary. */
+                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id is a `404`, another actor's run a `403`, a finished run a `400`. The call then reaches ONLY the connections the run's kickoff bound to the integration (admin pins, enforced defaults, member pins already applied): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
+                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the proxy uses that connection after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration. When absent (and no `X-Run-Id`), only the caller's own connections are considered: exactly one is used, none is a `404` (a shared connection is never used unless named here), several are a `409 must_choose_connection` listing the candidates to name. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -10733,7 +10793,15 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            400: components["responses"]["ValidationError"];
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, or `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
             401: {
                 headers: {
@@ -10745,19 +10813,28 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used. */
+            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description No credentials or connection for the requested integration. */
+            /** @description No credentials or connection for the requested integration — including when the caller owns none and names none (even if other members shared some), when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description `must_choose_connection` — no `X-Connection-Id` and several candidates: the `X-Run-Id` run bound several connections to the integration, or (no run) the caller owns several. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
@@ -10794,9 +10871,9 @@ export interface operations {
                 "X-Stream-Response"?: "0" | "1";
                 /** @description Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set. */
                 "X-Max-Response-Size"?: string;
-                /** @description Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary. */
+                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id is a `404`, another actor's run a `403`, a finished run a `400`. The call then reaches ONLY the connections the run's kickoff bound to the integration (admin pins, enforced defaults, member pins already applied): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
+                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the proxy uses that connection after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration. When absent (and no `X-Run-Id`), only the caller's own connections are considered: exactly one is used, none is a `404` (a shared connection is never used unless named here), several are a `409 must_choose_connection` listing the candidates to name. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -10820,7 +10897,15 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            400: components["responses"]["ValidationError"];
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, or `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
             401: {
                 headers: {
@@ -10832,19 +10917,28 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used. */
+            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description No credentials or connection for the requested integration. */
+            /** @description No credentials or connection for the requested integration — including when the caller owns none and names none (even if other members shared some), when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description `must_choose_connection` — no `X-Connection-Id` and several candidates: the `X-Run-Id` run bound several connections to the integration, or (no run) the caller owns several. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
@@ -20528,7 +20622,7 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description `appfile://file_xxx` URIs to mount read-only into the run's `files/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_files` input field for them, so they go through the same ACL, byte/count caps and `file_links` chaining as any other file input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_files` is rejected with a `400` — the name is reserved. */
                     context_files?: string[];
-                    /** @description Per-integration connection sets for THIS run (the run-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor). */
+                    /** @description Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor). */
                     connection_overrides?: {
                         [key: string]: string[];
                     };

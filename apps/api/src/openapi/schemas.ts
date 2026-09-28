@@ -175,7 +175,7 @@ export const schemas = {
           },
         },
         description:
-          "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run.",
+          "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set (else every own and shared connection), and the retry names one in `X-Connection-Id`.",
       },
       connection_id: {
         type: "string",
@@ -1291,7 +1291,7 @@ export const schemas = {
       },
       connection_overrides: {
         type: ["object", "null"],
-        description: `Per-integration connection picks for this run (cascade layer 3). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats the schedule override, member pins, a soft org default and the fallback.`,
+        description: `Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback.`,
         additionalProperties: {
           type: "array",
           items: { type: "string" },
@@ -1406,7 +1406,7 @@ export const schemas = {
       version_override: { type: ["string", "null"] },
       connection_overrides: {
         type: ["object", "null"],
-        description: `Per-integration connection picks frozen on the schedule row (cascade layer 4). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.`,
+        description: `Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.`,
         additionalProperties: {
           type: "array",
           items: { type: "string" },
@@ -1839,9 +1839,10 @@ export const schemas = {
   IntegrationAgentResolution: {
     type: "object",
     description:
-      "Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback, each layer a set and the fallback binding only the caller's single own connection, never a shared one; then a scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses.",
+      "Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → launch override → member pin → soft org default → fallback, each layer a set and the fallback binding only the caller's single own connection, never a shared one; then a health and scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source` + `error_code`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here.",
     required: [
-      "status",
+      "source",
+      "error_code",
       "resolved_connection_ids",
       "resolved_missing_scopes",
       "admin_pinned_connection_ids",
@@ -1852,24 +1853,43 @@ export const schemas = {
       "candidates",
     ],
     properties: {
-      status: {
-        type: "string",
+      source: {
+        type: ["string", "null"],
         enum: [
-          "admin_locked",
-          "pinned",
-          "auto",
-          "must_choose",
-          "none",
-          "stale",
-          "needs_reconnection",
+          "admin_pin",
+          "org_default_enforced",
+          "run_override",
+          "schedule_override",
+          "member_pin",
+          "org_default",
+          "fallback_auto",
+          null,
         ],
+        description:
+          "The cascade layer that bound the set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable` — or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).",
+      },
+      error_code: {
+        type: ["string", "null"],
+        enum: [
+          "not_connected",
+          "needs_reconnection",
+          "pinned_connection_unavailable",
+          "override_connection_unavailable",
+          "must_choose_connection",
+          "insufficient_scopes",
+          "auth_key_mismatch",
+          "auth_serves_no_selected_tool",
+          null,
+        ],
+        description:
+          "Why a run would be refused on this integration — the same code the run-kickoff 409 carries. `null` when the set binds, and when there is no verdict.",
       },
       resolved_connection_ids: {
         type: "array",
         items: { type: "string" },
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
         description:
-          "The set the next run binds. On an `insufficient_scopes` verdict and on an `auth_serves_no_selected_tool` verdict (`stale`), the whole set the winning layer tried to bind.",
+          "The set the next run binds. When a member fails its health check (`needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), the whole set that layer tried to bind; empty otherwise.",
       },
       resolved_missing_scopes: {
         type: "array",
@@ -1900,6 +1920,8 @@ export const schemas = {
       },
       candidates: {
         type: "array",
+        description:
+          "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries. An integration with no selection keeps every auth.",
         items: {
           type: "object",
           required: [

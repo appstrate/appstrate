@@ -1304,11 +1304,17 @@ export const MAX_CONNECTIONS_PER_INTEGRATION = 10;
 /**
  * Per-integration connection picks. Used on `runs.connection_overrides`
  * (caller's run-time choice) and `package_schedules.connection_overrides`
- * (frozen at schedule create). Shape: `{ "@scope/integration": ["<connection_id>", ...] }`.
+ * (frozen at schedule create) — the resolver's ONE launch-override layer, fed
+ * by whichever of the two launched the run (a scheduled fire carries no run
+ * override). Shape: `{ "@scope/integration": ["<connection_id>", ...] }`.
  */
 export type ConnectionOverrides = Record<string, string[]>;
 
-/** Where a resolved connection came from — drives the audit + UI badge. */
+/**
+ * The cascade layer that bound a set — drives the audit + UI badge. A run and a
+ * schedule fire share the launch-override layer; the two values keep which one
+ * launched it in `runs.resolved_connections`.
+ */
 export type ConnectionResolutionSource =
   | "admin_pin"
   | "org_default_enforced"
@@ -1415,11 +1421,13 @@ export interface ConnectionResolutionError {
    */
   authKey?: string;
   /**
-   * The cascade layer that resolved the (failing) connection, when the error
-   * is bound to a specific connection (`insufficient_scopes`,
-   * `auth_serves_no_selected_tool`). Lets callers
-   * derive the pick status directly instead of re-comparing `connectionId`
-   * against re-fetched pin ids.
+   * The cascade layer whose set failed: an explicit layer naming a connection
+   * the actor cannot reach (`pinned_connection_unavailable`,
+   * `override_connection_unavailable`), or any layer whose bound set failed a
+   * health check (`needs_reconnection`, `insufficient_scopes`,
+   * `auth_serves_no_selected_tool`). Absent when no layer bound anything
+   * (`not_connected`, `must_choose_connection`, `auth_key_mismatch`), so a
+   * caller reads the verdict's layer here instead of re-deriving it.
    */
   source?: ConnectionResolutionSource;
   /** Every connection the layer that won bound, in its order — set when that set failed to bind. */
