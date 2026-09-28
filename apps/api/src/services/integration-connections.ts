@@ -3005,9 +3005,9 @@ export function scheduleOverridesName(connectionId: string): SQL {
  * account an unattended run acts as, so the owner re-picks and re-enables it instead. An emptied
  * map is stored NULL. Another actor's schedule keeps the id and fails loudly.
  *
- * @returns the rewritten rows — their job payload still freezes the old overrides, so the caller
- *   passes them to `resyncScheduleJobs` (scheduler) once the transaction has committed; that
- *   re-arms a kept schedule and removes a disabled one's job.
+ * @returns the rewritten rows — the caller passes them to `resyncScheduleJobs` (scheduler) once
+ *   the transaction has committed, which removes a disabled one's job (a fire reads the row, so a
+ *   kept one needs nothing more).
  */
 async function dropConnectionFromOwnSchedules(
   tx: Tx,

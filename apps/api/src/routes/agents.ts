@@ -18,6 +18,7 @@ import {
 import { validateAgainstSchema } from "../services/schema.ts";
 import { assertLockedFieldsSatisfiable } from "../services/input-resolution.ts";
 import { dropLockedFieldsFromSchedules } from "../services/scheduler.ts";
+import { db } from "@appstrate/db/client";
 import {
   listActivePackages,
   updateSpacePackage,
@@ -308,16 +309,20 @@ export function createAgentsRouter() {
       // AND unsatisfiable — every run would fail and nobody could see why.
       assertLockedFieldsSatisfiable(schema, body.locked_fields, values);
 
-      await updateSpacePackage(scope, agent.id, {
-        inputSettings: { values, locked: body.locked_fields },
+      // Reconcile the schedules the new lock set just invalidated, in the same
+      // transaction: a schedule that froze a now-locked field would otherwise
+      // fail `locked_input_field` on every tick forever — the schedule is not
+      // disabled by a failed fire. Its frozen value is dropped so the field
+      // re-resolves from the editor value, which is what a fresh launch does.
+      await db.transaction(async (tx) => {
+        await updateSpacePackage(
+          scope,
+          agent.id,
+          { inputSettings: { values, locked: body.locked_fields } },
+          { tx },
+        );
+        await dropLockedFieldsFromSchedules(tx, scope, agent.id, body.locked_fields);
       });
-
-      // Reconcile the schedules the new lock set just invalidated. A schedule
-      // that froze a now-locked field would otherwise fail `locked_input_field`
-      // on every tick forever — the schedule is not disabled by a failed fire.
-      // Its frozen value is dropped so the field re-resolves from the editor
-      // value, which is what a fresh launch does.
-      await dropLockedFieldsFromSchedules(scope, agent.id, body.locked_fields);
 
       await recordAuditFromContext(c, {
         action: "agent.input_settings_updated",

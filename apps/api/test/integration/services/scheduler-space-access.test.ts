@@ -53,7 +53,7 @@ describe("scheduled runs respect current space access", () => {
       if (change === "close")
         await db.update(spaces).set({ visibility: "closed" }).where(eq(spaces.id, space.id));
 
-      await triggerScheduledRun(schedule.id, pkg.id, actor, ctx.orgId, space.id, undefined, {});
+      await triggerScheduledRun(schedule.id);
       const [row] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
       const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
       expect(row!.enabled).toBe(change === "keep");

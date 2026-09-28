@@ -898,8 +898,9 @@ describe("Schedules API", () => {
       expect(body.userId).toBe(ctx.user.id);
     });
 
-    // Naming another member is an org owner/admin act; `schedules:write` covers yourself and
-    // end users only.
+    // A schedule running as another member lends that member's connections to every run: naming
+    // such an actor, and any later write to such a schedule, is an org owner/admin act.
+    // `schedules:write` covers schedules running as yourself or as an end user.
     describe("who may name another member", () => {
       let fid: string;
       let other: string;
@@ -956,21 +957,60 @@ describe("Schedules API", () => {
         expect(((await res.json()) as { userId: string }).userId).toBe(other);
       });
 
-      it("lets a builder edit an admin-written schedule without changing its actor", async () => {
-        const builder = await memberContext(ctx, "member", "builder");
+      function remove(caller: TestContext, id: string) {
+        return app.request(`/api/schedules/${id}`, {
+          method: "DELETE",
+          headers: authHeaders(caller),
+        });
+      }
+
+      async function scheduleRunningAsOther(): Promise<string> {
         const created = await create(ctx, { userId: other });
+        expect(created.status).toBe(201);
+        return ((await created.json()) as { id: string }).id;
+      }
+
+      it("refuses a builder every write to a schedule running as another member", async () => {
+        const builder = await memberContext(ctx, "member", "builder");
+        const id = await scheduleRunningAsOther();
+
+        for (const body of [
+          { name: "Renamed" },
+          { enabled: false },
+          // Re-sending the stored actor, or taking the schedule over, is a write like any other.
+          { actor: { userId: other } },
+          { actor: { userId: builder.user.id } },
+        ]) {
+          const res = await patch(builder, id, body);
+          expect(`${JSON.stringify(body)}: ${res.status}`).toBe(`${JSON.stringify(body)}: 403`);
+          expect(await res.json()).toMatchObject({ code: "forbidden" });
+        }
+        expect((await remove(builder, id)).status).toBe(403);
+
+        const read = await app.request(`/api/schedules/${id}`, { headers: authHeaders(ctx) });
+        expect(await read.json()).toMatchObject({ name: null, enabled: true, userId: other });
+      });
+
+      it("lets an org admin edit, disable and delete it", async () => {
+        const admin = await memberContext(ctx, "admin");
+        const id = await scheduleRunningAsOther();
+
+        expect((await patch(admin, id, { name: "Renamed" })).status).toBe(200);
+        expect((await patch(admin, id, { enabled: false })).status).toBe(200);
+        expect((await remove(admin, id)).status).toBe(204);
+      });
+
+      it("lets a builder write their own schedule, and refuses moving it to another member", async () => {
+        const builder = await memberContext(ctx, "member", "builder");
+        const created = await create(builder);
         expect(created.status).toBe(201);
         const { id } = (await created.json()) as { id: string };
 
         expect((await patch(builder, id, { name: "Renamed" })).status).toBe(200);
-        // Re-sending the stored actor is no choice either.
-        expect((await patch(builder, id, { actor: { userId: other } })).status).toBe(200);
-        // Moving it to another member is.
-        const third = await createTestUser();
-        await addOrgMember(ctx.orgId, third.id, "member");
-        const moved = await patch(builder, id, { actor: { userId: third.id } });
+        const moved = await patch(builder, id, { actor: { userId: other } });
         expect(moved.status).toBe(403);
         expect(await moved.json()).toMatchObject({ code: "forbidden", param: "actor" });
+        expect((await remove(builder, id)).status).toBe(204);
       });
     });
   });

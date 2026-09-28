@@ -418,8 +418,8 @@ router.delete(
     } else {
       scope = { spaceId: row.spaceId } satisfies ActorScope;
     }
-    // Re-armed (or, for a disabled one, removed) after the commit: each job payload froze the
-    // pre-delete overrides.
+    // After the commit, the job of a schedule the delete disabled is removed (the others stay
+    // armed: a fire reads the pruned row).
     await resyncScheduleJobs(await deleteIntegrationConnection(scope, connectionId, actor));
     await recordAuditFromContext(c, {
       action: "integration.connection.deleted",

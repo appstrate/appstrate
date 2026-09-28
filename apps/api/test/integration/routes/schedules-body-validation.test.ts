@@ -42,7 +42,13 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedSchedule, seedSpace, seedSpaceMember } from "../../helpers/seed.ts";
+import {
+  seedEndUser,
+  seedPackage,
+  seedSchedule,
+  seedSpace,
+  seedSpaceMember,
+} from "../../helpers/seed.ts";
 
 /** A skill the fixture agent DECLARES and this caller writes (homed in their space). */
 const DECLARED_SKILL = "@schedbodyorg/dep-skill";
@@ -404,12 +410,17 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
       body: JSON.stringify(body),
     });
 
-  /** A schedule armed by the skill's author — the only principal allowed to freeze `draft`. */
+  /**
+   * A schedule armed by the skill's author — the only principal allowed to freeze `draft`. It
+   * runs as an end user: one running as another MEMBER is written by org owners/admins only,
+   * which would refuse the schedule writer before the override is judged.
+   */
   async function armedSchedule(dependencyOverrides?: Record<string, string>): Promise<string> {
-    const res = await postSchedule(
-      await skillAuthor(),
-      dependencyOverrides ? { dependency_overrides: dependencyOverrides } : {},
-    );
+    const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: teamId });
+    const res = await postSchedule(await skillAuthor(), {
+      actor: { endUserId: endUser.id },
+      ...(dependencyOverrides ? { dependency_overrides: dependencyOverrides } : {}),
+    });
     expect(res.status, await res.clone().text()).toBe(201);
     return ((await res.json()) as { id: string }).id;
   }

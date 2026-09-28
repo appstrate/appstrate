@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 // Catch stale fire-and-forget rejections from previous test cycles
 // (e.g., ensureDefaultProfile racing with truncateAll)
 process.on("unhandledRejection", () => {});
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationConnections, organizationMembers, runs, schedules } from "@appstrate/db/schema";
 import { Queue, type ConnectionOptions } from "bullmq";
@@ -567,19 +567,62 @@ describeRequiresRedis("scheduler service", () => {
     });
 
     // The snapshot is what the caller's checks judged; a row that moved since writes nothing.
+    // Every schedule writer bumps `updated_at`; a second later stands for "any later write".
+    const bumped = sql`${schedules.updatedAt} + interval '1 second'`;
+
     it("refuses a stale snapshot with 409 and leaves the row as it is", async () => {
       const scope = { orgId: orgId, spaceId: defaultSpaceId };
       const created = await createSchedule(scope, packageId, actor, {
         cronExpression: "0 * * * *",
       });
       // A concurrent write (e.g. a connection delete) disabled it after the caller's read.
-      await db.update(schedules).set({ enabled: false }).where(eq(schedules.id, created.id));
+      await db
+        .update(schedules)
+        .set({ enabled: false, updatedAt: bumped })
+        .where(eq(schedules.id, created.id));
 
       await expect(
         updateSchedule(scope, created, { name: "renamed" }, null, undefined),
       ).rejects.toMatchObject({ status: 409, code: "schedule_modified_concurrently" });
       const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));
       expect(row).toMatchObject({ enabled: false, name: null });
+    });
+
+    // One stamp covers every field a check reads, not a list that can miss one.
+    it("refuses a snapshot whose row moved on a field no patch check lists, like version_override", async () => {
+      const scope = { orgId: orgId, spaceId: defaultSpaceId };
+      const created = await createSchedule(scope, packageId, actor, {
+        cronExpression: "0 * * * *",
+      });
+      await db
+        .update(schedules)
+        .set({ versionOverride: "draft", updatedAt: bumped })
+        .where(eq(schedules.id, created.id));
+
+      await expect(
+        updateSchedule(scope, created, { enabled: true }, null, undefined),
+      ).rejects.toMatchObject({ status: 409, code: "schedule_modified_concurrently" });
+    });
+
+    it("accepts the snapshot of a row stamped by the database clock (microseconds)", async () => {
+      const scope = { orgId: orgId, spaceId: defaultSpaceId };
+      const created = await createSchedule(scope, packageId, actor, {
+        cronExpression: "0 * * * *",
+      });
+      await db
+        .update(schedules)
+        .set({ updatedAt: sql`now()` })
+        .where(eq(schedules.id, created.id));
+      const [fresh] = await db.select().from(schedules).where(eq(schedules.id, created.id));
+
+      const updated = await updateSchedule(
+        scope,
+        { ...created, updatedAt: fresh!.updatedAt.toISOString() },
+        { name: "renamed" },
+        null,
+        undefined,
+      );
+      expect(updated.name).toBe("renamed");
     });
 
     it("refuses a snapshot of a row deleted since, with the same 409", async () => {
@@ -681,15 +724,7 @@ describeRequiresRedis("scheduler service", () => {
       // Inherit (no versionOverride) → resolves to `published` → 404
       // no_published_version → caught → failSchedule(). Stops before preflight,
       // so nothing executes.
-      await triggerScheduledRun(
-        schedule.id,
-        packageId,
-        actor,
-        orgId,
-        defaultSpaceId,
-        undefined, // input
-        {}, // overrides — versionOverride absent → inherit
-      );
+      await triggerScheduledRun(schedule.id);
 
       const failed = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
       expect(failed).toHaveLength(1);
@@ -698,23 +733,26 @@ describeRequiresRedis("scheduler service", () => {
     });
   });
 
-  // ── triggerScheduledRun — job data the write path would refuse ──
+  // ── triggerScheduledRun — a row the write path would refuse ──
   //
-  // BullMQ job data is a COPY of the schedule row, and a delayed job can outlive
-  // a rewrite of that row. A bare connection id where a set belongs must fail
+  // A bare connection id where a set belongs (the shape before sets) must fail
   // the fire loudly, never be read as a set of its characters.
 
   describe("triggerScheduledRun connection_overrides shape", () => {
-    it("fails the fire when the job's connection_overrides value is a bare id, not a set", async () => {
+    it("fails the fire when the row's connection_overrides value is a bare id, not a set", async () => {
       const schedule = await createSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
         cronExpression: "0 * * * *",
       });
+      await db
+        .update(schedules)
+        .set({
+          connectionOverrides: {
+            "@vendor/ssh": "0b7e4f4e-1c1f-4d7e-9c63-9a7b1f0e2d11",
+          } as unknown as Record<string, string[]>,
+        })
+        .where(eq(schedules.id, schedule.id));
 
-      await triggerScheduledRun(schedule.id, packageId, actor, orgId, defaultSpaceId, undefined, {
-        connectionOverrides: {
-          "@vendor/ssh": "0b7e4f4e-1c1f-4d7e-9c63-9a7b1f0e2d11",
-        } as unknown as Record<string, string[]>,
-      });
+      await triggerScheduledRun(schedule.id);
 
       const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
       expect(fired).toHaveLength(1);
@@ -757,9 +795,7 @@ describeRequiresRedis("scheduler service", () => {
         versionOverride: "draft",
       });
 
-      await triggerScheduledRun(schedule.id, agent.id, actor, orgId, defaultSpaceId, undefined, {
-        versionOverride: "draft",
-      });
+      await triggerScheduledRun(schedule.id);
 
       const failed = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
       expect(failed).toHaveLength(1);
@@ -771,10 +807,10 @@ describeRequiresRedis("scheduler service", () => {
 
   // ── triggerScheduledRun — fire-time actor revalidation (CRIT-13) ──
   //
-  // The BullMQ job payload freezes the actor at schedule create/update, and a
-  // removed member keeps their `user` row (multi-org) — so a job surviving the
-  // removeMember queue cleanup would keep firing under the revoked identity.
-  // The fire path must revalidate the frozen actor on EVERY fire and, when
+  // A removed member keeps their `user` row (multi-org), and the schedule row
+  // only cascades on account deletion — so a schedule the removeMember cleanup
+  // missed would keep firing under the revoked identity. The fire path must
+  // revalidate the row's actor on EVERY fire and, when
   // invalid, disable the schedule and record a VISIBLE FAILED run — never a
   // silent skip and never a false-positive `success`.
 
@@ -791,23 +827,15 @@ describeRequiresRedis("scheduler service", () => {
       expect(schedule.enabled).toBe(true);
 
       // Revoke the membership DIRECTLY (bypassing removeMember's own schedule
-      // disable) — this simulates the backstop case: a queued job that
-      // survived the revocation path and now fires with the frozen actor.
+      // disable) — this simulates the backstop case: a schedule the
+      // revocation path left armed now fires with the row's actor.
       await db
         .delete(organizationMembers)
         .where(
           and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, member.id)),
         );
 
-      await triggerScheduledRun(
-        schedule.id,
-        packageId,
-        actorM,
-        orgId,
-        defaultSpaceId,
-        undefined,
-        {},
-      );
+      await triggerScheduledRun(schedule.id);
 
       // VISIBLE failed run — never a silent skip, never `success`.
       const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
@@ -839,15 +867,7 @@ describeRequiresRedis("scheduler service", () => {
         { cronExpression: "0 * * * *" },
       );
 
-      await triggerScheduledRun(
-        schedule.id,
-        packageId,
-        actorEu,
-        orgId,
-        defaultSpaceId,
-        undefined,
-        {},
-      );
+      await triggerScheduledRun(schedule.id);
 
       const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
       expect(fired).toHaveLength(1);
@@ -870,15 +890,7 @@ describeRequiresRedis("scheduler service", () => {
         cronExpression: "0 * * * *",
       });
 
-      await triggerScheduledRun(
-        schedule.id,
-        packageId,
-        actor,
-        orgId,
-        defaultSpaceId,
-        undefined,
-        {},
-      );
+      await triggerScheduledRun(schedule.id);
 
       const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
       expect(fired).toHaveLength(1);
@@ -894,6 +906,65 @@ describeRequiresRedis("scheduler service", () => {
         .from(schedules)
         .where(eq(schedules.id, schedule.id));
       expect(row!.enabled).toBe(true);
+    });
+  });
+
+  // ── triggerScheduledRun reads the row, never a job payload ──
+  //
+  // A job only names its schedule: one armed out of order, or one whose
+  // removal failed, must neither fire a disabled/deleted schedule nor replay
+  // values the row no longer holds.
+
+  describe("triggerScheduledRun reads the schedule row", () => {
+    async function jobOf(scheduleId: string) {
+      const queue = new Queue("schedules", {
+        connection: getRedisQueueConnection() as unknown as ConnectionOptions,
+      });
+      try {
+        return await queue.getJobScheduler(scheduleId);
+      } finally {
+        await queue.close();
+      }
+    }
+
+    it("skips a schedule disabled behind its armed job, and removes the job", async () => {
+      const schedule = await createSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
+        cronExpression: "0 * * * *",
+      });
+      expect((await jobOf(schedule.id))?.template?.data).toEqual({ scheduleId: schedule.id });
+      await db.update(schedules).set({ enabled: false }).where(eq(schedules.id, schedule.id));
+
+      expect(await triggerScheduledRun(schedule.id)).toBe(false);
+      expect(await db.select().from(runs).where(eq(runs.scheduleId, schedule.id))).toHaveLength(0);
+      expect(await jobOf(schedule.id)).toBeUndefined();
+    });
+
+    it("skips a schedule deleted behind its armed job, and removes the job", async () => {
+      const schedule = await createSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
+        cronExpression: "0 * * * *",
+      });
+      await db.delete(schedules).where(eq(schedules.id, schedule.id));
+
+      expect(await triggerScheduledRun(schedule.id)).toBe(false);
+      expect(await jobOf(schedule.id)).toBeUndefined();
+    });
+
+    it("fires as the row's CURRENT actor, not the one it was armed with", async () => {
+      const schedule = await createSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
+        cronExpression: "0 * * * *",
+      });
+      // Re-pointed without re-arming the job: an end user of ANOTHER space fails revalidation.
+      const otherSpace = await seedSpace({ orgId });
+      const foreign = await seedEndUser({ spaceId: otherSpace.id, orgId });
+      await db
+        .update(schedules)
+        .set({ userId: null, endUserId: foreign.id })
+        .where(eq(schedules.id, schedule.id));
+
+      expect(await triggerScheduledRun(schedule.id)).toBe(true);
+      const [fired] = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(fired!.endUserId).toBe(foreign.id);
+      expect((fired!.error ?? "").toLowerCase()).toContain("end-user");
     });
   });
 
@@ -1008,14 +1079,12 @@ describeRequiresRedis("scheduler service", () => {
     });
   });
 
-  // ── a connection delete re-arms the owner's schedule jobs ──
+  // ── a connection delete and the owner's schedule jobs ──
   //
-  // The job payload freezes `connection_overrides`, and the fire reads the
-  // payload, not the row: a delete that pruned only the row would keep firing
-  // with the dead id.
+  // The fire reads the pruned row; the job only has to follow `enabled`.
 
   describe("deleteIntegrationConnection re-arms the owner's schedule job", () => {
-    it("the job payload drops the deleted id, like the row", async () => {
+    it("a shrunk set keeps the job armed, naming only the schedule", async () => {
       const integrationId = `@${orgSlug}/svc`;
       await seedPackage({ orgId, id: integrationId, type: "integration", source: "local" });
       const [kept, gone] = await Promise.all(
@@ -1046,12 +1115,17 @@ describeRequiresRedis("scheduler service", () => {
         await deleteIntegrationConnection({ orgId, spaceId: defaultSpaceId }, gone!, actor),
       );
 
+      const [after] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+      expect(after).toMatchObject({
+        enabled: true,
+        connectionOverrides: { [integrationId]: [kept!] },
+      });
       const queue = new Queue("schedules", {
         connection: getRedisQueueConnection() as unknown as ConnectionOptions,
       });
       try {
         const job = await queue.getJobScheduler(schedule.id);
-        expect(job?.template?.data?.connectionOverrides).toEqual({ [integrationId]: [kept!] });
+        expect(job?.template?.data).toEqual({ scheduleId: schedule.id });
       } finally {
         await queue.close();
       }

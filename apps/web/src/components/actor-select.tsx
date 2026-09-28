@@ -79,11 +79,14 @@ export function ActorSelect({
     { enabled: !!orgId },
   );
   const members = useMemo(() => orgData?.members ?? [], [orgData]);
-  // Naming ANOTHER member is an org owner/admin act (the server answers 403 otherwise); anyone
-  // else picks themselves, an end user, or keeps the member already selected.
+  // Naming ANOTHER member is an org owner/admin act; anyone else picks themselves, an end user, or
+  // the member the field started on — kept listed after picking someone else, so it can be put
+  // back. No permission names this rule, so the org role only shapes the list: the server
+  // decides (403).
   const { user } = useAuth();
   const { orgRole } = usePermissions();
   const mayChooseOtherMembers = orgRole === "owner" || orgRole === "admin";
+  const [initialUserId] = useState(value?.userId);
 
   const { data: endUserPage } = useEndUsers({
     limit: 50,
@@ -97,7 +100,7 @@ export function ActorSelect({
   const memberOptions = useMemo<Option[]>(() => {
     const q = debouncedQuery.toLowerCase();
     return members
-      .filter((m) => mayChooseOtherMembers || m.userId === user?.id || m.userId === value?.userId)
+      .filter((m) => mayChooseOtherMembers || m.userId === user?.id || m.userId === initialUserId)
       .filter(
         (m) =>
           !q ||
@@ -109,7 +112,7 @@ export function ActorSelect({
         name: primaryLabel(m.displayName, m.email ?? null, m.userId),
         email: m.email ?? null,
       }));
-  }, [members, debouncedQuery, mayChooseOtherMembers, user?.id, value?.userId]);
+  }, [members, debouncedQuery, mayChooseOtherMembers, user?.id, initialUserId]);
 
   const endUserOptions = useMemo<Option[]>(
     () =>

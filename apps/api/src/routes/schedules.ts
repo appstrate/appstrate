@@ -294,26 +294,47 @@ const actorSchema = z
   });
 
 /**
- * Naming ANOTHER platform member as a schedule's actor makes the schedule run with that
- * member's reach on every fire — an org owner/admin act (#738), not something `schedules:write`
- * alone grants. Yourself or an end user of the space stays a `schedules:write` choice. Checked
- * before the membership lookup, so a refused caller cannot probe who is a member either.
+ * A schedule running as ANOTHER platform member runs with that member's reach on every fire — the
+ * actor lends every connection of theirs to its runs — so it is governed by org owners/admins
+ * (#738): naming such an actor, and any later write to such a schedule, is not something
+ * `schedules:write` alone grants. Running as yourself or as an end user of the space stays a
+ * `schedules:write` matter. `memberId` is the schedule's member actor, `null` for an end user.
+ */
+function mayGovernMemberSchedule(c: Context<AppEnv>, memberId: string | null | undefined): boolean {
+  if (!memberId) return true;
+  const caller = getActor(c);
+  if (caller.type === "user" && caller.id === memberId) return true;
+  const role = callerOrgRole(c);
+  return role === "owner" || role === "admin";
+}
+
+/**
+ * Choosing the actor. Checked before the membership lookup, so a refused caller cannot probe who
+ * is a member either.
  */
 function assertMayChooseMemberActor(
   c: Context<AppEnv>,
   selected: { userId?: string } | undefined,
 ): void {
-  if (!selected?.userId) return;
-  const caller = getActor(c);
-  if (caller.type === "user" && caller.id === selected.userId) return;
-  const role = callerOrgRole(c);
-  if (role === "owner" || role === "admin") return;
+  if (mayGovernMemberSchedule(c, selected?.userId)) return;
   throw new ApiError({
     status: 403,
     code: "forbidden",
     title: "Forbidden",
     detail: "Only an organization owner or admin can make another member a schedule's actor.",
     param: "actor",
+  });
+}
+
+/** Any write (patch of any field, enable/disable, delete) to a stored schedule. */
+function assertMayWriteSchedule(c: Context<AppEnv>, schedule: { userId: string | null }): void {
+  if (mayGovernMemberSchedule(c, schedule.userId)) return;
+  throw new ApiError({
+    status: 403,
+    code: "forbidden",
+    title: "Forbidden",
+    detail:
+      "Only an organization owner or admin can change a schedule that runs as another member.",
   });
 }
 
@@ -561,6 +582,7 @@ export function createSchedulesRouter() {
     const id = c.req.param("id")!;
     const scope = getSpaceScope(c);
     const existing = await loadScheduleOr404(c, id, scope);
+    assertMayWriteSchedule(c, existing);
 
     const data = await readJsonBody(c, updateScheduleSchema);
 
@@ -736,7 +758,7 @@ export function createSchedulesRouter() {
 
     // #738: re-point the actor when the caller selected one (validated against
     // this org/space scope). `undefined` leaves the existing actor untouched. Re-sending the
-    // stored member is no choice, so it needs no admin — an admin already made it.
+    // stored actor is no choice; writing a schedule running as another member was judged above.
     if (data.actor?.userId !== existing.userId) assertMayChooseMemberActor(c, data.actor);
     const actor = data.actor ? await resolveScheduleActor(scope, data.actor) : undefined;
 
@@ -854,7 +876,7 @@ export function createSchedulesRouter() {
   router.delete("/schedules/:id", requirePermission("schedules", "delete"), async (c) => {
     const id = c.req.param("id")!;
     const scope = getSpaceScope(c);
-    await loadScheduleOr404(c, id, scope);
+    assertMayWriteSchedule(c, await loadScheduleOr404(c, id, scope));
     await deleteSchedule(scope, id);
     await recordAuditFromContext(c, {
       action: "schedule.deleted",

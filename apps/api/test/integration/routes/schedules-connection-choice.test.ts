@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { integrationConnections, integrationPins, schedules } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
@@ -400,8 +400,11 @@ describe("schedule writes for another actor — only what both reach", () => {
       enabled: false,
     });
     const judged = (await getSchedule(seeded.id, scope, null, undefined))!;
-    // P1 commits between P2's read and P2's write.
-    await db.update(schedules).set({ userId: member.user.id }).where(eq(schedules.id, seeded.id));
+    // P1 commits between P2's read and P2's write, bumping the stamp as every schedule write does.
+    await db
+      .update(schedules)
+      .set({ userId: member.user.id, updatedAt: sql`${schedules.updatedAt} + interval '1 second'` })
+      .where(eq(schedules.id, seeded.id));
 
     await expect(
       updateSchedule(

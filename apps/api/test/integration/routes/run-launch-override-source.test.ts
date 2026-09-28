@@ -95,17 +95,10 @@ describe("launch override — the bound set names the launch it came from", () =
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       connectionOverrides: { [INTEGRATION]: [picked] },
+      versionOverride: "draft",
     });
 
-    await triggerScheduledRun(
-      schedule.id,
-      AGENT,
-      { type: "user", id: ctx.user.id },
-      ctx.orgId,
-      ctx.defaultSpaceId,
-      undefined,
-      { versionOverride: "draft", connectionOverrides: { [INTEGRATION]: [picked] } },
-    );
+    await triggerScheduledRun(schedule.id);
 
     const [row] = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
     expect(row!.status).not.toBe("failed");

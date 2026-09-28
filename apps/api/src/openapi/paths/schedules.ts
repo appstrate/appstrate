@@ -304,7 +304,7 @@ export const schedulesPaths = {
       tags: ["Schedules"],
       summary: "Update a schedule",
       description:
-        "Update a cron schedule (expression, timezone, enabled state, or input). Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
+        "Update a cron schedule (expression, timezone, enabled state, or input). Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. A schedule whose actor is ANOTHER platform member than the caller lends that member's connections to every run, so any patch of it — whatever the fields, enabling and disabling included — requires the org role owner or admin (else `403 forbidden`); schedules running as the caller or as an end user need `schedules:write` only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -356,7 +356,7 @@ export const schedulesPaths = {
                 actor: {
                   type: "object",
                   description:
-                    "Re-point the schedule's execution identity (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`; changing it to ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin — else `403 forbidden` with `param: actor`. Re-sending the stored actor is not a change.",
+                    "Re-point the schedule's execution identity (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`; changing it to ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin — else `403 forbidden` with `param: actor`. A schedule already running as another member takes owner or admin for any patch, this field included.",
                   properties: {
                     userId: { type: "string" },
                     endUserId: { type: "string" },
@@ -400,7 +400,7 @@ export const schedulesPaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "Insufficient permissions — including `forbidden` with `param: actor` when a caller who is not an org owner or admin changes `actor` to another member, and `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged.",
+            "Insufficient permissions — including `forbidden` when a caller who is not an org owner or admin patches a schedule running as another member (any field), or (with `param: actor`) changes `actor` to another member, and `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged.",
         },
         // Two causes, both on this one response: `loadScheduleOr404` runs
         // first (unknown schedule id — the dominant 404 here), and a patch
@@ -409,11 +409,13 @@ export const schedulesPaths = {
         // revalidating onto a never-published agent gets `no_published_version`
         // here too. The shared component's description names both.
         "404": { $ref: "#/components/responses/NoPublishedVersion" },
-        // The connection refusal is not raised by a patch leaving the schedule disabled; the
-        // concurrent-write one can be raised by any patch.
+        // `must_choose_connection` / `auth_serves_no_selected_tool` need the schedule to stay
+        // enabled; `override_connection_unavailable` on another member's schedule (an owner/admin
+        // write) is judged on every write, disabled or not; the concurrent-write one can be raised
+        // by any patch.
         "409": {
           ...scheduleConnectionNotChosen,
-          description: `${scheduleConnectionNotChosen.description} — Or \`schedule_modified_concurrently\`: the schedule's actor, \`connection_overrides\`, \`enabled\`, \`cron_expression\` or \`timezone\` changed while this patch was being judged (another write, or a connection delete disabling it); nothing was written — reload the schedule and retry.`,
+          description: `${scheduleConnectionNotChosen.description} — Or \`schedule_modified_concurrently\`: the schedule was written since this patch read it (\`updated_at\` moved: another patch, a connection delete disabling it, a fire, or a lock on one of its input fields); nothing was written — reload the schedule and retry.`,
         },
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
@@ -422,7 +424,8 @@ export const schedulesPaths = {
       operationId: "deleteSchedule",
       tags: ["Schedules"],
       summary: "Delete a schedule",
-      description: "Permanently delete a cron schedule.",
+      description:
+        "Permanently delete a cron schedule. A schedule whose actor is ANOTHER platform member than the caller requires the org role owner or admin (else `403 forbidden`), on top of `schedules:delete`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -434,7 +437,11 @@ export const schedulesPaths = {
           headers: STD_RESPONSE_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "Insufficient permissions — including `forbidden` when a caller who is not an org owner or admin deletes a schedule running as another member.",
+        },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
