@@ -112,11 +112,32 @@ describe("describeResolution — resolved", () => {
   });
 });
 
+describe("describeResolution — soft default set", () => {
+  it("is the stored default, whole, while the soft default is the layer in play", () => {
+    for (const error_code of [
+      null,
+      "auth_serves_no_selected_tool",
+      "pinned_connection_unavailable",
+    ] as const) {
+      const view = describeResolution(
+        resolution({ source: "org_default", error_code, org_default_connection_ids: ["a", "b"] }),
+      );
+      expect(view.softDefaultIds).toEqual(["a", "b"]);
+    }
+  });
+
+  it("is empty when another layer is in play, the enforced default included", () => {
+    for (const source of ["member_pin", "fallback_auto", "org_default_enforced", null] as const) {
+      const view = describeResolution(resolution({ source, org_default_connection_ids: ["a"] }));
+      expect(view.softDefaultIds).toEqual([]);
+    }
+  });
+});
+
 describe("describeResolution — empty picker prompt", () => {
-  it("asks for a pick, a removal, or a connection", () => {
+  it("asks for a pick or a connection", () => {
     const cases = [
       ["must_choose_connection", "choose"],
-      ["auth_serves_no_selected_tool", "remove_unserving"],
       ["not_connected", "connect"],
       ["needs_reconnection", "connect"],
       [null, "connect"],

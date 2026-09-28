@@ -4,11 +4,10 @@ import type { IntegrationAgentResolution } from "@appstrate/shared-types";
 
 /**
  * What an empty picker trigger asks the actor for: a pick among several
- * (`must_choose_connection`), dropping a default whose auth serves none of the
- * selected tools (`auth_serves_no_selected_tool`), or — every other state — a
- * connection.
+ * (`must_choose_connection`), or — every other state — a connection. A broken
+ * explicit set never reaches it: the picker names that set whole.
  */
-type EmptyPickerPrompt = "choose" | "remove_unserving" | "connect";
+type EmptyPickerPrompt = "choose" | "connect";
 
 interface ResolutionView {
   /**
@@ -19,6 +18,12 @@ interface ResolutionView {
   lockedConnectionIds: string[];
   /** Bound without anyone's pick: a soft org default or the actor's single own connection. */
   byDefault: boolean;
+  /**
+   * The soft org default's whole stored set while it is the layer in play —
+   * bound, or failed on a member (unreachable, or on an auth serving no
+   * selected tool) — else empty. The candidates alone would hide that member.
+   */
+  softDefaultIds: string[];
   /**
    * The set binds: connections were resolved and no error was raised. False
    * when there is no verdict at all (no manifest loaded — `source` and
@@ -47,12 +52,8 @@ export function describeResolution(resolution: IntegrationAgentResolution): Reso
           ? resolution.org_default_connection_ids
           : [],
     byDefault: source === "org_default" || source === "fallback_auto",
+    softDefaultIds: source === "org_default" ? resolution.org_default_connection_ids : [],
     resolved: code === null && resolution.resolved_connection_ids.length > 0,
-    emptyPickerPrompt:
-      code === "must_choose_connection"
-        ? "choose"
-        : code === "auth_serves_no_selected_tool"
-          ? "remove_unserving"
-          : "connect",
+    emptyPickerPrompt: code === "must_choose_connection" ? "choose" : "connect",
   };
 }

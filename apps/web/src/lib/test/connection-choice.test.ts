@@ -5,6 +5,9 @@ import { ApiError } from "../../api/errors.ts";
 import {
   integrationIdOfField,
   pendingConnectionChoices,
+  picksAfterActorChange,
+  refusalForActor,
+  refusalReasonKey,
   scheduleConnectionChoices,
   type ConnectionChoice,
 } from "../connection-choice.ts";
@@ -47,10 +50,16 @@ describe("scheduleConnectionChoices", () => {
         code: "override_connection_unavailable",
         message: "gone",
       },
+      {
+        field: "integrations.@acme/ssh",
+        code: "auth_serves_no_selected_tool",
+        message: "unserving",
+      },
     ]);
     expect(scheduleConnectionChoices(err)).toEqual([
       { integrationId: "@acme/gmail", code: "must_choose_connection", candidates: [CANDIDATE] },
       { integrationId: "@acme/notion", code: "override_connection_unavailable", candidates: [] },
+      { integrationId: "@acme/ssh", code: "auth_serves_no_selected_tool", candidates: [] },
     ]);
   });
 
@@ -87,5 +96,77 @@ describe("pendingConnectionChoices", () => {
       "@acme/gmail",
       "@acme/notion",
     ]);
+  });
+});
+
+const ALICE = { userId: "usr_alice" };
+const BOB = { userId: "usr_bob" };
+const ALICE_PICKS = { "@acme/gmail": ["c_alice"] };
+const BOB_PICKS = { "@acme/gmail": ["c_bob"] };
+
+describe("picksAfterActorChange", () => {
+  const stored = { actor: ALICE, picks: ALICE_PICKS };
+
+  it("keeps the picks while the identity does not change", () => {
+    expect(
+      picksAfterActorChange({ picks: BOB_PICKS, runsAs: ALICE, nextRunsAs: ALICE, stored }),
+    ).toBe(BOB_PICKS);
+  });
+
+  it("drops them on a real change: they named the previous identity's connections", () => {
+    expect(
+      picksAfterActorChange({ picks: ALICE_PICKS, runsAs: ALICE, nextRunsAs: BOB, stored }),
+    ).toBeUndefined();
+    expect(
+      picksAfterActorChange({ picks: ALICE_PICKS, runsAs: ALICE, nextRunsAs: BOB, stored: null }),
+    ).toBeUndefined();
+  });
+
+  it("restores the stored picks back on the schedule's own actor", () => {
+    expect(
+      picksAfterActorChange({ picks: undefined, runsAs: BOB, nextRunsAs: ALICE, stored }),
+    ).toBe(ALICE_PICKS);
+  });
+
+  it("restores nothing on create, where no picks are stored", () => {
+    expect(
+      picksAfterActorChange({ picks: BOB_PICKS, runsAs: BOB, nextRunsAs: ALICE, stored: null }),
+    ).toBeUndefined();
+  });
+});
+
+describe("refusalForActor", () => {
+  const choices: ConnectionChoice[] = [
+    { integrationId: "@acme/gmail", code: "must_choose_connection", candidates: [CANDIDATE] },
+  ];
+
+  it("speaks for the identity the refused save was sent for", () => {
+    expect(refusalForActor(choices, { runsAs: ALICE, picks: {} }, ALICE)).toBe(choices);
+  });
+
+  it("goes stale once the actor moves, and comes back with it", () => {
+    const submitted = { runsAs: ALICE, picks: {} };
+    expect(refusalForActor(choices, submitted, BOB)).toEqual([]);
+    expect(refusalForActor(choices, submitted, ALICE)).toBe(choices);
+  });
+
+  it("is empty before any save and without a refusal", () => {
+    expect(refusalForActor(choices, null, ALICE)).toEqual([]);
+    expect(refusalForActor(undefined, { runsAs: ALICE, picks: {} }, ALICE)).toEqual([]);
+  });
+});
+
+describe("refusalReasonKey", () => {
+  const key = (code: ConnectionChoice["code"], candidates = [CANDIDATE]) =>
+    refusalReasonKey({ integrationId: "@acme/gmail", code, candidates });
+
+  it("tells each refusal apart", () => {
+    expect(key("must_choose_connection")).toBe("schedule.connectionOverrides.mustChoose");
+    expect(key("override_connection_unavailable")).toBe("schedule.connectionOverrides.unavailable");
+    expect(key("auth_serves_no_selected_tool")).toBe("schedule.connectionOverrides.unserving");
+  });
+
+  it("an open choice with nothing the caller may name is the actor's (or an admin's) to make", () => {
+    expect(key("must_choose_connection", [])).toBe("schedule.connectionOverrides.actorMustChoose");
   });
 });

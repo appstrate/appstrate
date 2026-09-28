@@ -181,7 +181,8 @@ export function IntegrationConnectionPicker({
     member_pinned_connection_ids: memberPinnedConnectionIds,
     can_add_connection: canAddConnection,
   } = resolution;
-  const { lockedConnectionIds, byDefault, emptyPickerPrompt } = describeResolution(resolution);
+  const { lockedConnectionIds, byDefault, softDefaultIds, emptyPickerPrompt } =
+    describeResolution(resolution);
 
   const byId = (id: string): IntegrationCandidate | undefined =>
     candidates.find((c) => c.id === id);
@@ -224,7 +225,11 @@ export function IntegrationConnectionPicker({
     resolvedIds: resolvedConnectionIds,
   });
   const candidateIds = candidates.map((c) => c.id);
-  const unavailableIds = unavailableConnectionIds(explicitIds, candidateIds);
+  // The set in play, named whole: the actor's own pick, else (pin mode) a soft
+  // space default — a member of either that is no candidate blocks the run.
+  const fromDefault = !overrideMode && explicitIds.length === 0 && softDefaultIds.length > 0;
+  const storedIds = fromDefault ? softDefaultIds : explicitIds;
+  const unavailableIds = unavailableConnectionIds(storedIds, candidateIds);
   const dirty = draft !== null;
   const checkedIds = checkedConnectionIds({
     draft,
@@ -318,11 +323,9 @@ export function IntegrationConnectionPicker({
     else await refresh();
   };
 
-  // With nothing displayed, the verdict names the cause — `remove_unserving` here
-  // is a soft default whose member serves no selected tool (not a candidate).
   const triggerLabel =
     unavailableIds.length > 0
-      ? `${t("detail.integrationMemberPicker.selectedCount", { count: explicitIds.length })} · ${t(
+      ? `${t("detail.integrationMemberPicker.selectedCount", { count: storedIds.length })} · ${t(
           "detail.integrationMemberPicker.unavailableCount",
           { count: unavailableIds.length },
         )}`
@@ -334,9 +337,7 @@ export function IntegrationConnectionPicker({
             ? t("detail.integrationMemberPicker.inherit")
             : emptyPickerPrompt === "choose"
               ? t("detail.integrationMemberPicker.chooseLabel")
-              : emptyPickerPrompt === "remove_unserving"
-                ? t("detail.integrationMemberPicker.unservingLabel")
-                : t("detail.integrationMemberPicker.connectLabel");
+              : t("detail.integrationMemberPicker.connectLabel");
   // Amber on exactly the states that gate a run: pin mode reads the server's
   // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
   // override mode an empty pick inherits, so only an under-scoped or unavailable set warns.
@@ -424,7 +425,9 @@ export function IntegrationConnectionPicker({
           {candidates.map((c) => {
             const tl = typeLabel(c.auth_key);
             const isChecked = checkedIds.includes(c.id);
-            const isDefault = explicitIds.length === 0 && resolvedConnectionIds.includes(c.id);
+            const isDefault =
+              explicitIds.length === 0 &&
+              (resolvedConnectionIds.includes(c.id) || softDefaultIds.includes(c.id));
             // Only the connection owner can renew via OAuth — a foreign
             // shared connection's tokens belong to someone else. We still
             // let the actor pin a foreign needs_reconnection row (their
@@ -614,7 +617,9 @@ export function IntegrationConnectionPicker({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
-      {/* A stored member is unusable: the run is refused until the set is re-picked. */}
+      {/* A stored member is unusable: the run is refused until the set is re-picked
+          — or, for the space default, until the member picks their own or an
+          admin fixes the default. */}
       {unavailableIds.length > 0 && (
         <div
           className="mt-1.5 flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
@@ -622,9 +627,13 @@ export function IntegrationConnectionPicker({
         >
           <AlertTriangle className="size-3 shrink-0" />
           <span>
-            {t("detail.integrationMemberPicker.unavailableWarning", {
-              count: unavailableIds.length,
-            })}
+            {fromDefault
+              ? t("detail.integrationMemberPicker.defaultUnavailableWarning", {
+                  count: unavailableIds.length,
+                })
+              : t("detail.integrationMemberPicker.unavailableWarning", {
+                  count: unavailableIds.length,
+                })}
           </span>
         </div>
       )}

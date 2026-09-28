@@ -19,6 +19,7 @@ import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { withConnectionPick } from "../lib/connection-set";
+import { type ConnectionChoice, refusalReasonKey } from "../lib/connection-choice";
 import { ModelGenerationFields } from "./model-generation-fields";
 import {
   reconcileModelGenerationSettings,
@@ -78,10 +79,10 @@ interface RunOverridesPanelProps {
    */
   version?: string;
   /**
-   * Integrations a save was refused over for want of a connection choice, whose
-   * pick has not moved since; each row says so.
+   * What a save was refused over, for the integrations whose pick has not moved
+   * since; each rendered row says why.
    */
-  mustChoose?: readonly string[];
+  refusals?: readonly ConnectionChoice[];
 }
 
 /**
@@ -109,7 +110,7 @@ export function RunOverridesPanel({
   value,
   onChange,
   version,
-  mustChoose,
+  refusals,
 }: RunOverridesPanelProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: orgModels } = useModels();
@@ -257,7 +258,7 @@ export function RunOverridesPanel({
           agentPackageId={packageId}
           integrations={agentIntegrations}
           version={version}
-          mustChoose={mustChoose}
+          refusals={refusals}
           value={value.connection_overrides ?? {}}
           onChange={(next) => {
             if (Object.keys(next).length === 0) {
@@ -290,14 +291,14 @@ function ScheduleConnectionOverridesSection({
   agentPackageId,
   integrations,
   version,
-  mustChoose,
+  refusals,
   value,
   onChange,
 }: {
   agentPackageId: string;
   integrations: AgentIntegrationRef[];
   version?: string;
-  mustChoose?: readonly string[];
+  refusals?: readonly ConnectionChoice[];
   value: Record<string, string[]>;
   onChange: (next: Record<string, string[]>) => void;
 }) {
@@ -313,7 +314,7 @@ function ScheduleConnectionOverridesSection({
             agentPackageId={agentPackageId}
             integration={integ}
             version={version}
-            mustChoose={mustChoose?.includes(integ.id) ?? false}
+            refusal={refusals?.find((r) => r.integrationId === integ.id)}
             value={value[integ.id] ?? []}
             onChange={(connIds) => onChange(withConnectionPick(value, integ.id, connIds))}
           />
@@ -327,14 +328,14 @@ function IntegrationOverrideRow({
   agentPackageId,
   integration,
   version,
-  mustChoose,
+  refusal,
   value,
   onChange,
 }: {
   agentPackageId: string;
   integration: AgentIntegrationRef;
   version?: string;
-  mustChoose: boolean;
+  refusal: ConnectionChoice | undefined;
   /** Currently-picked connection set; empty = inherit. */
   value: string[];
   onChange: (next: string[]) => void;
@@ -363,9 +364,9 @@ function IntegrationOverrideRow({
         persistence={{ mode: "override", value, onChange }}
         version={version}
       />
-      {mustChoose && (
+      {refusal && (
         <p className="text-destructive text-xs" role="alert">
-          {t("schedule.connectionOverrides.mustChoose")}
+          {t(refusalReasonKey(refusal))}
         </p>
       )}
     </div>

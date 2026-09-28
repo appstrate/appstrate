@@ -203,16 +203,54 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(html).toContain(t("unavailableWarning", { count: 1 }));
   });
 
-  it("a default set on an auth serving no selected tool says so on the trigger", () => {
+  it("a soft default with a member serving no selected tool is named whole", () => {
+    // {WEB serves, GONE does not}: the candidates hold WEB alone, so reading the
+    // trigger off them showed one bound connection where the run is refused.
     const html = renderPicker(
       resolution({
         source: "org_default",
         error_code: "auth_serves_no_selected_tool",
-        resolved_connection_ids: [GONE],
+        org_default_connection_ids: [WEB, GONE],
+        resolved_connection_ids: [WEB, GONE],
       }),
       true,
     );
-    expect(html).toContain(t("unservingLabel"));
+    expect(html).toContain(
+      `${t("selectedCount", { count: 2 })} · ${t("unavailableCount", { count: 1 })}`,
+    );
+    expect(html).toContain(t("defaultBadge"));
+    expect(html).toContain(t("defaultUnavailableWarning", { count: 1 }));
+    expect(html).not.toContain(t("unavailableWarning", { count: 1 }));
+  });
+
+  it("a soft default naming an unreachable connection says the default is unavailable", () => {
+    // Nothing resolved: this used to read "Connecter (par défaut)".
+    const html = renderPicker(
+      resolution({
+        source: "org_default",
+        error_code: "pinned_connection_unavailable",
+        org_default_connection_ids: [GONE],
+      }),
+      true,
+    );
+    expect(html).not.toContain(t("connectLabel"));
+    expect(html).toContain(
+      `${t("selectedCount", { count: 1 })} · ${t("unavailableCount", { count: 1 })}`,
+    );
+    expect(html).toContain(WARNING);
+    expect(html).toContain(t("defaultUnavailableWarning", { count: 1 }));
+  });
+
+  it("a member pin over a broken soft default speaks for the pin alone", () => {
+    const html = renderPicker(
+      resolution({
+        member_pinned_connection_ids: [WEB],
+        resolved_connection_ids: [WEB],
+        org_default_connection_ids: [GONE],
+      }),
+      false,
+    );
+    expect(html).not.toContain(WARNING);
   });
 
   it("an unpinned must_choose asks for a choice", () => {

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ApiError } from "../api/errors";
+import type { ActorValue } from "../components/actor-select";
+import { sameActor } from "./schedule-payload";
 
 /** The integration package id an `integrations.{packageId}` error field names. */
 export function integrationIdOfField(field: string): string {
@@ -18,19 +20,23 @@ export interface ConnectionChoiceCandidate {
 
 /**
  * An integration a schedule write was refused over: nothing chosen where a fire
- * cannot decide alone (`must_choose_connection`, with the actor's candidates), or
- * a chosen connection the actor cannot reach (`override_connection_unavailable`).
- * Only an edit of the schedule clears either.
+ * cannot decide alone (`must_choose_connection`, with the candidates the caller
+ * may name — none when only the actor can choose), a chosen connection the actor
+ * cannot reach (`override_connection_unavailable`), or one on an auth serving
+ * none of the selected tools (`auth_serves_no_selected_tool`). Only an edit of
+ * the schedule clears any of them.
  */
 export interface ConnectionChoice {
   integrationId: string;
-  code: "must_choose_connection" | "override_connection_unavailable";
+  code:
+    "must_choose_connection" | "override_connection_unavailable" | "auth_serves_no_selected_tool";
   candidates: ConnectionChoiceCandidate[];
 }
 
 const SCHEDULE_CHOICE_CODES: ReadonlySet<string> = new Set([
   "must_choose_connection",
   "override_connection_unavailable",
+  "auth_serves_no_selected_tool",
 ]);
 
 /**
@@ -75,4 +81,57 @@ export function pendingConnectionChoices(
   return choices.filter((c) =>
     sameIds(current?.[c.integrationId] ?? [], submitted?.[c.integrationId] ?? []),
   );
+}
+
+/** What a schedule save was sent with — what its refusal, if any, speaks for. */
+export interface SubmittedPicks {
+  runsAs: ActorValue | undefined;
+  picks: Readonly<Record<string, string[]>>;
+}
+
+/**
+ * The refusal still in force: it judged the identity the save was sent for, so
+ * once the actor moves it is stale — neither shown nor gating.
+ */
+export function refusalForActor(
+  choices: readonly ConnectionChoice[] | undefined,
+  submitted: SubmittedPicks | null,
+  runsAs: ActorValue | undefined,
+): readonly ConnectionChoice[] {
+  return submitted && sameActor(submitted.runsAs, runsAs) ? (choices ?? []) : [];
+}
+
+/**
+ * The picks a schedule form holds once its actor changes. They named the
+ * previous identity's connections, so a real change drops them — except back on
+ * the schedule's stored actor (`stored`, edit only), whose stored picks hold again.
+ */
+export function picksAfterActorChange(args: {
+  picks: Record<string, string[]> | undefined;
+  runsAs: ActorValue | undefined;
+  nextRunsAs: ActorValue | undefined;
+  stored: { actor: ActorValue | undefined; picks: Record<string, string[]> | undefined } | null;
+}): Record<string, string[]> | undefined {
+  if (sameActor(args.nextRunsAs, args.runsAs)) return args.picks;
+  return args.stored && sameActor(args.nextRunsAs, args.stored.actor)
+    ? args.stored.picks
+    : undefined;
+}
+
+/**
+ * Why an integration was refused, as an `agents` key — one wording for the
+ * form-level alert and the inline marks. An open choice with no candidate
+ * offered is one only the actor (or an admin pin) can make.
+ */
+export function refusalReasonKey(choice: ConnectionChoice): string {
+  switch (choice.code) {
+    case "override_connection_unavailable":
+      return "schedule.connectionOverrides.unavailable";
+    case "auth_serves_no_selected_tool":
+      return "schedule.connectionOverrides.unserving";
+    case "must_choose_connection":
+      return choice.candidates.length > 0
+        ? "schedule.connectionOverrides.mustChoose"
+        : "schedule.connectionOverrides.actorMustChoose";
+  }
 }

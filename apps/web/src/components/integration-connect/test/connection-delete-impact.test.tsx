@@ -3,7 +3,8 @@
 /**
  * The delete confirmation says which of the caller's agents and schedules lose
  * the connection, and what each keeps: fewer connections, or none (back to the
- * usual resolution).
+ * usual resolution) — or, for an enabled schedule left with none, that it is
+ * disabled.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -70,6 +71,7 @@ describe("ConnectionDeleteImpact", () => {
           agent_display_name: "Ops multi",
           integration_package_id: "@acme/ssh",
           connection_count: 2,
+          disables: false,
         },
         {
           scheduleId: "sched_b",
@@ -78,6 +80,7 @@ describe("ConnectionDeleteImpact", () => {
           agent_display_name: "Audit",
           integration_package_id: "@acme/ssh",
           connection_count: 1,
+          disables: false,
         },
       ],
     });
@@ -90,6 +93,28 @@ describe("ConnectionDeleteImpact", () => {
     expect(html).toContain("(Audit)");
     expect(html).toContain(i18n.t("settings:connections.scheduleImpact.resets"));
     expect(html).not.toContain(i18n.t("settings:connections.pinImpact.intro", { count: 1 }));
+    expect(html).not.toContain(i18n.t("settings:connections.scheduleImpact.disables"));
+  });
+
+  it("says an enabled schedule the delete leaves with no connection is disabled", () => {
+    const html = renderWith({
+      pins: [],
+      schedules: [
+        {
+          scheduleId: "sched_c",
+          schedule_name: "Veille",
+          agent_package_id: "@acme/ops",
+          agent_display_name: "Ops multi",
+          integration_package_id: "@acme/ssh",
+          connection_count: 1,
+          disables: true,
+        },
+      ],
+    });
+    expect(html).toContain("Veille");
+    expect(html).toContain("(Ops multi)");
+    expect(html).toContain(i18n.t("settings:connections.scheduleImpact.disables"));
+    expect(html).not.toContain(i18n.t("settings:connections.scheduleImpact.resets"));
   });
 
   it("renders nothing when the delete rewrites none of the caller's references", () => {

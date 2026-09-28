@@ -74,6 +74,20 @@ describe("ScheduleActorConnectionChoice", () => {
     expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.clearChoice"));
   });
 
+  it("with nothing the viewer may name, says the actor or an admin must choose", () => {
+    const html = render(
+      <ScheduleActorConnectionChoice
+        choices={[{ integrationId: GMAIL, code: "must_choose_connection", candidates: [] }]}
+        pendingIds={[GMAIL]}
+        value={{}}
+        onChange={() => {}}
+      />,
+    );
+    expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.actorMustChoose"));
+    expect(html).not.toContain(i18n.t("agents:schedule.connectionOverrides.mustChoose"));
+    expect(html).not.toContain('role="checkbox"');
+  });
+
   it("drops the mark once the pick has moved, keeping the row on screen", () => {
     const html = renderChoice([], { [GMAIL]: ["c_work"] });
     expect(html).toContain("Travail");

@@ -3,9 +3,10 @@
 /**
  * What a delete rewrites among the caller's own references: it drops the
  * connection from their member pins and schedule overrides, so an agent or a
- * schedule bound to several connections keeps running on the rest — said here,
- * before the user confirms, rather than discovered on the next run. Mount only
- * while the confirmation is open.
+ * schedule bound to several connections keeps running on the rest, and an
+ * enabled schedule it leaves with none is disabled rather than left to guess —
+ * said here, before the user confirms, rather than discovered on the next run.
+ * Mount only while the confirmation is open.
  */
 
 import { useTranslation } from "react-i18next";
@@ -57,12 +58,14 @@ export function ConnectionDeleteImpact({ connectionId }: { connectionId: string 
                   {schedule.schedule_name ?? t("connections.scheduleImpact.unnamed")}
                 </span>
                 {` (${schedule.agent_display_name}) — `}
-                {schedule.connection_count > 1
-                  ? t("connections.scheduleImpact.shrinks", {
-                      count: schedule.connection_count - 1,
-                      from: schedule.connection_count,
-                    })
-                  : t("connections.scheduleImpact.resets")}
+                {schedule.disables
+                  ? t("connections.scheduleImpact.disables")
+                  : schedule.connection_count > 1
+                    ? t("connections.scheduleImpact.shrinks", {
+                        count: schedule.connection_count - 1,
+                        from: schedule.connection_count,
+                      })
+                    : t("connections.scheduleImpact.resets")}
               </li>
             ))}
           </ul>

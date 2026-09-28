@@ -30,8 +30,15 @@ import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel
 import { AgentVersionField } from "./package-version-select";
 import { ActorSelect, type ActorValue } from "./actor-select";
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
+import { ScheduleConnectionRefusals } from "./schedule-connection-refusals";
 import { VERSION_PUBLISHED } from "../lib/version-selector";
-import { type ConnectionChoice, pendingConnectionChoices } from "../lib/connection-choice";
+import {
+  type ConnectionChoice,
+  type SubmittedPicks,
+  pendingConnectionChoices,
+  picksAfterActorChange,
+  refusalForActor,
+} from "../lib/connection-choice";
 import { withConnectionPick } from "../lib/connection-set";
 import { sameActor, scheduleOverridePayload } from "../lib/schedule-payload";
 import { useAuth } from "../hooks/use-auth";
@@ -138,12 +145,6 @@ interface ScheduleFormProps {
    * a scheduled fire cannot ask which connection to use.
    */
   connectionChoices?: readonly ConnectionChoice[];
-}
-
-/** What the last save was sent with — what its refusal, if any, speaks for. */
-interface SubmittedPicks {
-  runsAs: ActorValue | undefined;
-  picks: Record<string, string[]>;
 }
 
 interface FormFields {
@@ -257,20 +258,18 @@ export function ScheduleForm({
   // that runs as the viewer.
   const actorIsViewer = !!user && sameActor(runsAs, { userId: user.id });
   const changeActor = (next: ActorValue | undefined) => {
-    const nextRunsAs = next ?? baseActor;
-    if (!sameActor(nextRunsAs, runsAs)) {
-      // The picks named the previous identity's connections. Back on the
-      // schedule's own actor, its stored picks hold again.
-      const restored =
-        isEdit && sameActor(nextRunsAs, currentActor)
-          ? (defaultValues?.connection_overrides ?? undefined)
-          : undefined;
-      setOverrides((prev) => {
-        const { connection_overrides: _stale, ...rest } = prev;
-        void _stale;
-        return restored ? { ...rest, connection_overrides: restored } : rest;
+    setOverrides((prev) => {
+      const { connection_overrides: picks, ...rest } = prev;
+      const kept = picksAfterActorChange({
+        picks,
+        runsAs,
+        nextRunsAs: next ?? baseActor,
+        stored: isEdit
+          ? { actor: currentActor, picks: defaultValues?.connection_overrides ?? undefined }
+          : null,
       });
-    }
+      return kept ? { ...rest, connection_overrides: kept } : rest;
+    });
     setActor(next);
   };
   const setConnectionPick = (integrationId: string, connectionIds: string[]) =>
@@ -284,13 +283,16 @@ export function ScheduleForm({
   // once the actor moves, answered once an integration's pick moves. Derived
   // rather than synced, so no effect sets state.
   const [submitted, setSubmitted] = useState<SubmittedPicks | null>(null);
-  const refused = submitted && sameActor(submitted.runsAs, runsAs) ? (connectionChoices ?? []) : [];
-  const pendingIds = pendingConnectionChoices(
+  const refused = refusalForActor(connectionChoices, submitted, runsAs);
+  const pending = pendingConnectionChoices(
     refused,
     submitted?.picks,
     overrides.connection_overrides,
-  ).map((c) => c.integrationId);
-  const overridesShown = overridesOpen || pendingIds.length > 0;
+  );
+  const pendingIds = pending.map((c) => c.integrationId);
+  // Open for as long as a refusal speaks for this actor, not just while it is
+  // unanswered: answering it must not fold away the pick just made.
+  const overridesShown = overridesOpen || refused.length > 0;
 
   // The rows come from the definition every fire runs — inherit means the
   // latest published version, never the draft this page would otherwise
@@ -504,6 +506,8 @@ export function ScheduleForm({
             </div>
           )}
 
+          <ScheduleConnectionRefusals choices={pending} />
+
           {/* Overrides accordion — surfaces per-schedule overrides for model,
           proxy, and version. Same UX vocabulary as the Run modal so users
           learn the override layer once. */}
@@ -554,7 +558,7 @@ export function ScheduleForm({
                   value={overrides}
                   onChange={setOverrides}
                   version={firedVersion}
-                  mustChoose={pendingIds}
+                  refusals={pending}
                 />
                 {showActorChoice && (
                   <ScheduleActorConnectionChoice
