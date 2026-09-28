@@ -56,6 +56,15 @@ export function checkedConnectionIds(input: {
 }
 
 /**
+ * Stored members the actor can no longer reach (deleted, unshared). They stay in the
+ * stored set — the resolver refuses it rather than bind what is left — so the picker
+ * names them, and "Valider" visibly drops them.
+ */
+export function unavailableConnectionIds(explicitIds: string[], candidateIds: string[]): string[] {
+  return explicitIds.filter((id) => !candidateIds.includes(id));
+}
+
+/**
  * A new connection joins what the actor chose, never the cascade's fallback — that
  * would freeze an org default into a member pin. `null` = nothing to write.
  */

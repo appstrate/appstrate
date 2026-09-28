@@ -22,8 +22,12 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
-import { eq, inArray, sql } from "drizzle-orm";
-import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import {
+  integrationConnections,
+  integrationOauthClients,
+  integrationPins,
+} from "@appstrate/db/schema";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 import {
   validatePinTarget,
@@ -515,6 +519,90 @@ describe("integration-pins-service — DB access/ownership", () => {
         .from(integrationConnections)
         .where(inArray(integrationConnections.id, [ownPinned!, colleaguePinned!]));
       expect(left).toEqual([]);
+    });
+
+    describe("deleting a connection its owner pinned", () => {
+      const OTHER_AGENT = "@pinsorg/other-agent";
+      const owner = () => ({ type: "user" as const, id: memberId });
+
+      async function memberPinSet(userId: string, agent = AGENT): Promise<string[] | null> {
+        const [row] = await db
+          .select({ connectionIds: integrationPins.connectionIds })
+          .from(integrationPins)
+          .where(and(eq(integrationPins.userId, userId), eq(integrationPins.packageId, agent)));
+        return row?.connectionIds ?? null;
+      }
+
+      async function pinAs(userId: string, connectionIds: string[], agent = AGENT) {
+        await upsertMemberPin(scope, {
+          agentPackageId: agent,
+          integrationId: INTEGRATION,
+          connectionIds,
+          userId,
+        });
+      }
+
+      beforeEach(async () => {
+        await seedPackage({
+          id: OTHER_AGENT,
+          orgId: ctx.orgId,
+          type: "agent",
+          homeSpaceId: scope.spaceId,
+          draftManifest: {
+            type: "agent",
+            schema_version: "0.1",
+            name: OTHER_AGENT,
+            version: "1.0.0",
+            display_name: "Other agent",
+            prompt: "x",
+            dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
+          },
+        });
+        await seedSpacePackage(scope.spaceId, OTHER_AGENT, { enabled: true });
+      });
+
+      it("leaves the owner's own member pins, keeping the rest of each set in order", async () => {
+        const [a, b, c] = await seedSharedConnections(3);
+        await pinAs(memberId, [a!, b!, c!]);
+        await pinAs(memberId, [b!, a!], OTHER_AGENT);
+
+        await deleteIntegrationConnection(scope, b!, owner());
+
+        expect(await memberPinSet(memberId)).toEqual([a!, c!]);
+        expect(await memberPinSet(memberId, OTHER_AGENT)).toEqual([a!]);
+      });
+
+      it("drops an owner's pin the delete empties, instead of breaking its 1..10 bound", async () => {
+        const [a, b] = await seedSharedConnections(2);
+        await pinAs(memberId, [a!]);
+        await pinAs(memberId, [a!, b!], OTHER_AGENT);
+
+        await deleteIntegrationConnection(scope, a!, owner());
+
+        expect(await memberPinSet(memberId)).toBeNull();
+        expect(await memberPinSet(memberId, OTHER_AGENT)).toEqual([b!]);
+      });
+
+      it("keeps the id in a COLLEAGUE's pin — their set fails loudly, it never shrinks", async () => {
+        const [a, b] = await seedSharedConnections(2);
+        await pinAs(ctx.user.id, [a!, b!]);
+
+        await deleteIntegrationConnection(scope, b!, owner());
+
+        expect(await memberPinSet(ctx.user.id)).toEqual([a!, b!]);
+      });
+
+      it("touches no pin when the delete is refused", async () => {
+        const [a, b] = await seedSharedConnections(2);
+        await pinAs(memberId, [a!, b!]);
+        const stranger = { type: "user" as const, id: ctx.user.id };
+
+        await expect(deleteIntegrationConnection(scope, b!, stranger)).rejects.toMatchObject({
+          status: 404,
+        });
+
+        expect(await memberPinSet(memberId)).toEqual([a!, b!]);
+      });
     });
 
     it("an org default still blocks delete and unshare (409 connection_pinned)", async () => {

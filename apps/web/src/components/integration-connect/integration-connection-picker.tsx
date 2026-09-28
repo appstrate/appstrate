@@ -51,6 +51,7 @@ import {
   joinCreatedConnection,
   sharedLabels,
   toggleCapped,
+  unavailableConnectionIds,
 } from "../../lib/connection-set";
 import { client } from "../../api/client";
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
@@ -231,6 +232,7 @@ export function IntegrationConnectionPicker({
     resolvedIds: resolvedConnectionIds,
   });
   const candidateIds = candidates.map((c) => c.id);
+  const unavailableIds = unavailableConnectionIds(explicitIds, candidateIds);
   const dirty = draft !== null;
   const checkedIds = checkedConnectionIds({
     draft,
@@ -326,28 +328,34 @@ export function IntegrationConnectionPicker({
   };
 
   const triggerLabel =
-    displayConns.length === 1
-      ? displayConns[0]!.label
-      : displayConns.length > 1
-        ? t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length })
-        : overrideMode
-          ? t("detail.integrationMemberPicker.inherit")
-          : status === "must_choose"
-            ? t("detail.integrationMemberPicker.chooseLabel")
-            : status === "stale"
-              ? t("detail.integrationMemberPicker.reconfigureLabel")
-              : t("detail.integrationMemberPicker.connectLabel");
+    unavailableIds.length > 0
+      ? `${t("detail.integrationMemberPicker.selectedCount", { count: explicitIds.length })} · ${t(
+          "detail.integrationMemberPicker.unavailableCount",
+          { count: unavailableIds.length },
+        )}`
+      : displayConns.length === 1
+        ? displayConns[0]!.label
+        : displayConns.length > 1
+          ? t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length })
+          : overrideMode
+            ? t("detail.integrationMemberPicker.inherit")
+            : status === "must_choose"
+              ? t("detail.integrationMemberPicker.chooseLabel")
+              : status === "stale"
+                ? t("detail.integrationMemberPicker.reconfigureLabel")
+                : t("detail.integrationMemberPicker.connectLabel");
   // Amber on exactly the states that gate a run: pin mode reads the server's
   // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
   // override mode an empty pick inherits, so only an under-scoped or colliding set warns.
   const triggerWarn = overrideMode
-    ? underScopedConns.length > 0 || collidingLabels.length > 0
+    ? underScopedConns.length > 0 || collidingLabels.length > 0 || unavailableIds.length > 0
     : (runBlocking ?? false);
   const TriggerIcon = triggerWarn ? AlertTriangle : displayConns.length > 0 ? Users : Plus;
 
   // Blocked for this member AND nothing to pick → dead end. Show a
   // disabled, explanatory button instead of an empty dropdown.
-  if (!canAddConnection && !hasCandidates) {
+  // Unless a stored set is left to clear: the menu's reset item is the way out.
+  if (!canAddConnection && !hasCandidates && explicitIds.length === 0) {
     return (
       <div data-testid={`member-picker-${integrationId}`}>
         <Button
@@ -513,6 +521,33 @@ export function IntegrationConnectionPicker({
               </DropdownMenuItem>
             );
           })}
+          {unavailableIds.map((id) => (
+            <DropdownMenuItem
+              key={id}
+              disabled
+              {...(oneClick ? {} : { role: "menuitemcheckbox", "aria-checked": false })}
+              data-testid={`member-pick-unavailable-${id}`}
+            >
+              {oneClick ? (
+                <Check className="size-3.5 opacity-0" />
+              ) : (
+                <Checkbox
+                  checked={false}
+                  aria-hidden
+                  tabIndex={-1}
+                  className="pointer-events-none"
+                />
+              )}
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate font-medium line-through">
+                  {t("detail.integrationMemberPicker.unavailableRow")}
+                </span>
+                <span className="text-muted-foreground truncate text-[0.65rem]">
+                  {t("detail.integrationMemberPicker.unavailableRowHint")}
+                </span>
+              </div>
+            </DropdownMenuItem>
+          ))}
           {!oneClick && hasCandidates && (
             <DropdownMenuItem
               disabled={!canApply}
@@ -586,6 +621,20 @@ export function IntegrationConnectionPicker({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+      {/* A stored member is gone: the run is refused until the set is re-picked. */}
+      {unavailableIds.length > 0 && (
+        <div
+          className="mt-1.5 flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
+          data-testid={`member-pick-unavailable-warning-${integrationId}`}
+        >
+          <AlertTriangle className="size-3 shrink-0" />
+          <span>
+            {t("detail.integrationMemberPicker.unavailableWarning", {
+              count: unavailableIds.length,
+            })}
+          </span>
+        </div>
+      )}
       {/* Same name twice: the run is refused until one is renamed. */}
       {collidingLabels.length > 0 && (
         <div

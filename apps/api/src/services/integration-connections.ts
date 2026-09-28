@@ -20,7 +20,18 @@
  * module is the write side that populates it.
  */
 
-import { and, arrayOverlaps, asc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  arrayContains,
+  arrayOverlaps,
+  asc,
+  eq,
+  inArray,
+  isNull,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   spacePackages,
@@ -52,7 +63,13 @@ import {
 } from "./integration-client-registry.ts";
 import { isActiveHere } from "./package-activation.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
-import { setExactlyOneDefault, isUniqueViolation, isUuid, type DbOrTx } from "../lib/db-helpers.ts";
+import {
+  setExactlyOneDefault,
+  isUniqueViolation,
+  isUuid,
+  type DbOrTx,
+  type Tx,
+} from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import { ApiError, notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
 import {
@@ -2711,7 +2728,10 @@ export async function assertConnectionsUnpinned(
 
 /**
  * Delete one connection row. Used by the "disconnect" button per auth
- * (or per account, when multi-account).
+ * (or per account, when multi-account). In the same transaction the row
+ * leaves the OWNER's own member pins — their act, so their pins follow it; a
+ * pin it empties is dropped (the resolver falls back). Other members' pins keep
+ * the id and fail loudly until re-picked: a set never shrinks behind them.
  */
 export async function deleteIntegrationConnection(
   scope: SpaceScope | ActorScope,
@@ -2744,19 +2764,40 @@ export async function deleteIntegrationConnection(
     .limit(1);
   if (!owned) throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
   await assertConnectionsUnpinned([connectionId], "Connection cannot be deleted");
-  const deleted = await db
-    .delete(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.id, connectionId),
-        eq(integrationConnections.spaceId, scope.spaceId),
-        ownerPredicate,
-      ),
-    )
-    .returning({ id: integrationConnections.id });
-  if (deleted.length === 0) {
-    throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
-  }
+  await db.transaction(async (tx) => {
+    const deleted = await tx
+      .delete(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.id, connectionId),
+          eq(integrationConnections.spaceId, scope.spaceId),
+          ownerPredicate,
+        ),
+      )
+      .returning({ id: integrationConnections.id });
+    if (deleted.length === 0) {
+      throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
+    }
+    if (actor.type === "user") await dropFromOwnMemberPins(tx, deleted[0]!.id, actor.id);
+  });
+}
+
+async function dropFromOwnMemberPins(tx: Tx, connectionId: string, userId: string): Promise<void> {
+  const holding = and(
+    eq(integrationPins.userId, userId),
+    arrayContains(integrationPins.connectionIds, [connectionId]),
+  );
+  // Delete before update: `cardinality BETWEEN 1 AND 10` refuses an emptied set.
+  await tx
+    .delete(integrationPins)
+    .where(and(holding, sql`cardinality(${integrationPins.connectionIds}) = 1`));
+  await tx
+    .update(integrationPins)
+    .set({
+      connectionIds: sql`array_remove(${integrationPins.connectionIds}, ${connectionId}::uuid)`,
+      updatedAt: new Date(),
+    })
+    .where(holding);
 }
 
 /**

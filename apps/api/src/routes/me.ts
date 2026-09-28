@@ -311,7 +311,8 @@ router.delete(
  *
  * Removes the underlying `integration_connections` row — *destructive*: "I never
  * want to use this credential anywhere again" — unless an admin pin or org default
- * names it (409 `connection_pinned`, `assertConnectionsUnpinned`).
+ * names it (409 `connection_pinned`, `assertConnectionsUnpinned`). The caller's own
+ * member pins drop it in the same transaction; another member's pin keeps the id.
  *
  * This is the ONLY entrypoint for that delete, and it is owner-scoped by
  * construction. Surfaced only from `/connections` (the user-owned management

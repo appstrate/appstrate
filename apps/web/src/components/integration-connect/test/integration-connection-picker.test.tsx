@@ -1,0 +1,178 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * The picker when a member of the stored set is gone (deleted or unshared by
+ * its owner). The server keeps refusing the set — it never binds what is left —
+ * so the picker must say so, instead of showing the survivors as if they were
+ * the whole selection.
+ */
+
+import { describe, expect, it } from "bun:test";
+import { QueryClient } from "@tanstack/react-query";
+import { $api, type components } from "../../../api/client.ts";
+import i18n, { i18nReady } from "../../../i18n.ts";
+import { installFakeStorage } from "../../../test/fake-storage.ts";
+import { render } from "../../../test/render.tsx";
+import type { IntegrationManifestView } from "../../../hooks/use-integrations.ts";
+import { IntegrationConnectionPicker } from "../integration-connection-picker.tsx";
+
+await i18nReady;
+await i18n.changeLanguage("fr");
+installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
+
+type Resolution = components["schemas"]["IntegrationAgentResolution"];
+type Candidate = Resolution["candidates"][number];
+
+const INTEGRATION = "@acme/ssh";
+const AGENT = "@acme/ops";
+const WEB = "11111111-1111-4111-8111-111111111111";
+const DB = "22222222-2222-4222-8222-222222222222";
+const GONE = "33333333-3333-4333-8333-333333333333";
+
+const MANIFEST = {
+  auths: { primary: { type: "custom" } },
+} as unknown as IntegrationManifestView;
+
+function candidate(id: string, label: string): Candidate {
+  return {
+    id,
+    auth_key: "primary",
+    account_id: `root@${label}`,
+    label,
+    owner_user_id: "usr_me",
+    owner_end_user_id: null,
+    owner_name: "Moi",
+    scopes_granted: [],
+    shared_with_org: false,
+    needs_reconnection: false,
+    missing_scopes: [],
+    is_own: true,
+  };
+}
+
+function resolution(overrides: Partial<Resolution>): Resolution {
+  return {
+    status: "pinned",
+    resolved_connection_ids: [],
+    resolved_missing_scopes: [],
+    admin_pinned_connection_ids: [],
+    member_pinned_connection_ids: [],
+    org_default_connection_ids: [],
+    org_default_enforced: false,
+    can_add_connection: true,
+    candidates: [candidate(WEB, "web"), candidate(DB, "db")],
+    ...overrides,
+  };
+}
+
+/** Seed the one readiness query the picker reads, under the key it builds. */
+function renderPicker(res: Resolution, runBlocking: boolean): string {
+  const qc = new QueryClient();
+  const { queryKey } = $api.queryOptions("get", "/api/agents/{scope}/{name}/connection-readiness", {
+    params: {
+      path: { scope: "@acme", name: "ops" },
+      header: { "X-Org-Id": undefined, "X-Space-Id": undefined },
+    },
+  });
+  qc.setQueryData(queryKey, {
+    blocks_run: runBlocking,
+    errors: [],
+    integrations: [{ integration_id: INTEGRATION, run_blocking: runBlocking, resolution: res }],
+  });
+  return render(
+    <IntegrationConnectionPicker
+      integrationId={INTEGRATION}
+      agentPackageId={AGENT}
+      manifest={MANIFEST}
+      authStatuses={[]}
+      agentTools={undefined}
+      agentScopes={undefined}
+    />,
+    { queryClient: qc },
+  );
+}
+
+const WARNING = `member-pick-unavailable-warning-${INTEGRATION}`;
+
+describe("IntegrationConnectionPicker — a stored member is gone", () => {
+  it("counts the whole stored set and names how many are unavailable", () => {
+    const html = renderPicker(
+      resolution({ status: "stale", member_pinned_connection_ids: [WEB, GONE] }),
+      true,
+    );
+    const label = `${i18n.t("agents:detail.integrationMemberPicker.selectedCount", { count: 2 })} · ${i18n.t(
+      "agents:detail.integrationMemberPicker.unavailableCount",
+      { count: 1 },
+    )}`;
+    expect(html).toContain(label);
+    expect(html).toContain(WARNING);
+    expect(html).toContain(
+      i18n.t("agents:detail.integrationMemberPicker.unavailableWarning", { count: 1 }),
+    );
+  });
+
+  it("shows neither the count nor the warning while every stored member is reachable", () => {
+    const html = renderPicker(
+      resolution({ member_pinned_connection_ids: [WEB, DB], resolved_connection_ids: [WEB, DB] }),
+      false,
+    );
+    expect(html).not.toContain(WARNING);
+    expect(html).toContain(
+      i18n.t("agents:detail.integrationMemberPicker.selectedCount", { count: 2 }),
+    );
+  });
+
+  it("keeps the menu reachable when nothing is left to pick, so the stored set can be reset", () => {
+    const html = renderPicker(
+      resolution({
+        status: "stale",
+        member_pinned_connection_ids: [GONE],
+        candidates: [],
+        can_add_connection: false,
+      }),
+      true,
+    );
+    expect(html).not.toContain(`member-pick-blocked-${INTEGRATION}`);
+    expect(html).toContain(`member-pick-${INTEGRATION}`);
+    expect(html).toContain(WARNING);
+  });
+
+  it("warns in override mode too — a schedule would fail at every fire", () => {
+    const html = render(
+      <IntegrationConnectionPicker
+        integrationId={INTEGRATION}
+        agentPackageId={AGENT}
+        manifest={MANIFEST}
+        authStatuses={[]}
+        agentTools={undefined}
+        agentScopes={undefined}
+        persistence={{ mode: "override", value: [DB, GONE], onChange: () => {} }}
+      />,
+      {
+        queryClient: (() => {
+          const qc = new QueryClient();
+          const { queryKey } = $api.queryOptions(
+            "get",
+            "/api/agents/{scope}/{name}/connection-readiness",
+            {
+              params: {
+                path: { scope: "@acme", name: "ops" },
+                header: { "X-Org-Id": undefined, "X-Space-Id": undefined },
+              },
+            },
+          );
+          qc.setQueryData(queryKey, {
+            blocks_run: false,
+            errors: [],
+            integrations: [
+              { integration_id: INTEGRATION, run_blocking: false, resolution: resolution({}) },
+            ],
+          });
+          return qc;
+        })(),
+      },
+    );
+    expect(html).toContain(WARNING);
+    expect(html).toContain("text-amber-600");
+  });
+});

@@ -15,6 +15,7 @@ import {
   displayedConnectionIds,
   checkedConnectionIds,
   joinCreatedConnection,
+  unavailableConnectionIds,
 } from "../connection-set";
 
 describe("toggleCapped", () => {
@@ -208,5 +209,39 @@ describe("joinCreatedConnection", () => {
         max: 10,
       }),
     ).toBeNull();
+  });
+});
+
+describe("unavailableConnectionIds", () => {
+  it("names the stored members the actor can no longer reach, in stored order", () => {
+    expect(unavailableConnectionIds(["gone-2", "a", "gone-1"], ["a", "b"])).toEqual([
+      "gone-2",
+      "gone-1",
+    ]);
+  });
+
+  it("is empty while every stored member is a candidate, and with nothing stored", () => {
+    expect(unavailableConnectionIds(["a", "b"], ["a", "b", "c"])).toEqual([]);
+    expect(unavailableConnectionIds([], ["a"])).toEqual([]);
+  });
+
+  // The scenario the picker exists for: [a, gone] stored, `gone` deleted by its
+  // owner. Untouched, the ticks are the survivors and "Valider" is live — it
+  // writes [a], the change the unavailable row announces.
+  it("leaves 'Valider' live on the survivors, and dead once nothing survives", () => {
+    const explicitIds = ["a", "gone"];
+    const candidateIds = ["a", "b"];
+    const checked = checkedConnectionIds({
+      draft: null,
+      explicitIds,
+      resolvedIds: [],
+      candidateIds,
+    });
+    expect(checked).toEqual(["a"]);
+    expect(canApplyConnectionSet([{ id: "a", label: "web" }], explicitIds, false)).toBe(true);
+    expect(
+      checkedConnectionIds({ draft: null, explicitIds: ["gone"], resolvedIds: [], candidateIds }),
+    ).toEqual([]);
+    expect(canApplyConnectionSet([], ["gone"], false)).toBe(false);
   });
 });

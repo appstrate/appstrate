@@ -359,9 +359,10 @@ export const mePaths = {
         "Intent is destructive: 'I never want to use this credential anywhere again'. " +
         "Refused with 409 `connection_pinned` while an admin pin or an org default names the connection: " +
         "those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes " +
-        "it from the pin(s) or default first. A member pin (anyone's, the caller's own included) never " +
-        "blocks the delete: it keeps the id, and that member's next run fails with " +
-        "`pinned_connection_unavailable` until they pick again. " +
+        "it from the pin(s) or default first. A member pin never blocks the delete. The caller's own " +
+        "member pins drop the connection in the same transaction (a pin it empties is removed, so the " +
+        "cascade falls back); another member's pin keeps the id, and that member's next run fails with " +
+        "`pinned_connection_unavailable` until they pick again — a set never shrinks behind its owner. " +
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
         "drop the member pin instead (see `DELETE /api/me/integration-pins`). " +
         "With a delegated or end-user credential, only connections inside its bound " +

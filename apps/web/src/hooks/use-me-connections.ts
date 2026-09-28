@@ -53,8 +53,8 @@ export function useDisconnectIntegrationConnection() {
   return $api.useMutation("delete", "/api/me/connections/{connectionId}", {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
-      // A member pin naming the deleted connection keeps its id (only an admin
-      // pin or org default refuses the delete); refresh so the picker shows it stale.
+      // The caller's own member pins drop the connection; a colleague's keeps its
+      // id and shows it unavailable in their picker. Refresh both.
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
       // The agent page's reuse hints + accessible-connection lists live under
       // the typed `/api/integrations…` keys — refresh the whole subtree.
