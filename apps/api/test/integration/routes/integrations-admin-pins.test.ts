@@ -357,41 +357,6 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect(resolution.admin_pinned_connection_ids).toEqual([connA]);
     });
 
-    it("DENY: 400 when the pinned set's labels collide — 200 once one is renamed", async () => {
-      const put = (ids: string[]) =>
-        app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
-          method: "PUT",
-          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-          body: JSON.stringify({ connection_ids: ids }),
-        });
-      const a = await seedSharedConnection();
-      const b = await seedSharedConnection();
-      await app.request(`/api/integrations/${INTEGRATION}/connections/${b}`, {
-        method: "PATCH",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ label: "collision" }),
-      });
-      await app.request(`/api/integrations/${INTEGRATION}/connections/${a}`, {
-        method: "PATCH",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ label: "collision" }),
-      });
-
-      const clash = await put([a, b]);
-      expect(clash.status).toBe(400);
-      expect(((await clash.json()) as { detail: string }).detail).toMatch(
-        /must have distinct labels/,
-      );
-
-      // Control: rename one and the identical request lands.
-      await app.request(`/api/integrations/${INTEGRATION}/connections/${a}`, {
-        method: "PATCH",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ label: "distinct" }),
-      });
-      expect((await put([a, b])).status).toBe(200);
-    });
-
     it("a deleted member of a pinned set blocks the run by name — the pin does not shrink", async () => {
       const connA = await seedSharedConnection();
       const connB = await seedSharedConnection();
@@ -461,28 +426,6 @@ describe("/api/integrations/:packageId admin surface", () => {
       const err = body.errors.find((e) => e.field === `integrations.${INTEGRATION}`)!;
       expect(err.code).toBe("pinned_connection_unavailable");
       expect(err.message).toContain(shared);
-    });
-
-    it("a pinned set whose labels collide AFTER the write reports every bound id", async () => {
-      const connA = await seedSharedConnection();
-      const connB = await seedSharedConnection();
-      await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connection_ids: [connA, connB] }),
-      });
-      for (const id of [connA, connB]) {
-        await app.request(`/api/integrations/${INTEGRATION}/connections/${id}`, {
-          method: "PATCH",
-          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-          body: JSON.stringify({ label: "same" }),
-        });
-      }
-
-      const resolution = await getResolution(AGENT, INTEGRATION);
-      expect(resolution.status).toBe("duplicate_label");
-      // The picker re-pins from this list; a partial one would drop members.
-      expect(resolution.resolved_connection_ids).toEqual([connA, connB]);
     });
 
     it("DENY: 400 on an empty set, a repeated id, and a set over the cap", async () => {
@@ -592,6 +535,21 @@ describe("/api/integrations/:packageId admin surface", () => {
       const ok = await patch(connId, "Compte équipe — prod");
       expect(ok.status).toBe(200);
       expect(((await ok.json()) as { label: string }).label).toBe("Compte équipe — prod");
+    });
+
+    it("DENY: 409 connection_label_taken on another connection's label — 200 on its own", async () => {
+      const a = await seedSharedConnection();
+      const b = await seedSharedConnection();
+      expect((await patch(b, "prod")).status).toBe(200);
+
+      const clash = await patch(a, "prod");
+      expect(clash.status).toBe(409);
+      const body = (await clash.json()) as { code: string; detail: string };
+      expect(body.code).toBe("connection_label_taken");
+      expect(body.detail).toContain("prod");
+
+      // Control: the holder re-saving its own label is not a collision.
+      expect((await patch(b, "prod")).status).toBe(200);
     });
   });
 

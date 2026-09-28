@@ -7,12 +7,14 @@ import { ApiError } from "../api/client";
 
 /**
  * Refusals whose English server `detail` is replaced by a translated sentence. The lock codes
- * interpolate the field named in `param`; `draft_not_writable` says which version will run instead.
+ * interpolate the field named in `param`; `draft_not_writable` says which version will run instead;
+ * `connection_label_taken` answers a rename, whose caller just typed the label.
  */
 const REFUSAL_ERROR_KEYS: Record<string, string> = {
   locked_input_field: "error.lockedInputField",
   locked_required_field_empty: "error.lockedRequiredFieldEmpty",
   draft_not_writable: "error.draftNotWritable",
+  connection_label_taken: "error.connectionLabelTaken",
 };
 
 function refusalMessage(err: ApiError): string | null {

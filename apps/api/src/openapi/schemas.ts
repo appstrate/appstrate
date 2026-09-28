@@ -170,7 +170,7 @@ export const schemas = {
           },
         },
         description:
-          "Populated on `must_choose_connection` — the connections the caller may pick from, each carrying the fields that tell them apart; pass their `id`s back as the request body's `connection_overrides` array for that integration to retry the run. Populated on `duplicate_connection_label` too, where it names the bound connections that share a label: the remedy is renaming one of them (`PATCH /api/integrations/{packageId}/connections/{connectionId}`), not re-picking.",
+          "Populated on `must_choose_connection` — the connections the caller may pick from, each carrying the fields that tell them apart; pass their `id`s back as the request body's `connection_overrides` array for that integration to retry the run.",
       },
       connection_id: {
         type: "string",
@@ -1854,7 +1854,6 @@ export const schemas = {
           "pinned",
           "auto",
           "must_choose",
-          "duplicate_label",
           "none",
           "stale",
           "needs_reconnection",
@@ -1865,7 +1864,7 @@ export const schemas = {
         items: { type: "string" },
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
         description:
-          "The set the next run binds. On `duplicate_label`, on an `insufficient_scopes` verdict and on an `auth_serves_no_selected_tool` verdict (`stale`), the whole set the winning layer tried to bind.",
+          "The set the next run binds. On an `insufficient_scopes` verdict and on an `auth_serves_no_selected_tool` verdict (`stale`), the whole set the winning layer tried to bind.",
       },
       resolved_missing_scopes: {
         type: "array",

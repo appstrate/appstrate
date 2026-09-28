@@ -165,10 +165,8 @@ export async function seedConnectionTestIntegration(ctx: TestContext, id: string
 
 /**
  * Add one connection on the integration's `primary` auth, owned by the ctx
- * user. `label` is NOT NULL in the schema and defaults here to a distinct
- * generated name, because labels must be distinct across a BOUND set
- * (`duplicate_connection_label`) — two fixture rows sharing one would refuse
- * every multi-connection bind. Pass one when the test asserts on it.
+ * user. `label` is NOT NULL and unique per (space, integration), so it
+ * defaults here to a generated name. Pass one when the test asserts on it.
  */
 export async function seedIntegrationConnection(
   ctx: TestContext,

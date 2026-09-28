@@ -300,12 +300,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       const ids: string[] = [];
       for (let i = 0; i < n; i += 1) {
         ids.push(
-          await seedConnection({
-            spaceId: scope.spaceId,
-            userId: memberId,
-            sharedWithOrg: true,
-            label: `conn-${i}`,
-          }),
+          await seedConnection({ spaceId: scope.spaceId, userId: memberId, sharedWithOrg: true }),
         );
       }
       return ids.sort();
@@ -360,46 +355,6 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(listed).toHaveLength(1);
       expect(listed[0]!.connection_ids).toEqual([ids[2]!]);
       expect(listed[0]!.connection_ids).not.toContain(ids[0]!);
-    });
-
-    it("refuses a set whose members share a label, with the resolver's wording", async () => {
-      // The label is the agent's handle for a connection, so an unaddressable
-      // set must not be creatable — the resolver's run-time check is the other
-      // half (a rename after the write), not a substitute for this one.
-      const a = await seedConnection({
-        spaceId: scope.spaceId,
-        userId: memberId,
-        sharedWithOrg: true,
-        label: "prod",
-      });
-      const bSame = await seedConnection({
-        spaceId: scope.spaceId,
-        userId: memberId,
-        sharedWithOrg: true,
-        label: "prod",
-      });
-      await expect(
-        upsertIntegrationPin(scope, INTEGRATION, {
-          agentPackageId: AGENT,
-          connectionIds: [a, bSame],
-          createdBy: ctx.user.id,
-        }),
-      ).rejects.toThrow(/must have distinct labels/);
-      expect(await listIntegrationPins(scope, INTEGRATION)).toEqual([]);
-
-      // Control: the same two ids with distinct labels land.
-      const bOther = await seedConnection({
-        spaceId: scope.spaceId,
-        userId: memberId,
-        sharedWithOrg: true,
-        label: "staging",
-      });
-      const pin = await upsertIntegrationPin(scope, INTEGRATION, {
-        agentPackageId: AGENT,
-        connectionIds: [a, bOther],
-        createdBy: ctx.user.id,
-      });
-      expect(pin.connection_ids).toEqual([a, bOther]);
     });
 
     it("echoes what the next read returns, in the caller's order", async () => {
@@ -673,6 +628,47 @@ describe("integration-pins-service — DB access/ownership", () => {
         }),
       ).rejects.toThrow(/sharedWithOrg/i);
       expect(await listIntegrationPins(scope, INTEGRATION)).toEqual([]);
+    });
+  });
+
+  describe("renaming — a label is unique per (space, integration)", () => {
+    it("refuses a label another owner's connection holds (409 connection_label_taken)", async () => {
+      await seedConnection({ spaceId: scope.spaceId, userId: memberId, label: "prod" });
+      const mine = await seedConnection({
+        spaceId: scope.spaceId,
+        userId: ctx.user.id,
+        label: "staging",
+      });
+      await expect(updateConnectionMetadata(mine, { label: "prod" })).rejects.toMatchObject({
+        status: 409,
+        code: "connection_label_taken",
+      });
+      const [row] = await db
+        .select({ label: integrationConnections.label })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, mine));
+      expect(row!.label).toBe("staging");
+    });
+
+    it("keeps its own label, and takes one that differs only by case or lives elsewhere", async () => {
+      const mine = await seedConnection({
+        spaceId: scope.spaceId,
+        userId: ctx.user.id,
+        label: "prod",
+      });
+      await seedConnection({
+        integrationId: OTHER_INTEGRATION,
+        spaceId: scope.spaceId,
+        userId: ctx.user.id,
+        label: "Prod",
+      });
+      // Control for the refusal above: the row's own label is not "another" row's.
+      expect((await updateConnectionMetadata(mine, { label: "prod" })).label).toBe("prod");
+      // Verbatim comparison, the sidecar's enum: `Prod` is a second address.
+      await seedConnection({ spaceId: scope.spaceId, userId: memberId, label: "staging" });
+      expect((await updateConnectionMetadata(mine, { label: "Staging" })).label).toBe("Staging");
+      // `Prod` is taken on the OTHER integration only.
+      expect((await updateConnectionMetadata(mine, { label: "Prod" })).label).toBe("Prod");
     });
   });
 

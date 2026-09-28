@@ -102,7 +102,7 @@ import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { ConnectionTeardownSteps } from "../components/integration-connect/connection-teardown-steps";
 import { ConnectionPinImpact } from "../components/integration-connect/connection-pin-impact";
-import { keepAvailable, sharedLabels, toggleCapped } from "../lib/connection-set";
+import { keepAvailable, toggleCapped } from "../lib/connection-set";
 import { Modal } from "../components/modal";
 import { SourceBadge } from "../components/source-badge";
 import { DefaultCell } from "../components/default-cell";
@@ -967,8 +967,6 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
     setEnforce(orgDefault?.enforce ?? false);
   }
 
-  const colliding = sharedLabels(shared.filter((c) => connectionIds.includes(c.id)));
-
   return (
     <div
       className="border-border bg-muted/30 mb-6 rounded-md border p-4"
@@ -1015,7 +1013,7 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
                 body: { connection_ids: connectionIds, enforce },
               })
             }
-            disabled={connectionIds.length === 0 || colliding.length > 0 || upsert.isPending}
+            disabled={connectionIds.length === 0 || upsert.isPending}
             data-testid="org-default-save"
           >
             {t("integration.admin.orgDefault.save")}
@@ -1037,7 +1035,7 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   );
 }
 
-/** Checkbox set capped at {@link MAX_CONNECTIONS_PER_INTEGRATION}; flags colliding labels. */
+/** Checkbox set capped at {@link MAX_CONNECTIONS_PER_INTEGRATION}. */
 function ConnectionSetChecklist({
   connections,
   value,
@@ -1049,36 +1047,27 @@ function ConnectionSetChecklist({
   onChange: (next: string[]) => void;
   idPrefix: string;
 }) {
-  const { t } = useTranslation("settings");
-  const colliding = sharedLabels(connections.filter((c) => value.includes(c.id)));
   return (
-    <>
-      <div className="flex flex-col gap-1" data-testid={`${idPrefix}s`}>
-        {connections.map((c) => {
-          const id = `${idPrefix}-${c.id}`;
-          const isChecked = value.includes(c.id);
-          return (
-            <div key={c.id} className="flex items-center gap-2 text-xs">
-              <Checkbox
-                id={id}
-                checked={isChecked}
-                disabled={!isChecked && value.length >= MAX_CONNECTIONS_PER_INTEGRATION}
-                onCheckedChange={() =>
-                  onChange(toggleCapped(value, c.id, MAX_CONNECTIONS_PER_INTEGRATION))
-                }
-                data-testid={id}
-              />
-              <label htmlFor={id}>{connectionOptionLabel(c)}</label>
-            </div>
-          );
-        })}
-      </div>
-      {colliding.length > 0 && (
-        <p className="mt-1 text-[0.7rem] text-amber-600 dark:text-amber-400">
-          {t("integration.admin.duplicateLabel", { labels: colliding.join(", ") })}
-        </p>
-      )}
-    </>
+    <div className="flex flex-col gap-1" data-testid={`${idPrefix}s`}>
+      {connections.map((c) => {
+        const id = `${idPrefix}-${c.id}`;
+        const isChecked = value.includes(c.id);
+        return (
+          <div key={c.id} className="flex items-center gap-2 text-xs">
+            <Checkbox
+              id={id}
+              checked={isChecked}
+              disabled={!isChecked && value.length >= MAX_CONNECTIONS_PER_INTEGRATION}
+              onCheckedChange={() =>
+                onChange(toggleCapped(value, c.id, MAX_CONNECTIONS_PER_INTEGRATION))
+              }
+              data-testid={id}
+            />
+            <label htmlFor={id}>{connectionOptionLabel(c)}</label>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1108,10 +1097,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
     return connectionOptionLabel(c);
   };
 
-  const colliding = sharedLabels(
-    pinnableConnections.filter((c) => newConnectionIds.includes(c.id)),
-  );
-  const canAddPin = !!newAgent && newConnectionIds.length > 0 && colliding.length === 0;
+  const canAddPin = !!newAgent && newConnectionIds.length > 0;
 
   const onSubmitNewPin = () => {
     if (!canAddPin) return;

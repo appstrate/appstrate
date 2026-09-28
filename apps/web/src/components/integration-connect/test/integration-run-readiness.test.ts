@@ -42,16 +42,6 @@ describe("resolutionBlocksRun", () => {
     ).toBe(false);
   });
 
-  it("blocks on duplicate_label — a bound set sharing a label is unaddressable", () => {
-    // Control: the SAME two-connection set with distinct labels resolves
-    // `pinned` and does not block (assertion above). Only the status differs.
-    expect(
-      resolutionBlocksRun(
-        resolution({ status: "duplicate_label", resolved_connection_ids: ["conn_1", "conn_2"] }),
-      ),
-    ).toBe(true);
-  });
-
   it("blocks on missing scopes even when a connection resolves (insufficient_scopes)", () => {
     expect(
       resolutionBlocksRun(resolution({ status: "auto", resolved_missing_scopes: ["write"] })),
@@ -59,13 +49,7 @@ describe("resolutionBlocksRun", () => {
   });
 
   it("blocks on every unresolved status", () => {
-    for (const status of [
-      "none",
-      "must_choose",
-      "duplicate_label",
-      "needs_reconnection",
-      "stale",
-    ] as const) {
+    for (const status of ["none", "must_choose", "needs_reconnection", "stale"] as const) {
       expect(resolutionBlocksRun(resolution({ status, resolved_connection_ids: [] }))).toBe(true);
     }
   });

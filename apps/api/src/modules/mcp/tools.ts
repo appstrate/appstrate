@@ -1061,10 +1061,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
             "ambiguous integration and its `candidate_connections`, each with a `label`, an " +
             "`account_id` and `owned_by_actor`; pick the candidates the task needs and retry " +
             "the SAME call with their `id`s here. Those fields are what tells the candidates " +
-            "apart, so read them rather than listing connections separately. A `409 " +
-            "duplicate_connection_label` instead means two bound connections share a label: " +
-            "that one is NOT fixable here — ask the user to rename one, never rename or pick " +
-            "for them. Each key is the integration id itself (`@scope/integration`) — NOT the " +
+            "apart, so read them rather than listing connections separately. Each key is the " +
+            "integration id itself (`@scope/integration`) — NOT the " +
             "`integrations.<id>` field path the error reports it under, which matches no " +
             "integration and is ignored. TOP-LEVEL argument, " +
             (inline ? "alongside `manifest`/`input`" : "alongside `input`") +

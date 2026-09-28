@@ -18,7 +18,6 @@ import type { IntegrationAgentResolution } from "@appstrate/shared-types";
  * Status → not-usable mapping:
  *   - `none` ........... not connected (no candidate)
  *   - `must_choose` .... N>1 candidates, ambiguous pick
- *   - `duplicate_label`  the bound set shares a label, so it is unaddressable
  *   - `needs_reconnection` connection flagged for re-consent
  *   - `stale` .......... pinned/override connection unavailable
  *   - `auto` / `pinned` / `admin_locked` resolve to a connection → OK, UNLESS
@@ -29,7 +28,6 @@ export function resolutionBlocksRun(resolution: IntegrationAgentResolution): boo
   return (
     resolution.status === "none" ||
     resolution.status === "must_choose" ||
-    resolution.status === "duplicate_label" ||
     resolution.status === "needs_reconnection" ||
     resolution.status === "stale"
   );

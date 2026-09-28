@@ -236,25 +236,17 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *  - `pinned`       — the actor's own member pin resolves.
  *  - `auto`         — no pin, exactly one accessible connection.
  *  - `must_choose`  — no pin, more than one candidate (member must pick).
- *  - `duplicate_label` — the bound set shares a label; the remedy is renaming, not re-picking.
  *  - `none`         — no accessible connection on an auth serving the selected tools.
  *  - `stale`        — a pin or org default names a connection the run cannot use (gone, or
  *                     on an auth serving no selected tool).
  *  - `needs_reconnection` — the resolved connection is flagged for re-consent.
  */
 export type IntegrationPickStatus =
-  | "admin_locked"
-  | "pinned"
-  | "auto"
-  | "must_choose"
-  | "duplicate_label"
-  | "none"
-  | "stale"
-  | "needs_reconnection";
+  "admin_locked" | "pinned" | "auto" | "must_choose" | "none" | "stale" | "needs_reconnection";
 
 export interface IntegrationAgentResolution {
   status: IntegrationPickStatus;
-  /** The set the next run binds (the whole failing set on under-scoped / duplicate_label). */
+  /** The set the next run binds (the whole failing set on an under-scoped or stale verdict). */
   resolved_connection_ids: string[];
   /** Missing scopes on the one connection an under-scoped verdict names; else empty. */
   resolved_missing_scopes: string[];

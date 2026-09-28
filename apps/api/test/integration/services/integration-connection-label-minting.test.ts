@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * "Connexion N" minting. Pins and org defaults bind shared connections of
- * several owners into one set, and a set's labels must be distinct — so N is
- * numbered per (space, integration) across every owner, one past the highest N
- * already minted, never a row count.
+ * Label minting. A set spans owners and a tool call names a connection by its
+ * label, so labels are unique per (space, integration) across every owner:
+ * "Connexion N" is one past the highest N already minted, never a row count,
+ * and a named label that is taken gets the first free " (n)".
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -69,5 +69,26 @@ describe("integration connection — label minting", () => {
 
     const blank = await connect(ctx.user.id, "​⁦", "\n");
     expect(blank.label).toBe("Connexion 1");
+  });
+
+  it("suffixes a taken identity with the first free (n), whoever holds it", async () => {
+    const other = await memberContext(ctx, "member");
+    expect((await connect(other.user.id, "ops@example.com")).label).toBe("ops@example.com");
+    expect((await connect(ctx.user.id, "ops@example.com")).label).toBe("ops@example.com (2)");
+
+    // A rename already took "(3)": it is skipped, not duplicated.
+    const renamed = await connect(ctx.user.id, "other@example.com");
+    await db
+      .update(integrationConnections)
+      .set({ label: "ops@example.com (3)" })
+      .where(eq(integrationConnections.id, renamed.id));
+    expect((await connect(ctx.user.id, "ops@example.com")).label).toBe("ops@example.com (4)");
+  });
+
+  it("suffixes a taken label hint too, and compares labels verbatim", async () => {
+    expect((await connect(ctx.user.id, "default", "sk-…abcd")).label).toBe("sk-…abcd");
+    expect((await connect(ctx.user.id, "default", "sk-…abcd")).label).toBe("sk-…abcd (2)");
+    // Control: case makes a second label — the sidecar's enum is case-sensitive.
+    expect((await connect(ctx.user.id, "default", "SK-…abcd")).label).toBe("SK-…abcd");
   });
 });

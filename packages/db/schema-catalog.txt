@@ -121,7 +121,7 @@ column integration_connections.expires_at timestamp with time zone
 column integration_connections.id uuid not null default gen_random_uuid()
 column integration_connections.identity_claims jsonb
 column integration_connections.integration_package_id text not null
-column integration_connections.label text
+column integration_connections.label text not null
 column integration_connections.needs_reconnection boolean not null default false
 column integration_connections.refresh_failure_count integer not null default 0
 column integration_connections.scopes_granted text[] not null default '{}'::text[]
@@ -142,7 +142,7 @@ column integration_oauth_clients.redirect_uri text
 column integration_oauth_clients.space_id text
 column integration_oauth_clients.token_endpoint_auth_method text
 column integration_oauth_clients.updated_at timestamp with time zone not null default now()
-column integration_org_defaults.connection_id uuid not null
+column integration_org_defaults.connection_ids uuid[] not null
 column integration_org_defaults.created_at timestamp with time zone not null default now()
 column integration_org_defaults.created_by text
 column integration_org_defaults.enforce boolean not null default false
@@ -150,7 +150,7 @@ column integration_org_defaults.id uuid not null default gen_random_uuid()
 column integration_org_defaults.integration_package_id text not null
 column integration_org_defaults.space_id text not null
 column integration_org_defaults.updated_at timestamp with time zone not null default now()
-column integration_pins.connection_id uuid not null
+column integration_pins.connection_ids uuid[] not null
 column integration_pins.created_at timestamp with time zone not null default now()
 column integration_pins.created_by text
 column integration_pins.id uuid not null default gen_random_uuid()
@@ -687,6 +687,7 @@ constraint integration_connections integration_conn_exactly_one_owner CHECK ((((
 constraint integration_connections integration_connections_auth_key_valid CHECK ((auth_key ~ '^[a-z][a-z0-9_]*$'::text))
 constraint integration_connections integration_connections_end_user_id_end_users_id_fk FOREIGN KEY (end_user_id) REFERENCES end_users(id) ON DELETE CASCADE
 constraint integration_connections integration_connections_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint integration_connections integration_connections_label_not_empty CHECK ((label <> ''::text))
 constraint integration_connections integration_connections_pkey PRIMARY KEY (id)
 constraint integration_connections integration_connections_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint integration_connections integration_connections_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
@@ -697,12 +698,12 @@ constraint integration_oauth_clients integration_oauth_clients_space_id_spaces_i
 constraint integration_oauth_clients ioc_auth_method_values CHECK (((token_endpoint_auth_method IS NULL) OR (token_endpoint_auth_method = ANY (ARRAY['client_secret_post'::text, 'client_secret_basic'::text, 'none'::text]))))
 constraint integration_oauth_clients ioc_auto_provisioned_is_space CHECK (((NOT auto_provisioned) OR (space_id IS NOT NULL)))
 constraint integration_oauth_clients ioc_public_iff_no_secret CHECK ((((token_endpoint_auth_method = 'none'::text) AND (client_secret_encrypted = ''::text)) OR ((token_endpoint_auth_method IS DISTINCT FROM 'none'::text) AND (client_secret_encrypted <> ''::text))))
-constraint integration_org_defaults integration_org_defaults_connection_id_fk FOREIGN KEY (connection_id) REFERENCES integration_connections(id) ON DELETE CASCADE
+constraint integration_org_defaults integration_org_defaults_connection_ids_cardinality CHECK (((cardinality(connection_ids) >= 1) AND (cardinality(connection_ids) <= 10)))
 constraint integration_org_defaults integration_org_defaults_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint integration_org_defaults integration_org_defaults_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
 constraint integration_org_defaults integration_org_defaults_pkey PRIMARY KEY (id)
 constraint integration_org_defaults integration_org_defaults_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
-constraint integration_pins integration_pins_connection_id_integration_connections_id_fk FOREIGN KEY (connection_id) REFERENCES integration_connections(id) ON DELETE CASCADE
+constraint integration_pins integration_pins_connection_ids_cardinality CHECK (((cardinality(connection_ids) >= 1) AND (cardinality(connection_ids) <= 10)))
 constraint integration_pins integration_pins_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint integration_pins integration_pins_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
 constraint integration_pins integration_pins_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
@@ -934,8 +935,8 @@ index CREATE INDEX idx_integration_conn_user ON public.integration_connections U
 index CREATE INDEX idx_integration_oauth_clients_lookup ON public.integration_oauth_clients USING btree (space_id, integration_package_id, auth_key)
 index CREATE INDEX idx_integration_oauth_clients_org_lookup ON public.integration_oauth_clients USING btree (org_id, integration_package_id, auth_key)
 index CREATE INDEX idx_integration_oauth_clients_package ON public.integration_oauth_clients USING btree (integration_package_id)
-index CREATE INDEX idx_integration_org_defaults_connection ON public.integration_org_defaults USING btree (connection_id)
-index CREATE INDEX idx_integration_pins_connection ON public.integration_pins USING btree (connection_id)
+index CREATE INDEX idx_integration_org_defaults_connection_ids ON public.integration_org_defaults USING gin (connection_ids)
+index CREATE INDEX idx_integration_pins_connection_ids ON public.integration_pins USING gin (connection_ids)
 index CREATE INDEX idx_integration_pins_user ON public.integration_pins USING btree (user_id) WHERE (user_id IS NOT NULL)
 index CREATE INDEX idx_llm_usage_api_key_id ON public.llm_usage USING btree (api_key_id)
 index CREATE INDEX idx_llm_usage_chat_session_id ON public.llm_usage USING btree (chat_session_id)
@@ -1045,6 +1046,7 @@ index CREATE UNIQUE INDEX files_pkey ON public.files USING btree (id)
 index CREATE UNIQUE INDEX idx_api_keys_key_hash ON public.api_keys USING btree (key_hash)
 index CREATE UNIQUE INDEX idx_end_users_external_id ON public.end_users USING btree (space_id, external_id) WHERE (external_id IS NOT NULL)
 index CREATE UNIQUE INDEX idx_end_users_space_email ON public.end_users USING btree (space_id, email) WHERE (email IS NOT NULL)
+index CREATE UNIQUE INDEX idx_integration_conn_label ON public.integration_connections USING btree (space_id, integration_package_id, label)
 index CREATE UNIQUE INDEX idx_integration_org_defaults_unique ON public.integration_org_defaults USING btree (space_id, integration_package_id)
 index CREATE UNIQUE INDEX idx_integration_pins_unique ON public.integration_pins USING btree (space_id, package_id, integration_package_id, COALESCE(user_id, ''::text))
 index CREATE UNIQUE INDEX idx_ioc_one_auto ON public.integration_oauth_clients USING btree (space_id, integration_package_id, auth_key) WHERE auto_provisioned

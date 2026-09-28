@@ -431,45 +431,6 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     expect(retry.status).toBeLessThan(500);
   });
 
-  it("emits 409 duplicate_connection_label when the bound set shares a label", async () => {
-    // The label is the agent's handle for a connection, so a set whose labels
-    // collide is unaddressable. The remedy is a rename, not another pick —
-    // which is why the error is its own code and not `must_choose_connection`.
-    await seedAgent({
-      id: AGENT,
-      homeSpaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      createdBy: ctx.user.id,
-      draftManifest: buildAgentManifest([INTEGRATION]),
-    });
-    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
-    await seedIntegration(INTEGRATION);
-    const conn1 = await seedConnection(INTEGRATION, ctx.user.id, {
-      label: "same",
-      accountId: "root@web-01",
-    });
-    const conn2 = await seedConnection(INTEGRATION, ctx.user.id, {
-      label: "same",
-      accountId: "root@db-01",
-    });
-
-    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
-      method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_overrides: { [INTEGRATION]: [conn1, conn2] } }),
-    });
-
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as ProblemDetails;
-    expect(body.code).toBe("missing_integration_connection");
-    const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
-    expect(err!.code).toBe("duplicate_connection_label");
-    // Same payload shape as must_choose_connection — the rows to act on.
-    expect(err!.candidate_connections!.map((c) => c.id).sort()).toEqual([conn1, conn2].sort());
-    // Not a connect problem: no offer is minted for it.
-    expect(err!.connect_url).toBeUndefined();
-  });
-
   it("emits 409 with needs_reconnection + connection_id when actor's only candidate is flagged", async () => {
     // The reconnect CTA in MissingConnectionsModal forwards `connection_id`
     // to InlineConnectButton → OAuth state, so the callback UPDATEs the

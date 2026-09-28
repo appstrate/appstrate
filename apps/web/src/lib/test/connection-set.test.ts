@@ -11,7 +11,6 @@ import {
   toggleCapped,
   keepAvailable,
   canApplyConnectionSet,
-  sharedLabels,
   displayedConnectionIds,
   checkedConnectionIds,
   joinCreatedConnection,
@@ -43,18 +42,14 @@ describe("keepAvailable", () => {
 });
 
 describe("canApplyConnectionSet", () => {
-  const a = { id: "conn_a", label: "work" };
-  const b = { id: "conn_b", label: "perso" };
+  const a = { id: "conn_a" };
+  const b = { id: "conn_b" };
   const candidateIds = ["conn_a", "conn_b"];
   const conns = (ids: string[]) => [a, b].filter((c) => ids.includes(c.id));
 
-  it("refuses a set whose labels collide — the server would 400 it", () => {
-    // Control: the same two ids with distinct labels are writable.
-    expect(canApplyConnectionSet([a, b], [], true)).toBe(true);
-    expect(canApplyConnectionSet([a, { ...b, label: "work" }], [], true)).toBe(false);
-  });
-
   it("refuses the empty set and the stored pick, in any order", () => {
+    // Control: a touched set that differs from the stored pick is writable.
+    expect(canApplyConnectionSet([a, b], [], true)).toBe(true);
     expect(canApplyConnectionSet([], [], true)).toBe(false);
     expect(canApplyConnectionSet([b, a], ["conn_a", "conn_b"], true)).toBe(false);
   });
@@ -97,14 +92,6 @@ describe("canApplyConnectionSet", () => {
     expect(canApplyConnectionSet(conns(cleaned), explicitIds, false)).toBe(true);
     // Control: an untouched pick with no ghost has nothing to rewrite.
     expect(canApplyConnectionSet([a], ["conn_a"], false)).toBe(false);
-  });
-});
-
-describe("sharedLabels", () => {
-  it("names each repeated label once, and nothing for distinct labels", () => {
-    const rows = [{ label: "web" }, { label: "db" }, { label: "web" }, { label: "web" }];
-    expect(sharedLabels(rows)).toEqual(["web"]);
-    expect(sharedLabels([{ label: "web" }, { label: "db" }])).toEqual([]);
   });
 });
 
@@ -238,7 +225,7 @@ describe("unavailableConnectionIds", () => {
       candidateIds,
     });
     expect(checked).toEqual(["a"]);
-    expect(canApplyConnectionSet([{ id: "a", label: "web" }], explicitIds, false)).toBe(true);
+    expect(canApplyConnectionSet([{ id: "a" }], explicitIds, false)).toBe(true);
     expect(
       checkedConnectionIds({ draft: null, explicitIds: ["gone"], resolvedIds: [], candidateIds }),
     ).toEqual([]);

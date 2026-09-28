@@ -1301,13 +1301,6 @@ export function validateAgentIntegrationScopes(
 /** Cap on the connections one declared integration binds in a run, enforced at every write. */
 export const MAX_CONNECTIONS_PER_INTEGRATION = 10;
 
-/** Rows sharing their `label` verbatim with another row — the one definition of a collision. */
-export function labelsSharedBy<T extends { label: string }>(rows: readonly T[]): T[] {
-  const counts = new Map<string, number>();
-  for (const row of rows) counts.set(row.label, (counts.get(row.label) ?? 0) + 1);
-  return rows.filter((row) => (counts.get(row.label) ?? 0) > 1);
-}
-
 /**
  * Per-integration connection picks. Used on `runs.connection_overrides`
  * (caller's run-time choice) and `package_schedules.connection_overrides`
@@ -1352,13 +1345,12 @@ export type ConnectionResolutionErrorCode =
   | "pinned_connection_unavailable"
   | "override_connection_unavailable"
   | "must_choose_connection"
-  | "duplicate_connection_label"
   | "insufficient_scopes"
   | "auth_key_mismatch"
   | "auth_serves_no_selected_tool";
 
 /**
- * One connection carried by `must_choose_connection` or `duplicate_connection_label`.
+ * One connection carried by `must_choose_connection`.
  *
  * Carries what it takes to TELL the candidates apart, not just to name them.
  * An id alone is opaque: a model reading the 409 has to fetch the connection
@@ -1383,7 +1375,7 @@ export interface ConnectionCandidate {
 export interface ConnectionResolutionError {
   integrationId: string;
   code: ConnectionResolutionErrorCode;
-  /** Pickable on `must_choose_connection`; colliding on `duplicate_connection_label`. */
+  /** Pickable on `must_choose_connection`. */
   candidateConnections?: ConnectionCandidate[];
   /**
    * The connection the error is bound to:

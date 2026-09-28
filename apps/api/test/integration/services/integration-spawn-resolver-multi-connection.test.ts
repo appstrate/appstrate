@@ -191,15 +191,15 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
     });
   });
 
-  // The kickoff cascade checked the set's labels are distinct on the SNAPSHOT;
-  // a rename afterwards must not reach the sidecar unchecked.
+  // The run's addresses are fixed at kickoff: a rename afterwards must not
+  // change what the sidecar enumerates mid-run.
   it("names each connection by its snapshot label, not a rename made since kickoff", async () => {
     await seedConnection({ label: "web-1", host: "web-1.example.com" });
     const dbHost = await seedConnection({ label: "db", host: "db.example.com" });
     const bound = await bindAllConnections(INTEG);
     await db
       .update(integrationConnections)
-      .set({ label: "web-1" })
+      .set({ label: "renamed" })
       .where(eq(integrationConnections.id, dbHost));
 
     const { specs } = await resolve(bound);

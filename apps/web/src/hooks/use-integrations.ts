@@ -628,7 +628,7 @@ export function useUpdateIntegrationConnection() {
     },
     onSuccess: () => {
       toast.success(t("integration.connection.updated"));
-      // A rename can clear or create a `duplicate_connection_label` verdict.
+      // A label shows on every picker and readiness view, not just the connection list.
       void invalidateIntegrationQueries(qc);
     },
     onError: onMutationError,

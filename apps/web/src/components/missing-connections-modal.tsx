@@ -3,18 +3,13 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, XCircle, Puzzle, Check, Loader2 } from "lucide-react";
-import { Input } from "@appstrate/ui/components/input";
-import type { AgentIntegrationEntry, IntegrationCandidate } from "@appstrate/shared-types";
+import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { resolutionBlocksRun } from "./integration-connect/integration-run-readiness";
-import {
-  useIntegrationDetail,
-  useIntegrationAgentResolution,
-  useUpdateIntegrationConnection,
-} from "../hooks/use-integrations";
+import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
 
 /**
@@ -54,7 +49,6 @@ export interface MissingIntegrationFieldError {
     | "needs_reconnection"
     | "insufficient_scopes"
     | "must_choose_connection"
-    | "duplicate_connection_label"
     | "auth_key_mismatch"
     | "auth_serves_no_selected_tool"
     | "pinned_connection_unavailable"
@@ -68,10 +62,7 @@ export interface MissingIntegrationFieldError {
   message: string;
   /** Missing scopes — populated on insufficient_scopes for the OAuth re-consent upgrade. */
   missing_scopes?: string[];
-  /**
-   * `must_choose_connection`: rows to pick from, for API/MCP callers (the picker lists a superset).
-   * `duplicate_connection_label`: the BOUND rows sharing a label, read by `DuplicateLabelFix`.
-   */
+  /** `must_choose_connection`: rows to pick from, for API/MCP callers (the picker lists a superset). */
   candidate_connections?: {
     id: string;
     label: string;
@@ -290,13 +281,6 @@ function MissingRow({
           <Loader2 className="text-muted-foreground size-4 shrink-0 animate-spin" />
         )}
       </div>
-      {err.code === "duplicate_connection_label" && err.candidate_connections && (
-        <DuplicateLabelFix
-          packageId={packageId}
-          connections={err.candidate_connections}
-          {...(resolution ? { candidates: resolution.candidates } : {})}
-        />
-      )}
       {canRenderPicker && (
         <div className="border-border/60 mt-1 border-t pt-2">
           <IntegrationConnectionPicker
@@ -314,97 +298,6 @@ function MissingRow({
           />
         </div>
       )}
-    </div>
-  );
-}
-
-/**
- * `duplicate_connection_label` remedy: a run addresses each bound connection by label, so one
- * must be renamed. Renaming a foreign row would 403, so that row names its owner instead.
- */
-function DuplicateLabelFix({
-  packageId,
-  connections,
-  candidates,
-}: {
-  packageId: string;
-  connections: { id: string; label: string; account_id: string; owned_by_actor: boolean }[];
-  candidates?: IntegrationCandidate[];
-}) {
-  const { t } = useTranslation(["agents"]);
-  const rename = useUpdateIntegrationConnection();
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-  // The 409 payload is stale: remember saved labels so the field and button see them.
-  const [renamed, setRenamed] = useState<Record<string, string>>({});
-
-  const ownerOf = (id: string): string =>
-    candidates?.find((c) => c.id === id)?.owner_name ??
-    t("detail.integrationMemberPicker.ownerUnknown");
-
-  return (
-    <div
-      className="mt-1 flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs"
-      data-testid={`duplicate-label-fix-${packageId}`}
-    >
-      <span className="text-amber-700 dark:text-amber-300">
-        {t("missingConnections.duplicateLabel.hint")}
-      </span>
-      {connections.map((c) => {
-        const current = renamed[c.id] ?? c.label;
-        const draft = drafts[c.id] ?? current;
-        return (
-          <div key={c.id} className="flex items-center gap-2">
-            <span className="text-muted-foreground min-w-0 flex-1 truncate">{c.account_id}</span>
-            {c.owned_by_actor ? (
-              <>
-                <Input
-                  className="h-7 max-w-[10rem] text-xs"
-                  value={draft}
-                  onChange={(e) => setDrafts((prev) => ({ ...prev, [c.id]: e.target.value }))}
-                  aria-label={t("missingConnections.duplicateLabel.renameField", {
-                    account: c.account_id,
-                  })}
-                  data-testid={`duplicate-label-input-${c.id}`}
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs"
-                  disabled={rename.isPending || draft.trim() === "" || draft === current}
-                  onClick={() =>
-                    rename.mutate(
-                      {
-                        params: { path: { packageId, connectionId: c.id } },
-                        body: { label: draft },
-                      },
-                      {
-                        onSuccess: () => {
-                          setRenamed((prev) => ({ ...prev, [c.id]: draft }));
-                          setDrafts((prev) => {
-                            const { [c.id]: _done, ...rest } = prev;
-                            void _done;
-                            return rest;
-                          });
-                        },
-                      },
-                    )
-                  }
-                  data-testid={`duplicate-label-save-${c.id}`}
-                >
-                  {t("missingConnections.duplicateLabel.rename")}
-                </Button>
-              </>
-            ) : (
-              <span data-testid={`duplicate-label-foreign-${c.id}`}>
-                {t("missingConnections.duplicateLabel.askOwner", {
-                  label: current,
-                  owner: ownerOf(c.id),
-                })}
-              </span>
-            )}
-          </div>
-        );
-      })}
     </div>
   );
 }

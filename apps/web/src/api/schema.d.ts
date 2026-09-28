@@ -1662,7 +1662,7 @@ export interface paths {
         head?: never;
         /**
          * Update an integration connection's label and/or shared_with_org flag
-         * @description The connection owner or a holder of `integrations:configure` may edit it. Sharing (`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; unsharing is open to both, so a governor can withdraw a colleague's shared credentials. Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an org default names the connection. A member pin does not block it; that member's next run fails with `pinned_connection_unavailable` until they pick again.
+         * @description The connection owner or a holder of `integrations:configure` may edit it. Sharing (`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; unsharing is open to both, so a governor can withdraw a colleague's shared credentials. Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an org default names the connection. A member pin does not block it; that member's next run fails with `pinned_connection_unavailable` until they pick again. A label is unique per (space, integration), compared verbatim: renaming to one another connection holds is refused with 409 `connection_label_taken`.
          */
         patch: operations["updateIntegrationConnectionMetadata"];
         trace?: never;
@@ -5676,8 +5676,8 @@ export interface components {
         /** @description Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback, each layer a set and the fallback binding at most one; then a scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses. */
         IntegrationAgentResolution: {
             /** @enum {string} */
-            status: "admin_locked" | "pinned" | "auto" | "must_choose" | "duplicate_label" | "none" | "stale" | "needs_reconnection";
-            /** @description The set the next run binds. On `duplicate_label`, on an `insufficient_scopes` verdict and on an `auth_serves_no_selected_tool` verdict (`stale`), the whole set the winning layer tried to bind. */
+            status: "admin_locked" | "pinned" | "auto" | "must_choose" | "none" | "stale" | "needs_reconnection";
+            /** @description The set the next run binds. On an `insufficient_scopes` verdict and on an `auth_serves_no_selected_tool` verdict (`stale`), the whole set the winning layer tried to bind. */
             resolved_connection_ids: string[];
             /** @description Missing scopes on the one connection an `insufficient_scopes` verdict names; empty otherwise. */
             resolved_missing_scopes: string[];
@@ -6253,7 +6253,7 @@ export interface components {
             message: string;
             /** @description Human-readable title; preserved from the underlying error factory. */
             title?: string;
-            /** @description Populated on `must_choose_connection` — the connections the caller may pick from, each carrying the fields that tell them apart; pass their `id`s back as the request body's `connection_overrides` array for that integration to retry the run. Populated on `duplicate_connection_label` too, where it names the bound connections that share a label: the remedy is renaming one of them (`PATCH /api/integrations/{packageId}/connections/{connectionId}`), not re-picking. */
+            /** @description Populated on `must_choose_connection` — the connections the caller may pick from, each carrying the fields that tell them apart; pass their `id`s back as the request body's `connection_overrides` array for that integration to retry the run. */
             candidate_connections?: {
                 id: string;
                 /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections addresses each by its label. */
@@ -8145,7 +8145,7 @@ export interface operations {
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
-                    /** @description Per-integration connection sets for THIS run (the run-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `duplicate_connection_label` (two bound connections share a label). */
+                    /** @description Per-integration connection sets for THIS run (the run-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor). */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -8482,7 +8482,7 @@ export interface operations {
                     proxy_id_override?: string;
                     /** @description Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitting it is identical to `published` (latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent at THIS write — `403 draft_not_writable` otherwise — and is not re-checked at fire time, the way `connection_overrides` are frozen here too. The selected definition (manifest + prompt) is resolved at each fire — a schedule inheriting (`published`) on a never-published agent skips the fire and logs a warning until a version is published or `draft` is selected. */
                     version_override?: string;
-                    /** @description Per-integration connection sets frozen on the schedule row (the schedule-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write. Label distinctness is NOT checked at this write: a set whose connections share a label fails every fire with `duplicate_connection_label` until one is renamed. */
+                    /** @description Per-integration connection sets frozen on the schedule row (the schedule-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write. */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -12483,7 +12483,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400. */
+                    /** @description A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of this integration in the space holds with 409 `connection_label_taken`. */
                     label?: string;
                     shared_with_org?: boolean;
                 };
@@ -12531,7 +12531,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Connection is named by an admin pin or an org default (`connection_pinned`) */
+            /** @description Unsharing a connection an admin pin or an org default names (`connection_pinned`), or renaming it to a label another connection of this integration in the space holds (`connection_label_taken`) */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -20520,7 +20520,7 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description `appfile://file_xxx` URIs to mount read-only into the run's `files/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_files` input field for them, so they go through the same ACL, byte/count caps and `file_links` chaining as any other file input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_files` is rejected with a `400` — the name is reserved. */
                     context_files?: string[];
-                    /** @description Per-integration connection sets for THIS run (the run-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `duplicate_connection_label` (two bound connections share a label). */
+                    /** @description Per-integration connection sets for THIS run (the run-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor). */
                     connection_overrides?: {
                         [key: string]: string[];
                     };

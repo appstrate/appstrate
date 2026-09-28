@@ -29,9 +29,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `api_call` cookie jar and the persistent-`401` state are keyed per
   (integration, connection), so nothing captured through one connection is
   replayed on another. A call is routed by `(tool name, connection label)`. The
-  label is therefore the address, which is why a set whose labels collide is
-  refused (see `### Changed`) and why `integration_connections.label` is now
-  `NOT NULL` and non-empty. A bound set is spawned whole or not at all: when one
+  label is therefore the address, which is why `integration_connections.label`
+  is now `NOT NULL`, non-empty and unique per (space, integration) (see
+  `### Changed`). A bound set is spawned whole or not at all: when one
   member of a set of two or more cannot be delivered at kickoff, the whole
   integration is dropped — the lost member marked `no_delivery`, each survivor
   `bound_set_incomplete` — because a lone survivor would carry no `connection`
@@ -77,35 +77,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     (`IntegrationPin`) and org-default summaries no longer carry `auth_key` —
     a set may span several auths. Each write carries the WHOLE set and REPLACES it; `DELETE`
     clears it. There is no add-one or remove-one endpoint, so the members of an
-    org default share one `enforce` by construction. These writes refuse, with
-    `400`, a set whose connections do not carry distinct labels; run and
-    schedule overrides are not checked at the write — a colliding set is
-    refused when the run kicks off, and at each schedule fire.
+    org default share one `enforce` by construction.
   - The agent connection readiness (`GET /api/agents/{scope}/{name}/connection-readiness`,
     `integrations[].resolution`): `resolved_connection_id`,
     `admin_pinned_connection_id`, `member_pinned_connection_id` and
     `org_default_connection_id` become `resolved_connection_ids`,
     `admin_pinned_connection_ids`, `member_pinned_connection_ids` and
-    `org_default_connection_ids` (arrays); `resolved_owned_by_actor` is removed;
-    `status` gains `duplicate_label`. On `duplicate_label` and on an
-    `insufficient_scopes` verdict, `resolved_connection_ids` carries the whole
-    set the winning layer tried to bind.
-  - A run whose bound connections share a label is refused with the usual
-    `409 missing_integration_connection`; the new value is the per-integration
-    `errors[].code`, `duplicate_connection_label`, and the field error carries
-    `candidate_connections` — the rows that collide. The remedy is renaming one
-    (`PATCH /api/integrations/{packageId}/connections/{connectionId}`), not
-    re-picking. `candidate_connections[].label` is a `string`, never `null`.
-  - `integration_connections.label` is `NOT NULL` and never empty.
-    `PATCH /api/integrations/{packageId}/connections/{connectionId}` refuses
-    with `400` a `label` that is `null`, empty, whitespace-only, or holds a
-    control character (line breaks and tabs included), a zero-width/invisible
-    character or a bidirectional-override character: the label reaches the
-    agent's model verbatim. A minted label is `Connexion N`, N one past the
-    highest `Connexion <n>` already held in the (space, integration) across
-    every owner, unless the connection's account id or the connect flow's
-    label hint supplies one — sanitised first: line breaks become spaces and
-    the other refused characters are dropped.
+    `org_default_connection_ids` (arrays); `resolved_owned_by_actor` is removed.
+    On an `insufficient_scopes` verdict, `resolved_connection_ids` carries the
+    whole set the winning layer tried to bind. `candidate_connections[].label`
+    is a `string`, never `null`.
+  - `integration_connections.label` is `NOT NULL`, never empty, and unique per
+    (space, integration) across every owner — compared verbatim, so `Gmail`
+    and `gmail` are two labels. A bound set therefore never needs a label
+    check. `PATCH /api/integrations/{packageId}/connections/{connectionId}`
+    refuses with `409 connection_label_taken` a `label` another connection of
+    the same integration in the space holds, and with `400` one that is
+    `null`, empty, whitespace-only, or holds a control character (line breaks
+    and tabs included), a zero-width/invisible character or a
+    bidirectional-override character: the label reaches the agent's model
+    verbatim. A minted label is `Connexion N`, N one past the highest
+    `Connexion <n>` already held in the (space, integration) across every
+    owner, unless the connection's account id or the connect flow's label hint
+    supplies one — sanitised first: line breaks become spaces and the other
+    refused characters are dropped — and suffixed ` (2)`, ` (3)`, … when that
+    one is taken. A reconnect never changes a label.
   - Deleting a connection (`DELETE /api/me/connections/{id}`, or deleting the
     custom OAuth client that minted it) is refused with `409
 connection_pinned` while an admin pin or an org default names it, exactly
@@ -142,8 +138,10 @@ connection_pinned` while an admin pin or an org default names it, exactly
   column (one row per key, a `CHECK` of 1..10 members, a GIN index for the
   reverse lookup); it numbers every NULL or empty `label` `Connexion N`
   counting on from the highest `Connexion <n>` of its (space, integration)
-  across all owners, then sets the column `NOT NULL` with a
-  `CHECK (label <> '')`. `0032` is idempotent and prints its counts before and
+  across all owners, renames every row but the oldest of a group sharing a
+  label in its (space, integration) to `<label> (n)` — n the smallest numbers
+  from 2 no row holds —, then sets the column `NOT NULL` with a
+  `CHECK (label <> '')` and a unique index on (space, integration, label). `0032` is idempotent and prints its counts before and
   after; every "after" must read 0. Schedule job data held in Redis needs no
   rewrite: the scheduler re-syncs every enabled schedule's job from its row
   before starting its worker, and a fire whose job still carries the old shape

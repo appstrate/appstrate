@@ -21,7 +21,7 @@ import { db } from "@appstrate/db/client";
 import { integrationOrgDefaults } from "@appstrate/db/schema";
 import type { IntegrationOrgDefault } from "@appstrate/shared-types";
 import type { SpaceScope } from "../lib/scope.ts";
-import { assertDistinctConnectionLabels, validatePinTarget } from "./integration-pins-service.ts";
+import { validatePinTarget } from "./integration-pins-service.ts";
 
 /** Identical wire shape to {@link IntegrationOrgDefault}; aliased for the canonical pattern (cf. `PinSummary`). */
 type OrgDefaultSummary = IntegrationOrgDefault;
@@ -91,12 +91,11 @@ export async function upsertOrgDefault(
   integrationId: string,
   input: UpsertOrgDefaultInput,
 ): Promise<OrgDefaultSummary> {
-  const conns = await Promise.all(
+  await Promise.all(
     input.connectionIds.map((connectionId) =>
       validatePinTarget(scope, integrationId, connectionId, { requireShared: true }),
     ),
   );
-  assertDistinctConnectionLabels(integrationId, conns);
 
   const now = new Date();
   // Atomic upsert on the (space, integration) unique index — avoids the

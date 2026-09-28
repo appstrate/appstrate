@@ -114,10 +114,11 @@ export const integrationConnections = pgTable(
     // a column with no reader is not telemetry, it is write amplification.
     // User-facing display name, set at creation: the extracted identity
     // (email/login) when available, else "Connexion N" (N = 1 + the highest
-    // "Connexion <n>" in the same (space, integration), every owner). Stable
-    // for the row's lifetime; user-editable. The UI shows it verbatim — a
-    // single source of truth, no render-time fallback gymnastics. Never empty:
-    // the sidecar's `connection` tool argument addresses a bound connection by it.
+    // "Connexion <n>" in the same (space, integration), every owner), suffixed
+    // " (n)" when taken. Stable for the row's lifetime; user-editable. The UI
+    // shows it verbatim — a single source of truth, no render-time fallback
+    // gymnastics. Never empty and unique per (space, integration): the
+    // sidecar's `connection` tool argument addresses a bound connection by it.
     label: text("label").notNull(),
     // Owner-set opt-in: when true, this connection is selectable by
     // any actor of the same space during the run-time fallback
@@ -157,6 +158,9 @@ export const integrationConnections = pgTable(
     index("idx_integration_conn_shared")
       .on(table.spaceId, table.integrationId, table.authKey)
       .where(sql`${table.sharedWithOrg} = true`),
+    // A bound set spans owners of one (space, integration) and a tool call
+    // names its connection by label, so no two rows there share one.
+    uniqueIndex("idx_integration_conn_label").on(table.spaceId, table.integrationId, table.label),
     check(
       "integration_conn_exactly_one_owner",
       sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,

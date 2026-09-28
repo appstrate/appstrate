@@ -49,7 +49,6 @@ import {
   checkedConnectionIds,
   displayedConnectionIds,
   joinCreatedConnection,
-  sharedLabels,
   toggleCapped,
   unavailableConnectionIds,
 } from "../../lib/connection-set";
@@ -250,7 +249,6 @@ export function IntegrationConnectionPicker({
   // Warnings judge the set "Valider" would write, not the bound one.
   const verdictConns = dirty ? checkedConns : displayConns;
   const underScopedConns = verdictConns.filter((c) => c.missing_scopes.length > 0);
-  const collidingLabels = sharedLabels(verdictConns);
   const hasCandidates = candidates.length > 0;
   const canApply = canApplyConnectionSet(checkedConns, explicitIds, dirty) && !upsertPin.isPending;
 
@@ -346,9 +344,9 @@ export function IntegrationConnectionPicker({
                 : t("detail.integrationMemberPicker.connectLabel");
   // Amber on exactly the states that gate a run: pin mode reads the server's
   // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
-  // override mode an empty pick inherits, so only an under-scoped or colliding set warns.
+  // override mode an empty pick inherits, so only an under-scoped or unavailable set warns.
   const triggerWarn = overrideMode
-    ? underScopedConns.length > 0 || collidingLabels.length > 0 || unavailableIds.length > 0
+    ? underScopedConns.length > 0 || unavailableIds.length > 0
     : (runBlocking ?? false);
   const TriggerIcon = triggerWarn ? AlertTriangle : displayConns.length > 0 ? Users : Plus;
 
@@ -633,29 +631,6 @@ export function IntegrationConnectionPicker({
               count: unavailableIds.length,
             })}
           </span>
-        </div>
-      )}
-      {/* Same name twice: the run is refused until one is renamed. */}
-      {collidingLabels.length > 0 && (
-        <div
-          className="mt-1.5 flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
-          data-testid={`member-pick-duplicate-label-${integrationId}`}
-        >
-          <div className="flex items-center gap-1.5">
-            <AlertTriangle className="size-3 shrink-0" />
-            <span>
-              {t("detail.integrationMemberPicker.duplicateLabel", {
-                labels: collidingLabels.join(", "),
-              })}
-            </span>
-          </div>
-          <Link
-            to={`/integrations/${integrationId}`}
-            className="underline underline-offset-2"
-            data-testid={`member-pick-rename-link-${integrationId}`}
-          >
-            {t("detail.integrationMemberPicker.duplicateLabelRename")}
-          </Link>
         </div>
       )}
       {/* Under-scoped → blocked server-side. The owner can upgrade in place;

@@ -48,7 +48,6 @@ import {
   requiredScopesForAgent,
   manifestAuthKeySet,
   manifestHasRequiredAuth,
-  labelsSharedBy,
   type IntegrationManifest,
   type ConnectionCandidate,
   type ConnectionOverrides,
@@ -373,7 +372,7 @@ function ownedConns(
   return { rows };
 }
 
-/** Every member must pass `checkHealth`, then carry a distinct label (the sidecar's address). */
+/** Every member must pass `checkHealth`; labels are unique per (space, integration) in the schema. */
 function bindSet(
   args: ResolveOneArgs,
   rows: ConnectionRow[],
@@ -388,26 +387,7 @@ function bindSet(
     }
     value.push(health.value);
   }
-
-  const colliding = labelsSharedBy(rows);
-  if (colliding.length > 0) {
-    return errorOf(args, {
-      code: "duplicate_connection_label",
-      message: duplicateLabelMessage(args.integrationId, colliding),
-      candidateConnections: colliding.map((c) => candidateOf(args, c)),
-      boundConnectionIds,
-    });
-  }
-
   return { kind: "resolved", value };
-}
-
-export function duplicateLabelMessage(
-  integrationId: string,
-  colliding: readonly ConnectionRow[],
-): string {
-  const labels = [...new Set(colliding.map((c) => c.label))].join(", ");
-  return `Connections bound to ${integrationId} must have distinct labels — rename one of: ${labels}.`;
 }
 
 interface ExplicitLayer {
@@ -958,7 +938,6 @@ const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
   pinned_connection_unavailable: "Pinned Connection Unavailable",
   override_connection_unavailable: "Override Connection Unavailable",
   must_choose_connection: "Multiple Connections Available — Pick One",
-  duplicate_connection_label: "Duplicate Connection Label",
   insufficient_scopes: "Insufficient Permissions",
   auth_key_mismatch: "Connection Auth Method Mismatch",
   auth_serves_no_selected_tool: "Connection Auth Serves No Selected Tool",

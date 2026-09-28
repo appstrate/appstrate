@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { labelsSharedBy } from "@appstrate/core/integration";
-
 /** At the cap an addition is refused and `ids` comes back unchanged. */
 export function toggleCapped(ids: string[], id: string, max: number): string[] {
   if (ids.includes(id)) return ids.filter((x) => x !== id);
@@ -13,21 +11,16 @@ export function keepAvailable(ids: string[], availableIds: string[]): string[] {
   return ids.filter((id) => availableIds.includes(id));
 }
 
-/** Each label the set carries more than once — the resolver refuses to bind such a set. */
-export function sharedLabels(rows: readonly { label: string }[]): string[] {
-  return [...new Set(labelsSharedBy(rows).map((r) => r.label))];
-}
-
 /**
- * "Valider" writes a non-empty, addressable set that differs from the stored pick. Untouched,
- * that is only a stored pick naming an id no longer a candidate — never the cascade's fallback.
+ * "Valider" writes a non-empty set that differs from the stored pick. Untouched, that is
+ * only a stored pick naming an id no longer a candidate — never the cascade's fallback.
  */
 export function canApplyConnectionSet(
-  checked: readonly { id: string; label: string }[],
+  checked: readonly { id: string }[],
   explicitIds: string[],
   touched: boolean,
 ): boolean {
-  if (checked.length === 0 || sharedLabels(checked).length > 0) return false;
+  if (checked.length === 0) return false;
   if (!touched && explicitIds.length === 0) return false;
   const ids = checked.map((c) => c.id);
   return !(ids.length === explicitIds.length && ids.every((id) => explicitIds.includes(id)));

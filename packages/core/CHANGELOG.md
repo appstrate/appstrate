@@ -14,17 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run (10). Enforced at every WRITE (pins, org defaults, run and schedule
   overrides), never in the resolver: the cascade only echoes a set a write
   already validated, and the fallback produces at most one.
-- **New export `labelsSharedBy` (`@appstrate/core/integration`)** — given the
-  rows of a connection set, the ones whose `label` another row of the set
-  carries verbatim. The single definition of the collision rule: the API
-  resolver raises `duplicate_connection_label` on it, the pin and org-default
-  writes refuse on it, and the web pickers flag on it, so the three can never
-  disagree about what a duplicate is.
 - **`ConnectionResolutionError` gains optional `boundConnectionIds: string[]`**
   (`@appstrate/core/integration`) — every connection the winning cascade layer
   tried to bind, in its order. Set when every member was reachable but the set
   still could not bind: a member failing its health check (e.g.
-  `insufficient_scopes`) or `duplicate_connection_label`. Additive.
+  `insufficient_scopes`). Additive.
 - **`PlatformServices.loadEnforcedChatSkills`** and
   **`PlatformServices.listEnforcedChatSkills`** (`@appstrate/core/module`, #1586) —
   the skills a space enforces on its chat conversations: its active skills whose
@@ -101,18 +95,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first connection": the array is the only accepted shape, and a value left in
   the old one fails loudly. Wrap each existing value in an array.
 
-- **BREAKING: `ConnectionResolutionErrorCode` gains `duplicate_connection_label`
-  and `auth_serves_no_selected_tool`** (`@appstrate/core/integration`).
-  `duplicate_connection_label` is raised when the connections bound to one
-  integration do not carry distinct labels — the label is the handle the agent
-  names a connection by, so a colliding set is unaddressable; it carries
-  `candidateConnections` (the rows sharing a label), the same field
-  `must_choose_connection` uses. `auth_serves_no_selected_tool` is raised when a
-  connection an explicit layer binds (pin, org default, run or schedule
-  override) is on an auth that exposes none of the agent's selected tools; it
-  carries that `connectionId`. The fallback raises `not_connected` instead, its
-  `authKey` restricted to auths that serve the selection. Exhaustive `switch`es over the code must handle
-  both.
+- **BREAKING: `ConnectionResolutionErrorCode` gains `auth_serves_no_selected_tool`**
+  (`@appstrate/core/integration`), raised when a connection an explicit layer
+  binds (pin, org default, run or schedule override) is on an auth that exposes
+  none of the agent's selected tools; it carries that `connectionId`. The
+  fallback raises `not_connected` instead, its `authKey` restricted to auths
+  that serve the selection. Exhaustive `switch`es over the code must handle it.
+  A bound set needs no label check: labels are unique per (space, integration)
+  in the platform's schema.
 
 - **BREAKING: a connection label is never null.** `ConnectionCandidate.label`
   (`@appstrate/core/integration`) and `ResolutionFieldError.candidate_connections[].label`

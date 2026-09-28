@@ -202,28 +202,6 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
     expect(row!.resolvedConnections![INTEGRATION]!.map((c) => c.connectionId)).toEqual([picked]);
   });
 
-  it("refuses a two-connection bind whose labels collide (duplicate_connection_label)", async () => {
-    await seedIntegration(INTEGRATION);
-    await seedDefaultModel();
-    const a = await seedIntegrationConnection(ctx, INTEGRATION, { label: "same" });
-    const b = await seedIntegrationConnection(ctx, INTEGRATION, { label: "same" });
-
-    const res = await post("/api/runs/inline", {
-      manifest: inlineManifest([INTEGRATION]),
-      prompt: "do the thing",
-      connection_overrides: { [INTEGRATION]: [a, b] },
-    });
-
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as ProblemDetails;
-    expect(body.code).toBe("missing_integration_connection");
-    const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
-    expect(err!.code).toBe("duplicate_connection_label");
-    expect(err!.candidate_connections!.map((c) => c.id).sort()).toEqual([a, b].sort());
-    // The run must not exist — the refusal is at the gate, not mid-boot.
-    expect(await db.select().from(runs)).toHaveLength(0);
-  });
-
   it("POST /api/runs/inline/validate agrees with the launch — pick clears, absence does not", async () => {
     await seedIntegration(INTEGRATION);
     const picked = await seedConnection(INTEGRATION);

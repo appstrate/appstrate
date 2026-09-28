@@ -55,6 +55,7 @@ import {
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { guardedFetch, isBlockedUrl } from "@appstrate/core/ssrf";
+import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
@@ -2230,6 +2231,48 @@ interface PersistCredentialInput {
 }
 
 /**
+ * Serialise the label writes of one (space, integration) — an insert picking a free label and a
+ * rename — so a pick cannot be taken between its read and its write.
+ */
+export async function lockConnectionLabels(
+  tx: Tx,
+  spaceId: string,
+  integrationId: string,
+): Promise<void> {
+  const key = `ic_label:${spaceId}:${integrationId}`;
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key})::bigint)`);
+}
+
+/**
+ * `label`, else its first " (n)" form no row of the (space, integration) holds.
+ * Call under {@link lockConnectionLabels}.
+ */
+async function firstFreeLabel(
+  tx: Tx,
+  spaceId: string,
+  integrationId: string,
+  label: string,
+): Promise<string> {
+  const taken = await tx
+    .select({ label: integrationConnections.label })
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.spaceId, spaceId),
+        eq(integrationConnections.integrationId, integrationId),
+        or(
+          eq(integrationConnections.label, label),
+          sql`starts_with(${integrationConnections.label}, ${`${label} (`})`,
+        ),
+      ),
+    );
+  return dedupeLabel(
+    label,
+    taken.map((row) => row.label),
+  );
+}
+
+/**
  * The single low-level writer of the credential columns
  * (`credentials_encrypted`, `expires_at`, `scopes_granted`, `identity_claims`,
  * `needs_reconnection`) on `integration_connections`. Every acquisition and
@@ -2277,17 +2320,17 @@ export async function persistCredentialBundle(
     // No mono-auth-per-actor gate: an actor may hold N connections across any
     // mix of declared auths (OAuth + PAT + custom).
     //
-    // Label: identity or `labelHint`, else "Connexion N" past the highest N across EVERY
-    // owner (a set spans owners); the advisory lock serialises concurrent reads of MAX.
+    // Label: identity or `labelHint` (" (n)"-suffixed when taken), else "Connexion N" past the
+    // highest N across EVERY owner — free by construction. Labels are unique per
+    // (space, integration); the advisory lock serialises the reads that pick one.
     const namedLabel = [displayAccountId(input.accountId), input.labelHint]
       .map((raw) => (raw ? toMintedLabel(raw) : ""))
       .find((label) => label.length > 0);
-    const labelValue: string | SQL =
-      namedLabel ??
-      sql<string>`'Connexion ' || (COALESCE((SELECT MAX(substring(label from '^Connexion ([0-9]+)$')::numeric) FROM integration_connections WHERE space_id = ${target.scope.spaceId} AND integration_package_id = ${insertPackageId} AND label ~ '^Connexion [0-9]+$'), 0) + 1)`;
-    const labelLockKey = `ic_label:${target.scope.spaceId}:${insertPackageId}`;
     const row = await db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${labelLockKey})::bigint)`);
+      await lockConnectionLabels(tx, target.scope.spaceId, insertPackageId);
+      const labelValue: string | SQL = namedLabel
+        ? await firstFreeLabel(tx, target.scope.spaceId, insertPackageId, namedLabel)
+        : sql<string>`'Connexion ' || (COALESCE((SELECT MAX(substring(label from '^Connexion ([0-9]+)$')::numeric) FROM integration_connections WHERE space_id = ${target.scope.spaceId} AND integration_package_id = ${insertPackageId} AND label ~ '^Connexion [0-9]+$'), 0) + 1)`;
       const inserted = await tx
         .insert(integrationConnections)
         .values({

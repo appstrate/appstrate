@@ -38,7 +38,6 @@ import type {
 import {
   missingScopesForConnection,
   manifestAuthKeySet,
-  labelsSharedBy,
   type ConnectionResolutionSource,
 } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
@@ -49,7 +48,8 @@ import {
   notEphemeralFilter,
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
-import { notFound, invalidRequest } from "../lib/errors.ts";
+import { notFound, invalidRequest, conflict } from "../lib/errors.ts";
+import { isUniqueViolation } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
@@ -58,12 +58,11 @@ import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integration-service.ts";
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
-import { assertConnectionsUnpinned } from "./integration-connections.ts";
+import { assertConnectionsUnpinned, lockConnectionLabels } from "./integration-connections.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
   isUserConnectionCreationBlocked,
-  duplicateLabelMessage,
 } from "./integration-connection-resolver.ts";
 import type { ConnectionResolutionResult } from "@appstrate/core/integration";
 import type { IntegrationManifestCache } from "./integration-service.ts";
@@ -135,17 +134,6 @@ export async function setBlockUserConnections(
 }
 
 // ─────────────────────────── Pin CRUD ─────────────────────────────────────────
-
-/** Refuse a colliding set here; the resolver re-checks for a LATER rename. */
-export function assertDistinctConnectionLabels(
-  integrationId: string,
-  rows: readonly ConnectionRow[],
-): void {
-  const colliding = labelsSharedBy(rows);
-  if (colliding.length > 0) {
-    throw invalidRequest(duplicateLabelMessage(integrationId, colliding));
-  }
-}
 
 function toPinSummary(pin: PinRow): PinSummary {
   return {
@@ -263,10 +251,9 @@ async function upsertPin(args: {
   createdBy: string | null;
 }): Promise<PinSummary> {
   const { scope, agentPackageId, integrationId, connectionIds, userIdValue, createdBy } = args;
-  const conns = await Promise.all(
+  await Promise.all(
     connectionIds.map((id) => validatePinTarget(scope, integrationId, id, args.validateOpts)),
   );
-  assertDistinctConnectionLabels(integrationId, conns);
   await assertAgentActiveHere(scope, agentPackageId);
 
   const ids = sql`ARRAY[${sql.join(
@@ -468,7 +455,10 @@ interface UpdateConnectionMetadataInput {
  * is enforced in the route: the owner or an `integrations:configure` holder
  * may edit, but only the owner may share (sharing is consent).
  *
- * Refuses sharedWithOrg=false per `assertConnectionsUnpinned`.
+ * Refuses sharedWithOrg=false per `assertConnectionsUnpinned`, and a label
+ * another connection of the (space, integration) holds (409
+ * `connection_label_taken`, raised by the unique index). A rename takes the
+ * insert's label lock, so it cannot land between an insert's pick and its write.
  */
 export async function updateConnectionMetadata(
   connectionId: string,
@@ -485,10 +475,32 @@ export async function updateConnectionMetadata(
   if (input.sharedWithOrg !== undefined) updates.sharedWithOrg = input.sharedWithOrg;
 
   const result = await db
-    .update(integrationConnections)
-    .set(updates)
-    .where(eq(integrationConnections.id, connectionId))
-    .returning();
+    .transaction(async (tx) => {
+      if (input.label !== undefined) {
+        const [conn] = await tx
+          .select({
+            spaceId: integrationConnections.spaceId,
+            integrationId: integrationConnections.integrationId,
+          })
+          .from(integrationConnections)
+          .where(eq(integrationConnections.id, connectionId))
+          .limit(1);
+        if (!conn) return [];
+        await lockConnectionLabels(tx, conn.spaceId, conn.integrationId);
+      }
+      return tx
+        .update(integrationConnections)
+        .set(updates)
+        .where(eq(integrationConnections.id, connectionId))
+        .returning();
+    })
+    .catch((err: unknown) => {
+      if (input.label === undefined || !isUniqueViolation(err)) throw err;
+      throw conflict(
+        "connection_label_taken",
+        `Another connection of this integration is already named '${input.label}'`,
+      );
+    });
   if (result.length === 0) throw notFound(`Connection '${connectionId}' not found`);
   return result[0]!;
 }
@@ -696,10 +708,6 @@ async function resolveAgentIntegrationPick(args: {
         break;
       case "must_choose_connection":
         status = "must_choose";
-        break;
-      case "duplicate_connection_label":
-        resolvedConnectionIds = err.boundConnectionIds ?? [];
-        status = "duplicate_label";
         break;
       case "needs_reconnection":
         status = "needs_reconnection";

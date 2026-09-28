@@ -2,8 +2,9 @@
 
 /**
  * `0077_connection_sets.sql` on a database at `0076`, holding the rows it
- * exists for: scalar pins and org defaults, and connections with no label or
- * an empty one beside labels that already use the "Connexion N" series.
+ * exists for: scalar pins and org defaults, connections with no label or an
+ * empty one beside labels that already use the "Connexion N" series, and
+ * labels shared within a (space, integration) beside a "<label> (2)" taken.
  * Same split as `migration-0059-drop-org-viewer.test.ts`: the replayed-journal
  * parity tests guard the shape, this file guards what the `.sql` does to rows.
  */
@@ -82,7 +83,12 @@ beforeAll(async () => {
       ${connection(3, GMAIL, BOB, "Connexion 5", "2026-01-03")},
       ${connection(4, GMAIL, BOB, "", "2026-01-04")},
       ${connection(5, GMAIL, ALICE, "prod", "2026-01-05")},
-      ${connection(6, SLACK, ALICE, null, "2026-01-06")};
+      ${connection(6, SLACK, ALICE, null, "2026-01-06")},
+      ${connection(7, GMAIL, BOB, "prod", "2026-01-07")},
+      ${connection(8, GMAIL, ALICE, "prod (2)", "2026-01-08")},
+      ${connection(9, GMAIL, ALICE, "prod", "2026-01-09")},
+      ${connection(10, GMAIL, BOB, "Prod", "2026-01-10")},
+      ${connection(11, SLACK, BOB, "prod", "2026-01-11")};
     INSERT INTO integration_pins (space_id, package_id, integration_package_id, user_id, connection_id)
       VALUES ('${SPACE}', '${AGENT}', '${GMAIL}', NULL, '${conn(1)}'),
              ('${SPACE}', '${AGENT}', '${GMAIL}', '${ALICE}', '${conn(5)}');
@@ -125,6 +131,27 @@ describe("0077 — connection sets", () => {
     // Labels already set are untouched.
     expect(await labelOf(conn(1))).toBe("Connexion 2");
     expect(await labelOf(conn(5))).toBe("prod");
+  });
+
+  it("renames all but the oldest of a shared label past every '(n)' already held", async () => {
+    // "prod (2)" is an existing label, so the two late "prod" rows take 3 and 4.
+    expect(await labelOf(conn(7))).toBe("prod (3)");
+    expect(await labelOf(conn(9))).toBe("prod (4)");
+    expect(await labelOf(conn(8))).toBe("prod (2)");
+    // Verbatim comparison: case makes another label; another integration another group.
+    expect(await labelOf(conn(10))).toBe("Prod");
+    expect(await labelOf(conn(11))).toBe("prod");
+    // The index refuses a second holder in a group; the other integration is another group.
+    expect(
+      await rejects(
+        `UPDATE integration_connections SET label = 'prod (2)' WHERE id = '${conn(7)}'`,
+      ),
+    ).toBe(true);
+    expect(
+      await rejects(
+        `UPDATE integration_connections SET label = 'prod (3)' WHERE id = '${conn(11)}'`,
+      ),
+    ).toBe(false);
   });
 
   it("deleting a pinned connection leaves its id in the set", async () => {

@@ -54,7 +54,6 @@ export interface ResolutionFieldError extends ValidationFieldError {
    * `owned_by_actor`). Pick some and send their `id`s back in the request's
    * `connection_overrides` map. Ids alone would force a second round-trip
    * through the connection list before the caller could choose.
-   * `duplicate_connection_label` — the bound connections sharing a label.
    */
   candidate_connections?: {
     id: string;

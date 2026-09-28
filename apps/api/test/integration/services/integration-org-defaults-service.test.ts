@@ -167,28 +167,6 @@ describe("integration-org-defaults-service", () => {
     expect(fetched!.enforce).toBe(false);
   });
 
-  it("refuses a set whose members share a label, with the resolver's wording", async () => {
-    const a = await seedSharedConnection(ctx.defaultSpaceId, "prod");
-    const bSame = await seedSharedConnection(ctx.defaultSpaceId, "prod");
-    await expect(
-      upsertOrgDefault(scope, INTEGRATION_ID, {
-        connectionIds: [a, bSame],
-        enforce: true,
-        createdBy: ctx.user.id,
-      }),
-    ).rejects.toThrow(/must have distinct labels/);
-    expect(await getOrgDefault(scope, INTEGRATION_ID)).toBeNull();
-
-    // Control: distinct labels, same two-member shape, lands.
-    const bOther = await seedSharedConnection(ctx.defaultSpaceId, "staging");
-    const ok = await upsertOrgDefault(scope, INTEGRATION_ID, {
-      connectionIds: [a, bOther],
-      enforce: true,
-      createdBy: ctx.user.id,
-    });
-    expect(ok.connection_ids).toEqual([a, bOther]);
-  });
-
   it("deleting a member leaves its id in the set — an enforced default never shrinks", async () => {
     const a = await seedSharedConnection(ctx.defaultSpaceId, "staging");
     const b = await seedSharedConnection(ctx.defaultSpaceId, "prod");

@@ -1167,7 +1167,9 @@ export const integrationsPaths = {
         "unsharing is open to both, so a governor can withdraw a colleague's shared credentials. " +
         "Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin " +
         "or an org default names the connection. A member pin does not block it; that member's next run " +
-        "fails with `pinned_connection_unavailable` until they pick again.",
+        "fails with `pinned_connection_unavailable` until they pick again. A label is unique per " +
+        "(space, integration), compared verbatim: renaming to one another connection holds is refused " +
+        "with 409 `connection_label_taken`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1186,7 +1188,7 @@ export const integrationsPaths = {
                   minLength: 1,
                   maxLength: 80,
                   description:
-                    "A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400.",
+                    "A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of this integration in the space holds with 409 `connection_label_taken`.",
                 },
                 shared_with_org: { type: "boolean" },
               },
@@ -1213,7 +1215,7 @@ export const integrationsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Connection is named by an admin pin or an org default (`connection_pinned`)",
+            "Unsharing a connection an admin pin or an org default names (`connection_pinned`), or renaming it to a label another connection of this integration in the space holds (`connection_label_taken`)",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/problem+json": {

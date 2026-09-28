@@ -131,10 +131,9 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
   });
 
   it("rejects a repeated connection id in a set, in either case", async () => {
-    // The same connection twice is a set whose labels cannot be distinct, so
-    // it would 409 `duplicate_connection_label` at the gate instead of 400ing
-    // here. `z.uuid()` accepts either case and Postgres folds, so the guard
-    // has to fold too.
+    // The same connection twice would bind one credential under two
+    // addresses. `z.uuid()` accepts either case and Postgres folds, so the
+    // guard has to fold too.
     await expectRejectedField(
       await post({ input: {}, connection_overrides: { "@acme/gmail": ["conn_1", "conn_1"] } }),
       "connection_overrides.@acme/gmail",
