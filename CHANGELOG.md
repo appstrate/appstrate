@@ -60,10 +60,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   column `NOT NULL` with a `CHECK (label <> '')` and a unique index on
   (space, integration, label). `0032` is idempotent and prints its counts
   before and after; every "after" must read 0. Schedule job data held in
-  Redis needs no rewrite: the scheduler re-syncs every enabled schedule's job
-  from its row before starting its
-  worker, and a fire whose job still carries the old shape records a visible
-  failed run instead of launching. The runbook, with the control query that
+  Redis needs no rewrite: a fire now reads only the job's `scheduleId` and
+  runs what the schedule row holds (see `### Fixed`), and the scheduler
+  re-syncs every enabled schedule's job from its row before starting its
+  worker. A row whose `connection_overrides` still has the old shape (0032
+  skipped) records a visible failed run instead of launching. The runbook, with the control query that
   tells "nothing to rewrite" apart from "nothing at all", is
   `scripts/migration/README.md`. Existing pins and defaults stay valid: each
   becomes a set of one.
@@ -326,20 +327,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   runs as another identity it hides the viewer's own pickers and offers the
   shared candidates, or says the actor must choose.
 
-- **BREAKING: only an org owner or admin can make ANOTHER member a schedule's
-  actor** (#738). The actor lends every connection they hold to each fire, so
-  `schedules:write` alone no longer grants it: a caller whose org role is not
-  `owner` or `admin` — a `builder`, a custom role holding `schedules:write`,
-  or a space `admin` whose org role is `member` — naming another member's
-  `userId` in `actor` on `POST /api/agents/{scope}/{name}/schedules`, or
-  changing `actor` to another member on `PATCH /api/schedules/{id}`, gets
-  `403 forbidden` with `param: actor`, decided before the membership lookup so
-  the refusal cannot probe who is a member. Choosing yourself or an end-user of
-  the space is unchanged, and a `PATCH` re-sending the stored actor is no
-  change, so such a caller still edits a schedule an admin pointed at a
-  colleague. The schedule form's actor picker lists other members only to org
-  owners and admins; anyone else is offered themselves, end-users, and the
-  member already selected.
+- **BREAKING: a schedule running as ANOTHER member is an org owner or admin
+  matter** (#738). The actor lends every connection they hold to each fire, so
+  `schedules:write` / `schedules:delete` alone no longer grant it. A caller
+  whose org role is not `owner` or `admin` — a `builder`, a custom role
+  holding those permissions, or a space `admin` whose org role is `member` —
+  gets `403 forbidden`:
+  - with `param: actor`, when naming another member's `userId` in `actor` on
+    `POST /api/agents/{scope}/{name}/schedules` or `PATCH /api/schedules/{id}`,
+    decided before the membership lookup so the refusal cannot probe who is a
+    member;
+  - on ANY write to a schedule whose stored actor is another member —
+    `PATCH /api/schedules/{id}` of any field, enabling and disabling included,
+    and `DELETE /api/schedules/{id}` — decided before the body is read.
+
+  A schedule running as the caller or as an end-user of the space still needs
+  only `schedules:write` (`schedules:delete` to delete), and the member a
+  schedule runs as still writes it. The schedule form's actor picker lists
+  other members only to org owners and admins; anyone else is offered
+  themselves, end-users, and the member the field started on. The schedule
+  views hide the write controls (edit, enable/disable, delete) of a schedule
+  running as another member from anyone who is not an org owner or admin.
+
 - **BREAKING: a pin or org-default target that is not yours to pin is one
   `404`.** `PUT /api/me/integration-pins`,
   `PUT /api/integrations/{packageId}/pins/{agentPackageId}` and
@@ -463,14 +472,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   concurrent patches could combine into a schedule running as a member on
   that member's private connection, and a name-only patch could re-enable a
   schedule an owner's connection delete had just disabled. The write is now a
-  compare-and-set on the fields the checks read — actor,
-  `connection_overrides`, `enabled`, `cron_expression`, `timezone` — and
-  answers `409 schedule_modified_concurrently`, writing nothing, when one of
-  them changed in between: reload the schedule and retry.
-  `PUT /api/agents/{scope}/{name}/input-settings`, which rewrites the
-  schedules freezing a newly locked field through the same write, can answer
-  that `409` too once the settings are saved; re-sending it completes the
-  rewrite.
+  compare-and-set on the row's `updated_at`, which every schedule write bumps,
+  and answers `409 schedule_modified_concurrently`, writing nothing, when the
+  schedule was written since the patch read it — another patch, a connection
+  delete disabling it, a fire, or a lock on one of its input fields: reload
+  the schedule and retry.
+  `PUT /api/agents/{scope}/{name}/input-settings` rewrites the schedules
+  freezing a newly locked field in the same transaction as the settings, so
+  it saves both or neither, and it takes no compare-and-set: it never answers
+  that `409`.
+- **A schedule fire runs what the schedule row holds now.** Each repeatable
+  job carried a copy of the schedule — actor, input, model, proxy, version,
+  connection and dependency overrides — taken when it was armed, and the fire
+  ran that copy. A job re-armed out of order, or one whose removal failed,
+  could fire a disabled schedule or replay values an update or a connection
+  delete had just replaced. The job now carries only `{ scheduleId }`; the
+  fire reads the row, skips a deleted or disabled schedule and removes its
+  job, and otherwise launches from the row's values.
 - **Runs on an `openai-compatible` model that is not aliased reach
   `/chat/completions` again**. The agent installed its credential with
   `setRuntimeApiKey`, which leaves Pi's builtin `openai` provider untouched,

@@ -300,7 +300,7 @@ The runner→platform ingestion routes (`/api/runs/{runId}/events*`) carry this 
 
 | Type                                                      | File                                                              |
 | --------------------------------------------------------- | ----------------------------------------------------------------- |
-| `ScheduleJobData`                                         | `apps/api/src/services/scheduler.ts`                              |
+| `ScheduleJobData` (`scheduleId`)                          | `apps/api/src/services/scheduler.ts`                              |
 | `DeliveryJobData`                                         | `apps/api/src/modules/webhooks/service.ts`                        |
 | `CompactionJobData` (`retentionDays`)                     | `apps/api/src/services/inline-compaction.ts`                      |
 | `LlmUsageRetryJob` (`entry: LlmUsageEntry`, `onConflict`) | `apps/api/src/services/llm-usage-retry.ts`, `llm-usage-ledger.ts` |
