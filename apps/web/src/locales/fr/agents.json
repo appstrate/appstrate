@@ -467,6 +467,8 @@
   "actorSelect.badgeEndUser": "Utilisateur final",
   "schedule.connectionOverrides.label": "Connexions d'intégration",
   "schedule.connectionOverrides.hint": "Forcez une connexion spécifique pour chaque intégration dont dépend l'agent. Laisser sur « Hériter » pour utiliser la résolution par défaut (épingle admin → fallback utilisateur) au moment de chaque déclenchement.",
+  "schedule.connectionOverrides.mustChoose": "Une planification s'exécute sans personne pour choisir : sélectionnez la connexion à utiliser.",
+  "schedule.connectionChoiceRequired": "Cette planification ne sait pas quelle connexion utiliser pour une intégration. Choisissez-la dans « Override des paramètres par défaut » en la modifiant.",
   "detail.configSectionProxy": "Proxy",
   "detail.tabApi": "API",
   "detail.tabFiles": "Contenu",

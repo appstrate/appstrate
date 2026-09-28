@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { useAgents } from "../hooks/use-packages";
 import { useCreateSchedule, useScheduleFormDeps } from "../hooks/use-schedules";
 import { ScheduleForm } from "../components/schedule-form";
+import { mustChooseIntegrationIds } from "../lib/connection-choice";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 
@@ -48,7 +49,11 @@ export function ScheduleCreatePage() {
         mode="create"
         agents={agents?.map((f) => ({ id: f.id, displayName: f.display_name ?? f.id })) ?? []}
         selectedAgentId={effectiveAgentId}
-        onAgentChange={setSelectedAgentId}
+        onAgentChange={(agentId) => {
+          // A refusal names the previous agent's integrations.
+          createSchedule.reset();
+          setSelectedAgentId(agentId);
+        }}
         inputWrapper={deps?.inputWrapper}
         persistedModelId={deps?.persistedModelId ?? null}
         persistedGenerationConfig={deps?.persistedGenerationConfig ?? null}
@@ -58,6 +63,7 @@ export function ScheduleCreatePage() {
         agentIntegrations={deps?.agentIntegrations ?? []}
         blockedMessage={deps?.hasFileInputs ? t("schedule.fileInputBlocked") : undefined}
         isPending={createSchedule.isPending}
+        mustChooseIntegrationIds={mustChooseIntegrationIds(createSchedule.error)}
         onSubmit={(data) => {
           createSchedule.mutate(data, {
             onSuccess: () => navigate("/schedules"),

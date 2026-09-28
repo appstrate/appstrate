@@ -27,7 +27,7 @@ import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { connectionOverridesSchema } from "../lib/launch-schemas.ts";
-import type { LaunchOverrides } from "./integration-connection-resolver.ts";
+import { scheduleLaunchOverrides } from "./integration-connection-resolver.ts";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
@@ -527,9 +527,7 @@ export async function triggerScheduledRun(
       return;
     }
     // The resolver's launch-override layer, recorded as `schedule_override`.
-    const launchOverrides: LaunchOverrides | null = connectionOverrides.data
-      ? { ids: connectionOverrides.data, source: "schedule_override" }
-      : null;
+    const launchOverrides = scheduleLaunchOverrides(connectionOverrides.data);
 
     const draftAgent = await getPackage(packageId, orgId);
     if (!draftAgent) {

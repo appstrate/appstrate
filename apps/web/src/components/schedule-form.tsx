@@ -29,6 +29,7 @@ import { changedInputValues, hasInputFields, initialInputValues } from "../lib/a
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
 import { ActorSelect, type ActorValue } from "./actor-select";
+import { VERSION_PUBLISHED } from "../lib/version-selector";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 // Sentinel for the schedule's "inherit" version choice — nothing stored; the
@@ -132,6 +133,11 @@ interface ScheduleFormProps {
   onDelete?: () => void;
   isPending?: boolean;
   blockedMessage?: string;
+  /**
+   * Integrations the last save was refused over (`409 missing_integration_connection`,
+   * `must_choose_connection`): a scheduled fire cannot ask which connection to use.
+   */
+  mustChooseIntegrationIds?: readonly string[];
 }
 
 interface FormFields {
@@ -160,6 +166,7 @@ export function ScheduleForm({
   onDelete,
   isPending,
   blockedMessage,
+  mustChooseIntegrationIds,
 }: ScheduleFormProps) {
   const { t } = useTranslation(["agents", "common"]);
   const cronPresets = getCronPresets(t);
@@ -229,6 +236,12 @@ export function ScheduleForm({
       Object.keys(defaultValues.connection_overrides).length > 0
     );
   const [overridesOpen, setOverridesOpen] = useState(initialOverridesNonEmpty);
+  // Still unanswered after the refusal: the section stays open on them until
+  // a set is picked, derived rather than synced so no effect sets state.
+  const unchosen = (mustChooseIntegrationIds ?? []).filter(
+    (id) => (overrides.connection_overrides?.[id]?.length ?? 0) === 0,
+  );
+  const overridesShown = overridesOpen || unchosen.length > 0;
 
   // #738: execution identity. `undefined` = caller (create) / unchanged (edit).
   const [actor, setActor] = useState<ActorValue | undefined>(defaultValues?.actor);
@@ -479,7 +492,7 @@ export function ScheduleForm({
           proxy, and version. Same UX vocabulary as the Run modal so users
           learn the override layer once. */}
           {packageId && (
-            <Collapsible open={overridesOpen} onOpenChange={setOverridesOpen}>
+            <Collapsible open={overridesShown} onOpenChange={setOverridesOpen}>
               <CollapsibleTrigger asChild>
                 <button
                   type="button"
@@ -489,7 +502,7 @@ export function ScheduleForm({
                   <ChevronDown
                     className={cn(
                       "text-muted-foreground size-4 transition-transform",
-                      overridesOpen && "rotate-180",
+                      overridesShown && "rotate-180",
                     )}
                   />
                 </button>
@@ -522,6 +535,11 @@ export function ScheduleForm({
                   {...(agentIntegrations ? { agentIntegrations } : {})}
                   value={overrides}
                   onChange={setOverrides}
+                  // The definition every fire runs — inherit means the latest
+                  // published version, never the draft the picker would
+                  // otherwise judge for an author.
+                  version={versionOverride ?? VERSION_PUBLISHED}
+                  mustChoose={unchosen}
                 />
               </CollapsibleContent>
             </Collapsible>

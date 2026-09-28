@@ -94,6 +94,13 @@ export function runLaunchOverrides(
   return ids ? { ids, source: "run_override" } : null;
 }
 
+/** A schedule row's frozen `connection_overrides` as the launch-override layer; `null` when it names none. */
+export function scheduleLaunchOverrides(
+  ids: ConnectionOverrides | null | undefined,
+): LaunchOverrides | null {
+  return ids ? { ids, source: "schedule_override" } : null;
+}
+
 /**
  * Per-integration requirement compiled from the agent manifest. With the
  * flat model the resolver only needs to know "this integration is

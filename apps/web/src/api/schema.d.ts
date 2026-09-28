@@ -8568,6 +8568,16 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description `no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`). */
             404: components["responses"]["NoPublishedVersion"];
+            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides`. Judged for the schedule's actor against the definition it fires (`version_override`). Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. */
+            409: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             422: components["responses"]["VersionArtifactUnavailable"];
             429: components["responses"]["RateLimited"];
         };
@@ -21974,6 +21984,16 @@ export interface operations {
             /** @description Insufficient permissions — including `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NoPublishedVersion"];
+            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides`. Judged for the schedule's actor against the definition it fires (`version_override`). Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. */
+            409: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             422: components["responses"]["VersionArtifactUnavailable"];
         };
     };

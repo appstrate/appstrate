@@ -21,7 +21,11 @@ import { materializeRunUploads, type PendingUploadMaterialization } from "./file
 import { resolveModel } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { inferenceRouteOf } from "./run-launcher/subscription-run-policy.ts";
-import { validateAgentReadiness } from "./agent-readiness.ts";
+import {
+  collectAgentReadinessErrors,
+  missingIntegrationConnection,
+  validateAgentReadiness,
+} from "./agent-readiness.ts";
 import {
   resolveRunConnectionsOrError,
   type LaunchOverrides,
@@ -239,12 +243,11 @@ export async function resolveRunPreflight(params: {
   // The caller's own Map is seeded when given (never a second one created
   // behind its back), so the route still shares one memo across preflight,
   // snapshot and spawn.
-  const manifestCache: IntegrationManifestCache = params.manifestCache ?? new Map();
-  await resolveRunIntegrationVersions({
-    agentManifest: agent.manifest as Record<string, unknown>,
+  const manifestCache = await seedPinnedIntegrationManifests({
+    agent,
     orgId,
     dependencyOverrides: params.dependencyOverrides ?? null,
-    manifestCache,
+    manifestCache: params.manifestCache,
   });
 
   await validateAgentReadiness({
@@ -256,6 +259,57 @@ export async function resolveRunPreflight(params: {
     manifestCache,
     ...(params.connectOffers ? { connectOffers: params.connectOffers } : {}),
   });
+}
+
+/** The manifest memo seeded with the pinned integration manifests — see `resolveRunPreflight`. */
+async function seedPinnedIntegrationManifests(params: {
+  agent: LoadedPackage;
+  orgId: string;
+  dependencyOverrides: Record<string, string> | null;
+  manifestCache?: IntegrationManifestCache;
+}): Promise<IntegrationManifestCache> {
+  const manifestCache: IntegrationManifestCache = params.manifestCache ?? new Map();
+  await resolveRunIntegrationVersions({
+    agentManifest: params.agent.manifest as Record<string, unknown>,
+    orgId: params.orgId,
+    dependencyOverrides: params.dependencyOverrides,
+    manifestCache,
+  });
+  return manifestCache;
+}
+
+/**
+ * Refuse arming a schedule whose fire would raise `must_choose_connection`:
+ * an unattended run cannot ask which connection to use, so the choice is made
+ * when the schedule is written (the rule Make.com applies to a scenario).
+ *
+ * The same readiness the fire runs (`resolveRunPreflight`, same seeding, same
+ * launch-override layer), keeping ONLY the ambiguity. Every other verdict
+ * (not connected, needs reconnection, missing scopes, inactive integration…)
+ * is repaired outside the schedule, so it stays a visible failed run at the
+ * tick rather than a refusal to save. Non-throwing readiness on purpose: the
+ * throwing wrapper would emit `onRunConnectionMissing` for a run nobody launched.
+ */
+export async function assertScheduleConnectionsChosen(params: {
+  /** The agent at the version the schedule fires (`version_override` resolved). */
+  agent: LoadedPackage;
+  orgId: string;
+  spaceId: string;
+  actor: Actor;
+  launchOverrides: LaunchOverrides | null;
+  dependencyOverrides: Record<string, string> | null;
+}): Promise<void> {
+  const manifestCache = await seedPinnedIntegrationManifests(params);
+  const errors = await collectAgentReadinessErrors({
+    agent: params.agent,
+    orgId: params.orgId,
+    spaceId: params.spaceId,
+    actor: params.actor,
+    launchOverrides: params.launchOverrides,
+    manifestCache,
+  });
+  const unchosen = errors.filter((e) => e.code === "must_choose_connection");
+  if (unchosen.length > 0) throw missingIntegrationConnection(unchosen);
 }
 
 // ---------------------------------------------------------------------------

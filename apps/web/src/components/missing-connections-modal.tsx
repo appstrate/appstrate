@@ -11,6 +11,7 @@ import { IntegrationConnectionPicker } from "./integration-connect/integration-c
 import { describeResolution } from "./integration-connect/integration-run-readiness";
 import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
+import { integrationIdOfField } from "../lib/connection-choice";
 
 /**
  * Recovery surface for the run-kickoff 409 emitted by
@@ -140,7 +141,7 @@ export function MissingConnectionsModal({
   // 409 just reopens the modal with the updated error list.
   const mustChooseIds = integrationErrors
     .filter((e) => e.code === "must_choose_connection")
-    .map((e) => parseField(e.field));
+    .map((e) => integrationIdOfField(e.field));
   const allMustChosen = mustChooseIds.every((id) => (picks[id]?.length ?? 0) > 0);
 
   const hasActionable = integrationErrors.some((e) => !isStructuralCode(e.code));
@@ -197,7 +198,7 @@ export function MissingConnectionsModal({
             err={err}
             agentPackageId={agentPackageId}
             integrationEntries={integrationEntries}
-            pick={picks[parseField(err.field)] ?? []}
+            pick={picks[integrationIdOfField(err.field)] ?? []}
             onPick={setPick}
           />
         ))}
@@ -221,7 +222,7 @@ function MissingRow({
   onPick: (integrationId: string, connectionIds: string[]) => void;
 }) {
   const { t } = useTranslation(["agents"]);
-  const packageId = parseField(err.field);
+  const packageId = integrationIdOfField(err.field);
   const { data: detail } = useIntegrationDetail(packageId);
   const readsIntegrations = usePermissions().can("integrations:read");
   // Structural failures can't be fixed by connecting — an admin must activate
@@ -301,9 +302,4 @@ function MissingRow({
       )}
     </div>
   );
-}
-
-/** Extract the integration package id from the `integrations.{packageId}` field path. */
-function parseField(field: string): string {
-  return field.slice("integrations.".length);
 }

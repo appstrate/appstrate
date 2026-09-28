@@ -1,7 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { REQUEST_ID_ONLY_HEADERS, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+
+/** The 409 both schedule writes answer when an armed schedule leaves a connection choice open. */
+const scheduleConnectionNotChosen = {
+  description:
+    "`missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides`. Judged for the schedule's actor against the definition it fires (`version_override`). Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run.",
+  headers: REQUEST_ID_ONLY_HEADERS,
+  content: {
+    "application/problem+json": {
+      schema: { $ref: "#/components/schemas/ProblemDetail" },
+    },
+  },
+};
 
 export const schedulesPaths = {
   "/api/schedules": {
@@ -227,6 +239,7 @@ export const schedulesPaths = {
           description:
             "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`).",
         },
+        "409": scheduleConnectionNotChosen,
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
@@ -396,6 +409,8 @@ export const schedulesPaths = {
         // revalidating onto a never-published agent gets `no_published_version`
         // here too. The shared component's description names both.
         "404": { $ref: "#/components/responses/NoPublishedVersion" },
+        // Not raised by a patch leaving the schedule disabled.
+        "409": scheduleConnectionNotChosen,
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },

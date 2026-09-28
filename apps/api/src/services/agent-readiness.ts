@@ -274,6 +274,21 @@ export async function collectAgentReadinessErrors(
 }
 
 /**
+ * The `409 missing_integration_connection` envelope, one `errors[]` item per
+ * integration. Shared by the run kickoff and the schedule write so a client
+ * reads a refusal the same way whichever door raised it.
+ */
+export function missingIntegrationConnection(errors: ValidationFieldError[]): ApiError {
+  return new ApiError({
+    status: 409,
+    code: "missing_integration_connection",
+    title: "Missing Integration Connection",
+    detail: errors[0]!.message,
+    errors,
+  });
+}
+
+/**
  * Validate that an agent is ready for a run. Delegates to
  * `collectAgentReadinessErrors` and throws the first error, preserving the
  * historical fail-fast contract (single ApiError with the original code and
@@ -288,7 +303,6 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
   // modal can render the full list in one round trip.
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
   if (integrationErrors.length > 0) {
-    const first = integrationErrors[0]!;
     // Fire-and-forget — modules opting in (e.g. webhooks) get a structured
     // notification before we throw. Integration errors only accumulate when
     // an actor was present, so the guard narrows the type for the payload.
@@ -319,13 +333,7 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
             ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
           })
         : integrationErrors;
-    throw new ApiError({
-      status: 409,
-      code: "missing_integration_connection",
-      title: "Missing Integration Connection",
-      detail: first.message,
-      errors: responseErrors,
-    });
+    throw missingIntegrationConnection(responseErrors);
   }
 
   const first = errors[0]!;

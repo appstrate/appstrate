@@ -73,10 +73,14 @@ interface RunOverridesPanelProps {
   onChange: (next: RunOverridesValue) => void;
   /**
    * Version selector (#770) forwarded to the integration connection pickers so
-   * their per-integration readiness verdict matches the run for a pinned
-   * version. Omitted → draft (the schedule editor passes nothing).
+   * their per-integration readiness verdict judges the definition that runs.
    */
   version?: string;
+  /**
+   * Integrations a save was refused over for want of a connection choice
+   * (`must_choose_connection`); each row says so until a set is picked.
+   */
+  mustChoose?: readonly string[];
 }
 
 /**
@@ -104,6 +108,7 @@ export function RunOverridesPanel({
   value,
   onChange,
   version,
+  mustChoose,
 }: RunOverridesPanelProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: orgModels } = useModels();
@@ -251,6 +256,7 @@ export function RunOverridesPanel({
           agentPackageId={packageId}
           integrations={agentIntegrations}
           version={version}
+          mustChoose={mustChoose}
           value={value.connection_overrides ?? {}}
           onChange={(next) => {
             if (Object.keys(next).length === 0) {
@@ -283,12 +289,14 @@ function ScheduleConnectionOverridesSection({
   agentPackageId,
   integrations,
   version,
+  mustChoose,
   value,
   onChange,
 }: {
   agentPackageId: string;
   integrations: AgentIntegrationRef[];
   version?: string;
+  mustChoose?: readonly string[];
   value: Record<string, string[]>;
   onChange: (next: Record<string, string[]>) => void;
 }) {
@@ -304,6 +312,7 @@ function ScheduleConnectionOverridesSection({
             agentPackageId={agentPackageId}
             integration={integ}
             version={version}
+            mustChoose={mustChoose?.includes(integ.id) ?? false}
             value={value[integ.id] ?? []}
             onChange={(connIds) => {
               const next = { ...value };
@@ -322,16 +331,19 @@ function IntegrationOverrideRow({
   agentPackageId,
   integration,
   version,
+  mustChoose,
   value,
   onChange,
 }: {
   agentPackageId: string;
   integration: AgentIntegrationRef;
   version?: string;
+  mustChoose: boolean;
   /** Currently-picked connection set; empty = inherit. */
   value: string[];
   onChange: (next: string[]) => void;
 }) {
+  const { t } = useTranslation(["agents"]);
   const { data: detail } = useIntegrationDetail(integration.id);
   const displayName = detail?.manifest.display_name ?? integration.id;
 
@@ -355,6 +367,11 @@ function IntegrationOverrideRow({
         persistence={{ mode: "override", value, onChange }}
         version={version}
       />
+      {mustChoose && value.length === 0 && (
+        <p className="text-destructive text-xs" role="alert">
+          {t("schedule.connectionOverrides.mustChoose")}
+        </p>
+      )}
     </div>
   );
 }

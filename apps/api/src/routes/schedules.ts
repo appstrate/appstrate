@@ -42,6 +42,8 @@ import { getSpacePackageSettings, type SpacePackageSettings } from "../services/
 import { resolveAndValidateScheduleInput } from "../services/input-resolution.ts";
 import { getPackage } from "../services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
+import { assertScheduleConnectionsChosen } from "../services/run-pipeline.ts";
+import { scheduleLaunchOverrides } from "../services/integration-connection-resolver.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import {
@@ -225,6 +227,30 @@ async function assertScheduleTargetValid(args: {
   // definition this write just validated the input against — resolving the
   // selector a second time there would let the two answers drift.
   return effectiveAgent;
+}
+
+/**
+ * The agent definition a stored schedule fires, for a patch that did not
+ * already resolve it. `null` when that version cannot be resolved (say, an
+ * agent never published): the row is already failing every tick for that
+ * cause, which a rename must not be refused over — the version gates above
+ * judge it whenever the patch moves it.
+ */
+async function scheduledDefinition(
+  resolved: LoadedPackage | null,
+  packageId: string,
+  scope: SpaceScope,
+  versionOverride: string | undefined,
+): Promise<LoadedPackage | null> {
+  if (resolved) return resolved;
+  const agent = await getPackage(packageId, scope.orgId);
+  if (!agent) throw notFound(`Agent '${packageId}' not found`);
+  try {
+    return (await resolveAgentRunVersion(agent, versionOverride)).agent;
+  } catch (err) {
+    if (err instanceof ApiError) return null;
+    throw err;
+  }
 }
 
 /**
@@ -444,6 +470,16 @@ export function createSchedulesRouter() {
         );
       }
 
+      // A new schedule is armed, so its connection choice is made now.
+      await assertScheduleConnectionsChosen({
+        agent: effectiveAgent,
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
+        actor,
+        launchOverrides: scheduleLaunchOverrides(data.connection_overrides),
+        dependencyOverrides: data.dependency_overrides ?? null,
+      });
+
       const schedule = await createSchedule(scope, agent.id, actor, {
         name: data.name,
         cronExpression: data.cron_expression,
@@ -512,7 +548,7 @@ export function createSchedulesRouter() {
     const nextVersionOverride =
       (data.version_override !== undefined ? data.version_override : existing.version_override) ??
       undefined;
-    /** Set by the input gate below when it runs; reused by the dependency gate. */
+    /** Set by the input or dependency gate below when it runs; reused by the gates after it. */
     let effectiveAgent: LoadedPackage | null = null;
 
     // A `version_override` this patch MOVES is an act and proves itself; one it
@@ -611,6 +647,7 @@ export function createSchedulesRouter() {
         // `package_schedules.package_id` cascades. Typed, not assumed.
         if (!agentForDeps) throw notFound(`Agent '${existing.packageId}' not found`);
         target = (await resolveAgentRunVersion(agentForDeps, nextVersionOverride)).agent;
+        effectiveAgent = target;
       }
       const targetManifest = target.manifest as unknown as Record<string, unknown>;
       assertDependencyOverrideKeysDeclared(targetManifest, effectiveDependencyOverrides);
@@ -674,6 +711,32 @@ export function createSchedulesRouter() {
     // picks, forcing a re-pick under the new identity.
     const connectionOverrides =
       actorChanged && data.connection_overrides === undefined ? null : data.connection_overrides;
+
+    // A schedule that is (or stays) armed must fire without asking which
+    // connection to use — re-judged on every such write, since a connection
+    // added since the last save can make the resolution ambiguous. Disabling
+    // skips it: a patch that reduces what the row does is always applicable.
+    const nextActor = actor ?? existingActor;
+    if ((data.enabled ?? existing.enabled) && nextActor) {
+      const fired = await scheduledDefinition(
+        effectiveAgent,
+        existing.packageId,
+        scope,
+        nextVersionOverride,
+      );
+      if (fired) {
+        await assertScheduleConnectionsChosen({
+          agent: fired,
+          orgId: scope.orgId,
+          spaceId: scope.spaceId,
+          actor: nextActor,
+          launchOverrides: scheduleLaunchOverrides(
+            connectionOverrides !== undefined ? connectionOverrides : existing.connection_overrides,
+          ),
+          dependencyOverrides: effectiveDependencyOverrides ?? null,
+        });
+      }
+    }
 
     // Translate snake_case wire fields to internal camelCase for the service.
     const schedule = await updateSchedule(
