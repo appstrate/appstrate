@@ -8,6 +8,7 @@ import {
   createTestUser,
   addOrgMember,
   authHeaders,
+  memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
@@ -895,6 +896,82 @@ describe("Schedules API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.userId).toBe(ctx.user.id);
+    });
+
+    // Naming another member is an org owner/admin act; `schedules:write` covers yourself and
+    // end users only.
+    describe("who may name another member", () => {
+      let fid: string;
+      let other: string;
+
+      beforeEach(async () => {
+        fid = agentId("actor-authority");
+        await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
+        await publish(fid);
+        const user = await createTestUser();
+        await addOrgMember(ctx.orgId, user.id, "member");
+        other = user.id;
+      });
+
+      function create(caller: TestContext, actor?: Record<string, string>) {
+        return app.request(`/api/agents/${fid}/schedules`, {
+          method: "POST",
+          headers: { ...authHeaders(caller), "Content-Type": "application/json" },
+          body: JSON.stringify({ cron_expression: "0 9 * * *", ...(actor ? { actor } : {}) }),
+        });
+      }
+
+      function patch(caller: TestContext, id: string, body: Record<string, unknown>) {
+        return app.request(`/api/schedules/${id}`, {
+          method: "PATCH",
+          headers: { ...authHeaders(caller), "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      }
+
+      it("refuses a builder naming another member, and writes nothing", async () => {
+        const builder = await memberContext(ctx, "member", "builder");
+        const res = await create(builder, { userId: other });
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({ code: "forbidden", param: "actor" });
+        const list = await app.request(`/api/schedules`, { headers: authHeaders(ctx) });
+        expect(((await list.json()) as { data: unknown[] }).data).toHaveLength(0);
+      });
+
+      it("lets a builder name themselves or an end user", async () => {
+        const builder = await memberContext(ctx, "member", "builder");
+        const eu = await seedEndUser({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          externalId: `ext-${Date.now()}`,
+        });
+        expect((await create(builder, { userId: builder.user.id })).status).toBe(201);
+        expect((await create(builder, { endUserId: eu.id })).status).toBe(201);
+      });
+
+      it("lets an org admin name another member", async () => {
+        const admin = await memberContext(ctx, "admin");
+        const res = await create(admin, { userId: other });
+        expect(res.status).toBe(201);
+        expect(((await res.json()) as { userId: string }).userId).toBe(other);
+      });
+
+      it("lets a builder edit an admin-written schedule without changing its actor", async () => {
+        const builder = await memberContext(ctx, "member", "builder");
+        const created = await create(ctx, { userId: other });
+        expect(created.status).toBe(201);
+        const { id } = (await created.json()) as { id: string };
+
+        expect((await patch(builder, id, { name: "Renamed" })).status).toBe(200);
+        // Re-sending the stored actor is no choice either.
+        expect((await patch(builder, id, { actor: { userId: other } })).status).toBe(200);
+        // Moving it to another member is.
+        const third = await createTestUser();
+        await addOrgMember(ctx.orgId, third.id, "member");
+        const moved = await patch(builder, id, { actor: { userId: third.id } });
+        expect(moved.status).toBe(403);
+        expect(await moved.json()).toMatchObject({ code: "forbidden", param: "actor" });
+      });
     });
   });
 

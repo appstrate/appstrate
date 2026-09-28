@@ -38,6 +38,7 @@ import {
 } from "../../../src/services/organizations.ts";
 import { removeSpaceMember } from "../../../src/services/space-members.ts";
 import { updateSpace } from "../../../src/services/spaces.ts";
+import { updateConnectionMetadata } from "../../../src/services/integration-pins-service.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { resolveConnectionsForRun } from "../../../src/services/integration-connection-resolver.ts";
 import { presetPermissions } from "../../../src/lib/permissions.ts";
@@ -236,6 +237,34 @@ describe("unsharing on access loss", () => {
     await updateSpace(ctx.orgId, space.id, { visibility: "closed" }, space);
 
     expect(await stillShared([implicitConn, explicitConn])).toEqual([explicitConn]);
+  });
+
+  // The share-side twin: a share committed after the access loss must not re-share what the
+  // loss unshared (the route's own access check ran before the loss).
+  it("refuses sharing a connection whose owner no longer reaches its space", async () => {
+    const member = await addMember();
+    const closed = await seedSpace({ orgId: ctx.orgId, visibility: "closed" });
+    await seedSpaceMember({ spaceId: closed.id, userId: member, presetRole: "builder" });
+    const lost = await seedConnection({ spaceId: closed.id, userId: member, shared: false });
+    const kept = await seedConnection({
+      spaceId: ctx.defaultSpaceId,
+      userId: member,
+      shared: false,
+    });
+    await removeSpaceMember({
+      orgId: ctx.orgId,
+      space: closed,
+      userId: member,
+      actorPermissions: presetPermissions("admin"),
+    });
+
+    await expect(updateConnectionMetadata(lost, { sharedWithOrg: true })).rejects.toMatchObject({
+      status: 409,
+      code: "connection_owner_without_access",
+    });
+    // Control: the same write where the owner still reaches the space.
+    await updateConnectionMetadata(kept, { sharedWithOrg: true });
+    expect(await stillShared([lost, kept])).toEqual([kept]);
   });
 
   it("an admin pin on a departed member's connection fails loudly at resolution", async () => {

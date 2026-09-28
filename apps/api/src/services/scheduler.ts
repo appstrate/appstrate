@@ -3,7 +3,7 @@
 import { createQueue } from "../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { getCache } from "../infra/index.ts";
-import { and, eq, asc, inArray, sql } from "drizzle-orm";
+import { and, eq, asc, inArray, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { schedules, endUsers, runs, notifications } from "@appstrate/db/schema";
@@ -32,7 +32,7 @@ import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import type { LoadedPackage } from "../types/index.ts";
-import { ApiError, internalError, invalidRequest } from "../lib/errors.ts";
+import { ApiError, conflict, internalError, invalidRequest } from "../lib/errors.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorMatch, type Actor } from "../lib/actor.ts";
@@ -1064,9 +1064,34 @@ export async function createSchedule(
   return enriched ?? { ...schedule, ...UNENRICHED_SCHEDULE_FIELDS };
 }
 
+/**
+ * The row fields a schedule write is judged against: the actor and its connection set (whose
+ * reach the route checks), `enabled` (whether it checks readiness at all) and the cron pair the
+ * next run is computed from.
+ */
+export type ScheduleWriteSnapshot = Pick<
+  ScheduleWireDto,
+  | "id"
+  | "userId"
+  | "endUserId"
+  | "enabled"
+  | "connection_overrides"
+  | "cron_expression"
+  | "timezone"
+>;
+
+/**
+ * Merge-update a schedule judged against `expected` — the caller's one read of the row. A
+ * compare-and-set, not a lock held across the caller's checks (they resolve readiness through
+ * `db`, which a held transaction would deadlock on PGlite's single connection): the UPDATE
+ * applies only while the row still holds `expected`'s judged fields, else 409
+ * `schedule_modified_concurrently` and nothing is written. Without it, a concurrent actor change
+ * could meet a pick judged for the previous actor, or a rename re-enable a row a connection
+ * delete just disabled.
+ */
 export async function updateSchedule(
   scope: SpaceScope,
-  id: string,
+  expected: ScheduleWriteSnapshot,
   data: {
     name?: string;
     cronExpression?: string;
@@ -1089,13 +1114,10 @@ export async function updateSchedule(
   viewer: Actor | null,
   /** Caller's run-read predicate — scopes the run counters of the echoed row. */
   visibility: SQL | undefined,
-): Promise<EnrichedSchedule | null> {
-  const existing = await loadSchedule(id, scope);
-  if (!existing) return null;
-
-  const cronExpr = data.cronExpression ?? existing.cron_expression;
-  const tz = data.timezone ?? existing.timezone ?? "UTC";
-  const enabled = data.enabled ?? existing.enabled;
+): Promise<EnrichedSchedule> {
+  const cronExpr = data.cronExpression ?? expected.cron_expression;
+  const tz = data.timezone ?? expected.timezone ?? "UTC";
+  const enabled = data.enabled ?? expected.enabled;
 
   // Compute next run (cron parsing only)
   const nextRun = enabled ? computeNextRun(cronExpr, tz ?? "UTC") : null;
@@ -1131,13 +1153,30 @@ export async function updateSchedule(
       scopedWhere(schedules, {
         orgId: scope.orgId,
         spaceId: scope.spaceId,
-        extra: [eq(schedules.id, id)],
+        extra: [
+          eq(schedules.id, expected.id),
+          expected.userId === null
+            ? isNull(schedules.userId)
+            : eq(schedules.userId, expected.userId),
+          expected.endUserId === null
+            ? isNull(schedules.endUserId)
+            : eq(schedules.endUserId, expected.endUserId),
+          eq(schedules.enabled, expected.enabled),
+          eq(schedules.cronExpression, expected.cron_expression),
+          eq(schedules.timezone, expected.timezone ?? "UTC"),
+          // jsonb equality is semantic; COALESCE so an SQL NULL and a JSON null both read as "none".
+          sql`coalesce(${schedules.connectionOverrides}, 'null'::jsonb) = ${JSON.stringify(expected.connection_overrides ?? null)}::jsonb`,
+        ],
       }),
     )
     .returning();
 
+  // Changed or deleted since the caller read it: every check it ran judged another row.
   if (!row) {
-    throw internalError();
+    throw conflict(
+      "schedule_modified_concurrently",
+      "The schedule changed while this request was being handled. Reload it and retry.",
+    );
   }
   const schedule = toSchedule(row);
 
@@ -1172,7 +1211,8 @@ export async function updateSchedule(
  *
  * Rewrites go through {@link updateSchedule} rather than a raw UPDATE so the
  * row and its repeatable BullMQ job — whose payload freezes `input` — stay in
- * step; a raw UPDATE would leave the queue firing the stale frozen values.
+ * step; a raw UPDATE would leave the queue firing the stale frozen values. A row a concurrent
+ * write changes meanwhile answers its 409; the lock write is idempotent, so a retry repairs it.
  *
  * @returns the ids of the schedules that were rewritten.
  */
@@ -1184,7 +1224,7 @@ export async function dropLockedFieldsFromSchedules(
   if (lockedFields.length === 0) return [];
 
   const rows = await db
-    .select({ id: schedules.id, input: schedules.input })
+    .select()
     .from(schedules)
     .where(
       scopedWhere(schedules, {
@@ -1204,7 +1244,7 @@ export async function dropLockedFieldsFromSchedules(
     if (Object.keys(stripped).length === Object.keys(input).length) continue;
     // No viewer and no run predicate: this rewrite is a repair, and the
     // enriched row it returns is discarded.
-    await updateSchedule(scope, row.id, { input: stripped }, null, undefined);
+    await updateSchedule(scope, toSchedule(row), { input: stripped }, null, undefined);
     rewritten.push(row.id);
   }
   return rewritten;

@@ -167,7 +167,9 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
     "runs:cancel",
     // Files: read only — deleting is preset admin or the creator (per-file capability check).
     "files:read",
-    // Schedules: read only — choosing the execution identity is governance (#738).
+    // Schedules: read only. Even with `schedules:write` (builder, custom roles) a caller schedules
+    // as themselves or an end user; naming another member as the actor is an org owner/admin act
+    // (#738, `assertMayChooseMemberActor` in routes/schedules.ts).
     "schedules:read",
     "persistence:read",
     // Browse the catalog + self-connect; activation is preset admin.

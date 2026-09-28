@@ -423,7 +423,9 @@ export async function assertScheduleConnectionsChosen(params: {
     case "self":
       throw missingIntegrationConnection(unchosen.map(translateResolutionError));
     case "member":
-      throw missingIntegrationConnection(await withSharedCandidatesOnly(unchosen));
+      throw missingIntegrationConnection(
+        await withSharedCandidatesOnly(unchosen, params.connectionOverrides),
+      );
     case "end_user":
       throw missingIntegrationConnection(
         unchosen.map((e) =>
@@ -443,14 +445,20 @@ export async function assertScheduleConnectionsChosen(params: {
 /**
  * The refusal as a caller acting for another member may read it: a choice lists only the
  * candidates shared in the space. When none is, the choice is still open — the actor pins
- * one of their own for the agent, or an admin pins one.
+ * one of their own for the agent, or an admin pins one. Any other item about a connection that
+ * is not shared (an exempt stored set can hold the actor's private row) names no label or
+ * account; its id stays only when the schedule's set names it, which the caller already reads.
  */
 async function withSharedCandidatesOnly(
   errors: ConnectionResolutionError[],
+  connectionOverrides: ConnectionOverrides | null,
 ): Promise<ValidationFieldError[]> {
-  const candidateIds = errors.flatMap((e) => (e.candidateConnections ?? []).map((c) => c.id));
+  const ids = errors.flatMap((e) => [
+    ...(e.candidateConnections ?? []).map((c) => c.id),
+    ...(e.connectionId ? [e.connectionId] : []),
+  ]);
   const shared = new Set(
-    candidateIds.length === 0
+    ids.length === 0
       ? []
       : (
           await db
@@ -458,14 +466,22 @@ async function withSharedCandidatesOnly(
             .from(integrationConnections)
             .where(
               and(
-                inArray(integrationConnections.id, candidateIds),
+                inArray(integrationConnections.id, ids),
                 eq(integrationConnections.sharedWithOrg, true),
               ),
             )
         ).map((r) => r.id),
   );
   return errors.map((e) => {
-    if (e.code !== "must_choose_connection") return translateResolutionError(e);
+    if (e.code !== "must_choose_connection") {
+      if (!e.connectionId || shared.has(e.connectionId)) return translateResolutionError(e);
+      const onSchedule = connectionOverrides?.[e.integrationId]?.includes(e.connectionId);
+      return translateResolutionError({
+        ...e,
+        connectionId: onSchedule ? e.connectionId : undefined,
+        message: `A connection in the schedule's set for ${e.integrationId} cannot serve this run (${e.code}) — only the schedule's actor can see it; remove it from the set or ask them.`,
+      });
+    }
     const candidates = (e.candidateConnections ?? []).filter((c) => shared.has(c.id));
     return translateResolutionError({
       ...e,

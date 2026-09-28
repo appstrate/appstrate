@@ -29,6 +29,7 @@ import {
 } from "../../helpers/run-connection-fixtures.ts";
 import { apiIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
+import { getSchedule, updateSchedule } from "../../../src/services/scheduler.ts";
 
 const app = getTestApp();
 
@@ -386,6 +387,39 @@ describe("schedule writes for another actor — only what both reach", () => {
     expect((await patch({ enabled: true })).status).toBe(200);
   });
 
+  // Two PATCHes interleaved: P1 re-points the actor to the member, P2 — read before P1 committed —
+  // stores the member's private id, judged as the owner's own pick. P2's write must not land.
+  it("refuses a write judged against a row a concurrent write re-pointed, and writes nothing", async () => {
+    const own = await seedIntegrationConnection(member, INTEGRATION);
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    const seeded = await seedSchedule({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      enabled: false,
+    });
+    const judged = (await getSchedule(seeded.id, scope, null, undefined))!;
+    // P1 commits between P2's read and P2's write.
+    await db.update(schedules).set({ userId: member.user.id }).where(eq(schedules.id, seeded.id));
+
+    await expect(
+      updateSchedule(
+        scope,
+        judged,
+        { connectionOverrides: { [INTEGRATION]: [own] }, enabled: true },
+        null,
+        undefined,
+      ),
+    ).rejects.toMatchObject({ status: 409, code: "schedule_modified_concurrently" });
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, seeded.id));
+    expect(row).toMatchObject({
+      userId: member.user.id,
+      connectionOverrides: null,
+      enabled: false,
+    });
+  });
+
   it("refuses an actor who cannot run agents in this space before resolving anything", async () => {
     const guest = await memberContext(ctx, "guest");
     await seedIntegrationConnection(guest, INTEGRATION);
@@ -480,6 +514,47 @@ describe("schedule writes — a set on an auth serving no selected tool", () => 
       code: "auth_serves_no_selected_tool",
       connection_id: backup,
     });
+  });
+
+  it("names no label or account of another member's private row the stored set binds", async () => {
+    const member = await memberContext(ctx, "member");
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: API,
+        authKey: "backup",
+        accountId: "private-account",
+        spaceId: ctx.defaultSpaceId,
+        userId: member.user.id,
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+        scopesGranted: [],
+        label: "private-label",
+      })
+      .returning({ id: integrationConnections.id });
+    const schedule = await seedSchedule({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: member.user.id,
+      enabled: true,
+      connectionOverrides: { [API]: [row!.id] },
+    });
+
+    // The owner edits the member's schedule; the stored set is exempt, its verdict is not.
+    const res = await app.request(`/api/schedules/${schedule.id}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "renamed" }),
+    });
+    expect(res.status).toBe(409);
+    const text = await res.text();
+    expect(text).not.toContain("private-label");
+    expect(text).not.toContain("private-account");
+    const body = JSON.parse(text) as ProblemBody;
+    // The id is on the schedule the caller reads, so it stays.
+    expect(body.errors).toEqual([
+      expect.objectContaining({ code: "auth_serves_no_selected_tool", connection_id: row!.id }),
+    ]);
   });
 
   it("accepts it when an admin pin binds it — the pin, not the schedule, is what to fix", async () => {

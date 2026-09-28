@@ -309,11 +309,15 @@ export const mePaths = {
           },
         },
         "400": {
-          description: `Refused: ${connectionSetRefusals}; or a connection of another integration or space, or one neither owned by the caller nor shared.`,
+          description: `Refused: ${connectionSetRefusals}.`,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "A connection id that is unknown, of another integration or space, or neither owned by the caller nor shared — one answer for all, so an id cannot be probed.",
+        },
       },
     },
     delete: {

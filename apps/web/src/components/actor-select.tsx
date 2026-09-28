@@ -18,6 +18,8 @@ import { cn } from "@appstrate/ui/cn";
 import { $api } from "../api/client";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useEndUsers, useEndUser } from "../hooks/use-end-users";
+import { useAuth } from "../hooks/use-auth";
+import { usePermissions } from "../hooks/use-permissions";
 
 /**
  * An execution identity. Exactly one field is set; `undefined` means no
@@ -77,6 +79,11 @@ export function ActorSelect({
     { enabled: !!orgId },
   );
   const members = useMemo(() => orgData?.members ?? [], [orgData]);
+  // Naming ANOTHER member is an org owner/admin act (the server answers 403 otherwise); anyone
+  // else picks themselves, an end user, or keeps the member already selected.
+  const { user } = useAuth();
+  const { orgRole } = usePermissions();
+  const mayChooseOtherMembers = orgRole === "owner" || orgRole === "admin";
 
   const { data: endUserPage } = useEndUsers({
     limit: 50,
@@ -90,6 +97,7 @@ export function ActorSelect({
   const memberOptions = useMemo<Option[]>(() => {
     const q = debouncedQuery.toLowerCase();
     return members
+      .filter((m) => mayChooseOtherMembers || m.userId === user?.id || m.userId === value?.userId)
       .filter(
         (m) =>
           !q ||
@@ -101,7 +109,7 @@ export function ActorSelect({
         name: primaryLabel(m.displayName, m.email ?? null, m.userId),
         email: m.email ?? null,
       }));
-  }, [members, debouncedQuery]);
+  }, [members, debouncedQuery, mayChooseOtherMembers, user?.id, value?.userId]);
 
   const endUserOptions = useMemo<Option[]>(
     () =>

@@ -31,6 +31,7 @@ import type { AuditPayload } from "@appstrate/core/module";
 import { parseListPagination } from "../lib/list-query.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
+import { callerOrgRole } from "../lib/view-as.ts";
 import { getSpaceScope, type SpaceScope } from "../lib/scope.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
@@ -293,6 +294,30 @@ const actorSchema = z
   });
 
 /**
+ * Naming ANOTHER platform member as a schedule's actor makes the schedule run with that
+ * member's reach on every fire — an org owner/admin act (#738), not something `schedules:write`
+ * alone grants. Yourself or an end user of the space stays a `schedules:write` choice. Checked
+ * before the membership lookup, so a refused caller cannot probe who is a member either.
+ */
+function assertMayChooseMemberActor(
+  c: Context<AppEnv>,
+  selected: { userId?: string } | undefined,
+): void {
+  if (!selected?.userId) return;
+  const caller = getActor(c);
+  if (caller.type === "user" && caller.id === selected.userId) return;
+  const role = callerOrgRole(c);
+  if (role === "owner" || role === "admin") return;
+  throw new ApiError({
+    status: 403,
+    code: "forbidden",
+    title: "Forbidden",
+    detail: "Only an organization owner or admin can make another member a schedule's actor.",
+    param: "actor",
+  });
+}
+
+/**
  * Resolves + validates a selected schedule actor against the org/space scope.
  * Validates org membership (user) or space ownership (end-user) so a schedule
  * can never be pinned to an identity outside the caller's tenant. Returns
@@ -450,8 +475,9 @@ export function createSchedulesRouter() {
         effectiveAgent.manifest as unknown as Record<string, unknown>,
       );
 
-      // #738: actor defaults to the caller; an admin may override it from the
-      // form (validated against this org/space scope).
+      // #738: actor defaults to the caller; an admin may name another member (validated against
+      // this org/space scope).
+      assertMayChooseMemberActor(c, data.actor);
       const actor = await resolveScheduleActor(scope, data.actor, getActor(c));
 
       // Reject a `model_id_override` that references no real model up front, so
@@ -709,7 +735,9 @@ export function createSchedulesRouter() {
     }
 
     // #738: re-point the actor when the caller selected one (validated against
-    // this org/space scope). `undefined` leaves the existing actor untouched.
+    // this org/space scope). `undefined` leaves the existing actor untouched. Re-sending the
+    // stored member is no choice, so it needs no admin — an admin already made it.
+    if (data.actor?.userId !== existing.userId) assertMayChooseMemberActor(c, data.actor);
     const actor = data.actor ? await resolveScheduleActor(scope, data.actor) : undefined;
 
     // Only a *real* identity change invalidates frozen connection picks. Picking
@@ -764,10 +792,12 @@ export function createSchedulesRouter() {
       }
     }
 
-    // Translate snake_case wire fields to internal camelCase for the service.
+    // Translate snake_case wire fields to internal camelCase for the service. `existing` is the
+    // row every check above judged: the write applies only while the row still matches it
+    // (409 `schedule_modified_concurrently` otherwise).
     const schedule = await updateSchedule(
       scope,
-      id,
+      existing,
       {
         name: data.name,
         cronExpression: data.cron_expression,

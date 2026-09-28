@@ -106,40 +106,46 @@ describe("integration-pins-service — DB access/ownership", () => {
   });
 
   describe("validatePinTarget", () => {
-    it("throws notFound for an unknown connection id", async () => {
-      await expect(validatePinTarget(scope, INTEGRATION, crypto.randomUUID(), {})).rejects.toThrow(
-        /not found/i,
-      );
-    });
+    /** The refusal with the probed id masked — what a caller could compare across ids. */
+    async function refusal(
+      id: string,
+      opts: Parameters<typeof validatePinTarget>[3],
+    ): Promise<{ status: number; code: string; message: string }> {
+      try {
+        await validatePinTarget(scope, INTEGRATION, id, opts);
+      } catch (err) {
+        const e = err as { status: number; code: string; message: string };
+        return { status: e.status, code: e.code, message: e.message.replace(id, "<id>") };
+      }
+      throw new Error(`validatePinTarget accepted ${id}`);
+    }
 
-    it("rejects a connection from a different space", async () => {
+    // One answer for every id the caller may not pin, so a uuid cannot be probed.
+    it("refuses an unknown id, another space, another integration and a private row alike", async () => {
       const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other" });
-      const id = await seedConnection({ spaceId: otherSpace.id, userId: ctx.user.id });
-      await expect(validatePinTarget(scope, INTEGRATION, id, {})).rejects.toThrow(
-        /different space/i,
-      );
-    });
-
-    it("rejects a connection belonging to a different integration", async () => {
-      const id = await seedConnection({
+      const inOtherSpace = await seedConnection({
+        spaceId: otherSpace.id,
+        userId: memberId,
+        sharedWithOrg: true,
+      });
+      const ofOtherIntegration = await seedConnection({
         integrationId: OTHER_INTEGRATION,
         spaceId: scope.spaceId,
-        userId: ctx.user.id,
+        userId: memberId,
+        sharedWithOrg: true,
       });
-      await expect(validatePinTarget(scope, INTEGRATION, id, {})).rejects.toThrow(
-        /belongs to integration/i,
-      );
-    });
-
-    it("rejects a non-shared connection when requireShared is set", async () => {
-      const id = await seedConnection({
+      const privateRow = await seedConnection({
         spaceId: scope.spaceId,
-        userId: ctx.user.id,
+        userId: memberId,
         sharedWithOrg: false,
       });
-      await expect(
-        validatePinTarget(scope, INTEGRATION, id, { requireShared: true }),
-      ).rejects.toThrow(/sharedWithOrg/i);
+      const ids = [crypto.randomUUID(), inOtherSpace, ofOtherIntegration, privateRow];
+
+      for (const opts of [{ requireShared: true }, { allowOwnedBy: ctx.user.id }]) {
+        const answers = await Promise.all(ids.map((id) => refusal(id, opts)));
+        expect(answers[0]).toMatchObject({ status: 404, code: "not_found" });
+        for (const answer of answers) expect(answer).toEqual(answers[0]!);
+      }
     });
 
     it("accepts a shared connection under requireShared", async () => {
@@ -152,15 +158,11 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(conn.id).toBe(id);
     });
 
-    it("rejects allowOwnedBy when the connection is neither owned nor shared", async () => {
-      const id = await seedConnection({
-        spaceId: scope.spaceId,
-        userId: memberId,
-        sharedWithOrg: false,
-      });
-      await expect(
-        validatePinTarget(scope, INTEGRATION, id, { allowOwnedBy: ctx.user.id }),
-      ).rejects.toThrow(/owned by you or shared/i);
+    it("refuses the caller's own private row under requireShared, with the same answer", async () => {
+      const own = await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id });
+      expect(await refusal(own, { requireShared: true })).toEqual(
+        await refusal(crypto.randomUUID(), { requireShared: true }),
+      );
     });
 
     it("accepts allowOwnedBy when the caller owns the connection", async () => {
@@ -734,7 +736,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       release();
       await unshare;
 
-      expect(await pin).toMatch(/sharedWithOrg/i);
+      expect(await pin).toMatch(/not a shared connection/i);
       expect(await listIntegrationPins(scope, INTEGRATION)).toEqual([]);
     });
 
@@ -751,7 +753,7 @@ describe("integration-pins-service — DB access/ownership", () => {
           connectionIds: [shared!, personal],
           createdBy: ctx.user.id,
         }),
-      ).rejects.toThrow(/sharedWithOrg/i);
+      ).rejects.toMatchObject({ status: 404, code: "not_found" });
       expect(await listIntegrationPins(scope, INTEGRATION)).toEqual([]);
     });
   });

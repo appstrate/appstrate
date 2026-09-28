@@ -1216,7 +1216,7 @@ export const integrationsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Unsharing a connection an admin pin or an org default names (`connection_pinned`), or renaming it to a label another connection of this integration in the space holds (`connection_label_taken`)",
+            "Unsharing a connection an admin pin or an org default names (`connection_pinned`), renaming it to a label another connection of this integration in the space holds (`connection_label_taken`), or sharing it once its owner no longer reaches the space — removed concurrently, or the space closed (`connection_owner_without_access`)",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/problem+json": {
@@ -1392,10 +1392,14 @@ export const integrationsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description: `Refused: ${connectionSetRefusals}; or a connection that is not shared, belongs to another integration or another space.`,
+          description: `Refused: ${connectionSetRefusals}.`,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "A connection id that is unknown, not shared, or of another integration or space — one answer for all, so an id cannot be probed.",
+        },
       },
     },
     delete: {
@@ -1496,10 +1500,14 @@ export const integrationsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description: `Refused: ${connectionSetRefusals}; or a connection that is not shared, belongs to another integration or another space.`,
+          description: `Refused: ${connectionSetRefusals}.`,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "A connection id that is unknown, not shared, or of another integration or space — one answer for all, so an id cannot be probed.",
+        },
       },
     },
     delete: {

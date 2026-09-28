@@ -9,7 +9,7 @@
  *    org column, so the org tier is enforced here, in the service.
  */
 
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   integrationConnections,
@@ -276,8 +276,9 @@ export interface SpaceMemberRemoval {
  * so re-reading it here would judge the bound against a space the permission
  * that admitted the request was never checked against. A concurrent
  * `PATCH /api/spaces/{id}` widening `default_role` is therefore NOT serialized
- * against this removal: the request-scoped window RBAC spec §4.4 states and
- * §13.8 declines to lock.
+ * against this removal's authority bound: the request-scoped window RBAC spec §4.4
+ * states and §13.8 declines to lock. The space row IS share-locked, but only so
+ * the connection unshare reads the space as a concurrent access change left it.
  *
  * @throws 403 when the caller could not have granted the standing left behind,
  *   or the one being dropped.
@@ -291,6 +292,9 @@ export async function removeSpaceMember(params: {
   const { orgId, space, userId } = params;
   return db.transaction(async (tx) => {
     const target = await lockOrgMember(tx, orgId, userId);
+    // Before the unshare below reads the space: a concurrent close (`updateSpace`) and this
+    // removal would otherwise each read the other's pre-commit state and neither unshare.
+    await lockSpaceRow(tx, space.id);
     // The standing is the TARGET's, so the caller id is theirs — a personal
     // space resolves `admin` for its owner and nothing for anyone else. No
     // member row: the removal is about to delete the only one there could be.
@@ -369,6 +373,103 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
   tx: Tx,
   scope: { orgId: string; userId?: string; spaceId?: string },
 ): Promise<string[]> {
+  const lost = await connectionsOfOwnersWithoutAccess(
+    tx,
+    and(
+      eq(spaces.orgId, scope.orgId),
+      eq(integrationConnections.sharedWithOrg, true),
+      scope.userId === undefined ? undefined : eq(integrationConnections.userId, scope.userId),
+      scope.spaceId === undefined ? undefined : eq(spaces.id, scope.spaceId),
+    ),
+  );
+  if (lost.length === 0) return [];
+  // In id order, like every other connection-row locker — the UPDATE alone locks in scan order.
+  await lockConnectionRows(tx, lost, "update");
+  await tx
+    .update(integrationConnections)
+    .set({ sharedWithOrg: false, updatedAt: new Date() })
+    .where(inArray(integrationConnections.id, lost));
+  return lost;
+}
+
+/**
+ * Refuse sharing a connection whose owner no longer reaches its space — the share-side twin of
+ * {@link unshareConnectionsOfOwnersWithoutAccess}, same predicate. Call it in the sharing
+ * transaction, before the write: it locks the owner's org membership (what a member removal and
+ * an org role change lock) and the space row (what closing the space updates), so a share and
+ * an access loss serialize and whichever commits second sees the other — without the locks each
+ * reads the other's pre-commit state and the connection stays shared by someone without access.
+ * No-op for a connection an end user owns: membership does not govern those.
+ *
+ * @throws 409 `connection_owner_without_access`.
+ */
+export async function assertOwnerReachesSpaceForShare(tx: Tx, connectionId: string): Promise<void> {
+  const [conn] = await tx
+    .select({
+      userId: integrationConnections.userId,
+      spaceId: integrationConnections.spaceId,
+      orgId: spaces.orgId,
+    })
+    .from(integrationConnections)
+    .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  if (!conn?.userId) return;
+  await lockOrgMember(tx, conn.orgId, conn.userId);
+  await lockSpaceRow(tx, conn.spaceId);
+  const lost = await connectionsOfOwnersWithoutAccess(
+    tx,
+    eq(integrationConnections.id, connectionId),
+  );
+  if (lost.length > 0) {
+    throw conflict(
+      "connection_owner_without_access",
+      "The connection's owner no longer has access to this space, so it cannot be shared.",
+    );
+  }
+}
+
+/**
+ * Share-lock, in id order, every space of `orgId` where `userId` owns a shared connection — for
+ * an org role change, whose unshare would otherwise read a concurrently closed space as still
+ * open while the close reads the old role (neither unshares). A share landing meanwhile needs
+ * the member lock the caller already holds, so the set cannot grow under it.
+ */
+export async function lockSpacesOfSharedConnections(
+  tx: Tx,
+  orgId: string,
+  userId: string,
+): Promise<void> {
+  const owned = tx
+    .select({ spaceId: integrationConnections.spaceId })
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.userId, userId),
+        eq(integrationConnections.sharedWithOrg, true),
+      ),
+    );
+  await tx
+    .select({ id: spaces.id })
+    .from(spaces)
+    .where(and(eq(spaces.orgId, orgId), inArray(spaces.id, owned)))
+    .orderBy(asc(spaces.id))
+    .for("share");
+}
+
+/**
+ * Share-lock a space row: conflicts with the UPDATE that closes the space or changes its default
+ * role, not with other share-lockers (two member removals need not wait on each other).
+ */
+async function lockSpaceRow(tx: Tx, spaceId: string): Promise<void> {
+  await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.id, spaceId)).for("share");
+}
+
+/** User-owned connections matching `filter` whose owner no longer reaches the connection's space. */
+async function connectionsOfOwnersWithoutAccess(
+  tx: Tx,
+  filter: SQL | undefined,
+): Promise<string[]> {
   const rows = await tx
     .select({
       id: integrationConnections.id,
@@ -399,31 +500,15 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
       ),
     )
     .leftJoin(spaceRoles, customRoleOn)
-    .where(
-      and(
-        eq(spaces.orgId, scope.orgId),
-        eq(integrationConnections.sharedWithOrg, true),
-        isNotNull(integrationConnections.userId),
-        scope.userId === undefined ? undefined : eq(integrationConnections.userId, scope.userId),
-        scope.spaceId === undefined ? undefined : eq(spaces.id, scope.spaceId),
-      ),
-    );
+    .where(and(isNotNull(integrationConnections.userId), filter));
 
-  const lost = rows
+  return rows
     .filter(
       (row) =>
         row.orgRole === null ||
         resolveSpaceRole(row.orgRole, row.space, memberFromJoin(row), row.userId) === null,
     )
     .map((row) => row.id);
-  if (lost.length === 0) return [];
-  // In id order, like every other connection-row locker — the UPDATE alone locks in scan order.
-  await lockConnectionRows(tx, lost, "update");
-  await tx
-    .update(integrationConnections)
-    .set({ sharedWithOrg: false, updatedAt: new Date() })
-    .where(inArray(integrationConnections.id, lost));
-  return lost;
 }
 
 /**

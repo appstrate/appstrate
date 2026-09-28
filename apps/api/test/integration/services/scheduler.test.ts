@@ -391,7 +391,7 @@ describeRequiresRedis("scheduler service", () => {
 
       const updated = await updateSchedule(
         { orgId: orgId, spaceId: defaultSpaceId },
-        created.id,
+        created,
         {
           cronExpression: "*/5 * * * *",
         },
@@ -418,7 +418,7 @@ describeRequiresRedis("scheduler service", () => {
 
       const updated = await updateSchedule(
         { orgId: orgId, spaceId: defaultSpaceId },
-        created.id,
+        created,
         {
           name: "Updated Name",
         },
@@ -447,7 +447,7 @@ describeRequiresRedis("scheduler service", () => {
       // Cron-only update — overrides untouched (undefined leaves them).
       const partialUpdate = await updateSchedule(
         { orgId: orgId, spaceId: defaultSpaceId },
-        created.id,
+        created,
         { cronExpression: "*/15 * * * *" },
         null,
         undefined,
@@ -458,9 +458,10 @@ describeRequiresRedis("scheduler service", () => {
       expect(partialUpdate!.version_override).toBe("1.0.0");
 
       // Explicit null clears the override (UI's "Inherit" sentinel).
+      // Judged against the row the previous write left (its cron moved).
       const cleared = await updateSchedule(
         { orgId: orgId, spaceId: defaultSpaceId },
-        created.id,
+        partialUpdate,
         {
           generationConfigOverride: null,
           modelIdOverride: null,
@@ -491,7 +492,7 @@ describeRequiresRedis("scheduler service", () => {
 
       const updated = await updateSchedule(
         { orgId: orgId, spaceId: defaultSpaceId },
-        created.id,
+        created,
         {
           enabled: false,
         },
@@ -514,9 +515,9 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      await updateSchedule(
+      const disabled = await updateSchedule(
         { orgId: orgId, spaceId: defaultSpaceId },
-        created.id,
+        created,
         {
           enabled: false,
         },
@@ -526,7 +527,7 @@ describeRequiresRedis("scheduler service", () => {
 
       const updated = await updateSchedule(
         { orgId: orgId, spaceId: defaultSpaceId },
-        created.id,
+        disabled,
         {
           enabled: true,
         },
@@ -553,7 +554,7 @@ describeRequiresRedis("scheduler service", () => {
 
       const updated = await updateSchedule(
         { orgId: orgId, spaceId: defaultSpaceId },
-        created.id,
+        created,
         {
           input: { key: "updated", extra: true },
         },
@@ -565,17 +566,31 @@ describeRequiresRedis("scheduler service", () => {
       expect(updated!.input).toEqual({ key: "updated", extra: true });
     });
 
-    it("returns null for a non-existent ID", async () => {
-      const updated = await updateSchedule(
-        { orgId: orgId, spaceId: defaultSpaceId },
-        "sched_nonexistent",
-        {
-          cronExpression: "*/5 * * * *",
-        },
-        null,
-        undefined,
-      );
-      expect(updated).toBeNull();
+    // The snapshot is what the caller's checks judged; a row that moved since writes nothing.
+    it("refuses a stale snapshot with 409 and leaves the row as it is", async () => {
+      const scope = { orgId: orgId, spaceId: defaultSpaceId };
+      const created = await createSchedule(scope, packageId, actor, {
+        cronExpression: "0 * * * *",
+      });
+      // A concurrent write (e.g. a connection delete) disabled it after the caller's read.
+      await db.update(schedules).set({ enabled: false }).where(eq(schedules.id, created.id));
+
+      await expect(
+        updateSchedule(scope, created, { name: "renamed" }, null, undefined),
+      ).rejects.toMatchObject({ status: 409, code: "schedule_modified_concurrently" });
+      const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));
+      expect(row).toMatchObject({ enabled: false, name: null });
+    });
+
+    it("refuses a snapshot of a row deleted since, with the same 409", async () => {
+      const scope = { orgId: orgId, spaceId: defaultSpaceId };
+      const created = await createSchedule(scope, packageId, actor, {
+        cronExpression: "0 * * * *",
+      });
+      await deleteSchedule(scope, created.id);
+      await expect(
+        updateSchedule(scope, created, { cronExpression: "*/5 * * * *" }, null, undefined),
+      ).rejects.toMatchObject({ status: 409, code: "schedule_modified_concurrently" });
     });
   });
 
@@ -894,6 +909,7 @@ describeRequiresRedis("scheduler service", () => {
   describe("cross-space isolation", () => {
     let spaceBId: string;
     let scheduleIdInA: string;
+    let scheduleInA: Awaited<ReturnType<typeof createSchedule>>;
 
     beforeEach(async () => {
       const spaceB = await seedSpace({ orgId, name: "Space B" });
@@ -905,6 +921,7 @@ describeRequiresRedis("scheduler service", () => {
         { name: "Space A Schedule", cronExpression: "0 * * * *" },
       );
       scheduleIdInA = created.id;
+      scheduleInA = created;
     });
 
     it("does not list a schedule belonging to another space", async () => {
@@ -950,23 +967,20 @@ describeRequiresRedis("scheduler service", () => {
       ).not.toBeNull();
     });
 
-    // `updateSchedule` gates on its own `getSchedule(id, scope, null, undefined)` read and
-    // returns null on a miss, so the UPDATE's `spaceId` predicate is
-    // defence-in-depth BEHIND that read and cannot be reached independently
-    // through this function. What this case pins is the caller-visible half:
-    // a cross-space update is a null no-op, never a silent success.
-    it("reports no update issued from another space, and the row is unchanged", async () => {
-      expect(
-        await updateSchedule(
+    // `updateSchedule` writes against the caller's snapshot, so the UPDATE's `spaceId` predicate
+    // is what stands here: another space's snapshot matches no row and writes nothing.
+    it("refuses an update issued from another space, and the row is unchanged", async () => {
+      await expect(
+        updateSchedule(
           { orgId: orgId, spaceId: spaceBId },
-          scheduleIdInA,
+          scheduleInA,
           {
             name: "Hijacked",
           },
           null,
           undefined,
         ),
-      ).toBeNull();
+      ).rejects.toMatchObject({ status: 409 });
       const survivor = await getSchedule(
         scheduleIdInA,
         { orgId: orgId, spaceId: defaultSpaceId },

@@ -43,7 +43,7 @@ import {
   notEphemeralFilter,
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
-import { notFound, invalidRequest, conflict } from "../lib/errors.ts";
+import { notFound, conflict } from "../lib/errors.ts";
 import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
@@ -55,6 +55,7 @@ import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import { assertConnectionsUnpinned, lockConnectionLabels } from "./integration-connections.ts";
 import { lockConnectionRows } from "./connection-row-locks.ts";
+import { assertOwnerReachesSpaceForShare } from "./space-members.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
@@ -327,6 +328,12 @@ async function assertAgentActiveHere(scope: SpaceScope, agentPackageId: string):
   }
 }
 
+/**
+ * The connection `connectionId` names, when the caller may pin it for `integrationId` here. Every
+ * refusal — unknown id, another space or integration, a row neither shared nor (for a member
+ * pin) the caller's own — is the SAME 404, so a pin write cannot tell a colleague's private
+ * uuid from a made-up one. The message depends only on `opts`, i.e. on the caller.
+ */
 export async function validatePinTarget(
   scope: SpaceScope,
   integrationId: string,
@@ -339,28 +346,22 @@ export async function validatePinTarget(
     .from(integrationConnections)
     .where(eq(integrationConnections.id, connectionId))
     .limit(1);
-  if (!conn) throw notFound(`Connection '${connectionId}' not found`);
-  if (conn.spaceId !== scope.spaceId) {
-    throw invalidRequest("Pinned connection belongs to a different space");
-  }
-  if (conn.integrationId !== integrationId) {
-    throw invalidRequest(
-      `Pinned connection belongs to integration '${conn.integrationId}', not '${integrationId}'`,
+  const reachable =
+    conn !== undefined &&
+    conn.spaceId === scope.spaceId &&
+    conn.integrationId === integrationId &&
+    (opts.requireShared
+      ? conn.sharedWithOrg
+      : opts.allowOwnedBy === undefined || conn.userId === opts.allowOwnedBy || conn.sharedWithOrg);
+  if (!conn || !reachable) {
+    const wanted = opts.requireShared
+      ? "a shared connection"
+      : opts.allowOwnedBy !== undefined
+        ? "one of your connections or a shared one"
+        : "a connection";
+    throw notFound(
+      `Connection '${connectionId}' is not ${wanted} of ${integrationId} in this space`,
     );
-  }
-  if (opts.requireShared) {
-    if (!conn.sharedWithOrg) {
-      throw invalidRequest(
-        "Pinned connection must be marked sharedWithOrg=true before it can be pinned for other members",
-      );
-    }
-  } else if (opts.allowOwnedBy !== undefined) {
-    const accessible = conn.userId === opts.allowOwnedBy || conn.sharedWithOrg;
-    if (!accessible) {
-      throw invalidRequest(
-        "Pinned connection must be owned by you or shared with the org before you can pin it",
-      );
-    }
   }
   return conn;
 }
@@ -476,8 +477,9 @@ export async function updateConnectionMetadata(
 
   const result = await db
     .transaction(async (tx) => {
-      // Lock order, everywhere: the label advisory lock, THEN the row lock (the unshare's
-      // check, else the UPDATE) — a rename-only write takes them in that order too.
+      // Lock order, everywhere: the label advisory lock, then (a share) the owner's membership
+      // and the space row, THEN the row lock (the unshare's check, else the UPDATE) — a
+      // rename-only write takes them in that order too.
       if (input.label !== undefined) {
         const [conn] = await tx
           .select({
@@ -492,6 +494,11 @@ export async function updateConnectionMetadata(
       }
       if (input.sharedWithOrg === false) {
         await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be unshared");
+      }
+      // The owner may have lost the space since the route checked; the unshare that loss ran
+      // could not see this share yet.
+      if (input.sharedWithOrg === true) {
+        await assertOwnerReachesSpaceForShare(tx, connectionId);
       }
       return tx
         .update(integrationConnections)
