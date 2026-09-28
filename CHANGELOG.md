@@ -300,19 +300,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   actor who could never fire the schedule — a user without `agents:run` in
   the space or outside the organization, an end-user absent from the space —
   which was accepted and then disabled at its first fire.
-- **BREAKING: a schedule written for another identity sees and binds only
-  shared connections.** When the caller writing a schedule is not its actor,
-  the connections still resolve with the actor's reach, but the caller learns
-  and names only what both reach: a connection id the write newly names in
+- **BREAKING: a schedule written for another member sees and binds only
+  shared connections.** When the caller writing a schedule is not its actor
+  and the actor is another platform member, the connections still resolve
+  with the actor's reach, but the caller learns and names only what both
+  reach: on every write — armed or not — a connection id in
   `connection_overrides` that is not a connection of that integration shared
-  in the space is refused as `override_connection_unavailable` — the same
-  answer for a private, foreign or unknown id — and a `must_choose_connection`
+  in the space is refused as `override_connection_unavailable`, the same
+  answer for a private, foreign or unknown id; and a `must_choose_connection`
   item lists only shared candidates. Its `candidate_connections` may then be
   an empty array: only the actor (a member pin of their own for the agent) or
-  an admin (an admin pin) can make that choice. Ids already on the row for the
-  same actor are the actor's earlier pick and are not re-judged; changing a
-  schedule's actor resets its picks. Before, nothing stopped such a write from
-  naming one of the actor's private connections, which every fire then bound.
+  an admin (an admin pin) can make that choice. A set is exempt only when the
+  write changes neither the actor nor that set. Changing a schedule's actor
+  resets its picks. An END-USER actor is an identity the organization's
+  application manages: the caller sees and names the end-user's own
+  connections. Before, nothing stopped a write from naming a member's private
+  connection, which every fire then bound.
 
   The schedule form lists every refusal above its fields, integration by
   integration and with its reason, even where no picker row renders, and

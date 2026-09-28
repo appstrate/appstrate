@@ -53,11 +53,8 @@ import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integration-service.ts";
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
-import {
-  assertConnectionsUnpinned,
-  lockConnectionLabels,
-  lockConnectionRows,
-} from "./integration-connections.ts";
+import { assertConnectionsUnpinned, lockConnectionLabels } from "./integration-connections.ts";
+import { lockConnectionRows } from "./connection-row-locks.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
@@ -479,9 +476,8 @@ export async function updateConnectionMetadata(
 
   const result = await db
     .transaction(async (tx) => {
-      if (input.sharedWithOrg === false) {
-        await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be unshared");
-      }
+      // Lock order, everywhere: the label advisory lock, THEN the row lock (the unshare's
+      // check, else the UPDATE) — a rename-only write takes them in that order too.
       if (input.label !== undefined) {
         const [conn] = await tx
           .select({
@@ -493,6 +489,9 @@ export async function updateConnectionMetadata(
           .limit(1);
         if (!conn) return [];
         await lockConnectionLabels(tx, conn.spaceId, conn.integrationId);
+      }
+      if (input.sharedWithOrg === false) {
+        await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be unshared");
       }
       return tx
         .update(integrationConnections)

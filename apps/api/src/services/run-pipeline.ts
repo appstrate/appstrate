@@ -310,84 +310,42 @@ function isScheduleOwned(e: ConnectionResolutionError): boolean {
 }
 
 /**
- * Refuse arming a schedule whose fire would fail on its own connection choice:
- * an unattended run cannot ask which connection to use, so the choice is made
- * when the schedule is written (the rule Make.com applies to a scenario).
- *
- * The same readiness the fire runs (`resolveRunPreflight`, same seeding, same
- * launch-override layer), keeping ONLY {@link isScheduleOwned} verdicts. Every other
- * verdict (not connected, needs reconnection, missing scopes, inactive
- * integration…) is repaired outside the schedule, so it stays a visible failed
- * run at the tick rather than a refusal to save. Non-throwing readiness on
- * purpose: the throwing wrapper would emit `onRunConnectionMissing` for a run
- * nobody launched.
- *
- * A caller writing a schedule that runs as SOMEONE ELSE resolves with the actor's
- * reach but must neither see nor bind the actor's private connections: the ids
- * it newly names must be shared ones, and a choice lists only shared candidates.
+ * Who a schedule write acts for, as its connection rules see it: the caller itself; another
+ * platform MEMBER, whose private connections the caller must neither see nor bind; or an END
+ * USER, an identity the org's application manages — its caller picks its connections, as a run
+ * override does for its runs.
  */
-export async function assertScheduleConnectionsChosen(params: {
-  /** The agent at the version the schedule fires (`version_override` resolved). */
-  agent: LoadedPackage;
-  orgId: string;
-  spaceId: string;
-  /** The schedule's actor — whose reach the fire resolves with. */
-  actor: Actor;
-  /** Who writes the schedule. */
-  caller: Actor;
-  /** The overrides this write stores. */
-  connectionOverrides: ConnectionOverrides | null;
-  /** The overrides already on the row for the SAME actor — not the caller's pick, never re-judged. */
-  storedOverrides: ConnectionOverrides | null;
-  dependencyOverrides: Record<string, string> | null;
-}): Promise<void> {
-  const onBehalf = params.caller.type !== params.actor.type || params.caller.id !== params.actor.id;
-  if (onBehalf) {
-    const refused = await unsharedOverrideIds(
-      params.spaceId,
-      params.connectionOverrides,
-      params.storedOverrides,
-    );
-    if (refused.length > 0) {
-      const layer = launchOverrideLayer("schedule_override");
-      throw missingIntegrationConnection(
-        refused.map(([integrationId, id]) =>
-          translateResolutionError(unavailableMemberError(integrationId, layer, id)),
-        ),
-      );
-    }
+type ScheduleWriteFor = "self" | "member" | "end_user";
+
+function scheduleWriteFor(caller: Actor, actor: Actor): ScheduleWriteFor {
+  if (actor.type === "end_user") {
+    return caller.type === "end_user" && caller.id === actor.id ? "self" : "end_user";
   }
-  const manifestCache = await seedPinnedIntegrationManifests(params);
-  const { resolutionErrors } = await collectAgentReadiness({
-    agent: params.agent,
-    orgId: params.orgId,
-    spaceId: params.spaceId,
-    actor: params.actor,
-    launchOverrides: scheduleLaunchOverrides(params.connectionOverrides),
-    manifestCache,
-  });
-  const unchosen = resolutionErrors.filter(isScheduleOwned);
-  if (unchosen.length === 0) return;
-  throw missingIntegrationConnection(
-    onBehalf ? await withSharedCandidatesOnly(unchosen) : unchosen.map(translateResolutionError),
-  );
+  return caller.type === "user" && caller.id === actor.id ? "self" : "member";
 }
 
 /**
- * `[integrationId, id]` for each id of `overrides` the caller newly names (absent from
- * `stored`) that is not a connection of that integration shared in the space — the only ones
- * both the caller and the actor reach. One uniform refusal whatever the id is, so a caller
- * cannot probe for a colleague's private rows.
+ * On EVERY schedule write — armed or not, create or patch — a caller writing for another member
+ * binds only connections shared in the space: 409 `override_connection_unavailable` for any other
+ * id, one uniform refusal whatever the id is, so a caller cannot probe for a colleague's private
+ * rows. An integration's set is exempt only when this write changes neither the actor nor that
+ * set — the ids the write that stored it already judged.
  */
-async function unsharedOverrideIds(
-  spaceId: string,
-  overrides: ConnectionOverrides | null,
-  stored: ConnectionOverrides | null,
-): Promise<[string, string][]> {
-  const named = Object.entries(overrides ?? {}).flatMap(([integrationId, ids]) =>
-    ids
-      .filter((id) => !(stored?.[integrationId] ?? []).includes(id))
-      .map((id): [string, string] => [integrationId, id]),
+export async function assertScheduleOverridesReachable(params: {
+  spaceId: string;
+  /** The schedule's actor after this write. */
+  actor: Actor;
+  caller: Actor;
+  /** The overrides the row holds after this write. */
+  connectionOverrides: ConnectionOverrides | null;
+  /** The overrides on the row before it, `null` when the actor changes (or on create). */
+  storedOverrides: ConnectionOverrides | null;
+}): Promise<void> {
+  if (scheduleWriteFor(params.caller, params.actor) !== "member") return;
+  const named = Object.entries(params.connectionOverrides ?? {}).flatMap(([integrationId, ids]) =>
+    sameSet(ids, params.storedOverrides?.[integrationId])
+      ? []
+      : ids.map((id): [string, string] => [integrationId, id]),
   );
   const uuids = named.map(([, id]) => id).filter(isUuid);
   const shared =
@@ -402,16 +360,88 @@ async function unsharedOverrideIds(
           .where(
             and(
               inArray(integrationConnections.id, uuids),
-              eq(integrationConnections.spaceId, spaceId),
+              eq(integrationConnections.spaceId, params.spaceId),
               eq(integrationConnections.sharedWithOrg, true),
             ),
           );
   const reachable = new Set(shared.map((r) => `${r.integrationId}\0${r.id}`));
-  return named.filter(([integrationId, id]) => !reachable.has(`${integrationId}\0${id}`));
+  const refused = named.filter(([integrationId, id]) => !reachable.has(`${integrationId}\0${id}`));
+  if (refused.length === 0) return;
+  const layer = launchOverrideLayer("schedule_override");
+  throw missingIntegrationConnection(
+    refused.map(([integrationId, id]) =>
+      translateResolutionError(unavailableMemberError(integrationId, layer, id)),
+    ),
+  );
+}
+
+function sameSet(a: readonly string[], b: readonly string[] | undefined): boolean {
+  return b !== undefined && a.length === b.length && a.every((id) => b.includes(id));
 }
 
 /**
- * The refusal as a caller acting for someone else may read it: a choice lists only the
+ * Refuse arming a schedule whose fire would fail on its own connection choice:
+ * an unattended run cannot ask which connection to use, so the choice is made
+ * when the schedule is written (the rule Make.com applies to a scenario).
+ *
+ * The same readiness the fire runs (`resolveRunPreflight`, same seeding, same
+ * launch-override layer), keeping ONLY {@link isScheduleOwned} verdicts. Every other
+ * verdict (not connected, needs reconnection, missing scopes, inactive
+ * integration…) is repaired outside the schedule, so it stays a visible failed
+ * run at the tick rather than a refusal to save. Non-throwing readiness on
+ * purpose: the throwing wrapper would emit `onRunConnectionMissing` for a run
+ * nobody launched.
+ *
+ * The refusal is worded for whoever writes ({@link scheduleWriteFor}): for another member only
+ * shared candidates are listed; for an end user the caller names one of all of them.
+ */
+export async function assertScheduleConnectionsChosen(params: {
+  /** The agent at the version the schedule fires (`version_override` resolved). */
+  agent: LoadedPackage;
+  orgId: string;
+  spaceId: string;
+  /** The schedule's actor — whose reach the fire resolves with. */
+  actor: Actor;
+  /** Who writes the schedule. */
+  caller: Actor;
+  /** The overrides this write stores — already judged by {@link assertScheduleOverridesReachable}. */
+  connectionOverrides: ConnectionOverrides | null;
+  dependencyOverrides: Record<string, string> | null;
+}): Promise<void> {
+  const manifestCache = await seedPinnedIntegrationManifests(params);
+  const { resolutionErrors } = await collectAgentReadiness({
+    agent: params.agent,
+    orgId: params.orgId,
+    spaceId: params.spaceId,
+    actor: params.actor,
+    launchOverrides: scheduleLaunchOverrides(params.connectionOverrides),
+    manifestCache,
+  });
+  const unchosen = resolutionErrors.filter(isScheduleOwned);
+  if (unchosen.length === 0) return;
+  switch (scheduleWriteFor(params.caller, params.actor)) {
+    case "self":
+      throw missingIntegrationConnection(unchosen.map(translateResolutionError));
+    case "member":
+      throw missingIntegrationConnection(await withSharedCandidatesOnly(unchosen));
+    case "end_user":
+      throw missingIntegrationConnection(
+        unchosen.map((e) =>
+          translateResolutionError(
+            e.code === "must_choose_connection"
+              ? {
+                  ...e,
+                  message: `Integration '${e.integrationId}' needs a connection choice for the schedule's end-user actor — name one of the candidates in connection_overrides.`,
+                }
+              : e,
+          ),
+        ),
+      );
+  }
+}
+
+/**
+ * The refusal as a caller acting for another member may read it: a choice lists only the
  * candidates shared in the space. When none is, the choice is still open — the actor pins
  * one of their own for the agent, or an admin pins one.
  */

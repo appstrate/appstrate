@@ -35,6 +35,7 @@ import {
 } from "../lib/space-role.ts";
 import { assertCanGrantSpaceRole, assertCanManageSpaceMember } from "../lib/space-role-policy.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
+import { lockConnectionRows } from "./connection-row-locks.ts";
 
 /** Assignment as the write routes accept it: one preset, or one custom role id. */
 export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
@@ -416,6 +417,8 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
     )
     .map((row) => row.id);
   if (lost.length === 0) return [];
+  // In id order, like every other connection-row locker — the UPDATE alone locks in scan order.
+  await lockConnectionRows(tx, lost, "update");
   await tx
     .update(integrationConnections)
     .set({ sharedWithOrg: false, updatedAt: new Date() })

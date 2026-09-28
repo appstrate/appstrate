@@ -43,7 +43,10 @@ import { getSpacePackageSettings, type SpacePackageSettings } from "../services/
 import { resolveAndValidateScheduleInput } from "../services/input-resolution.ts";
 import { getPackage } from "../services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
-import { assertScheduleConnectionsChosen } from "../services/run-pipeline.ts";
+import {
+  assertScheduleConnectionsChosen,
+  assertScheduleOverridesReachable,
+} from "../services/run-pipeline.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import {
@@ -473,6 +476,13 @@ export function createSchedulesRouter() {
       // A new schedule is armed: its actor must be able to fire it, and its connection choice is
       // made now.
       await assertScheduleActorValid(actor, scope.orgId, scope.spaceId);
+      await assertScheduleOverridesReachable({
+        spaceId: scope.spaceId,
+        actor,
+        caller: getActor(c),
+        connectionOverrides: data.connection_overrides ?? null,
+        storedOverrides: null,
+      });
       await assertScheduleConnectionsChosen({
         agent: effectiveAgent,
         orgId: scope.orgId,
@@ -480,7 +490,6 @@ export function createSchedulesRouter() {
         actor,
         caller: getActor(c),
         connectionOverrides: data.connection_overrides ?? null,
-        storedOverrides: null,
         dependencyOverrides: data.dependency_overrides ?? null,
       });
 
@@ -721,6 +730,19 @@ export function createSchedulesRouter() {
     // added since the last save can make the resolution ambiguous. Disabling
     // skips it: a patch that reduces what the row does is always applicable.
     const nextActor = actor ?? existingActor;
+    const nextOverrides =
+      connectionOverrides !== undefined ? connectionOverrides : existing.connection_overrides;
+    // On EVERY write, armed or not: a disabled row must not store what arming it later would
+    // then take for an already-judged pick.
+    if (nextActor) {
+      await assertScheduleOverridesReachable({
+        spaceId: scope.spaceId,
+        actor: nextActor,
+        caller: getActor(c),
+        connectionOverrides: nextOverrides,
+        storedOverrides: actorChanged ? null : existing.connection_overrides,
+      });
+    }
     if ((data.enabled ?? existing.enabled) && nextActor) {
       await assertScheduleActorValid(nextActor, scope.orgId, scope.spaceId);
       const fired = await scheduledDefinition(
@@ -736,10 +758,7 @@ export function createSchedulesRouter() {
           spaceId: scope.spaceId,
           actor: nextActor,
           caller: getActor(c),
-          connectionOverrides:
-            connectionOverrides !== undefined ? connectionOverrides : existing.connection_overrides,
-          // A pick already on the row was made for this actor — unless the actor changes now.
-          storedOverrides: actorChanged ? null : existing.connection_overrides,
+          connectionOverrides: nextOverrides,
           dependencyOverrides: effectiveDependencyOverrides ?? null,
         });
       }

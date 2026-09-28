@@ -63,6 +63,7 @@ import {
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
 import { isActiveHere } from "./package-activation.ts";
+import { lockConnectionRows } from "./connection-row-locks.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 import {
   setExactlyOneDefault,
@@ -2055,10 +2056,13 @@ export async function deleteIntegrationOAuthClient(
         db.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, owner.orgId)),
       );
   return db.transaction(async (tx) => {
+    // Locked as read, in id order: the rows checked below are exactly the rows deleted.
     const minted = await tx
       .select({ id: integrationConnections.id })
       .from(integrationConnections)
-      .where(and(eq(integrationConnections.clientRef, clientId), connectionSpaces));
+      .where(and(eq(integrationConnections.clientRef, clientId), connectionSpaces))
+      .orderBy(asc(integrationConnections.id))
+      .for("update");
     await assertConnectionsUnpinned(
       tx,
       minted.map((c) => c.id),
@@ -2081,10 +2085,18 @@ export async function deleteIntegrationOAuthClient(
     // never collides with a non-UUID system id — so the tier-scoped
     // match is exact. The pg_notify DELETE trigger fires `connection_update`
     // so live UI badges clear without a manual publish.
-    const deletedConns = await tx
-      .delete(integrationConnections)
-      .where(and(eq(integrationConnections.clientRef, clientId), connectionSpaces))
-      .returning({ id: integrationConnections.id });
+    const deletedConns =
+      minted.length === 0
+        ? []
+        : await tx
+            .delete(integrationConnections)
+            .where(
+              inArray(
+                integrationConnections.id,
+                minted.map((c) => c.id),
+              ),
+            )
+            .returning({ id: integrationConnections.id });
     return { deletedConnections: deletedConns.length };
   });
 }
@@ -2849,26 +2861,6 @@ export async function listUsableIntegrationsForActor(
       default_tools: defaultToolsMap.get(integrationId),
     };
   });
-}
-
-/**
- * Row-lock `ids` in the caller's transaction, in id order so two lockers cannot deadlock:
- * `update` before a write that unshares or deletes them, `share` before an admin pin or org
- * default names them as shared. The two serialize, so neither can commit a state the other
- * checked against — a set naming a row that is concurrently unshared or deleted.
- */
-export async function lockConnectionRows(
-  tx: Tx,
-  ids: readonly string[],
-  strength: "update" | "share",
-): Promise<void> {
-  if (ids.length === 0) return;
-  await tx
-    .select({ id: integrationConnections.id })
-    .from(integrationConnections)
-    .where(inArray(integrationConnections.id, [...ids]))
-    .orderBy(asc(integrationConnections.id))
-    .for(strength);
 }
 
 /**

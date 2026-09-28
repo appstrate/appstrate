@@ -22,7 +22,7 @@ import { integrationOrgDefaults } from "@appstrate/db/schema";
 import type { IntegrationOrgDefault } from "@appstrate/shared-types";
 import type { SpaceScope } from "../lib/scope.ts";
 import { validatePinTarget } from "./integration-pins-service.ts";
-import { lockConnectionRows } from "./integration-connections.ts";
+import { lockConnectionRows } from "./connection-row-locks.ts";
 
 /** Identical wire shape to {@link IntegrationOrgDefault}; aliased for the canonical pattern (cf. `PinSummary`). */
 type OrgDefaultSummary = IntegrationOrgDefault;

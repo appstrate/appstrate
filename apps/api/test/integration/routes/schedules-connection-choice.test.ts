@@ -21,7 +21,7 @@ import {
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion, seedSchedule } from "../../helpers/seed.ts";
+import { seedEndUser, seedPackage, seedPackageVersion, seedSchedule } from "../../helpers/seed.ts";
 import { seedDivergedAgent, seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
 import {
   seedConnectionTestIntegration,
@@ -348,6 +348,44 @@ describe("schedule writes for another actor — only what both reach", () => {
     expect(res.status).toBe(200);
   });
 
+  it("judges a disabled write too — disabling is no way to store a colleague's private pick", async () => {
+    const own = await seedIntegrationConnection(member, INTEGRATION);
+    await seedIntegrationConnection(member, INTEGRATION);
+    const schedule = await seedSchedule({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      enabled: false,
+    });
+    const patch = (body: Record<string, unknown>) =>
+      app.request(`/api/schedules/${schedule.id}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    // Re-point to the member and store their private id while disabled, to arm it next.
+    const probe = async (id: string) => {
+      const res = await patch({
+        enabled: false,
+        actor: { userId: member.user.id },
+        connection_overrides: { [INTEGRATION]: [id] },
+      });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as ProblemBody;
+      expect(body.errors.map((e) => e.code)).toEqual(["override_connection_unavailable"]);
+      return body.errors[0]!.message.replace(id, "<id>");
+    };
+    const unknown = crypto.randomUUID();
+    // A real private row and a made-up id read the same: nothing to probe.
+    expect(await probe(own)).toBe(await probe(unknown));
+
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+    expect(row).toMatchObject({ userId: ctx.user.id, connectionOverrides: null, enabled: false });
+    expect((await patch({ enabled: true })).status).toBe(200);
+  });
+
   it("refuses an actor who cannot run agents in this space before resolving anything", async () => {
     const guest = await memberContext(ctx, "guest");
     await seedIntegrationConnection(guest, INTEGRATION);
@@ -453,5 +491,67 @@ describe("schedule writes — a set on an auth serving no selected tool", () => 
       connectionIds: [backup],
     });
     expect((await create({})).status).toBe(201);
+  });
+});
+
+describe("schedule writes for an end user — the caller picks among its connections", () => {
+  let ctx: TestContext;
+  let endUserId: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "schedchoice" });
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedSchedulableAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      manifest: agentManifest(true),
+    });
+    endUserId = (
+      await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, externalId: "ext-eu" })
+    ).id;
+  });
+
+  async function seedEndUserConnection(label: string): Promise<string> {
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: INTEGRATION,
+        authKey: "primary",
+        accountId: label,
+        spaceId: ctx.defaultSpaceId,
+        endUserId,
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+        scopesGranted: [],
+        label,
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
+  }
+
+  function createForEndUser(body: Record<string, unknown> = {}) {
+    return app.request(`/api/agents/${AGENT}/schedules`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ cron_expression: "0 9 * * *", actor: { endUserId }, ...body }),
+    });
+  }
+
+  it("lists the end user's own connections, and naming one arms the schedule", async () => {
+    const a = await seedEndUserConnection("a");
+    const b = await seedEndUserConnection("b");
+
+    const refused = await createForEndUser();
+    expect(refused.status).toBe(409);
+    const body = (await refused.json()) as ProblemBody;
+    expect(body.errors[0]!.code).toBe("must_choose_connection");
+    expect(body.errors[0]!.candidate_connections!.map((c) => c.id).sort()).toEqual([a, b].sort());
+    expect(body.errors[0]!.message).toContain("connection_overrides");
+
+    expect((await createForEndUser({ connection_overrides: { [INTEGRATION]: [a] } })).status).toBe(
+      201,
+    );
   });
 });
