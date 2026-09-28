@@ -105,6 +105,20 @@ Scheduled runs re-resolve their user's space role at every fire and require
 space or removing that permission disables the schedule and records a failed run.
 End-user schedules retain their pinned-space identity check.
 
+**Choosing a schedule's actor is split between a space permission and an org role** (#738).
+`schedules:write` lets a caller schedule as themselves or as an end-user of the space. Naming
+ANOTHER platform member (`actor.userId` other than the caller's) makes every fire run with that
+member's reach — every connection they hold — so it additionally requires the org role `owner`
+or `admin`, read through `callerOrgRole` (the role pinned at admission, or a view-as persona's):
+a `builder`, a custom role holding `schedules:write`, and a space `admin` whose org role is
+`member` all get `403 forbidden` with `param: actor` on schedule creation and on a `PATCH` that
+changes the actor (`assertMayChooseMemberActor`, `apps/api/src/routes/schedules.ts`). It is
+asked before the membership lookup, so a refused caller cannot probe who is a member either. A
+`PATCH` re-sending the stored actor is not a choice and is not judged: such a caller still edits
+a schedule an admin pointed at a colleague. The SPA's actor picker (`ActorSelect`) lists other
+members only to org owners and admins; anyone else is offered themselves, end-users, and the
+member already selected.
+
 Run visibility does not grant access to an agent's imposed input values. Without
 `agents:read`, registered-agent run responses return `input: null`, including launch,
 lists, cancellation and long polling. This also protects historical values after

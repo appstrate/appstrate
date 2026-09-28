@@ -311,7 +311,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   item lists only shared candidates. Its `candidate_connections` may then be
   an empty array: only the actor (a member pin of their own for the agent) or
   an admin (an admin pin) can make that choice. A set is exempt only when the
-  write changes neither the actor nor that set. Changing a schedule's actor
+  write changes neither the actor nor that set; an item about a connection of
+  such a set that is not shared (the actor's own private row) carries a
+  generic message naming no label or account, and its `connection_id` only
+  because the schedule's set already names it. Changing a schedule's actor
   resets its picks. An END-USER actor is an identity the organization's
   application manages: the caller sees and names the end-user's own
   connections. Before, nothing stopped a write from naming a member's private
@@ -323,6 +326,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   runs as another identity it hides the viewer's own pickers and offers the
   shared candidates, or says the actor must choose.
 
+- **BREAKING: only an org owner or admin can make ANOTHER member a schedule's
+  actor** (#738). The actor lends every connection they hold to each fire, so
+  `schedules:write` alone no longer grants it: a caller whose org role is not
+  `owner` or `admin` — a `builder`, a custom role holding `schedules:write`,
+  or a space `admin` whose org role is `member` — naming another member's
+  `userId` in `actor` on `POST /api/agents/{scope}/{name}/schedules`, or
+  changing `actor` to another member on `PATCH /api/schedules/{id}`, gets
+  `403 forbidden` with `param: actor`, decided before the membership lookup so
+  the refusal cannot probe who is a member. Choosing yourself or an end-user of
+  the space is unchanged, and a `PATCH` re-sending the stored actor is no
+  change, so such a caller still edits a schedule an admin pointed at a
+  colleague. The schedule form's actor picker lists other members only to org
+  owners and admins; anyone else is offered themselves, end-users, and the
+  member already selected.
+- **BREAKING: a pin or org-default target that is not yours to pin is one
+  `404`.** `PUT /api/me/integration-pins`,
+  `PUT /api/integrations/{packageId}/pins/{agentPackageId}` and
+  `PUT /api/integrations/{packageId}/default` answered `404` for an unknown
+  connection id but `400` for one of another space or integration, one not
+  shared (admin pin, org default), or one neither the caller's own nor shared
+  (member pin) — so a pin write told a colleague's private connection id apart
+  from a made-up one. Every one of those is now the same `404`, its message
+  depending only on the caller (`validatePinTarget`,
+  `services/integration-pins-service.ts`). The `400` keeps only the refusals
+  of the set's shape (empty, more than 10 ids, a repeated id, labels that are
+  not distinct).
 - **BREAKING: the credential proxy applies the connection cascade.**
   `/api/credential-proxy/proxy` chose a connection by itself: with `X-Run-Id`
   it ignored the run's snapshot (admin pins, enforced defaults, member pins),
@@ -415,6 +444,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Each now runs in one transaction under a row lock on the connections —
   exclusive for the unshare or delete, shared for the pin (member or admin)
   or org-default write — so one waits for the other and sees its outcome.
+- **A share can no longer race the access loss that would unshare it.** The
+  unshare ran by an access change and a concurrent share (or two concurrent
+  access changes — a space closing while a member is removed from it or
+  demoted) each read the other's pre-commit state, so a connection could stay
+  shared by an owner who no longer reached the space. Sharing
+  (`PATCH /api/integrations/{packageId}/connections/{connectionId}` with
+  `shared_with_org: true`) now locks the owner's org membership and the space
+  row and re-checks, inside its transaction, that the owner still reaches the
+  space — `409 connection_owner_without_access` otherwise
+  (`assertOwnerReachesSpaceForShare`, `services/space-members.ts`). A space
+  member removal share-locks the space row, and an org role change the spaces
+  where the member shares a connection, before reading access; closing a space
+  updates that row. Whichever commits second sees the other.
+- **A schedule update applies only to the schedule it judged.**
+  `PATCH /api/schedules/{id}` ran its checks (actor, connection reach,
+  readiness) against one read of the row and then wrote by id alone, so two
+  concurrent patches could combine into a schedule running as a member on
+  that member's private connection, and a name-only patch could re-enable a
+  schedule an owner's connection delete had just disabled. The write is now a
+  compare-and-set on the fields the checks read — actor,
+  `connection_overrides`, `enabled`, `cron_expression`, `timezone` — and
+  answers `409 schedule_modified_concurrently`, writing nothing, when one of
+  them changed in between: reload the schedule and retry.
+  `PUT /api/agents/{scope}/{name}/input-settings`, which rewrites the
+  schedules freezing a newly locked field through the same write, can answer
+  that `409` too once the settings are saved; re-sending it completes the
+  rewrite.
 - **Runs on an `openai-compatible` model that is not aliased reach
   `/chat/completions` again**. The agent installed its credential with
   `setRuntimeApiKey`, which leaves Pi's builtin `openai` provider untouched,
