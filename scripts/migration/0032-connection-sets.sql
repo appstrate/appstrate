@@ -1,36 +1,49 @@
 -- 0032 — the row work the connection-sets release needs BEFORE its drizzle
 -- batch: the three connection jsonb columns become SETS, departed members stop
 -- sharing, the shared connections the old fallback picked implicitly become
--- member pins, and labels become unique per (space, integration).
+-- member pins, labels lose the characters a label may not carry, and labels
+-- become unique per (space, integration).
 --
 -- Run BEFORE the drizzle batch, with the platform STOPPED. The window is:
 -- stop → run this file → deploy the new image (`0077` applies at boot) →
 -- reopen.
 --
--- WHY that moment and not after the batch. Three of the four sections depend on
--- it: the pin freeze reads `integration_org_defaults.connection_id` and writes
--- `integration_pins.connection_id`, the two scalar columns `0077` folds into
--- `connection_ids` and drops; and the label dedupe is the precondition of
--- `0077`'s `CREATE UNIQUE INDEX "idx_integration_conn_label"`, which
--- `docs/NO_TRANSITIONAL_CODE.md` §2 does not license a repair beside. The shape
--- rewrite depends on nothing `0077` does — the columns are jsonb and neither
--- their type nor any constraint on them moves — but the new readers raise on
--- the old shape rather than degrade, so with the platform down no request ever
--- meets an unrewritten row. The old code never reads a rewritten row either:
--- its image is stopped the moment the rewrite starts.
+-- WHY that moment and not after the batch. The freeze and both label sections
+-- depend on it: the pin freeze reads `integration_org_defaults.connection_id`
+-- and writes `integration_pins.connection_id`, the two scalar columns `0077`
+-- folds into `connection_ids` and drops; the label dedupe is the precondition
+-- of `0077`'s `CREATE UNIQUE INDEX "idx_integration_conn_label"`, which
+-- `docs/NO_TRANSITIONAL_CODE.md` §2 does not license a repair beside; and the
+-- normalization must precede that dedupe (it can make two labels equal) and
+-- leaves the labels it empties to `0077`'s backfill. The shape rewrite depends
+-- on nothing `0077` does — the columns are jsonb and neither their type nor
+-- any constraint on them moves — but the new readers raise on the old shape
+-- rather than degrade, so with the platform down no request ever meets an
+-- unrewritten row. The old code never reads a rewritten row either: its image
+-- is stopped the moment the rewrite starts.
 --
--- A database that skipped this file does NOT boot half-migrated: if it holds a
--- duplicate label, `0077`'s unique index raises 23505 and the whole batch rolls
--- back, loudly. (One holding no duplicate boots, and misses only the shape
--- rewrite — whose readers then raise on the first old row — and the freeze.)
+-- A database that skipped this file and holds a duplicate label does NOT boot
+-- half-migrated: `0077`'s unique index raises 23505 and the whole batch rolls
+-- back, loudly. One holding no duplicate DOES boot, and misses four sections:
+--   - the shape rewrite — its readers raise on the first old row;
+--   - the departed-owner unshare — a SECURITY loss: a member who left the
+--     organization before the deploy keeps every connection they shared usable
+--     by the members who stayed, until a write on that space happens to run
+--     the service's unshare;
+--   - the freeze — members who leaned on a colleague's shared connection meet
+--     `must_choose_connection`;
+--   - the label normalization — a label carrying a line break, control,
+--     invisible or bidi character keeps reaching the model verbatim, and a
+--     whitespace-only one passes `0077`'s `label <> ''` CHECK.
 --
 -- (The `integration_connections.label` BACKFILL — NULL or '' → "Connexion N" —
 -- is NOT here: it is the precondition of `0077`'s `SET NOT NULL` and `CHECK`,
 -- which §2 does license, so it lives in `0077`.)
 --
 -- Sections, in order, in ONE transaction: 1. shape rewrite, 2. unshare
--- departed members, 3. freeze implicit shared picks, 4. label dedupe. Three
--- `UPDATE`s + one `UPDATE` + one `INSERT` + one `UPDATE`, no `DELETE`.
+-- departed members, 3. freeze implicit shared picks, 4. label normalization,
+-- 5. label dedupe. Three `UPDATE`s + one `UPDATE` + one `INSERT` + one
+-- `UPDATE` + one `UPDATE`, no `DELETE`.
 --
 -- ═══ 1. SHAPE — the three snapshot columns hold SETS ═══
 --
@@ -124,6 +137,12 @@
 --     platform user who is still a member of the space's organization (never
 --     an end-user's, never a departed member's — section 2 has just unshared
 --     the latter anyway), and is healthy (`needs_reconnection = false`);
+--   - its auth still passes the two filters the resolver applies to every
+--     candidate before any layer: the integration's current manifest
+--     (`packages.draft_manifest`, what `fetchIntegrationManifest` reads)
+--     still declares it, when that manifest declares auths at all; and
+--     neither the agent's draft manifest nor its `latest` published one pins
+--     (`integrations_configuration.<id>.auth_key`) another auth;
 --   - the old fallback would STILL pick it today: it is the only healthy
 --     connection the user can reach there — no other healthy shared one, and
 --     no healthy one of the user's own (the new fallback binds that one by
@@ -153,14 +172,68 @@
 -- standalone end-user listing at the end of this file, before the window, and
 -- hand them to whoever owns those callers.
 --
--- Approximated, on the safe side: the old fallback first drops candidates on an
--- auth key the integration's CURRENT manifest no longer declares, and — when
--- the agent pins an `auth_key` — candidates on another auth. Neither filter is
--- reproduced here (both read manifests), so the uniqueness test counts every
--- healthy candidate of the integration. That can only SKIP a pin the old
--- fallback would have honoured, never write one it would not.
+-- Why the auth test. A pin names ONE row; the resolver drops a row on a
+-- retired auth, or on an auth other than the agent's `auth_key`, before any
+-- layer reads it. Pinning such a row would turn the old `not_connected` (or
+-- the old fallback's pick of another row on the right auth) into
+-- `pinned_connection_unavailable`, naming a pin nobody set.
 --
--- ═══ 4. DEDUPE — labels unique per (space, integration) ═══
+-- Approximations — what that test and the uniqueness test do NOT reproduce:
+--   - the uniqueness test counts every healthy candidate of the integration,
+--     including rows on an auth those filters drop. That can only SKIP a pin
+--     the old fallback would have honoured;
+--   - the agent manifest a run reads is the version it runs (`version_ref`:
+--     draft, a dist-tag, an exact version or a range); only the draft and
+--     `latest` are read here. A mismatch in either SKIPS the pin, even for a
+--     schedule running another version that agrees with the row. The one
+--     case that writes a pin the old code would not have used: a schedule or
+--     caller pinned to a version whose `auth_key` names another auth than the
+--     row's while neither the draft nor `latest` does (the version changed
+--     since the run that recorded the pick). Its runs then fail
+--     `pinned_connection_unavailable` when other rows sit on the required
+--     auth — the old fallback would have picked among those — and
+--     `auth_key_mismatch` otherwise, as before;
+--   - the release also drops a candidate on an auth serving none of the
+--     agent's selected tools (`servingCandidates`), a filter the old code did
+--     not have. It reads tool definitions and the agent's effective selection,
+--     so it is not reproduced: a frozen pin on such an auth fails
+--     `auth_serves_no_selected_tool`, naming the row. Without the pin the run
+--     fails too (`not_connected` or `must_choose_connection`): the old code
+--     launched it on a connection that exposed none of its tools.
+--
+-- ═══ 4. NORMALIZE — a label carries no line break, control, invisible or bidi character ═══
+--
+-- A label reaches the model verbatim — it is a value of the `connection` enum
+-- of the sidecar's tools — so `apps/api/src/lib/connection-label.ts` refuses
+-- one carrying any of those. Until now nothing did: the `PATCH` checked only
+-- the length, and labels minted from a provider identity were stored as the
+-- provider sent them. So existing rows can carry any of them, and a
+-- whitespace-only label passes `0077`'s `label <> ''` CHECK.
+--
+-- Every non-empty label is rewritten to what `toMintedLabel` (same file)
+-- makes of it, class for class:
+--   - a line break or tab — U+0009–U+000D, U+0085, U+2028, U+2029 — becomes
+--     a space;
+--   - every other forbidden code point is dropped: C0 (≤ U+001F), DEL and C1
+--     (U+007F–U+009F), and `isHiddenCodePoint`
+--     (`packages/mcp-transport/src/sanitize.ts`) — U+00AD, U+115F–U+1160,
+--     U+17B4–U+17B5, U+180E, U+200B–U+200F, U+202A–U+202E, U+2060–U+206F,
+--     U+3164, U+FEFF, U+FFA0, U+E0000–U+E007F;
+--   - every run of JavaScript whitespace (`\s`: the space, U+00A0, U+1680,
+--     U+2000–U+200A, U+202F, U+205F, U+3000, and the line breaks above)
+--     becomes one space, and both ends are trimmed;
+--   - the result is cut to 80 UTF-16 units (`CONNECTION_LABEL_MAX`) and
+--     right-trimmed again.
+-- A label that ends up empty becomes NULL, and `0077`'s backfill names it
+-- "Connexion N" like any unlabelled row. '' is left as it is: that backfill
+-- already names it.
+--
+-- It runs BEFORE the dedupe, which must compare the labels the index will:
+-- two labels that differed only by an invisible character are one label here,
+-- and the dedupe tells them apart. The rewrite is a pure function of the
+-- label and its output is a fixed point of it, so a second run finds nothing.
+--
+-- ═══ 5. DEDUPE — labels unique per (space, integration) ═══
 --
 -- A label is how a tool call names its connection, so `0077` makes it unique
 -- per (space, integration). Until now it was minted per (space, integration,
@@ -195,8 +268,8 @@
 -- Re-running BEFORE the batch changes nothing: every `WHERE` is the condition
 -- its write removes — no non-array value is left, no departed owner still
 -- shares, every frozen candidate now has a member pin (which the "no member
--- pin" condition excludes, and `ON CONFLICT DO NOTHING` backs), and no group
--- holds a label twice. AFTER the batch the file cannot half-apply: `0077`
+-- pin" condition excludes, and `ON CONFLICT DO NOTHING` backs), every label is
+-- its own normalization, and no group holds a label twice. AFTER the batch the file cannot half-apply: `0077`
 -- drops both `connection_id` columns the freeze names, so it raises (42703)
 -- and — under psql's `ON_ERROR_STOP` — the whole transaction rolls back.
 --
@@ -214,7 +287,8 @@
 -- from the pre-run `pg_dump` instead. The frozen pins are ordinary member pins:
 -- a member drops one from the agent page like any pin they set themselves. An
 -- unshared connection is re-shared by its owner, should they rejoin; a renamed
--- label is edited like any other.
+-- or normalized label is edited like any other (its old spelling is in the
+-- dump, and is exactly what the new `PATCH` would refuse).
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -371,6 +445,28 @@ WHERE (r.started_at >= now() - interval '30 days'
     SELECT 1 FROM spaces sp
     JOIN org_members m ON m.org_id = sp.org_id AND m.user_id = c.user_id
     WHERE sp.id = c.space_id)
+  -- its auth is one the integration's current manifest still declares (no
+  -- constraint when it declares none) …
+  AND NOT EXISTS (
+    SELECT 1 FROM packages i
+    WHERE i.id = e.integration_id
+      AND jsonb_typeof(i.draft_manifest -> 'auths') = 'object'
+      AND i.draft_manifest -> 'auths' <> '{}'::jsonb
+      AND i.draft_manifest -> 'auths' -> c.auth_key IS NULL)
+  -- … and not one the agent's draft or `latest` manifest rules out by pinning another
+  AND NOT EXISTS (
+    SELECT 1 FROM (
+      SELECT agent.draft_manifest AS m
+      UNION ALL
+      SELECT v.manifest
+      FROM package_dist_tags t
+      JOIN package_versions v ON v.id = t.version_id
+      WHERE t.package_id = r.package_id AND t.tag = 'latest'
+    ) am
+    CROSS JOIN LATERAL (
+      SELECT am.m -> 'integrations_configuration' -> e.integration_id -> 'auth_key' AS k) pinned
+    WHERE jsonb_typeof(pinned.k) = 'string'
+      AND pinned.k #>> '{}' <> c.auth_key)
   -- the old fallback would still pick it: no OTHER healthy connection the user
   -- can reach there — neither another shared one nor one of their own
   AND NOT EXISTS (
@@ -421,7 +517,65 @@ WHERE NOT EXISTS (
 
 DROP TABLE _0032_implicit_shared_picks;
 
--- ═══ 4. DEDUPE ═══
+-- ═══ 4. NORMALIZE ═══
+--
+-- A VIEW, not a materialized set: the "after" line re-evaluates the rewrite
+-- rather than trusting the `UPDATE`. `ascii()` is the code point (the database
+-- is UTF-8), and `regexp_split_to_table(…, '')` splits by code point.
+CREATE TEMP VIEW _0032_label_norm AS
+SELECT c.id, c.label, cut.label AS normalized
+FROM integration_connections c
+-- line break → space, forbidden → dropped, other whitespace → space
+CROSS JOIN LATERAL (
+  SELECT string_agg(
+           CASE
+             WHEN p.cp BETWEEN 0x09 AND 0x0D OR p.cp IN (0x85, 0x2028, 0x2029) THEN ' '
+             WHEN p.cp <= 0x1F
+               OR p.cp BETWEEN 0x7F AND 0x9F
+               OR p.cp IN (0xAD, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180E, 0x3164, 0xFEFF, 0xFFA0)
+               OR p.cp BETWEEN 0x200B AND 0x200F
+               OR p.cp BETWEEN 0x202A AND 0x202E
+               OR p.cp BETWEEN 0x2060 AND 0x206F
+               OR p.cp BETWEEN 0xE0000 AND 0xE007F THEN ''
+             WHEN p.cp IN (0x20, 0xA0, 0x1680, 0x202F, 0x205F, 0x3000)
+               OR p.cp BETWEEN 0x2000 AND 0x200A THEN ' '
+             ELSE s.ch
+           END, '' ORDER BY s.i) AS mapped
+  FROM regexp_split_to_table(c.label, '') WITH ORDINALITY AS s(ch, i)
+  CROSS JOIN LATERAL (SELECT ascii(s.ch) AS cp) p
+) m
+-- runs of spaces → one, both ends trimmed, cut to 80 UTF-16 units, right-trimmed, '' → NULL
+CROSS JOIN LATERAL (
+  SELECT NULLIF(rtrim(string_agg(w.ch, '' ORDER BY w.i) FILTER (WHERE w.run <= 80), ' '), '') AS label
+  FROM (
+    SELECT t.ch, t.i,
+           sum(CASE WHEN ascii(t.ch) > 0xFFFF THEN 2 ELSE 1 END) OVER (ORDER BY t.i) AS run
+    FROM regexp_split_to_table(btrim(regexp_replace(m.mapped, ' {2,}', ' ', 'g'), ' '), '')
+         WITH ORDINALITY AS t(ch, i)
+  ) w
+) cut
+WHERE c.label IS NOT NULL AND c.label <> '';
+
+SELECT count(*)                                  AS labels_to_normalize_before,
+       count(*) FILTER (WHERE normalized IS NULL) AS labels_emptied_before
+FROM _0032_label_norm
+WHERE normalized IS DISTINCT FROM label;
+
+UPDATE integration_connections c
+SET label = v.normalized,
+    updated_at = now()
+FROM _0032_label_norm v
+WHERE c.id = v.id
+  AND v.normalized IS DISTINCT FROM v.label;
+
+-- must print 0
+SELECT count(*) AS labels_to_normalize_after
+FROM _0032_label_norm
+WHERE normalized IS DISTINCT FROM label;
+
+DROP VIEW _0032_label_norm;
+
+-- ═══ 5. DEDUPE ═══
 
 -- groups holding a non-empty label more than once
 SELECT count(*) AS duplicate_labels_before FROM (
@@ -524,7 +678,9 @@ COMMIT;
 -- ═══ Standalone counts — run read-only, before the window and after the fact ═══
 --
 -- The shape, unshare and dedupe counts, outside any transaction (the freeze has
--- no twin: it reads the rewritten shape). Before the window they size the work;
+-- no twin: it reads the rewritten shape; nor has the normalization: its
+-- expression is too long to keep in step twice — its "before" line, on the
+-- rehearsal dump, is its sizing). Before the window they size the work;
 -- after the run the five `_todo` counts must all read 0. A shape total of 0
 -- BEFORE is not by itself proof the file is unnecessary — pair it with the
 -- control below, which counts every row that HAS a value, so "nothing to
