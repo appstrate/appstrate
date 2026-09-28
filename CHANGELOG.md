@@ -181,6 +181,17 @@ connection_pinned` while an admin pin or an org default names it, exactly
 
 ### Fixed
 
+- **A member who loses access to a space stops sharing their connections
+  there.** Leaving or being removed from the organization, losing a space
+  membership, a demotion or a space that closes left the member's
+  `shared_with_org` connections powering colleagues' runs, and nobody could stop
+  it: unsharing was owner-only. The access change now unshares them in the same
+  transaction (`org.member_removed`, `org.member_left` and
+  `org.member_role_updated` name them in `unsharedConnectionIds`), and an admin
+  pin or org default still naming one fails the run with
+  `pinned_connection_unavailable`. A holder of `integrations:configure` may now
+  also unshare a colleague's connection (`PATCH …/connections/{id}` with
+  `shared_with_org: false`); sharing stays the owner's consent.
 - **Runs on an `openai-compatible` model that is not aliased reach
   `/chat/completions` again**. The agent installed its credential with
   `setRuntimeApiKey`, which leaves Pi's builtin `openai` provider untouched,

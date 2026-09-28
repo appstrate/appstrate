@@ -1342,12 +1342,14 @@ function ConnectionTableRow({
   //               (`routes/me.ts`), no admin escape hatch by design;
   //   - share   → owner-only, because sharing is the owner's consent
   //               (`routes/integrations.ts`, `shared_with_org` branch);
+  //               UNsharing is also open to `integrations:configure`;
   //   - rename  → owner OR org admin (same route, label branch).
   const isOwn = isConnectionOwnedBy(connection, user?.id);
   // Rename, share and reconnect all write the connection, which guards on
   // `integrations:connect` whoever owns it.
   const canConnect = can("integrations:connect");
   const canRename = canConnect && (isOwn || can("integrations:configure"));
+  const canToggleShare = (isOwn && canConnect) || (isShared && canRename);
   const startEdit = () => {
     setDraftLabel(connection.label);
     setEditing(true);
@@ -1506,12 +1508,16 @@ function ConnectionTableRow({
           )}
         </TableCell>
 
-        {/* Org-share toggle — owner-only (sharing is the owner's consent) */}
+        {/* Org-share toggle — sharing is the owner's consent, a governor can only withdraw it */}
         <TableCell>
-          {isOwn && canConnect ? (
+          {canToggleShare ? (
             <label
               className="flex items-center gap-1.5 text-xs"
-              title={t("integration.connection.shareWithOrg.help")}
+              title={t(
+                isOwn
+                  ? "integration.connection.shareWithOrg.help"
+                  : "integration.connection.shareWithOrg.unshareHelp",
+              )}
             >
               <input
                 type="checkbox"

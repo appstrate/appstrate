@@ -24,6 +24,7 @@ import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { isPlacedElsewhere, reconcilePlacementsAfterRehome } from "./package-placement.ts";
 import { countInProgressRuns } from "./state/runs.ts";
+import { unshareConnectionsOfOwnersWithoutAccess } from "./space-members.ts";
 import { DEFAULT_SPACE_NAME, ensurePersonalSpace } from "@appstrate/db/provision-org";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
@@ -258,26 +259,33 @@ export async function updateSpace(
       );
     }
   }
-  const [space] = await db
-    .update(spaces)
-    .set({
-      ...(params.name !== undefined && { name: params.name }),
-      ...(params.settings !== undefined && { settings: params.settings }),
-      ...(params.visibility !== undefined && { visibility: params.visibility }),
-      ...(params.defaultRole !== undefined && { defaultRole: params.defaultRole }),
-      updatedAt: new Date(),
-    })
-    .where(
-      scopedWhere(spaces, {
-        orgId,
-        extra: [
-          eq(spaces.id, spaceId),
-          changesAccess ? eq(spaces.visibility, judged.visibility) : undefined,
-          changesAccess ? eq(spaces.defaultRole, judged.defaultRole) : undefined,
-        ],
-      }),
-    )
-    .returning();
+  const space = await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(spaces)
+      .set({
+        ...(params.name !== undefined && { name: params.name }),
+        ...(params.settings !== undefined && { settings: params.settings }),
+        ...(params.visibility !== undefined && { visibility: params.visibility }),
+        ...(params.defaultRole !== undefined && { defaultRole: params.defaultRole }),
+        updatedAt: new Date(),
+      })
+      .where(
+        scopedWhere(spaces, {
+          orgId,
+          extra: [
+            eq(spaces.id, spaceId),
+            changesAccess ? eq(spaces.visibility, judged.visibility) : undefined,
+            changesAccess ? eq(spaces.defaultRole, judged.defaultRole) : undefined,
+          ],
+        }),
+      )
+      .returning();
+    // Closing an open space ends every implicit member's access.
+    if (updated && changesAccess) {
+      await unshareConnectionsOfOwnersWithoutAccess(tx, { orgId, spaceId });
+    }
+    return updated;
+  });
 
   if (space) return space;
   if (changesAccess) {

@@ -464,10 +464,9 @@ interface UpdateConnectionMetadataInput {
 }
 
 /**
- * Update a connection's label and/or sharedWithOrg flag. Caller-owned
- * connections only — actor authorization is enforced in the route
- * (only the owner OR an admin can mutate metadata; sharedWithOrg
- * specifically requires the owner since sharing is consent).
+ * Update a connection's label and/or sharedWithOrg flag. Actor authorization
+ * is enforced in the route: the owner or an `integrations:configure` holder
+ * may edit, but only the owner may share (sharing is consent).
  *
  * Refuses sharedWithOrg=false per `assertConnectionsUnpinned`.
  */

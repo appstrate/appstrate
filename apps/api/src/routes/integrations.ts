@@ -1389,9 +1389,8 @@ export function createIntegrationsRouter() {
         throw notFound(`Connection '${connectionId}' not found`);
       }
       // The connection owner, or whoever governs this space's integrations,
-      // can edit metadata. Sharing the connection is consent: only the owner
-      // should toggle sharedWithOrg, so we refuse non-owner edits to that
-      // field specifically.
+      // can edit metadata. Sharing is the owner's consent, so only they may
+      // set `shared_with_org: true`; a governor may withdraw it.
       const isOwner =
         (actor.type === "user" && ownership.userId === actor.id) ||
         (actor.type === "end_user" && ownership.endUserId === actor.id);
@@ -1405,12 +1404,12 @@ export function createIntegrationsRouter() {
         });
       }
       const body = await readJsonBody(c, updateConnectionSchema);
-      if (body.shared_with_org !== undefined && !isOwner) {
+      if (body.shared_with_org === true && !isOwner) {
         throw new ApiError({
           status: 403,
           code: "forbidden",
           title: "Forbidden",
-          detail: "Only the connection owner can change shared_with_org",
+          detail: "Only the connection owner can share it (shared_with_org: true)",
         });
       }
       const updated = await updateConnectionMetadata(connectionId, {

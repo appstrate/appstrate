@@ -934,6 +934,7 @@
   "integration.admin.pin.deleted": "Pin removed.",
   "integration.connection.shareWithOrg.label": "Share with organization",
   "integration.connection.shareWithOrg.help": "Other users will be able to use this connection for their runs.",
+  "integration.connection.shareWithOrg.unshareHelp": "Stop sharing: other users will no longer be able to use this connection. Only its owner can share it again.",
   "integration.connection.sharedByOwner": "Shared by {{owner}}",
   "integration.connection.sharedByUnknown": "Shared with the organization",
   "integration.connection.updated": "Connection updated.",

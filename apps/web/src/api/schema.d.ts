@@ -1662,7 +1662,7 @@ export interface paths {
         head?: never;
         /**
          * Update an integration connection's label and/or shared_with_org flag
-         * @description Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an org default names the connection. A member pin does not block it; that member's next run fails with `pinned_connection_unavailable` until they pick again.
+         * @description The connection owner or a holder of `integrations:configure` may edit it. Sharing (`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; unsharing is open to both, so a governor can withdraw a colleague's shared credentials. Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an org default names the connection. A member pin does not block it; that member's next run fails with `pinned_connection_unavailable` until they pick again.
          */
         patch: operations["updateIntegrationConnectionMetadata"];
         trace?: never;

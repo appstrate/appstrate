@@ -513,7 +513,7 @@ router.delete("/:orgId/members/:userId", requirePermission("members", "remove"),
   const orgId = c.req.param("orgId")!;
   const targetUserId = c.req.param("userId")!;
 
-  const { orphanedSpaceIds, revokedApiKeyIds } = await removeMember(
+  const { orphanedSpaceIds, revokedApiKeyIds, unsharedConnectionIds } = await removeMember(
     orgId,
     targetUserId,
     memberActor(c),
@@ -527,7 +527,7 @@ router.delete("/:orgId/members/:userId", requirePermission("members", "remove"),
     // §3.6). Named here because this is the event an owner comes back to when
     // deciding whether to convert one or sweep it: the sweeper's own log line
     // arrives 30 days later, and by then the space is gone.
-    after: { orphanedSpaceIds, revokedApiKeyIds },
+    after: { orphanedSpaceIds, revokedApiKeyIds, unsharedConnectionIds },
   });
   return c.body(null, 204);
 });
@@ -542,7 +542,7 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
 
   // Promoting to owner/admin drops the member's explicit space grants; the audit
   // is the only record of what a later demotion will NOT restore.
-  const { previousRole, revoked } = await updateMemberRole(
+  const { previousRole, revoked, unsharedConnectionIds } = await updateMemberRole(
     orgId,
     targetUserId,
     data.role,
@@ -560,7 +560,7 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
         customRoleId: row.customRoleId,
       })),
     },
-    after: { role: data.role },
+    after: { role: data.role, unsharedConnectionIds },
     orgIdOverride: orgId,
   });
 
@@ -594,13 +594,16 @@ router.post("/:orgId/leave", async (c) => {
 
   if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
-  const { orphanedSpaceIds, revokedApiKeyIds } = await leaveOrganization(orgId, user.id);
+  const { orphanedSpaceIds, revokedApiKeyIds, unsharedConnectionIds } = await leaveOrganization(
+    orgId,
+    user.id,
+  );
   await recordAuditFromContext(c, {
     action: "org.member_left",
     resourceType: "member",
     resourceId: user.id,
     orgIdOverride: orgId,
-    after: { orphanedSpaceIds, revokedApiKeyIds },
+    after: { orphanedSpaceIds, revokedApiKeyIds, unsharedConnectionIds },
   });
   return c.body(null, 204);
 });

@@ -934,6 +934,7 @@
   "integration.admin.pin.deleted": "Épinglage supprimé.",
   "integration.connection.shareWithOrg.label": "Partager avec l'organisation",
   "integration.connection.shareWithOrg.help": "Les autres utilisateurs pourront utiliser cette connexion pour leurs runs.",
+  "integration.connection.shareWithOrg.unshareHelp": "Retirer le partage : les autres utilisateurs ne pourront plus utiliser cette connexion. Seul son propriétaire pourra la partager à nouveau.",
   "integration.connection.sharedByOwner": "Partagée par {{owner}}",
   "integration.connection.sharedByUnknown": "Partagée avec l'organisation",
   "integration.connection.updated": "Connexion mise à jour.",

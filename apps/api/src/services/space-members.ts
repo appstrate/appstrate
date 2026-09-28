@@ -12,6 +12,7 @@
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
+  integrationConnections,
   organizationMembers,
   profiles,
   spaceMembers,
@@ -33,7 +34,7 @@ import {
   type SpaceRoleRef,
 } from "../lib/space-role.ts";
 import { assertCanGrantSpaceRole, assertCanManageSpaceMember } from "../lib/space-role-policy.ts";
-import type { DbOrTx } from "../lib/db-helpers.ts";
+import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 
 /** Assignment as the write routes accept it: one preset, or one custom role id. */
 export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
@@ -301,7 +302,9 @@ export async function removeSpaceMember(params: {
       .delete(spaceMembers)
       .where(and(eq(spaceMembers.spaceId, space.id), eq(spaceMembers.userId, userId)))
       .returning({ userId: spaceMembers.userId });
-    return { removed: deleted.length > 0, accessAfter };
+    if (deleted.length === 0) return { removed: false, accessAfter };
+    await unshareConnectionsOfOwnersWithoutAccess(tx, { orgId, userId, spaceId: space.id });
+    return { removed: true, accessAfter };
   });
 }
 
@@ -345,6 +348,79 @@ export async function deleteSpaceMembershipsInOrg(
       presetRole: spaceMembers.presetRole,
       customRoleId: spaceMembers.customRoleId,
     });
+}
+
+/**
+ * Unshare every user-owned shared connection in `scope` whose owner no longer
+ * reaches the connection's space — call it in the SAME transaction as any write
+ * that can take a user's access away. A departed member's shared credentials
+ * must not keep powering colleagues' runs, and once they have left nobody else
+ * may unshare them. "Reaches" is {@link resolveSpaceRole}; no org membership
+ * row means no access anywhere in the org.
+ *
+ * Deliberately NOT guarded by `assertConnectionsUnpinned`: an admin pin or org
+ * default naming such a connection then fails loudly at resolution
+ * (`pinned_connection_unavailable`) instead of blocking the access change.
+ *
+ * @returns the ids unshared, for the caller's audit.
+ */
+export async function unshareConnectionsOfOwnersWithoutAccess(
+  tx: Tx,
+  scope: { orgId: string; userId?: string; spaceId?: string },
+): Promise<string[]> {
+  const rows = await tx
+    .select({
+      id: integrationConnections.id,
+      userId: integrationConnections.userId,
+      orgRole: organizationMembers.role,
+      space: {
+        id: spaces.id,
+        visibility: spaces.visibility,
+        defaultRole: spaces.defaultRole,
+        ownerUserId: spaces.ownerUserId,
+      },
+      ...MEMBERSHIP_COLUMNS,
+    })
+    .from(integrationConnections)
+    .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
+    .leftJoin(
+      organizationMembers,
+      and(
+        eq(organizationMembers.orgId, spaces.orgId),
+        eq(organizationMembers.userId, integrationConnections.userId),
+      ),
+    )
+    .leftJoin(
+      spaceMembers,
+      and(
+        eq(spaceMembers.spaceId, spaces.id),
+        eq(spaceMembers.userId, integrationConnections.userId),
+      ),
+    )
+    .leftJoin(spaceRoles, customRoleOn)
+    .where(
+      and(
+        eq(spaces.orgId, scope.orgId),
+        eq(integrationConnections.sharedWithOrg, true),
+        isNotNull(integrationConnections.userId),
+        scope.userId === undefined ? undefined : eq(integrationConnections.userId, scope.userId),
+        scope.spaceId === undefined ? undefined : eq(spaces.id, scope.spaceId),
+      ),
+    );
+
+  const lost = rows
+    .filter(
+      (row) =>
+        row.orgRole === null ||
+        resolveSpaceRole(row.orgRole, row.space, memberFromJoin(row), row.userId) === null,
+    )
+    .map((row) => row.id);
+  if (lost.length === 0) return [];
+  await tx
+    .update(integrationConnections)
+    .set({ sharedWithOrg: false, updatedAt: new Date() })
+    .where(inArray(integrationConnections.id, lost));
+  return lost;
 }
 
 /**
