@@ -31,6 +31,8 @@ import {
   forceRefreshIntegrationProxyCredentials,
   IntegrationCredentialNotFoundError,
 } from "../../../src/services/credential-proxy/integration-resolver.ts";
+import { selectAccessibleConnection } from "../../../src/services/integration-connections.ts";
+import { ApiError, type ResolutionFieldError } from "../../../src/lib/errors.ts";
 
 const INTEGRATION_ID = "@official/gmail";
 
@@ -141,11 +143,17 @@ describe("credential-proxy integration-resolver", () => {
     endUserId?: string;
     /** `false` seeds the "IdP never issued one" shape (no `access_type=offline`). */
     withRefreshToken?: boolean;
+    /** Also the label, which is unique per (space, integration). */
+    accountId?: string;
+    authKey?: string;
+    sharedWithOrg?: boolean;
+    needsReconnection?: boolean;
   }): Promise<string> {
+    const accountId = opts.accountId ?? "acct-1";
     const ciphertext = encryptCredentialEnvelope({
       outputs: {
-        access_token: "live-access",
-        accessToken: "live-access",
+        access_token: `live-${accountId}`,
+        accessToken: `live-${accountId}`,
         ...(opts.withRefreshToken === false ? {} : { refresh_token: "rt-1", refreshToken: "rt-1" }),
       },
     });
@@ -153,14 +161,16 @@ describe("credential-proxy integration-resolver", () => {
       .insert(integrationConnections)
       .values({
         integrationId: INTEGRATION_ID,
-        authKey: "primary",
-        accountId: "acct-1",
-        label: "acct-1",
+        authKey: opts.authKey ?? "primary",
+        accountId,
+        label: accountId,
         spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
         scopesGranted: ["read"],
+        sharedWithOrg: opts.sharedWithOrg ?? false,
+        needsReconnection: opts.needsReconnection ?? false,
         // oauth2 connection → pins the org's custom per-space client by id (seeded above).
         clientRef: customClientId,
       })
@@ -185,7 +195,7 @@ describe("credential-proxy integration-resolver", () => {
     expect(resolved.authKey).toBe("primary");
     expect(resolved.payload).toBeDefined();
     // The live access token must reach the payload (header injection input).
-    expect(JSON.stringify(resolved.payload)).toContain("live-access");
+    expect(JSON.stringify(resolved.payload)).toContain("live-acct-1");
   });
 
   it("throws IntegrationCredentialNotFoundError when no accessible connection exists", async () => {
@@ -438,5 +448,147 @@ describe("credential-proxy integration-resolver", () => {
     // never touches/returns B's row.
     const refreshed = await forceRefreshIntegrationProxyCredentials(input(ctx.user.id));
     expect(refreshed).toBeNull();
+  });
+
+  describe("no X-Connection-Id — only the actor's single OWN connection is picked", () => {
+    async function rejectionOf(p: Promise<unknown>): Promise<unknown> {
+      try {
+        await p;
+      } catch (err) {
+        return err;
+      }
+      throw new Error("expected a rejection");
+    }
+
+    it("uses the actor's own connection even when a colleague shares one", async () => {
+      const colleague = await createTestUser();
+      await seedConnection({ userId: colleague.id, accountId: "shared", sharedWithOrg: true });
+      const ownId = await seedConnection({ userId: ctx.user.id, accountId: "mine" });
+
+      const resolved = await resolveIntegrationProxyCredentials(input());
+      expect(resolved.connectionId).toBe(ownId);
+      expect(JSON.stringify(resolved.payload)).toContain("live-mine");
+    });
+
+    it("never picks a colleague's shared connection implicitly — it must be named", async () => {
+      const colleague = await createTestUser();
+      const sharedId = await seedConnection({
+        userId: colleague.id,
+        accountId: "shared",
+        sharedWithOrg: true,
+      });
+
+      await expect(resolveIntegrationProxyCredentials(input())).rejects.toBeInstanceOf(
+        IntegrationCredentialNotFoundError,
+      );
+      const named = await resolveIntegrationProxyCredentials({
+        ...input(),
+        connectionId: sharedId,
+      });
+      expect(named.connectionId).toBe(sharedId);
+    });
+
+    it("answers 409 must_choose_connection listing every nameable connection when the actor owns several", async () => {
+      const colleague = await createTestUser();
+      const liveId = await seedConnection({ userId: ctx.user.id, accountId: "live" });
+      const deadId = await seedConnection({
+        userId: ctx.user.id,
+        accountId: "dead",
+        needsReconnection: true,
+      });
+      const sharedId = await seedConnection({
+        userId: colleague.id,
+        accountId: "shared",
+        sharedWithOrg: true,
+      });
+      // A colleague's UNshared connection is not the caller's to name.
+      await seedConnection({ userId: colleague.id, accountId: "private" });
+
+      const err = await rejectionOf(resolveIntegrationProxyCredentials(input()));
+      expect(err).toBeInstanceOf(ApiError);
+      const apiErr = err as ApiError;
+      expect(apiErr.status).toBe(409);
+      expect(apiErr.code).toBe("must_choose_connection");
+      expect(apiErr.message).toContain("X-Connection-Id");
+      const [item] = apiErr.fieldErrors as ResolutionFieldError[];
+      expect(item!.field).toBe(`integrations.${INTEGRATION_ID}`);
+      expect(item!.code).toBe("must_choose_connection");
+      // Rows seeded back to back can share a `created_at` — compare as a set.
+      const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
+      expect([...item!.candidate_connections!].sort(byId)).toEqual(
+        [
+          {
+            id: liveId,
+            label: "live",
+            account_id: "live",
+            owned_by_actor: true,
+            needs_reconnection: false,
+          },
+          {
+            id: deadId,
+            label: "dead",
+            account_id: "dead",
+            owned_by_actor: true,
+            needs_reconnection: true,
+          },
+          {
+            id: sharedId,
+            label: "shared",
+            account_id: "shared",
+            owned_by_actor: false,
+            needs_reconnection: false,
+          },
+        ].sort(byId),
+      );
+
+      // Naming one clears the ambiguity.
+      const named = await resolveIntegrationProxyCredentials({ ...input(), connectionId: liveId });
+      expect(named.connectionId).toBe(liveId);
+    });
+
+    it("picks a lone own connection even when it needs reconnection (no silent switch)", async () => {
+      const colleague = await createTestUser();
+      await seedConnection({ userId: colleague.id, accountId: "shared", sharedWithOrg: true });
+      const deadId = await seedConnection({
+        userId: ctx.user.id,
+        accountId: "dead",
+        needsReconnection: true,
+      });
+
+      const resolved = await resolveIntegrationProxyCredentials(input());
+      expect(resolved.connectionId).toBe(deadId);
+    });
+
+    it("narrows to the pinned requiredAuthKey before counting own connections", async () => {
+      const primaryId = await seedConnection({ userId: ctx.user.id, accountId: "p" });
+      await seedConnection({ userId: ctx.user.id, accountId: "s", authKey: "secondary" });
+      const context = {
+        spaceId: ctx.defaultSpaceId,
+        actor: { type: "user" as const, id: ctx.user.id },
+      };
+
+      const pinned = await selectAccessibleConnection(
+        INTEGRATION_ID,
+        ["primary", "secondary"],
+        null,
+        { ...context, requiredAuthKey: "primary" },
+      );
+      expect(pinned!.id).toBe(primaryId);
+      expect(pinned!.authKey).toBe("primary");
+
+      const unpinned = await rejectionOf(
+        selectAccessibleConnection(INTEGRATION_ID, ["primary", "secondary"], null, context),
+      );
+      expect((unpinned as ApiError).code).toBe("must_choose_connection");
+
+      // An undeclared auth key is never picked.
+      const primaryOnly = await selectAccessibleConnection(
+        INTEGRATION_ID,
+        ["primary"],
+        null,
+        context,
+      );
+      expect(primaryOnly!.id).toBe(primaryId);
+    });
   });
 });

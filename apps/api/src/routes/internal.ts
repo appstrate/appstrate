@@ -16,6 +16,7 @@ import { listResponse } from "../lib/list-response.ts";
 import { parseListPagination } from "../lib/list-query.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { verifyRunToken } from "../lib/verify-run-token.ts";
+import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import {
   getRecentRuns,
@@ -413,27 +414,13 @@ export function createInternalRouter() {
         "connection_id",
       );
     }
-    const connectionId = parsed.data.toLowerCase();
-    const bound = run.resolvedConnections?.[packageId] ?? [];
-    const entry = bound.find((member) => member.connectionId === connectionId);
-    if (!entry) {
-      logger.warn("Integration credentials request rejected — connection not bound by this run", {
-        runId,
-        packageId,
-        connectionId: parsed.data,
-        boundConnectionIds: bound.map((member) => member.connectionId),
-      });
-      throw new ApiError({
-        status: 400,
-        code: "connection_not_in_run",
-        title: "Connection Not Bound To This Run",
-        detail:
-          `Connection '${parsed.data}' is not bound to '${packageId}' by this run ` +
-          `(bound: ${bound.length === 0 ? "none" : bound.map((e) => e.connectionId).join(", ")}).`,
-        param: "connection_id",
-      });
-    }
-    return entry;
+    return requireRunBoundMember({
+      runId,
+      packageId,
+      connectionId: parsed.data,
+      bound: run.resolvedConnections?.[packageId] ?? [],
+      param: "connection_id",
+    });
   }
 
   /**

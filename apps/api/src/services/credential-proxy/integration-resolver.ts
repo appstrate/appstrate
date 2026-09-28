@@ -13,8 +13,10 @@
  *
  * `X-Integration-Id` carries the integration package id (`@scope/name`). The
  * actor (dashboard user, CLI/JWT user, or impersonated end-user) selects
- * which `integration_connections` row is decrypted; an optional
- * connection id (from `X-Connection-Id`) pins a specific row.
+ * which `integration_connections` row is decrypted. A call naming a run
+ * (`X-Run-Id`) reaches only the connections that run's kickoff bound;
+ * otherwise the one named by `X-Connection-Id` (own or shared), else the
+ * actor's single own connection (`selectAccessibleConnection`).
  *
  * Both this external-runner path and the in-container sidecar path
  * (`api-call-credentials.ts`) build the payload via the shared
@@ -40,6 +42,7 @@ import {
   selectAccessibleConnection,
   markIntegrationConnectionNeedsReconnection,
   type ResolvedConnectionRow,
+  type RunBoundSelection,
 } from "../integration-connections.ts";
 import { fetchIntegrationManifest } from "../integration-service.ts";
 import {
@@ -65,6 +68,8 @@ interface ResolveIntegrationProxyInput {
   actor: Actor;
   /** Optional connection id pin (from `X-Connection-Id`). */
   connectionId?: string;
+  /** The run named by `X-Run-Id` — confines the call to the connections it bound. */
+  run?: RunBoundSelection;
 }
 
 interface ResolvedIntegrationProxyCredentials {
@@ -77,8 +82,9 @@ interface ResolvedIntegrationProxyCredentials {
 /**
  * Resolve live credentials for the credential-proxy from an
  * integration connection. Throws {@link IntegrationCredentialNotFoundError}
- * when the integration is not active / has no accessible connection — the
- * only way this path fails.
+ * when the integration is not active / has no usable connection, and the
+ * 409 `must_choose_connection` `ApiError` when the caller names none and owns
+ * several.
  */
 export async function resolveIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
@@ -273,9 +279,6 @@ async function resolveConnection(
   input: ResolveIntegrationProxyInput,
   declaredAuthKeys: string[],
 ): Promise<ResolvedConnectionRow | null> {
-  // Single source of truth for connection selection (snapshot-pin-by-id vs
-  // auto-pick over declared auths) — shared with the spawn + credentials
-  // resolvers so the proxy can't drift on which connection it picks.
   // The by-id branch (caller-supplied `X-Connection-Id`) is bound to
   // `input.integrationId` inside the selector: a connection id belonging
   // to another integration resolves to null (→ 404) instead of leaking
@@ -284,7 +287,11 @@ async function resolveConnection(
     input.integrationId,
     declaredAuthKeys,
     input.connectionId ?? null,
-    { spaceId: input.spaceId, actor: input.actor },
+    {
+      spaceId: input.spaceId,
+      actor: input.actor,
+      ...(input.run ? { run: input.run } : {}),
+    },
   );
 }
 

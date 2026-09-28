@@ -267,6 +267,10 @@ const RESERVED_TRANSPORT_HEADERS: ReadonlySet<string> = new Set([
   "x-integration-id",
   "x-target",
   "appstrate-user",
+  // Set by the platform (`extraHeaders`) to scope the call to its run; an agent
+  // copy under another casing would merge into "a, b" and break the call.
+  // `x-connection-id` stays open: it is how a run-bound call picks inside its set.
+  "x-run-id",
 ]);
 
 /**

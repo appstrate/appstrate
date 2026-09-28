@@ -117,9 +117,13 @@ const proxyParameters = [
     in: "header",
     required: false,
     description:
-      "Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. " +
-      "Not validated against the principal — a mismatched runId is a reporting oddity, not " +
-      "a security boundary.",
+      "Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it " +
+      "(`appstrate run --report`). Must name an in-flight run of the calling actor in this " +
+      "space: an unknown id is a `404`, another actor's run a `403`, a finished run a `400`. " +
+      "The call then reaches ONLY the connections the run's kickoff bound to the integration " +
+      "(admin pins, enforced defaults, member pins already applied): one bound connection is " +
+      "used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` " +
+      "when absent, `400 connection_not_in_run` when it names another); none is a `404`.",
     schema: { type: "string" },
   },
   {
@@ -127,11 +131,14 @@ const proxyParameters = [
     in: "header",
     required: false,
     description:
-      "Optional explicit connection UUID. When set, the proxy narrows to that connection " +
-      "after validating it belongs to the caller (own user / end-user connection, or a " +
-      "shared connection in the request's space). When absent the route falls back to the " +
-      "implicit default chain (end-user default → space default → user default). Mismatched " +
-      "or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
+      "Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run " +
+      "bound (see `X-Run-Id`). Without it, the proxy uses that connection after validating it " +
+      "is one of the caller's own (user or end-user) or a connection another member shared in " +
+      "the request's space, of the requested integration. When absent (and no `X-Run-Id`), only " +
+      "the caller's own connections are considered: exactly one is used, none is a `404` (a " +
+      "shared connection is never used unless named here), several are a " +
+      "`409 must_choose_connection` listing the candidates to name. A non-uuid value is a " +
+      "`400`; mismatched or unknown ids surface as `404 — no credentials`.",
     schema: { type: "string", format: "uuid" },
   },
 ] as const;
@@ -153,7 +160,15 @@ const proxyResponses = {
     },
     content: { "*/*": {} },
   },
-  "400": { $ref: "#/components/responses/ValidationError" },
+  "400": {
+    description:
+      "Missing or malformed control header, a finished `X-Run-Id` run, or " +
+      "`connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run " +
+      "did not bind.",
+    content: {
+      "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+    },
+  },
   "401": {
     description:
       "Unauthorized. On a streaming-upload 401, the response carries " +
@@ -174,10 +189,25 @@ const proxyResponses = {
   "403": {
     description:
       "Forbidden — principal lacks `credential-proxy:call`, target not in " +
-      "`authorized_uris`, session bound to a different principal, or cookie session used.",
+      "`authorized_uris`, session bound to a different principal, cookie session used, or " +
+      "`X-Run-Id` names another actor's run.",
   },
   "404": {
-    description: "No credentials or connection for the requested integration.",
+    description:
+      "No credentials or connection for the requested integration — including when the " +
+      "caller owns none and names none (even if other members shared some), when the " +
+      "`X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space.",
+  },
+  "409": {
+    description:
+      "`must_choose_connection` — no `X-Connection-Id` and several candidates: the " +
+      "`X-Run-Id` run bound several connections to the integration, or (no run) the caller " +
+      "owns several. `errors[0].candidate_connections` lists what the caller may name (the " +
+      "run's bound set, else every own and shared connection), with `label`, `account_id`, " +
+      "`owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`.",
+    content: {
+      "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+    },
   },
   "413": {
     description: "Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB).",

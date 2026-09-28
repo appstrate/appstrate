@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `X-Run-Id` is a reserved transport header
+
+- An `api_call`'s own `x-run-id` header (any casing) is now dropped, like the
+  other Appstrate transport headers: the remote resolver sets `X-Run-Id` itself
+  (`extraHeaders`), and a second casing would reach the platform merged as
+  `"a, b"`. `X-Connection-Id` stays open — it is how a run-bound call picks a
+  connection inside its bound set.
+
 ### Removed — `computeTokenCost` (BREAKING)
 
 - `computeTokenCost` is no longer exported from `@appstrate/afps-runtime/runner`.

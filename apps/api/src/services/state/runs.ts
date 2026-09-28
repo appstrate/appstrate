@@ -1004,7 +1004,7 @@ export async function computeRunSpend(runId: string, orgId: string): Promise<Run
 
 /**
  * Minimal org-scoped attribution row for validating a caller-supplied run
- * reference (the llm-proxy `X-Run-Id` header) against the calling principal
+ * reference (the llm-proxy / credential-proxy `X-Run-Id` header) against the calling principal
  * BEFORE any usage is recorded on it. Returns `null` for an unknown id and
  * for a run outside `orgId` — the caller must treat both identically (404)
  * so a foreign tenant's run id can't be probed for existence. Never use this
@@ -1023,6 +1023,8 @@ export async function getRunAttribution(
   userId: string | null;
   endUserId: string | null;
   apiKeyId: string | null;
+  /** The kickoff's connection snapshot — what a credential-proxy call naming this run may reach. */
+  resolvedConnections: typeof runs.$inferSelect.resolvedConnections;
 } | null> {
   const [row] = await db
     .select({
@@ -1035,6 +1037,7 @@ export async function getRunAttribution(
       userId: runs.userId,
       endUserId: runs.endUserId,
       apiKeyId: runs.apiKeyId,
+      resolvedConnections: runs.resolvedConnections,
     })
     .from(runs)
     .where(and(eq(runs.id, runId), eq(runs.orgId, orgId)))

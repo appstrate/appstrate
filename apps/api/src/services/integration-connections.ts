@@ -93,6 +93,7 @@ import type { Actor } from "@appstrate/connect";
 import {
   resolveIntegrationToolCatalog,
   readDefaultTools,
+  type ConnectionCandidate,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
@@ -103,6 +104,8 @@ import {
 } from "./integration-manifest-helpers.ts";
 import { fetchMcpServerManifest } from "./integration-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
+import { translateResolutionError } from "./integration-connection-resolver.ts";
+import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 import { getIntegration, getOrgWideIntegrationManifest } from "./integration-service.ts";
@@ -203,97 +206,6 @@ export function displayAccountId(accountId: string | null | undefined): string |
 }
 
 /**
- * Lookup the actor's `integration_connections` row for `(packageId, authKey)`
- * scoped to `spaceId`. Returns `null` when no accessible connection
- * exists — callers decide whether that is a 404, a silent skip, or a 409
- * envelope.
- *
- * "Accessible" = own connection first, then any `shared_with_org=true`
- * connection in the same space + integration + authKey. The fallback
- * unlocks the admin-shared workflow: when `block_user_connections` is on
- * and the admin has marked their connection `shared_with_org`, members
- * who run agents on this integration land on the admin's row instead of
- * 409-ing with "not connected".
- *
- * Ordering rationale (own first): a user with their own connection
- * deliberately prefers their identity over the org pool — sharing is a
- * fallback for members who haven't connected, not a silent override.
- *
- * Single-row return — when multiple shared connections exist, the DB
- * order picks. Disambiguation across an accessible candidate set is the
- * member picker's job on the agent surface; this shared-pool fallback
- * stays single-source.
- *
- * `connectionId` override (#199 snapshot path): when set, the SELECT
- * additionally filters by id. The (own OR shared) predicate is kept as
- * defence-in-depth — pinned connections must be `sharedWithOrg=true`
- * (enforced at pin upsert) and override ids must come from accessible
- * candidates (enforced at kickoff by `resolveConnectionsForRun`). So
- * a snapshot-derived id always satisfies the access predicate; the AND
- * is a safety net against rogue callers, not a behavioural filter.
- */
-async function loadActorConnection(
-  packageId: string,
-  authKey: string,
-  context: { spaceId: string; actor: Actor; connectionId?: string },
-): Promise<ActorConnectionRow | null> {
-  const accessible = actorOrSharedFilter(context.actor, integrationConnections);
-  const rows = await db
-    .select({
-      id: integrationConnections.id,
-      credentialsEncrypted: integrationConnections.credentialsEncrypted,
-      expiresAt: integrationConnections.expiresAt,
-      scopesGranted: integrationConnections.scopesGranted,
-      clientRef: integrationConnections.clientRef,
-      userId: integrationConnections.userId,
-      endUserId: integrationConnections.endUserId,
-    })
-    .from(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.integrationId, packageId),
-        eq(integrationConnections.authKey, authKey),
-        eq(integrationConnections.spaceId, context.spaceId),
-        accessible,
-        ...(context.connectionId ? [eq(integrationConnections.id, context.connectionId)] : []),
-      ),
-    )
-    // Stable order so the fetch (GET) and the forced refresh (POST) on a
-    // multi-connection actor always resolve — and flag — the SAME sibling row.
-    .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id));
-  if (rows.length === 0) return null;
-
-  // When a connectionId override is set, the WHERE clause already narrowed
-  // to that row — skip the own-vs-shared tiebreaker.
-  if (context.connectionId) {
-    const picked = rows[0]!;
-    return {
-      id: picked.id,
-      credentialsEncrypted: picked.credentialsEncrypted,
-      expiresAt: picked.expiresAt,
-      scopesGranted: picked.scopesGranted,
-      clientRef: picked.clientRef,
-    };
-  }
-
-  // Prefer the actor's own row (any) over shared rows. The OR predicate
-  // above admits both — we discriminate here so the result honours user
-  // identity when both are present.
-  const ownsRow = (r: (typeof rows)[number]): boolean =>
-    context.actor.type === "user"
-      ? r.userId === context.actor.id
-      : r.endUserId === context.actor.id;
-  const picked = rows.find(ownsRow) ?? rows[0]!;
-  return {
-    id: picked.id,
-    credentialsEncrypted: picked.credentialsEncrypted,
-    expiresAt: picked.expiresAt,
-    scopesGranted: picked.scopesGranted,
-    clientRef: picked.clientRef,
-  };
-}
-
-/**
  * Load a specific connection row by its id, scoped to the space
  * and protected by the actor's access predicate (own OR shared). Used
  * by the spawn and live-credentials resolvers to load a run-bound connection.
@@ -356,57 +268,187 @@ export async function loadAccessibleConnectionById(
 }
 
 /**
- * Fallback pick for a credential-proxy call naming no connection. Walks the declared
- * auth keys and returns the first accessible connection found — same
- * auto-pick semantics as the runtime resolver's single-candidate fallback.
- * Multi-candidate ambiguity is resolved by iteration order (declared-auth
- * precedence); call sites needing deterministic disambiguation go through
- * `resolveConnectionsForRun`.
- *
- * `requiredAuthKey` (AFPS §4.1) — when set, narrows iteration to that
- * single auth key. The dep's `auth_key` pin must beat the manifest's
- * declared-auth precedence on the live-credentials path; this is the
- * non-snapshot mirror of the resolver's pre-cascade filter.
+ * The run a credential-proxy call acts for (`X-Run-Id`, already checked to be
+ * the actor's and in flight) and the set its kickoff bound to the integration
+ * (`runs.resolved_connections[packageId]`).
  */
-async function pickAnyAccessibleConnection(
-  packageId: string,
-  declaredAuthKeys: string[],
-  context: { spaceId: string; actor: Actor; requiredAuthKey?: string },
-): Promise<ResolvedConnectionRow | null> {
-  const keys = context.requiredAuthKey
-    ? declaredAuthKeys.filter((k) => k === context.requiredAuthKey)
-    : declaredAuthKeys;
-  for (const authKey of keys) {
-    const row = await loadActorConnection(packageId, authKey, context);
-    if (row) return { ...row, authKey };
-  }
-  return null;
+export interface RunBoundSelection {
+  id: string;
+  bound: readonly { connectionId: string }[];
+}
+
+/** The caller's context for the credential proxy's connection selection. */
+interface ConnectionSelectionContext {
+  spaceId: string;
+  actor: Actor;
+  /** AFPS §4.1 dep `auth_key` pin — the non-snapshot mirror of the resolver's pre-cascade filter. */
+  requiredAuthKey?: string;
+  /** When set, its bound set is all the call may reach — the cascade already chose. */
+  run?: RunBoundSelection;
 }
 
 /**
- * The credential proxy's connection selection: the named row, else the
- * auto-pick. Run paths never auto-pick ({@link loadAccessibleConnectionById}).
+ * The credential proxy's connection selection. Every branch is bound to
+ * `packageId`: a connection id of a DIFFERENT integration never resolves, so
+ * foreign credentials are never decrypted under this integration's manifest
+ * ({@link loadAccessibleConnectionById}).
  *
- * Both branches are bound to `packageId`: the by-id branch filters on
- * `integrationId` (and `requiredAuthKey` when set) so a pinned/overridden
- * connection id belonging to a DIFFERENT integration never resolves —
- * it returns `null` (or fails closed) instead of decrypting foreign
- * credentials under this integration's manifest.
+ *   - run-bound ({@link ConnectionSelectionContext.run}) — the set's single
+ *     member, else the member `namedConnectionId` names (400
+ *     `connection_not_in_run` for a non-member), else 409
+ *     `must_choose_connection` over the set; an empty set → `null`;
+ *   - `namedConnectionId` — that row, own or shared;
+ *   - neither — the actor's single own connection ({@link pickOwnConnection}).
  */
 export async function selectAccessibleConnection(
   packageId: string,
   declaredAuthKeys: string[],
-  snapshotConnectionId: string | null,
-  context: { spaceId: string; actor: Actor; requiredAuthKey?: string },
+  namedConnectionId: string | null,
+  context: ConnectionSelectionContext,
 ): Promise<ResolvedConnectionRow | null> {
-  return snapshotConnectionId
-    ? loadAccessibleConnectionById(
-        snapshotConnectionId,
+  const byId = (id: string) =>
+    loadAccessibleConnectionById(id, packageId, context.requiredAuthKey ?? null, context);
+  const { run } = context;
+  if (run) {
+    if (namedConnectionId) {
+      const member = requireRunBoundMember({
+        runId: run.id,
         packageId,
-        context.requiredAuthKey ?? null,
-        context,
+        connectionId: namedConnectionId,
+        bound: run.bound,
+        param: "X-Connection-Id",
+      });
+      return byId(member.connectionId);
+    }
+    if (run.bound.length === 0) return null;
+    if (run.bound.length === 1) return byId(run.bound[0]!.connectionId);
+    const rows = await loadSelectableRows(
+      packageId,
+      context,
+      inArray(
+        integrationConnections.id,
+        run.bound.map((m) => m.connectionId),
+      ),
+    );
+    throw mustChooseConnection(
+      packageId,
+      `Run '${run.id}' bound several connections to '${packageId}' — name one with the X-Connection-Id header.`,
+      rows.map((r) => candidateOf(context.actor, r)),
+    );
+  }
+  return namedConnectionId
+    ? byId(namedConnectionId)
+    : pickOwnConnection(packageId, declaredAuthKeys, context);
+}
+
+/**
+ * No run, no named connection — the run fallback's rule
+ * (`integration-connection-resolver.ts`, layer 7): bind only what is
+ * unambiguously the actor's, its ONE own connection, dead or not. None →
+ * `null` (not connected), even when colleagues shared some: a shared
+ * connection is used only when named with `X-Connection-Id`. Several → 409.
+ */
+async function pickOwnConnection(
+  packageId: string,
+  declaredAuthKeys: string[],
+  context: ConnectionSelectionContext,
+): Promise<ResolvedConnectionRow | null> {
+  const authKeys = context.requiredAuthKey
+    ? declaredAuthKeys.filter((k) => k === context.requiredAuthKey)
+    : declaredAuthKeys;
+  if (authKeys.length === 0) return null;
+  const rows = await loadSelectableRows(
+    packageId,
+    context,
+    inArray(integrationConnections.authKey, authKeys),
+  );
+  const own = rows.filter((r) => isActorsRow(context.actor, r));
+  if (own.length === 0) return null;
+  if (own.length > 1) {
+    throw mustChooseConnection(
+      packageId,
+      `Several connections of yours are available for '${packageId}' — name one with the X-Connection-Id header.`,
+      rows.map((r) => candidateOf(context.actor, r)),
+    );
+  }
+  const { id, authKey, credentialsEncrypted, expiresAt, scopesGranted, clientRef } = own[0]!;
+  return { id, authKey, credentialsEncrypted, expiresAt, scopesGranted, clientRef };
+}
+
+/** The actor's accessible rows (own + shared) of `packageId` in the space, narrowed by `narrow`. */
+async function loadSelectableRows(
+  packageId: string,
+  context: { spaceId: string; actor: Actor },
+  narrow: SQL,
+) {
+  return (
+    db
+      .select({
+        id: integrationConnections.id,
+        authKey: integrationConnections.authKey,
+        credentialsEncrypted: integrationConnections.credentialsEncrypted,
+        expiresAt: integrationConnections.expiresAt,
+        scopesGranted: integrationConnections.scopesGranted,
+        clientRef: integrationConnections.clientRef,
+        userId: integrationConnections.userId,
+        endUserId: integrationConnections.endUserId,
+        label: integrationConnections.label,
+        accountId: integrationConnections.accountId,
+        needsReconnection: integrationConnections.needsReconnection,
+      })
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.integrationId, packageId),
+          eq(integrationConnections.spaceId, context.spaceId),
+          actorOrSharedFilter(context.actor, integrationConnections),
+          narrow,
+        ),
       )
-    : pickAnyAccessibleConnection(packageId, declaredAuthKeys, context);
+      // Stable candidate order in the 409.
+      .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id))
+  );
+}
+
+type SelectableRow = Awaited<ReturnType<typeof loadSelectableRows>>[number];
+
+function isActorsRow(actor: Actor, r: SelectableRow): boolean {
+  return actor.type === "user" ? r.userId === actor.id : r.endUserId === actor.id;
+}
+
+function candidateOf(actor: Actor, r: SelectableRow): ConnectionCandidate {
+  return {
+    id: r.id,
+    label: r.label,
+    accountId: r.accountId,
+    ownedByActor: isActorsRow(actor, r),
+    needsReconnection: r.needsReconnection,
+  };
+}
+
+/**
+ * The run surfaces' `must_choose_connection` item (same translator, same
+ * candidate shape) as a 409 of its own, so the caller retries naming one of
+ * the candidates in `X-Connection-Id`.
+ */
+function mustChooseConnection(
+  packageId: string,
+  message: string,
+  candidates: ConnectionCandidate[],
+): ApiError {
+  const item = translateResolutionError({
+    integrationId: packageId,
+    code: "must_choose_connection",
+    message,
+    candidateConnections: candidates,
+  });
+  return new ApiError({
+    status: 409,
+    code: "must_choose_connection",
+    title: item.title ?? "Conflict",
+    detail: item.message,
+    errors: [item],
+  });
 }
 
 /**
@@ -2582,7 +2624,7 @@ export async function saveIntegrationConnection(
  *
  * The union — not the actor's own rows — is the correct set here because
  * it is what the runtime resolver will actually pick from
- * (`loadActorConnection`, `loadAccessibleConnections`,
+ * (`selectAccessibleConnection`, `loadAccessibleConnections`,
  * `listAccessibleConnections`). An own-only list made three surfaces built
  * on top of it silently wrong: the admin org-default and pin pickers
  * (which filter this list for `shared_with_org` and could therefore only
@@ -2651,7 +2693,7 @@ interface UsableIntegration {
  * Integrations the actor could use when building an agent manually in the
  * current space: any integration for which a connection exists that is
  * either the actor's own (`actorFilter`) OR opted into org-wide sharing
- * (`sharedWithOrg`). Mirrors the resolver predicate in `loadActorConnection`.
+ * (`sharedWithOrg`) — `actorOrSharedFilter`, the resolver's access predicate.
  *
  * Deduped to the integration level (the agent picks an integration; the
  * connection itself is resolved at run time by `resolveAgentIntegrationPick`).

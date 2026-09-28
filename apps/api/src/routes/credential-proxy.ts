@@ -18,6 +18,8 @@
  *     doesn't fit an endpoint that reaches third-party providers.
  *   - Explicit `credential-proxy:call` scope — NOT granted by default
  *   - Per-space scope (principal cannot reach providers in another space)
+ *   - Run binding — `X-Run-Id` must name an in-flight run of the caller, and
+ *     the call reaches only the connections that run's kickoff bound
  *   - Rate-limit: 100 req/min per principal (configurable via
  *     `CREDENTIAL_PROXY_LIMITS.rate_per_min`)
  *   - Session binding keyed on a namespaced principal id (`apikey:<id>`
@@ -45,7 +47,11 @@ import { MAX_STREAMED_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
 const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 import { filterHeaders, stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
-import { getActor } from "../lib/actor.ts";
+import { getActor, type Actor } from "../lib/actor.ts";
+import { isUuid } from "../lib/db-helpers.ts";
+import { ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
+import { getRunAttribution } from "../services/state/runs.ts";
+import type { RunBoundSelection } from "../services/integration-connections.ts";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -100,10 +106,12 @@ export function createCredentialProxyRouter() {
       const target = c.req.header("X-Target");
       const sessionId = c.req.header("X-Session-Id");
       const substituteBody = readFlagHeader(c, "X-Substitute-Body");
-      // X-Run-Id is optional — populated by runners that want per-run
-      // attribution in `credential_proxy_usage`. The value is not validated
-      // against the principal here (matches llm-proxy behaviour); a
-      // mismatched runId is a reporting oddity, not a security boundary.
+      // X-Run-Id is optional — a runner executing a run (`appstrate run
+      // --report`) sends it on every call. It IS a security boundary: it must
+      // name an in-flight run of this actor in this space, and the call then
+      // reaches only the connections that run's kickoff bound
+      // (`runBoundSelection`), so the cascade's verdict (admin pins, enforced
+      // defaults, member pins) holds for remote runs too.
       const runIdHeader = c.req.header("X-Run-Id");
       const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
       // X-Connection-Id is optional — when set the route narrows to that
@@ -111,12 +119,17 @@ export function createCredentialProxyRouter() {
       // set AND against `X-Integration-Id`: an id belonging to a different
       // integration never resolves, so this header cannot be used to inject
       // another integration's credentials under this integration's manifest);
-      // when absent the implicit default chain still applies.
+      // when absent only the actor's single own connection is used — a shared
+      // one must be named, and several own ones answer 409. Under X-Run-Id it
+      // must name a member of the run's bound set.
       const explicitConnectionHeader = c.req.header("X-Connection-Id");
       const explicitConnectionId =
         explicitConnectionHeader && explicitConnectionHeader.length > 0
           ? explicitConnectionHeader
           : null;
+      if (explicitConnectionId && !isUuid(explicitConnectionId)) {
+        throw invalidRequest("X-Connection-Id must be a connection uuid", "X-Connection-Id");
+      }
 
       if (!integrationId) throw invalidRequest("Missing X-Integration-Id header");
       if (!target) throw invalidRequest("Missing X-Target header");
@@ -160,10 +173,11 @@ export function createCredentialProxyRouter() {
       // The actor selects which `integration_connections` row is decrypted:
       //   - `Appstrate-User` impersonation → the end-user's connection
       //   - dashboard / CLI-JWT / API-key callers → the platform user's
-      //     own connection (or any `shared_with_org` connection in the space).
+      //     connections, plus the `shared_with_org` ones when named.
       // `X-Connection-Id` (when present) pins a specific connection id,
       // validated against the actor's accessible set in the resolver.
       const actor = getActor(c);
+      const run = runId ? await runBoundSelection(c, runId, integrationId, actor) : null;
 
       // Streaming control headers from the runtime.
       const streamRequest = readFlagHeader(c, "X-Stream-Request");
@@ -256,6 +270,7 @@ export function createCredentialProxyRouter() {
           spaceId,
           actor,
           ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
+          ...(run ? { run } : {}),
           integrationId,
           method,
           target,
@@ -376,6 +391,30 @@ export function createCredentialProxyRouter() {
   );
 
   return router;
+}
+
+/**
+ * The run `X-Run-Id` names, checked the way the llm-proxy checks it
+ * (`assertRunAttributable`) but bound to the ACTOR, not merely the space: the
+ * run's kickoff snapshot decides which connections the call may reach, so a
+ * caller may only borrow the snapshot of a run it launched. Unknown, foreign
+ * org and other-space ids are one 404 (no existence probe); another actor's run
+ * is 403; a finished run is 400.
+ */
+async function runBoundSelection(
+  c: Context<AppEnv>,
+  runId: string,
+  integrationId: string,
+  actor: Actor,
+): Promise<RunBoundSelection> {
+  const run = await getRunAttribution(c.get("orgId"), runId);
+  if (!run || run.spaceId !== c.get("spaceId")) throw notFound(`run ${runId} not found`);
+  const ownsRun = actor.type === "user" ? run.userId === actor.id : run.endUserId === actor.id;
+  if (!ownsRun) throw forbidden("X-Run-Id does not reference a run of the calling actor");
+  if (!ACTIVE_RUN_STATUSES.has(run.status)) {
+    throw invalidRequest(`run ${runId} is no longer active`, "X-Run-Id");
+  }
+  return { id: run.id, bound: run.resolvedConnections?.[integrationId] ?? [] };
 }
 
 /** Boolean control headers: `1` / `0`, absent = `0`, anything else a 400. */
