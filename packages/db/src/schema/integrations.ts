@@ -120,9 +120,10 @@ export const integrationConnections = pgTable(
     // gymnastics. Never empty and unique per (space, integration): the
     // sidecar's `connection` tool argument addresses a bound connection by it.
     label: text("label").notNull(),
-    // Owner-set opt-in: when true, this connection is selectable by
-    // any actor of the same space during the run-time fallback
-    // resolution (see integration-connection-resolver). Off by default
+    // Owner-set opt-in: when true, any actor of the same space may
+    // bind this connection by an explicit pick (member pin, launch
+    // override, admin pin, org default); the resolver's fallback never
+    // binds it (see integration-connection-resolver). Off by default
     // — sharing is explicit consent, never silent.
     sharedWithOrg: boolean("shared_with_org").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

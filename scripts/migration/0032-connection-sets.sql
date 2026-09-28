@@ -55,14 +55,15 @@
 --
 -- ═══ WHAT IT INSERTS — implicit shared picks frozen as member pins ═══
 --
--- The resolver's last layer (the fallback, layer 7 of
+-- The resolver's last layer (the fallback, then layer 7, now layer 6 of
 -- `apps/api/src/services/integration-connection-resolver.ts`) used to
 -- auto-bind the actor's single healthy ACCESSIBLE connection — own OR another
--- member's `shared_with_org = true` one. It now auto-binds the actor's OWN
--- connections only; a connection someone else shared is used after an explicit
--- choice (member pin, run/schedule override, org default), never implicitly.
--- A member whose runs silently leaned on a colleague's shared connection would
--- otherwise meet `not_connected` on the first run after the deploy.
+-- member's `shared_with_org = true` one. It now auto-binds the actor's single
+-- OWN connection only; a connection someone else shared is used after an
+-- explicit choice (member pin, run/schedule override, org default), never
+-- implicitly. A member whose runs silently leaned on a colleague's shared
+-- connection would otherwise meet `must_choose_connection` on the first run
+-- after the deploy.
 --
 -- So the pick the old fallback made for them is written down, as the member
 -- pin they would have created had the picker asked. One pin per

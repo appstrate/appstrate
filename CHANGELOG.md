@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Operators
+
+- **Stop the platform, run `scripts/migration/0032-connection-sets.sql`, then
+  deploy.** It must run before the drizzle batch. It rewrites
+  `runs.connection_overrides`, `runs.resolved_connections` and
+  `package_schedules.connection_overrides` from one pick per integration to a
+  set — a shape only the new readers accept — and freezes, as member pins, the
+  shared connections the old fallback bound implicitly (see `### Changed`):
+  one pin per (space, agent, integration, user) seen in a run of the last 30
+  days, only where that connection is still the user's one healthy candidate
+  and no admin pin, member pin or reachable org default decides. It writes
+  those pins in the pre-0077 shape, which is why it precedes the batch. The new
+  image then applies drizzle **0077** at boot: it folds each pin's and org
+  default's `connection_id` into a one-element `connection_ids uuid[]` and drops
+  the column (one row per key, a `CHECK` of 1..10 members, a GIN index for the
+  reverse lookup); it numbers every NULL or empty `label` `Connexion N`
+  counting on from the highest `Connexion <n>` of its (space, integration)
+  across all owners, renames every row but the oldest of a group sharing a
+  label in its (space, integration) to `<label> (n)` — n the smallest numbers
+  from 2 no row holds —, then sets the column `NOT NULL` with a
+  `CHECK (label <> '')` and a unique index on (space, integration, label).
+  `0032` is idempotent and prints its counts before and after; every "after"
+  must read 0. Schedule job data held in Redis needs no rewrite: the scheduler
+  re-syncs every enabled schedule's job from its row before starting its
+  worker, and a fire whose job still carries the old shape records a visible
+  failed run instead of launching. The runbook, with the control query that
+  tells "nothing to rewrite" apart from "nothing at all", is
+  `scripts/migration/README.md`. Existing pins and defaults stay valid: each
+  becomes a set of one.
+- **Upgrade notes — who loses an implicit shared connection.**
+  - End-users are not covered by the freeze: they own no member pins. An
+    end-user run that leaned on a shared connection answers
+    `409 must_choose_connection` until its API caller passes
+    `connection_overrides` or an admin pins the connection for the agent. The
+    end-user listing at the end of `0032` names the affected
+    (space, agent, integration) triples: run it before the window.
+  - A space that blocks personal connections (`block_user_connections`) so
+    that members fall through to an admin's shared connection must now make
+    that connection its org default (`PUT /api/integrations/{packageId}/default`),
+    or every member without a frozen pin is asked to choose.
+  - A credential-proxy caller that names no connection reaches only its own
+    single connection (see `### Changed`).
+
 ### Added
 
 - **An agent can use several connections of ONE integration in a single run.**
@@ -35,10 +78,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   member of a set of two or more cannot be delivered at kickoff, the whole
   integration is dropped — the lost member marked `no_delivery`, each survivor
   `bound_set_incomplete` — because a lone survivor would carry no `connection`
-  selector and silently take the calls meant for the lost one. Binding is a
-  human act at every layer: only the last layer of the cascade auto-binds, and
-  it still binds at most one connection — several accessible connections and no
-  explicit pick remain a `409 must_choose_connection`, never a silent fan-out.
+  selector and silently take the calls meant for the lost one. Binding several
+  connections is always an explicit choice: the fallback binds at most one, the
+  actor's own (see `### Changed`), never a silent fan-out.
+
+- **`GET /api/me/connections/{connectionId}/delete-impact`** lists the caller's
+  own member pins and schedules that deleting the connection would rewrite,
+  with each set's size. The delete confirmation lists them.
 
 - **The chat shows the model's reasoning phase instead of a blank bubble**
   (#1601). The thinking dots disappeared as soon as the model started
@@ -84,9 +130,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `org_default_connection_id` become `resolved_connection_ids`,
     `admin_pinned_connection_ids`, `member_pinned_connection_ids` and
     `org_default_connection_ids` (arrays); `resolved_owned_by_actor` is removed.
-    On an `insufficient_scopes` verdict, `resolved_connection_ids` carries the
-    whole set the winning layer tried to bind. `candidate_connections[].label`
-    is a `string`, never `null`.
+    `candidate_connections[].label` is a `string`, never `null`.
   - `integration_connections.label` is `NOT NULL`, never empty, and unique per
     (space, integration) across every owner — compared verbatim, so `Gmail`
     and `gmail` are two labels. A bound set therefore never needs a label
@@ -103,52 +147,94 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     refused characters are dropped — and suffixed ` (2)`, ` (3)`, … when that
     one is taken. A reconnect never changes a label.
   - Deleting a connection (`DELETE /api/me/connections/{id}`, or deleting the
-    custom OAuth client that minted it) is refused with `409
-connection_pinned` while an admin pin or an org default names it, exactly
-    like unsharing it: the sets carry no foreign key, and those are the
-    references an admin can clear. A member pin — anyone's, the owner's own
-    included — never blocks: only its owner can clear it. It keeps the id, so
-    a member that becomes unreachable (deleted, unshared, its owner gone from
-    the space) stays in the set: an admin pin, an enforced org default or a
-    member pin then fails the run with `pinned_connection_unavailable`, never
-    binds the survivors, until someone picks again; a soft org default is
-    skipped for the fallback, with a server log.
-  - A connection an explicit layer binds (a pin, an org default, a run or
-    schedule override) whose auth exposes none of the agent's selected tools
-    (a multi-auth integration whose `api_call` tools are per auth) is refused:
+    custom OAuth client that minted it) is refused with
+    `409 connection_pinned` while an admin pin or an ENFORCED org default names it,
+    exactly like unsharing it: the sets carry no foreign key, and those are the
+    references an admin must clear. Neither a member pin nor a soft org default
+    blocks (the resolver skips a soft default that no longer binds, with a
+    server log). The owner's own member pins and schedule
+    `connection_overrides` drop the connection in the same transaction: a pin
+    it empties is removed, a schedule override it empties drops that
+    integration (an emptied map becomes `null`), and the schedules' queue jobs
+    are re-armed. Another member's pin or schedule keeps the id, like any set
+    naming a connection that became unreachable (unshared, its owner gone from
+    the space): its next run fails with `pinned_connection_unavailable` or
+    `override_connection_unavailable`, never binding the survivors, until
+    someone picks again.
+  - A connection an explicit layer binds (a pin, an org default, a launch
+    override) whose auth exposes none of the agent's selected tools (a
+    multi-auth integration whose `api_call` tools are per auth) is refused:
     `errors[].code` `auth_serves_no_selected_tool`, carrying that
-    `connection_id`, at kickoff and in the readiness verdict (`stale`). The
-    remedy is taking it out of the set, not a connect flow. The fallback never
-    picks such a connection: with none on a serving auth it reports
-    `not_connected`, its `auth_key` naming an auth that does serve the
-    selection (when one can be named), and readiness says `none`.
+    `connection_id`, at kickoff and as the readiness `error_code`. The remedy
+    is taking it out of the set, not a connect flow. The fallback never picks
+    such a connection: with none on a serving auth it reports `not_connected`,
+    its `auth_key` naming an auth that does serve the selection (when one can
+    be named).
   - `GET /internal/integration-credentials/{scope}/{name}` and its `/refresh`
     sibling REQUIRE `?connection_id=<uuid>`, and it must be one the run's
     snapshot bound — `400 connection_not_in_run` otherwise, naming the bound
     ids. There is no "first connection" to fall back to. `/refresh` refreshes
     that connection only.
 
-  **Operators, one step.** Stop the platform, run
-  `scripts/migration/0032-connection-sets.sql` (rewrites
-  `runs.connection_overrides`, `runs.resolved_connections` and
-  `package_schedules.connection_overrides` from one pick per integration to a
-  set — a shape only the new readers accept), then deploy the new image: drizzle
-  **0077** self-applies at boot. It folds each pin's and org default's
-  `connection_id` into a one-element `connection_ids uuid[]` and drops the
-  column (one row per key, a `CHECK` of 1..10 members, a GIN index for the
-  reverse lookup); it numbers every NULL or empty `label` `Connexion N`
-  counting on from the highest `Connexion <n>` of its (space, integration)
-  across all owners, renames every row but the oldest of a group sharing a
-  label in its (space, integration) to `<label> (n)` — n the smallest numbers
-  from 2 no row holds —, then sets the column `NOT NULL` with a
-  `CHECK (label <> '')` and a unique index on (space, integration, label). `0032` is idempotent and prints its counts before and
-  after; every "after" must read 0. Schedule job data held in Redis needs no
-  rewrite: the scheduler re-syncs every enabled schedule's job from its row
-  before starting its worker, and a fire whose job still carries the old shape
-  records a visible failed run instead of launching. The runbook, with the
-  control query that tells "nothing to rewrite" apart from "nothing at all", is
-  `scripts/migration/README.md`. Existing pins and defaults stay valid: each
-  becomes a set of one.
+  The upgrade steps are under `### Operators`.
+
+- **BREAKING: the fallback binds only the actor's single OWN connection.** The
+  cascade's last layer auto-bound the one healthy connection the actor could
+  reach, a colleague's shared one included: a colleague sharing a second
+  connection flipped a member's runs and schedules to
+  `must_choose_connection`, an end-user with no connection ran on an
+  employee's account, and when one of two own accounts expired the run
+  silently switched to the other. The fallback now binds the actor's single
+  own connection on an auth serving the selected tools, dead or not (a dead one
+  fails with `needs_reconnection` instead of switching). No own connection
+  while shared ones exist, or several own ones, is a
+  `409 must_choose_connection`, for members and end-users alike. A shared
+  connection is bound only by an explicit pick: a member pin, a launch override, an admin
+  pin or an org default. `candidate_connections[]` lists every connection on a
+  serving auth, own and shared, live and dead, and each entry now carries
+  `needs_reconnection`. The upgrade freezes the implicit picks of the last 30
+  days as member pins (`### Operators`).
+- **BREAKING: connection readiness reports the resolver's own verdict.**
+  `GET /api/agents/{scope}/{name}/connection-readiness`
+  `integrations[].resolution.status` (`admin_locked`, `pinned`, `auto`,
+  `must_choose`, `none`, `stale`, `needs_reconnection`) is replaced by
+  `source`, the cascade layer that bound the set or whose set failed, and
+  `error_code`, the code a run kickoff's 409 would carry; each is `null` when
+  it does not apply. When a member fails its health check
+  (`needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`),
+  `resolved_connection_ids` is the whole set that layer tried to bind.
+  `candidates` is the resolver's own list, the one a `must_choose_connection`
+  409 carries.
+- **Six cascade layers, not seven.** A run's `connection_overrides` and a
+  schedule's frozen ones never coexist on a run, so they form one
+  launch-override layer: admin pin → enforced org default → launch override →
+  member pin → soft org default → fallback. Precedence is unchanged, and
+  `source` still records `run_override` or `schedule_override`.
+- **BREAKING: an enabled schedule cannot leave a connection choice open.**
+  Creating or updating a schedule that is (or stays) enabled resolves its
+  connections as a fire would — same actor, the version it fires, its frozen
+  overrides — and answers `409 missing_integration_connection`, one
+  `must_choose_connection` item per integration still needing a pick, with the
+  `candidate_connections` to name in `connection_overrides`. Such a schedule
+  used to be accepted, then failed every tick. Other connection problems (not
+  connected, needs reconnection, missing scopes) are still accepted: they are
+  fixed without editing the schedule. The schedule form opens its overrides
+  section and marks the integrations to pick.
+- **BREAKING: the credential proxy uses the run's connections.**
+  `/api/credential-proxy/proxy` chose a connection by itself: with `X-Run-Id`
+  it ignored the run's snapshot (admin pins, enforced defaults, member pins),
+  and without `X-Connection-Id` it took the first accessible row, a colleague's
+  shared one included. A call with `X-Run-Id` must now name an in-flight run of
+  the calling actor in this space (`404` unknown, `403` another actor's, `400`
+  finished) and reaches only the connections that run bound: one is used,
+  several need an `X-Connection-Id` inside the set
+  (`409 must_choose_connection` without, `400 connection_not_in_run` for
+  another id).
+  Without `X-Run-Id` and `X-Connection-Id`, only the caller's single own
+  connection is used: none is a `404` (a shared connection must be named),
+  several are a `409 must_choose_connection`. `@appstrate/afps-runtime` drops an
+  `api_call`'s own `x-run-id` header (any casing), like the other transport
+  headers, so an agent-supplied copy cannot collide with the platform's.
 
 - **Entering a space costs one query instead of two** (#1601). Every
   space-scoped request, the MCP endpoint and the per-space `/api/spaces/{id}`
