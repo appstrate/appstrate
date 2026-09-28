@@ -349,6 +349,66 @@ export const mePaths = {
       },
     },
   },
+  "/api/me/connections/{connectionId}/pins": {
+    get: {
+      operationId: "listMyPinsHoldingConnection",
+      tags: ["Profile"],
+      summary: "The caller's member pins a connection delete would shrink",
+      description:
+        "Lists the caller's own member pins whose connection set names this connection — exactly the " +
+        "pins `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before " +
+        "confirming, which agents lose it: each keeps `connection_count - 1` connections, and a pin " +
+        "left with none is removed (the agent then falls back to the default resolution). Other " +
+        "members' pins, admin pins and schedule overrides are not listed: the delete leaves them " +
+        "untouched. An id the caller pinned nowhere, or not a UUID, is an empty list. A delegated " +
+        "or end-user credential sees its bound organization (and space) only; an end user has no pins.",
+      parameters: [
+        { name: "connectionId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Pins naming the connection",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: [
+                        "agent_package_id",
+                        "agent_display_name",
+                        "integration_package_id",
+                        "connection_count",
+                      ],
+                      properties: {
+                        agent_package_id: { type: "string" },
+                        agent_display_name: { type: "string" },
+                        integration_package_id: { type: "string" },
+                        connection_count: {
+                          type: "integer",
+                          minimum: 1,
+                          description: "Size of the stored set before the delete.",
+                        },
+                      },
+                    },
+                  },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
   "/api/me/connections/{connectionId}": {
     delete: {
       operationId: "deleteMyConnection",

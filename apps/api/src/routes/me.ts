@@ -44,7 +44,11 @@ import { getOrgById, getUserOrganizations } from "../services/organizations.ts";
 import { db } from "@appstrate/db/client";
 import { integrationConnections, spaces } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
-import { listMeConnections, type MeConnectionAuthority } from "../services/me-connections.ts";
+import {
+  listMeConnections,
+  type MeConnectionAuthority,
+  listOwnPinsHoldingConnection,
+} from "../services/me-connections.ts";
 import { actorFilter, getActor } from "../lib/actor.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
@@ -198,6 +202,22 @@ router.get("/connections", requireCeiling("integrations", "read"), async (c) => 
   const authority = getMeConnectionAuthority(c);
   const groups = await listMeConnections(actor, authority);
   return c.json(listResponse(groups));
+});
+
+/**
+ * `GET /api/me/connections/:connectionId/pins` — the caller's member pins that
+ * deleting this connection would shrink, for the delete confirmation. A
+ * non-UUID id is an empty list, like any id the caller pinned nowhere.
+ */
+router.get("/connections/:connectionId/pins", requireCeiling("integrations", "read"), async (c) => {
+  const connectionId = c.req.param("connectionId")!;
+  if (!z.uuid().safeParse(connectionId).success) return c.json(listResponse([]));
+  const pins = await listOwnPinsHoldingConnection(
+    getActor(c),
+    connectionId.toLowerCase(),
+    getMeConnectionAuthority(c),
+  );
+  return c.json(listResponse(pins));
 });
 
 /**

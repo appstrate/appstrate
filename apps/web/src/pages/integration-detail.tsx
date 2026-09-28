@@ -101,6 +101,7 @@ import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { ConnectionTeardownSteps } from "../components/integration-connect/connection-teardown-steps";
+import { ConnectionPinImpact } from "../components/integration-connect/connection-pin-impact";
 import { keepAvailable, sharedLabels, toggleCapped } from "../lib/connection-set";
 import { Modal } from "../components/modal";
 import { SourceBadge } from "../components/source-badge";
@@ -1565,7 +1566,12 @@ function ConnectionTableRow({
           )
         }
       >
-        {confirmDelete && <ConnectionTeardownSteps connectionId={connection.id} />}
+        {confirmDelete && (
+          <>
+            <ConnectionPinImpact connectionId={connection.id} />
+            <ConnectionTeardownSteps connectionId={connection.id} />
+          </>
+        )}
       </ConfirmModal>
     </>
   );

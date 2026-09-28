@@ -17,6 +17,7 @@ import { LoadingState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";
 import { ConnectionTeardownSteps } from "../../components/integration-connect/connection-teardown-steps";
+import { ConnectionPinImpact } from "../../components/integration-connect/connection-pin-impact";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { useCanReach } from "../../hooks/use-can-reach";
 
@@ -451,7 +452,12 @@ export function PreferencesConnectionsPage() {
           );
         }}
       >
-        {confirmState && <ConnectionTeardownSteps connectionId={confirmState.connectionId} />}
+        {confirmState && (
+          <>
+            <ConnectionPinImpact connectionId={confirmState.connectionId} />
+            <ConnectionTeardownSteps connectionId={confirmState.connectionId} />
+          </>
+        )}
       </ConfirmModal>
     </>
   );

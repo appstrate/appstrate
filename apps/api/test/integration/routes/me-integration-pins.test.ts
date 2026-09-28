@@ -548,4 +548,135 @@ describe("/api/me/integration-pins", () => {
       expect(body.data.map((pin) => pin.connection_ids)).toEqual([[connectionId]]);
     });
   });
+  // ─── GET /connections/:id/pins — what a delete would shrink ───────
+
+  describe("GET /api/me/connections/:connectionId/pins", () => {
+    const OTHER_AGENT = "@pinorg/other-agent";
+
+    function pinsHolding(connectionId: string) {
+      return app.request(`/api/me/connections/${connectionId}/pins`, {
+        headers: authHeaders(ctx),
+      });
+    }
+
+    async function putPin(connectionIds: string[], agent = AGENT) {
+      const res = await app.request("/api/me/integration-pins", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_package_id: agent,
+          integration_package_id: INTEGRATION,
+          connection_ids: connectionIds,
+        }),
+      });
+      expect(res.status).toBe(200);
+    }
+
+    beforeEach(async () => {
+      await seedPackage({
+        id: OTHER_AGENT,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "agent",
+        source: "local",
+        draftManifest: { ...buildAgentManifest(), name: OTHER_AGENT, display_name: "Other" },
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OTHER_AGENT);
+    });
+
+    it("lists the caller's pins naming the connection, with each set's size", async () => {
+      const [web, db2, spare] = [
+        await seedConnectionFor(ctx.user.id),
+        await seedConnectionFor(ctx.user.id),
+        await seedConnectionFor(ctx.user.id),
+      ];
+      await putPin([web!, db2!]);
+      await putPin([db2!], OTHER_AGENT);
+
+      const res = await pinsHolding(db2!);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: unknown[] };
+      expect(body.data).toEqual([
+        {
+          agent_package_id: AGENT,
+          agent_display_name: "Pin Test Agent",
+          integration_package_id: INTEGRATION,
+          connection_count: 2,
+        },
+        {
+          agent_package_id: OTHER_AGENT,
+          agent_display_name: "Other",
+          integration_package_id: INTEGRATION,
+          connection_count: 1,
+        },
+      ]);
+      // A connection no pin names lists nothing.
+      expect(((await (await pinsHolding(spare!)).json()) as { data: unknown[] }).data).toEqual([]);
+    });
+
+    it("lists exactly the pins the delete then rewrites", async () => {
+      const [web, gone] = [
+        await seedConnectionFor(ctx.user.id),
+        await seedConnectionFor(ctx.user.id),
+      ];
+      await putPin([web!, gone!]);
+      await putPin([gone!], OTHER_AGENT);
+      const announced = (
+        (await (await pinsHolding(gone!)).json()) as {
+          data: { agent_package_id: string; connection_count: number }[];
+        }
+      ).data;
+      expect(announced.map((p) => p.agent_package_id)).toEqual([AGENT, OTHER_AGENT]);
+
+      const del = await app.request(`/api/me/connections/${gone}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del.status).toBe(204);
+
+      for (const pin of announced) {
+        const res = await app.request(
+          `/api/me/integration-pins?agent_package_id=${encodeURIComponent(pin.agent_package_id)}`,
+          { headers: authHeaders(ctx) },
+        );
+        const after = ((await res.json()) as { data: { connection_ids: string[] }[] }).data;
+        const left = after.flatMap((p) => p.connection_ids);
+        expect(left).toHaveLength(pin.connection_count - 1);
+        expect(left).not.toContain(gone);
+      }
+      expect(((await (await pinsHolding(gone!)).json()) as { data: unknown[] }).data).toEqual([]);
+    });
+
+    it("is an empty list for an id that is not a UUID", async () => {
+      const res = await pinsHolding("not-a-uuid");
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { data: unknown[] }).data).toEqual([]);
+    });
+
+    it("is an empty list for an end user, who holds no pins", async () => {
+      const connectionId = await seedConnectionFor(ctx.user.id);
+      await putPin([connectionId]);
+      const endUser = await seedEndUser({
+        spaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        externalId: "ext-eu-pins-holding",
+      });
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        name: "pins-holding-key",
+        scopes: ["integrations:read"],
+      });
+      const res = await app.request(`/api/me/connections/${connectionId}/pins`, {
+        headers: {
+          Authorization: `Bearer ${apiKey.rawKey}`,
+          "X-Space-Id": ctx.defaultSpaceId,
+          "Appstrate-User": endUser.id,
+        },
+      });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { data: unknown[] }).data).toEqual([]);
+    });
+  });
 });

@@ -2006,6 +2006,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/connections/{connectionId}/pins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's member pins a connection delete would shrink
+         * @description Lists the caller's own member pins whose connection set names this connection — exactly the pins `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before confirming, which agents lose it: each keeps `connection_count - 1` connections, and a pin left with none is removed (the agent then falls back to the default resolution). Other members' pins, admin pins and schedule overrides are not listed: the delete leaves them untouched. An id the caller pinned nowhere, or not a UUID, is an empty list. A delegated or end-user credential sees its bound organization (and space) only; an end user has no pins.
+         */
+        get: operations["listMyPinsHoldingConnection"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/context": {
         parameters: {
             query?: never;
@@ -13709,6 +13729,43 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listMyPinsHoldingConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pins naming the connection */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: {
+                            agent_package_id: string;
+                            agent_display_name: string;
+                            integration_package_id: string;
+                            /** @description Size of the stored set before the delete. */
+                            connection_count: number;
+                        }[];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getMyContext: {

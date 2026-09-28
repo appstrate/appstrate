@@ -16,11 +16,12 @@
  */
 
 import { db } from "@appstrate/db/client";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, arrayContains, asc, eq, inArray, sql } from "drizzle-orm";
 import {
   spacePackages,
   packageShares,
   integrationConnections,
+  integrationPins,
   organizationMembers,
   organizations,
   packages,
@@ -257,4 +258,58 @@ export async function listMeConnections(
   const integrations = await listAllActorIntegrationConnections(actor, authority);
   integrations.sort((a, b) => a.display_name.localeCompare(b.display_name));
   return integrations;
+}
+
+/** One of the caller's member pins that deleting a connection would shrink. */
+export interface OwnPinHoldingConnection {
+  agent_package_id: string;
+  agent_display_name: string;
+  integration_package_id: string;
+  /** Size of the stored set today; the delete leaves `connection_count - 1` (0 drops the pin). */
+  connection_count: number;
+}
+
+/**
+ * The caller's own member pins naming `connectionId` — exactly the rows
+ * `deleteIntegrationConnection` rewrites, so the confirmation can say what the
+ * delete does to each agent. A bound credential sees its org (and space) only.
+ */
+export async function listOwnPinsHoldingConnection(
+  actor: Actor,
+  connectionId: string,
+  authority: MeConnectionAuthority,
+): Promise<OwnPinHoldingConnection[]> {
+  if (actor.type !== "user") return [];
+  const rows = await db
+    .select({
+      agentPackageId: integrationPins.packageId,
+      integrationId: integrationPins.integrationId,
+      connectionIds: integrationPins.connectionIds,
+      draftManifest: packages.draftManifest,
+    })
+    .from(integrationPins)
+    .innerJoin(packages, eq(packages.id, integrationPins.packageId))
+    .innerJoin(spaces, eq(spaces.id, integrationPins.spaceId))
+    .where(
+      and(
+        eq(integrationPins.userId, actor.id),
+        arrayContains(integrationPins.connectionIds, [connectionId]),
+        ...(authority.kind === "bound"
+          ? [
+              eq(spaces.orgId, authority.orgId),
+              ...(authority.spaceId ? [eq(integrationPins.spaceId, authority.spaceId)] : []),
+            ]
+          : []),
+      ),
+    )
+    .orderBy(asc(integrationPins.packageId), asc(integrationPins.integrationId));
+  return rows.map((r) => ({
+    agent_package_id: r.agentPackageId,
+    agent_display_name: getPackageDisplayName({
+      id: r.agentPackageId,
+      draftManifest: r.draftManifest,
+    }),
+    integration_package_id: r.integrationId,
+    connection_count: r.connectionIds.length,
+  }));
 }
