@@ -279,10 +279,12 @@ export interface OwnScheduleHoldingConnection {
   agent_display_name: string;
   integration_package_id: string;
   /**
-   * Size of that set today; the delete leaves `connection_count - 1` (0 drops the integration's
-   * override, so the schedule inherits the default resolution for it).
+   * Size of that set today; the delete leaves `connection_count - 1`. 0 drops the integration's
+   * override and disables the schedule (never a silent fall-back for an unattended run).
    */
   connection_count: number;
+  /** True exactly when this delete disables the schedule: it is enabled and the set is this connection alone. */
+  disables: boolean;
 }
 
 /** Everything of the caller's that deleting a connection rewrites. */
@@ -359,6 +361,7 @@ async function listOwnSchedulesHoldingConnection(
     .select({
       id: schedules.id,
       name: schedules.name,
+      enabled: schedules.enabled,
       agentPackageId: schedules.packageId,
       connectionOverrides: schedules.connectionOverrides,
       draftManifest: packages.draftManifest,
@@ -393,6 +396,7 @@ async function listOwnSchedulesHoldingConnection(
         agent_display_name: agentDisplayName,
         integration_package_id: integrationId,
         connection_count: ids.length,
+        disables: r.enabled && ids.length === 1,
       }));
   });
 }

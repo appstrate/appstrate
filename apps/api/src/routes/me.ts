@@ -340,8 +340,9 @@ router.delete(
  * want to use this credential anywhere again" — unless an admin pin or an org
  * default, enforced or not, names it (409 `connection_pinned`,
  * `assertConnectionsUnpinned`). The caller's own member pins and schedule
- * overrides drop it in the same transaction
- * (`GET …/delete-impact` lists them beforehand); another member's keep the id.
+ * overrides drop it in the same transaction — a schedule whose set it empties is
+ * disabled, never silently switched — (`GET …/delete-impact` lists them
+ * beforehand); another member's keep the id.
  *
  * This is the ONLY entrypoint for that delete, and it is owner-scoped by
  * construction. Surfaced only from `/connections` (the user-owned management
@@ -417,7 +418,8 @@ router.delete(
     } else {
       scope = { spaceId: row.spaceId } satisfies ActorScope;
     }
-    // Re-armed after the commit: each job payload froze the pre-delete overrides.
+    // Re-armed (or, for a disabled one, removed) after the commit: each job payload froze the
+    // pre-delete overrides.
     await resyncScheduleJobs(await deleteIntegrationConnection(scope, connectionId, actor));
     await recordAuditFromContext(c, {
       action: "integration.connection.deleted",

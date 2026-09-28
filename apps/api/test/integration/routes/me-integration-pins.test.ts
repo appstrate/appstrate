@@ -589,12 +589,14 @@ describe("/api/me/integration-pins", () => {
       connectionIds: string[],
       owner: { userId?: string; endUserId?: string },
       name: string | null = null,
+      enabled = true,
     ) {
       return seedSchedule({
         packageId: AGENT,
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         name,
+        enabled,
         ...owner,
         connectionOverrides: { [INTEGRATION]: connectionIds },
       });
@@ -645,6 +647,7 @@ describe("/api/me/integration-pins", () => {
             agent_display_name: "Pin Test Agent",
             integration_package_id: INTEGRATION,
             connection_count: 1,
+            disables: true,
           },
         ],
       });
@@ -663,9 +666,9 @@ describe("/api/me/integration-pins", () => {
       const resets = await scheduleFor([gone!], { userId: ctx.user.id });
       const announced = await impactOf(gone!);
       expect(announced.pins.map((p) => p.agent_package_id)).toEqual([AGENT, OTHER_AGENT]);
-      expect(announced.schedules.map((s) => s.scheduleId).sort()).toEqual(
-        [shrinks.id, resets.id].sort(),
-      );
+      expect(
+        Object.fromEntries(announced.schedules.map((s) => [s.scheduleId, s.disables])),
+      ).toEqual({ [shrinks.id]: false, [resets.id]: true });
 
       const del = await app.request(`/api/me/connections/${gone}`, {
         method: "DELETE",
@@ -684,13 +687,35 @@ describe("/api/me/integration-pins", () => {
         expect(left).not.toContain(gone);
       }
       const rows = await db
-        .select({ id: schedules.id, connectionOverrides: schedules.connectionOverrides })
+        .select({
+          id: schedules.id,
+          connectionOverrides: schedules.connectionOverrides,
+          enabled: schedules.enabled,
+          nextRunAt: schedules.nextRunAt,
+        })
         .from(schedules)
         .where(inArray(schedules.id, [shrinks.id, resets.id]));
-      const overrides = new Map(rows.map((r) => [r.id, r.connectionOverrides]));
-      expect(overrides.get(shrinks.id)).toEqual({ [INTEGRATION]: [web!] });
-      expect(overrides.get(resets.id)).toBeNull();
+      const after = new Map(rows.map((r) => [r.id, r]));
+      // A set that only shrinks stays armed; an emptied one disables its schedule instead of
+      // letting it fall back to another account unattended.
+      expect(after.get(shrinks.id)).toMatchObject({
+        connectionOverrides: { [INTEGRATION]: [web!] },
+        enabled: true,
+      });
+      expect(after.get(resets.id)).toMatchObject({
+        connectionOverrides: null,
+        enabled: false,
+        nextRunAt: null,
+      });
       expect(await impactOf(gone!)).toEqual({ pins: [], schedules: [] });
+    });
+
+    it("does not announce a disable for a schedule that is already off", async () => {
+      const connectionId = await seedConnectionFor(ctx.user.id);
+      const off = await scheduleFor([connectionId], { userId: ctx.user.id }, null, false);
+      expect((await impactOf(connectionId)).schedules).toEqual([
+        expect.objectContaining({ scheduleId: off.id, connection_count: 1, disables: false }),
+      ]);
     });
 
     it("leaves out a colleague's schedule, which the delete does not rewrite", async () => {

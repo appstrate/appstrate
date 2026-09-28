@@ -1042,5 +1042,42 @@ describeRequiresRedis("scheduler service", () => {
         await queue.close();
       }
     });
+
+    it("an emptied override disables the schedule and removes its job", async () => {
+      const integrationId = `@${orgSlug}/svc`;
+      await seedPackage({ orgId, id: integrationId, type: "integration", source: "local" });
+      const [row] = await db
+        .insert(integrationConnections)
+        .values({
+          integrationId,
+          authKey: "primary",
+          accountId: "acct-only",
+          spaceId: defaultSpaceId,
+          userId,
+          credentialsEncrypted: "x",
+          scopesGranted: [],
+          label: "only",
+        })
+        .returning({ id: integrationConnections.id });
+      const schedule = await createSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
+        cronExpression: "0 * * * *",
+        connectionOverrides: { [integrationId]: [row!.id] },
+      });
+
+      await resyncScheduleJobs(
+        await deleteIntegrationConnection({ orgId, spaceId: defaultSpaceId }, row!.id, actor),
+      );
+
+      const [after] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+      expect(after).toMatchObject({ enabled: false, nextRunAt: null, connectionOverrides: null });
+      const queue = new Queue("schedules", {
+        connection: getRedisQueueConnection() as unknown as ConnectionOptions,
+      });
+      try {
+        expect(await queue.getJobScheduler(schedule.id)).toBeUndefined();
+      } finally {
+        await queue.close();
+      }
+    });
   });
 });

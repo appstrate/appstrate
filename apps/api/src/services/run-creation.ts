@@ -218,6 +218,9 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       };
     }
     resolvedConnections = outcome.resolved;
+    // The remote api_call tool exposes no argument addressing a set member (an
+    // `x-connection-id` header is only honoured when a caller already knows an
+    // id), so a set of several has no way to be used there.
     const multi = multiConnectionIntegrations(resolvedConnections);
     if (multi.length > 0) {
       return {

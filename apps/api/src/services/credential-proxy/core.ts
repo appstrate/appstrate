@@ -242,8 +242,6 @@ function redactCredentialValues(value: string, fields: Record<string, string>): 
  * upstream response headers + body, streamed back as-is.
  */
 export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult> {
-  // One selection for the read and both 401-refresh paths, so a refresh never
-  // lands on a different connection than the call used.
   const selection = {
     integrationId: input.integrationId,
     spaceId: input.spaceId,
@@ -252,9 +250,14 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     ...(input.run ? { run: input.run } : {}),
   };
   let resolved;
+  // Both 401-refresh paths NAME the connection the call used: re-running the
+  // selection could land elsewhere (a connection added or a default changed
+  // since). Naming still re-checks reach — run membership, enforced default.
+  let refreshSelection;
   try {
     const result = await resolveIntegrationProxyCredentials(selection);
     resolved = result.payload;
+    refreshSelection = { ...selection, connectionId: result.connectionId };
   } catch (err) {
     if (err instanceof IntegrationCredentialNotFoundError) {
       throw new ProxyCredentialError(err.message);
@@ -463,7 +466,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // fresh body stream).
   if (res.status === 401 && !isStreamBody && credentialInjection.kind === "inject") {
     try {
-      const refreshedResult = await forceRefreshIntegrationProxyCredentials(selection);
+      const refreshedResult = await forceRefreshIntegrationProxyCredentials(refreshSelection);
       const refreshed = refreshedResult?.payload ?? null;
       if (refreshed) {
         // Rebuild the credential header from the rotated token. Drop the
@@ -508,7 +511,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // can signal the client to retry itself with a fresh body stream.
   if (res.status === 401 && isStreamBody && credentialInjection.kind === "inject") {
     try {
-      await forceRefreshIntegrationProxyCredentials(selection);
+      await forceRefreshIntegrationProxyCredentials(refreshSelection);
     } catch {
       // Refresh itself failed (invalid_grant, revoked token, etc.) —
       // surface the 401 as-is; the caller will handle re-authentication.

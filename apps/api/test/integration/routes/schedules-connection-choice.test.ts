@@ -11,16 +11,24 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { schedules } from "@appstrate/db/schema";
+import { integrationConnections, integrationPins, schedules } from "@appstrate/db/schema";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedSchedule } from "../../helpers/seed.ts";
+import {
+  createTestContext,
+  authHeaders,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { seedPackage, seedPackageVersion, seedSchedule } from "../../helpers/seed.ts";
 import { seedDivergedAgent, seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
 import {
   seedConnectionTestIntegration,
   seedIntegrationConnection,
 } from "../../helpers/run-connection-fixtures.ts";
+import { apiIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
 
@@ -45,7 +53,13 @@ function agentManifest(integrations: boolean): Record<string, unknown> {
 
 interface ProblemBody {
   code: string;
-  errors: { field: string; code: string; candidate_connections?: { id: string }[] }[];
+  errors: {
+    field: string;
+    code: string;
+    message: string;
+    connection_id?: string;
+    candidate_connections?: { id: string }[];
+  }[];
 }
 
 describe("schedule writes — the connection choice is made up front", () => {
@@ -227,5 +241,217 @@ describe("schedule writes — the connection choice is made up front", () => {
     expect((await patch(inherit.id, { version_override: "draft" })).status).toBe(409);
     await db.update(schedules).set({ enabled: false }).where(eq(schedules.id, inherit.id));
     expect((await patch(inherit.id, { version_override: "draft" })).status).toBe(200);
+  });
+});
+
+describe("schedule writes for another actor — only what both reach", () => {
+  let ctx: TestContext;
+  let member: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "schedchoice" });
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedSchedulableAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      manifest: agentManifest(true),
+    });
+    member = await memberContext(ctx, "member");
+  });
+
+  /** The owner (caller) writes a schedule that runs as `member`. */
+  function createForMember(body: Record<string, unknown> = {}) {
+    return app.request(`/api/agents/${AGENT}/schedules`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cron_expression: "0 9 * * *",
+        actor: { userId: member.user.id },
+        ...body,
+      }),
+    });
+  }
+
+  async function share(id: string): Promise<void> {
+    await db
+      .update(integrationConnections)
+      .set({ sharedWithOrg: true })
+      .where(eq(integrationConnections.id, id));
+  }
+
+  it("lists none of the actor's private connections as candidates", async () => {
+    await seedIntegrationConnection(member, INTEGRATION);
+    await seedIntegrationConnection(member, INTEGRATION);
+
+    const res = await createForMember();
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as ProblemBody;
+    expect(body.errors).toHaveLength(1);
+    expect(body.errors[0]).toMatchObject({
+      field: `integrations.${INTEGRATION}`,
+      code: "must_choose_connection",
+      candidate_connections: [],
+    });
+    expect(body.errors[0]!.message).toContain("actor");
+    expect(await db.select().from(schedules)).toHaveLength(0);
+  });
+
+  it("refuses overrides naming the actor's private connection, like an unknown id", async () => {
+    const own = await seedIntegrationConnection(member, INTEGRATION);
+    await seedIntegrationConnection(member, INTEGRATION);
+
+    for (const id of [own, crypto.randomUUID()]) {
+      const res = await createForMember({ connection_overrides: { [INTEGRATION]: [id] } });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as ProblemBody;
+      expect(body.errors.map((e) => e.code)).toEqual(["override_connection_unavailable"]);
+      expect(body.errors[0]!.candidate_connections).toBeUndefined();
+    }
+    expect(await db.select().from(schedules)).toHaveLength(0);
+  });
+
+  it("offers a shared candidate, and binding it is accepted", async () => {
+    await seedIntegrationConnection(member, INTEGRATION);
+    await seedIntegrationConnection(member, INTEGRATION);
+    const shared = await seedIntegrationConnection(ctx, INTEGRATION);
+    await share(shared);
+
+    const refused = await createForMember();
+    expect(refused.status).toBe(409);
+    const body = (await refused.json()) as ProblemBody;
+    expect(body.errors[0]!.candidate_connections!.map((c) => c.id)).toEqual([shared]);
+
+    const res = await createForMember({ connection_overrides: { [INTEGRATION]: [shared] } });
+    expect(res.status).toBe(201);
+  });
+
+  it("keeps a private pick already on the actor's schedule when another caller edits it", async () => {
+    const own = await seedIntegrationConnection(member, INTEGRATION);
+    await seedIntegrationConnection(member, INTEGRATION);
+    const schedule = await seedSchedule({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: member.user.id,
+      enabled: true,
+      connectionOverrides: { [INTEGRATION]: [own] },
+    });
+
+    const res = await app.request(`/api/schedules/${schedule.id}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "renamed", connection_overrides: { [INTEGRATION]: [own] } }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("refuses an actor who cannot run agents in this space before resolving anything", async () => {
+    const guest = await memberContext(ctx, "guest");
+    await seedIntegrationConnection(guest, INTEGRATION);
+    await seedIntegrationConnection(guest, INTEGRATION);
+
+    const res = await app.request(`/api/agents/${AGENT}/schedules`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ cron_expression: "0 9 * * *", actor: { userId: guest.user.id } }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { param?: string; errors?: unknown };
+    expect(body.param).toBe("actor");
+    expect(body.errors).toBeUndefined();
+    expect(await db.select().from(schedules)).toHaveLength(0);
+  });
+});
+
+describe("schedule writes — a set on an auth serving no selected tool", () => {
+  const API = "@schedchoice/api";
+  let ctx: TestContext;
+  let backup: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "schedchoice" });
+    const auth = {
+      type: "api_key" as const,
+      authorizedUris: ["https://api.example.com/**"],
+      credentialFields: ["api_key"],
+    };
+    const manifest = apiIntegrationManifest({ name: API, auths: { primary: auth, backup: auth } });
+    (manifest as unknown as { _meta: unknown })._meta = {
+      "dev.appstrate/api": { auths: { primary: {}, backup: {} } },
+    };
+    await seedPackage({
+      id: API,
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifest,
+    });
+    await seedPackageVersion({
+      packageId: API,
+      version: "1.0.0",
+      manifest: manifest as unknown as Record<string, unknown>,
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, API);
+    await seedSchedulableAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      manifest: {
+        ...agentManifest(false),
+        dependencies: { integrations: { [API]: "^1.0.0" } },
+        integrations_configuration: { [API]: { tools: ["api_call__primary"] } },
+      },
+    });
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: API,
+        authKey: "backup",
+        accountId: "spare",
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+        scopesGranted: [],
+        label: "spare",
+      })
+      .returning({ id: integrationConnections.id });
+    backup = row!.id;
+  });
+
+  function create(body: Record<string, unknown>) {
+    return app.request(`/api/agents/${AGENT}/schedules`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ cron_expression: "0 9 * * *", ...body }),
+    });
+  }
+
+  it("refuses it when the schedule's own override binds it", async () => {
+    const res = await create({ connection_overrides: { [API]: [backup] } });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as ProblemBody;
+    expect(body.errors).toHaveLength(1);
+    expect(body.errors[0]).toMatchObject({
+      field: `integrations.${API}`,
+      code: "auth_serves_no_selected_tool",
+      connection_id: backup,
+    });
+  });
+
+  it("accepts it when an admin pin binds it — the pin, not the schedule, is what to fix", async () => {
+    await db.insert(integrationPins).values({
+      spaceId: ctx.defaultSpaceId,
+      packageId: AGENT,
+      integrationId: API,
+      userId: null,
+      connectionIds: [backup],
+    });
+    expect((await create({})).status).toBe(201);
   });
 });

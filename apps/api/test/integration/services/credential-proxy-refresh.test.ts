@@ -230,6 +230,56 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     expect(refreshBody.get("refresh_token")).toBe("rt_valid");
   });
 
+  it("refreshes the connection the call used, even when a fresh selection would now be ambiguous", async () => {
+    const packageId = "@cprefreshorg/gmail-second";
+    await setup(ctx, packageId, { access_token: "stale_token", refresh_token: "rt_valid" });
+    mockServer.setTokenResponse({
+      access_token: "fresh_token",
+      token_type: "Bearer",
+      expires_in: 3600,
+    });
+
+    const captured: Array<string | null> = [];
+    const fakeFetch = (async (url: string, init: RequestInit) => {
+      if (String(url).startsWith(mockServer.url)) return fetch(url, init);
+      captured.push(new Headers(init.headers).get("authorization"));
+      if (captured.length === 1) {
+        // A second own connection lands between the call and its retry: re-running the
+        // selection would 409 `must_choose_connection` and the refresh would be lost.
+        await db.insert(integrationConnections).values({
+          integrationId: packageId,
+          authKey: "google",
+          accountId: "acct-2",
+          label: "acct-2",
+          spaceId: ctx.defaultSpaceId,
+          userId: ctx.user.id,
+          credentialsEncrypted: encryptCredentialEnvelope({
+            outputs: { access_token: "other_token", refresh_token: "rt_other" },
+          }),
+          scopesGranted: ["openid", "email"],
+          sharedWithOrg: false,
+        });
+        return new Response("expired", { status: 401 });
+      }
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const res = await proxyCall({
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "GET",
+      target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+      headers: {},
+      fetch: fakeFetch,
+    });
+
+    expect(res.status).toBe(200);
+    expect(captured).toEqual(["Bearer stale_token", "Bearer fresh_token"]);
+    const tokenReqs = mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
+    expect(new URLSearchParams(tokenReqs[0]!.body).get("refresh_token")).toBe("rt_valid");
+  });
+
   it("surfaces the original 401 when the refresh itself fails (invalid_grant)", async () => {
     const packageId = "@cprefreshorg/gmail-revoked";
     await setup(ctx, packageId, { access_token: "stale_token", refresh_token: "rt_revoked" });

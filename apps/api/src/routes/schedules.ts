@@ -20,6 +20,7 @@ import {
   createSchedule,
   updateSchedule,
   deleteSchedule,
+  assertScheduleActorValid,
 } from "../services/scheduler.ts";
 import { computeNextRun, isValidCron } from "../lib/cron.ts";
 import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
@@ -43,7 +44,6 @@ import { resolveAndValidateScheduleInput } from "../services/input-resolution.ts
 import { getPackage } from "../services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { assertScheduleConnectionsChosen } from "../services/run-pipeline.ts";
-import { scheduleLaunchOverrides } from "../services/integration-connection-resolver.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import {
@@ -470,13 +470,17 @@ export function createSchedulesRouter() {
         );
       }
 
-      // A new schedule is armed, so its connection choice is made now.
+      // A new schedule is armed: its actor must be able to fire it, and its connection choice is
+      // made now.
+      await assertScheduleActorValid(actor, scope.orgId, scope.spaceId);
       await assertScheduleConnectionsChosen({
         agent: effectiveAgent,
         orgId: scope.orgId,
         spaceId: scope.spaceId,
         actor,
-        launchOverrides: scheduleLaunchOverrides(data.connection_overrides),
+        caller: getActor(c),
+        connectionOverrides: data.connection_overrides ?? null,
+        storedOverrides: null,
         dependencyOverrides: data.dependency_overrides ?? null,
       });
 
@@ -718,6 +722,7 @@ export function createSchedulesRouter() {
     // skips it: a patch that reduces what the row does is always applicable.
     const nextActor = actor ?? existingActor;
     if ((data.enabled ?? existing.enabled) && nextActor) {
+      await assertScheduleActorValid(nextActor, scope.orgId, scope.spaceId);
       const fired = await scheduledDefinition(
         effectiveAgent,
         existing.packageId,
@@ -730,9 +735,11 @@ export function createSchedulesRouter() {
           orgId: scope.orgId,
           spaceId: scope.spaceId,
           actor: nextActor,
-          launchOverrides: scheduleLaunchOverrides(
+          caller: getActor(c),
+          connectionOverrides:
             connectionOverrides !== undefined ? connectionOverrides : existing.connection_overrides,
-          ),
+          // A pick already on the row was made for this actor — unless the actor changes now.
+          storedOverrides: actorChanged ? null : existing.connection_overrides,
           dependencyOverrides: effectiveDependencyOverrides ?? null,
         });
       }

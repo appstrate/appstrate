@@ -94,26 +94,4 @@ describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-1
     expect(resolved!.id).toBe(connBId);
     expect(resolved!.authKey).toBe("oauth");
   });
-
-  it("does not resolve a row whose authKey differs from the dep's pinned requiredAuthKey", async () => {
-    // The connection was stored under authKey "oauth"; the agent dep pins
-    // `auth_key: "api_key"` (AFPS §4.1). The pinned lookup must fail closed —
-    // never hand back credentials acquired under a different auth method.
-    const mismatch = await selectAccessibleConnection(INTEG_B, ["oauth"], connBId, {
-      spaceId: ctx.defaultSpaceId,
-      actor,
-      requiredAuthKey: "api_key",
-    });
-    expect(mismatch).toBeNull();
-  });
-
-  it("resolves when the pinned requiredAuthKey matches the row's authKey", async () => {
-    const resolved = await selectAccessibleConnection(INTEG_B, ["oauth"], connBId, {
-      spaceId: ctx.defaultSpaceId,
-      actor,
-      requiredAuthKey: "oauth",
-    });
-    expect(resolved).not.toBeNull();
-    expect(resolved!.id).toBe(connBId);
-  });
 });

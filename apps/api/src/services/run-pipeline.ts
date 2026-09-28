@@ -22,12 +22,16 @@ import { resolveModel } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { inferenceRouteOf } from "./run-launcher/subscription-run-policy.ts";
 import {
-  collectAgentReadinessErrors,
+  collectAgentReadiness,
   missingIntegrationConnection,
   validateAgentReadiness,
 } from "./agent-readiness.ts";
 import {
+  launchOverrideLayer,
   resolveRunConnectionsOrError,
+  scheduleLaunchOverrides,
+  translateResolutionError,
+  unavailableMemberError,
   type LaunchOverrides,
 } from "./integration-connection-resolver.ts";
 import {
@@ -36,14 +40,22 @@ import {
   type ResolvedIntegrationVersionMap,
 } from "./integration-service.ts";
 import { assertDependencyOverrideKeysDeclared } from "../lib/launch-schemas.ts";
-import type { ResolvedConnectionMap } from "@appstrate/core/integration";
+import type {
+  ConnectionOverrides,
+  ConnectionResolutionError,
+  ResolvedConnectionMap,
+} from "@appstrate/core/integration";
+import { and, eq, inArray } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { integrationConnections } from "@appstrate/db/schema";
 import { parseScopedName } from "@appstrate/core/naming";
 import type { ModelCost } from "@appstrate/core/module";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getOrchestrator } from "./orchestrator/index.ts";
-import { ApiError } from "../lib/errors.ts";
+import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
+import { isUuid } from "../lib/db-helpers.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
@@ -280,13 +292,22 @@ async function seedPinnedIntegrationManifests(params: {
 
 /**
  * The verdicts only an edit of the schedule itself can clear: an open choice
- * (`must_choose_connection`) and a frozen pick the actor can no longer reach
- * (`override_connection_unavailable`).
+ * (`must_choose_connection`), a frozen pick the actor can no longer reach
+ * (`override_connection_unavailable`), and a frozen pick on an auth serving
+ * none of the selected tools — the last only when the schedule's OWN set bound
+ * it; bound by a pin or default, the fix is the pin's, not the schedule's.
  */
-const SCHEDULE_OWNED_CODES: ReadonlySet<string> = new Set([
-  "must_choose_connection",
-  "override_connection_unavailable",
-]);
+function isScheduleOwned(e: ConnectionResolutionError): boolean {
+  switch (e.code) {
+    case "must_choose_connection":
+    case "override_connection_unavailable":
+      return true;
+    case "auth_serves_no_selected_tool":
+      return e.source === "schedule_override";
+    default:
+      return false;
+  }
+}
 
 /**
  * Refuse arming a schedule whose fire would fail on its own connection choice:
@@ -294,33 +315,137 @@ const SCHEDULE_OWNED_CODES: ReadonlySet<string> = new Set([
  * when the schedule is written (the rule Make.com applies to a scenario).
  *
  * The same readiness the fire runs (`resolveRunPreflight`, same seeding, same
- * launch-override layer), keeping ONLY {@link SCHEDULE_OWNED_CODES}. Every other
+ * launch-override layer), keeping ONLY {@link isScheduleOwned} verdicts. Every other
  * verdict (not connected, needs reconnection, missing scopes, inactive
  * integration…) is repaired outside the schedule, so it stays a visible failed
  * run at the tick rather than a refusal to save. Non-throwing readiness on
  * purpose: the throwing wrapper would emit `onRunConnectionMissing` for a run
  * nobody launched.
+ *
+ * A caller writing a schedule that runs as SOMEONE ELSE resolves with the actor's
+ * reach but must neither see nor bind the actor's private connections: the ids
+ * it newly names must be shared ones, and a choice lists only shared candidates.
  */
 export async function assertScheduleConnectionsChosen(params: {
   /** The agent at the version the schedule fires (`version_override` resolved). */
   agent: LoadedPackage;
   orgId: string;
   spaceId: string;
+  /** The schedule's actor — whose reach the fire resolves with. */
   actor: Actor;
-  launchOverrides: LaunchOverrides | null;
+  /** Who writes the schedule. */
+  caller: Actor;
+  /** The overrides this write stores. */
+  connectionOverrides: ConnectionOverrides | null;
+  /** The overrides already on the row for the SAME actor — not the caller's pick, never re-judged. */
+  storedOverrides: ConnectionOverrides | null;
   dependencyOverrides: Record<string, string> | null;
 }): Promise<void> {
+  const onBehalf = params.caller.type !== params.actor.type || params.caller.id !== params.actor.id;
+  if (onBehalf) {
+    const refused = await unsharedOverrideIds(
+      params.spaceId,
+      params.connectionOverrides,
+      params.storedOverrides,
+    );
+    if (refused.length > 0) {
+      const layer = launchOverrideLayer("schedule_override");
+      throw missingIntegrationConnection(
+        refused.map(([integrationId, id]) =>
+          translateResolutionError(unavailableMemberError(integrationId, layer, id)),
+        ),
+      );
+    }
+  }
   const manifestCache = await seedPinnedIntegrationManifests(params);
-  const errors = await collectAgentReadinessErrors({
+  const { resolutionErrors } = await collectAgentReadiness({
     agent: params.agent,
     orgId: params.orgId,
     spaceId: params.spaceId,
     actor: params.actor,
-    launchOverrides: params.launchOverrides,
+    launchOverrides: scheduleLaunchOverrides(params.connectionOverrides),
     manifestCache,
   });
-  const unchosen = errors.filter((e) => SCHEDULE_OWNED_CODES.has(e.code));
-  if (unchosen.length > 0) throw missingIntegrationConnection(unchosen);
+  const unchosen = resolutionErrors.filter(isScheduleOwned);
+  if (unchosen.length === 0) return;
+  throw missingIntegrationConnection(
+    onBehalf ? await withSharedCandidatesOnly(unchosen) : unchosen.map(translateResolutionError),
+  );
+}
+
+/**
+ * `[integrationId, id]` for each id of `overrides` the caller newly names (absent from
+ * `stored`) that is not a connection of that integration shared in the space — the only ones
+ * both the caller and the actor reach. One uniform refusal whatever the id is, so a caller
+ * cannot probe for a colleague's private rows.
+ */
+async function unsharedOverrideIds(
+  spaceId: string,
+  overrides: ConnectionOverrides | null,
+  stored: ConnectionOverrides | null,
+): Promise<[string, string][]> {
+  const named = Object.entries(overrides ?? {}).flatMap(([integrationId, ids]) =>
+    ids
+      .filter((id) => !(stored?.[integrationId] ?? []).includes(id))
+      .map((id): [string, string] => [integrationId, id]),
+  );
+  const uuids = named.map(([, id]) => id).filter(isUuid);
+  const shared =
+    uuids.length === 0
+      ? []
+      : await db
+          .select({
+            id: integrationConnections.id,
+            integrationId: integrationConnections.integrationId,
+          })
+          .from(integrationConnections)
+          .where(
+            and(
+              inArray(integrationConnections.id, uuids),
+              eq(integrationConnections.spaceId, spaceId),
+              eq(integrationConnections.sharedWithOrg, true),
+            ),
+          );
+  const reachable = new Set(shared.map((r) => `${r.integrationId}\0${r.id}`));
+  return named.filter(([integrationId, id]) => !reachable.has(`${integrationId}\0${id}`));
+}
+
+/**
+ * The refusal as a caller acting for someone else may read it: a choice lists only the
+ * candidates shared in the space. When none is, the choice is still open — the actor pins
+ * one of their own for the agent, or an admin pins one.
+ */
+async function withSharedCandidatesOnly(
+  errors: ConnectionResolutionError[],
+): Promise<ValidationFieldError[]> {
+  const candidateIds = errors.flatMap((e) => (e.candidateConnections ?? []).map((c) => c.id));
+  const shared = new Set(
+    candidateIds.length === 0
+      ? []
+      : (
+          await db
+            .select({ id: integrationConnections.id })
+            .from(integrationConnections)
+            .where(
+              and(
+                inArray(integrationConnections.id, candidateIds),
+                eq(integrationConnections.sharedWithOrg, true),
+              ),
+            )
+        ).map((r) => r.id),
+  );
+  return errors.map((e) => {
+    if (e.code !== "must_choose_connection") return translateResolutionError(e);
+    const candidates = (e.candidateConnections ?? []).filter((c) => shared.has(c.id));
+    return translateResolutionError({
+      ...e,
+      candidateConnections: candidates,
+      message:
+        candidates.length > 0
+          ? `Integration '${e.integrationId}' needs a connection choice for the schedule's actor: pick one of the shared connections, or the actor pins one of their own for this agent.`
+          : `Integration '${e.integrationId}' needs a connection choice only the schedule's actor can make (a member pin of their own for this agent) or an admin can make (an admin pin).`,
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------

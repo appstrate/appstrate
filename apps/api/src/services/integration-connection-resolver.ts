@@ -443,6 +443,15 @@ export function orgDefaultLayer(enforce: boolean): ExplicitLayerRef {
   };
 }
 
+/** The launch-override layer (3) — a run body's or a schedule row's set. */
+export function launchOverrideLayer(source: LaunchOverrides["source"]): ExplicitLayerRef {
+  return {
+    source,
+    code: "override_connection_unavailable",
+    noun: source === "run_override" ? "Run-override connection" : "Schedule-override connection",
+  };
+}
+
 /** The loud failure of an explicit layer naming an id the actor cannot reach. */
 export function unavailableMemberError(
   integrationId: string,
@@ -476,12 +485,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
       ? [
           {
             ids: args.launchOverride.ids,
-            source: args.launchOverride.source,
-            code: "override_connection_unavailable" as const,
-            noun:
-              args.launchOverride.source === "run_override"
-                ? "Run-override connection"
-                : "Schedule-override connection",
+            ...launchOverrideLayer(args.launchOverride.source),
           },
         ]
       : []),
@@ -962,8 +966,9 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
     // Smuggle the candidates on must_choose_connection so a caller with no
     // picker of its own names its choice straight from the error, without a
     // second round-trip through the connection list to learn which uuid is
-    // which.
-    ...(e.candidateConnections && e.candidateConnections.length > 0
+    // which. Relayed even empty: a schedule written for another actor lists
+    // only shared candidates, and "none you may pick" is then the answer.
+    ...(e.candidateConnections
       ? {
           candidate_connections: e.candidateConnections.map((c) => ({
             id: c.id,

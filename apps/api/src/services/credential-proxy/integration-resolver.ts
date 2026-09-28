@@ -150,7 +150,10 @@ export async function resolveIntegrationProxyCredentials(
 
 /**
  * Force-refresh the integration connection's OAuth2 token (the proxy's
- * reactive 401-retry path) and rebuild the payload. Never throws for a
+ * reactive 401-retry path) and rebuild the payload. `input.connectionId` must
+ * name the connection the failed call used — the caller passes it, so the
+ * refresh never lands on whatever a fresh selection would pick now; the
+ * selection still re-checks that the actor (and the run) reaches it. Never throws for a
  * credential outcome — both call sites in `core.ts` sit inside `catch {}`, so
  * a throw would be swallowed and buy nothing. Returns `null` in the four
  * not-refreshed cases, which are NOT equivalent and are told apart by what

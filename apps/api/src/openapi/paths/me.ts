@@ -360,8 +360,9 @@ export const mePaths = {
         "exactly the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can " +
         "say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a " +
         "pin left with none is removed (the agent falls back to the default resolution), and a schedule " +
-        "override left with none drops that integration (the schedule inherits the default resolution " +
-        "for it). One schedule entry per (schedule, integration). Other members' pins and schedules, " +
+        "override left with none drops that integration AND disables the schedule (`disables: true`) — " +
+        "an unattended run never silently falls back to another account; its owner re-picks and " +
+        "re-enables it. One schedule entry per (schedule, integration). Other members' pins and schedules, " +
         "admin pins and org defaults are not listed: the delete leaves them untouched. An id the caller " +
         "references nowhere, or not a UUID, answers empty lists. A delegated or end-user credential sees " +
         "its bound organization (and space) only; an end user has no pins.",
@@ -411,6 +412,7 @@ export const mePaths = {
                         "agent_display_name",
                         "integration_package_id",
                         "connection_count",
+                        "disables",
                       ],
                       properties: {
                         scheduleId: { type: "string" },
@@ -423,6 +425,12 @@ export const mePaths = {
                           minimum: 1,
                           description:
                             "Size of the schedule's override set for this integration before the delete.",
+                        },
+                        disables: {
+                          type: "boolean",
+                          description:
+                            "True when the delete disables this schedule: it is enabled and this connection is " +
+                            "the only one in its set for the integration.",
                         },
                       },
                     },
@@ -450,8 +458,9 @@ export const mePaths = {
         "run. An admin removes it from the pin(s) or default first. A member pin does not block the " +
         "delete. The caller's own " +
         "member pins and schedule overrides drop the connection in the same transaction — a pin it " +
-        "empties is removed and a schedule override it empties drops that integration, so the cascade " +
-        "falls back; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. " +
+        "empties is removed (the cascade falls back), and a schedule override it empties drops that " +
+        "integration and disables the schedule (its job is removed) rather than let it fall back " +
+        "unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. " +
         "Another member's pins and schedules keep the id, and their next run fails " +
         "(`pinned_connection_unavailable`, `override_connection_unavailable`) until they pick again — " +
         "a set never shrinks behind its owner. " +

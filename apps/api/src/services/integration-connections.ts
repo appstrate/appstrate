@@ -293,8 +293,6 @@ export interface RunBoundSelection {
 interface ConnectionSelectionContext {
   spaceId: string;
   actor: Actor;
-  /** AFPS §4.1 dep `auth_key` pin — the non-snapshot mirror of the resolver's pre-cascade filter. */
-  requiredAuthKey?: string;
   /** When set, its bound set is all the call may reach — the cascade already chose. */
   run?: RunBoundSelection;
 }
@@ -326,8 +324,7 @@ export async function selectAccessibleConnection(
   namedConnectionId: string | null,
   context: ConnectionSelectionContext,
 ): Promise<ResolvedConnectionRow | null> {
-  const byId = (id: string) =>
-    loadAccessibleConnectionById(id, packageId, context.requiredAuthKey ?? null, context);
+  const byId = (id: string) => loadAccessibleConnectionById(id, packageId, null, context);
   const { run } = context;
   if (run) {
     const bound = await run.boundSet();
@@ -359,26 +356,15 @@ export async function selectAccessibleConnection(
     });
   }
 
-  const authKeys = selectableAuthKeys(declaredAuthKeys, context);
   const orgDefault = (await listOrgDefaultsForResolver(context.spaceId))[packageId];
   if (orgDefault?.enforce && orgDefault.connectionIds.length > 0) {
-    return pickFromOrgDefault(packageId, authKeys, orgDefault, namedConnectionId, context);
+    return pickFromOrgDefault(packageId, declaredAuthKeys, orgDefault, namedConnectionId, context);
   }
   if (namedConnectionId) return byId(namedConnectionId);
   if (orgDefault && orgDefault.connectionIds.length > 0) {
-    return pickFromOrgDefault(packageId, authKeys, orgDefault, null, context);
+    return pickFromOrgDefault(packageId, declaredAuthKeys, orgDefault, null, context);
   }
-  return pickOwnConnection(packageId, authKeys, context);
-}
-
-/** The declared auths a selection may land on — narrowed to the dep's `auth_key` pin. */
-function selectableAuthKeys(
-  declaredAuthKeys: string[],
-  context: ConnectionSelectionContext,
-): string[] {
-  return context.requiredAuthKey
-    ? declaredAuthKeys.filter((k) => k === context.requiredAuthKey)
-    : declaredAuthKeys;
+  return pickOwnConnection(packageId, declaredAuthKeys, context);
 }
 
 /**
@@ -2068,15 +2054,16 @@ export async function deleteIntegrationOAuthClient(
         integrationConnections.spaceId,
         db.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, owner.orgId)),
       );
-  const minted = await db
-    .select({ id: integrationConnections.id })
-    .from(integrationConnections)
-    .where(and(eq(integrationConnections.clientRef, clientId), connectionSpaces));
-  await assertConnectionsUnpinned(
-    minted.map((c) => c.id),
-    "A connection this OAuth client minted cannot be deleted",
-  );
   return db.transaction(async (tx) => {
+    const minted = await tx
+      .select({ id: integrationConnections.id })
+      .from(integrationConnections)
+      .where(and(eq(integrationConnections.clientRef, clientId), connectionSpaces));
+    await assertConnectionsUnpinned(
+      tx,
+      minted.map((c) => c.id),
+      "A connection this OAuth client minted cannot be deleted",
+    );
     const deleted = await tx
       .delete(integrationOauthClients)
       .where(clientByIdFilter(owner, packageId, clientId))
@@ -2865,30 +2852,54 @@ export async function listUsableIntegrationsForActor(
 }
 
 /**
+ * Row-lock `ids` in the caller's transaction, in id order so two lockers cannot deadlock:
+ * `update` before a write that unshares or deletes them, `share` before an admin pin or org
+ * default names them as shared. The two serialize, so neither can commit a state the other
+ * checked against — a set naming a row that is concurrently unshared or deleted.
+ */
+export async function lockConnectionRows(
+  tx: Tx,
+  ids: readonly string[],
+  strength: "update" | "share",
+): Promise<void> {
+  if (ids.length === 0) return;
+  await tx
+    .select({ id: integrationConnections.id })
+    .from(integrationConnections)
+    .where(inArray(integrationConnections.id, [...ids]))
+    .orderBy(asc(integrationConnections.id))
+    .for(strength);
+}
+
+/**
  * 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names one of
  * `ids` (the sets have no FK): each binds whole for every member of the space, so removing one
  * of its connections would fail everyone's runs at once. A member pin never blocks — it is that
  * member's own pick, and their next run reports `pinned_connection_unavailable`.
+ *
+ * Runs in the transaction of the unshare/delete it guards, after locking the rows
+ * ({@link lockConnectionRows}): a pin or default upsert racing it either committed first (and is
+ * seen here) or waits and then finds the row unshared or gone.
  */
 export async function assertConnectionsUnpinned(
+  tx: Tx,
   ids: readonly string[],
   refused: string,
 ): Promise<void> {
   if (ids.length === 0) return;
-  const [pins, orgDefaults] = await Promise.all([
-    db
-      .select({ id: integrationPins.id })
-      .from(integrationPins)
-      .where(
-        and(isNull(integrationPins.userId), arrayOverlaps(integrationPins.connectionIds, [...ids])),
-      )
-      .limit(1),
-    db
-      .select({ id: integrationOrgDefaults.id })
-      .from(integrationOrgDefaults)
-      .where(arrayOverlaps(integrationOrgDefaults.connectionIds, [...ids]))
-      .limit(1),
-  ]);
+  await lockConnectionRows(tx, ids, "update");
+  const pins = await tx
+    .select({ id: integrationPins.id })
+    .from(integrationPins)
+    .where(
+      and(isNull(integrationPins.userId), arrayOverlaps(integrationPins.connectionIds, [...ids])),
+    )
+    .limit(1);
+  const orgDefaults = await tx
+    .select({ id: integrationOrgDefaults.id })
+    .from(integrationOrgDefaults)
+    .where(arrayOverlaps(integrationOrgDefaults.connectionIds, [...ids]))
+    .limit(1);
   if (pins.length > 0) {
     throw conflict(
       "connection_pinned",
@@ -2907,7 +2918,8 @@ export async function assertConnectionsUnpinned(
  * Delete one connection row. Used by the "disconnect" button per auth
  * (or per account, when multi-account). In the same transaction the row
  * leaves the OWNER's own member pins and schedule overrides — their act, so their
- * references follow it; a set it empties is dropped (the resolver falls back).
+ * references follow it; an emptied member pin is dropped (the resolver falls back), an emptied
+ * schedule override disables its schedule (see {@link dropConnectionFromOwnSchedules}).
  * Other members' pins and schedules keep the id and fail loudly until re-picked:
  * a set never shrinks behind them.
  *
@@ -2944,8 +2956,8 @@ export async function deleteIntegrationConnection(
     )
     .limit(1);
   if (!owned) throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
-  await assertConnectionsUnpinned([connectionId], "Connection cannot be deleted");
   return db.transaction(async (tx) => {
+    await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be deleted");
     const deleted = await tx
       .delete(integrationConnections)
       .where(
@@ -2995,12 +3007,15 @@ export function scheduleOverridesName(connectionId: string): SQL {
 
 /**
  * Remove `connectionId` from the override sets of `actor`'s OWN schedules, in the caller's
- * transaction: deleting a connection is its owner's act, so their schedules follow it. A set it
- * empties drops its integration (the schedule then inherits the default resolution) and an
- * emptied map is stored NULL. Another actor's schedule keeps the id and fails loudly.
+ * transaction: deleting a connection is its owner's act, so their schedules follow it. A set that
+ * only shrinks keeps the schedule armed. A set it EMPTIES drops its integration AND disables the
+ * schedule: falling back to the default resolution would silently switch (or leave ambiguous) the
+ * account an unattended run acts as, so the owner re-picks and re-enables it instead. An emptied
+ * map is stored NULL. Another actor's schedule keeps the id and fails loudly.
  *
  * @returns the rewritten rows — their job payload still freezes the old overrides, so the caller
- *   passes them to `resyncScheduleJobs` (scheduler) once the transaction has committed.
+ *   passes them to `resyncScheduleJobs` (scheduler) once the transaction has committed; that
+ *   re-arms a kept schedule and removes a disabled one's job.
  */
 async function dropConnectionFromOwnSchedules(
   tx: Tx,
@@ -3018,10 +3033,12 @@ async function dropConnectionFromOwnSchedules(
       const rest = ids.filter((c) => c !== connectionId);
       return rest.length > 0 ? [[integrationId, rest] as const] : [];
     });
+    const emptiedASet = kept.length < Object.keys(connectionOverrides ?? {}).length;
     const [row] = await tx
       .update(schedules)
       .set({
         connectionOverrides: kept.length > 0 ? Object.fromEntries(kept) : null,
+        ...(emptiedASet ? { enabled: false, nextRunAt: null } : {}),
         updatedAt: new Date(),
       })
       .where(eq(schedules.id, id))

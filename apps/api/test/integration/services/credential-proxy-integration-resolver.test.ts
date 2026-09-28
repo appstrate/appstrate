@@ -564,22 +564,13 @@ describe("credential-proxy integration-resolver", () => {
       expect(resolved.connectionId).toBe(deadId);
     });
 
-    it("narrows to the pinned requiredAuthKey before counting own connections", async () => {
+    it("counts only own connections on a declared auth", async () => {
       const primaryId = await seedConnection({ userId: ctx.user.id, accountId: "p" });
       await seedConnection({ userId: ctx.user.id, accountId: "s", authKey: "secondary" });
       const context = {
         spaceId: ctx.defaultSpaceId,
         actor: { type: "user" as const, id: ctx.user.id },
       };
-
-      const pinned = await selectAccessibleConnection(
-        INTEGRATION_ID,
-        ["primary", "secondary"],
-        null,
-        { ...context, requiredAuthKey: "primary" },
-      );
-      expect(pinned!.id).toBe(primaryId);
-      expect(pinned!.authKey).toBe("primary");
 
       const unpinned = await rejectionOf(
         selectAccessibleConnection(INTEGRATION_ID, ["primary", "secondary"], null, context),

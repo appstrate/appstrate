@@ -19,6 +19,7 @@ import {
 } from "./integration-service.ts";
 import { resolveDeclaredSkills } from "./package-catalog.ts";
 import { isPromptEmpty } from "@appstrate/core/validation";
+import type { ConnectionResolutionError } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -115,9 +116,22 @@ function manifestFailureError(
 export async function collectAgentReadinessErrors(
   params: AgentReadinessParams,
 ): Promise<ValidationFieldError[]> {
+  return (await collectAgentReadiness(params)).errors;
+}
+
+/**
+ * {@link collectAgentReadinessErrors} plus the untranslated resolver errors behind its
+ * `integrations.*` connection entries — for a caller that must read what the wire entry drops
+ * (the cascade layer, `source`).
+ */
+export async function collectAgentReadiness(params: AgentReadinessParams): Promise<{
+  errors: ValidationFieldError[];
+  resolutionErrors: ConnectionResolutionError[];
+}> {
   const { agent, orgId, spaceId, actor, launchOverrides } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
+  const resolutionErrors: ConnectionResolutionError[] = [];
 
   if (isPromptEmpty(agent.prompt)) {
     errors.push({
@@ -268,9 +282,10 @@ export async function collectAgentReadinessErrors(
     for (const e of resolution.errors) {
       errors.push(translateResolutionError(e));
     }
+    resolutionErrors.push(...resolution.errors);
   }
 
-  return errors;
+  return { errors, resolutionErrors };
 }
 
 /**

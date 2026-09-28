@@ -32,7 +32,7 @@ import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import type { LoadedPackage } from "../types/index.ts";
-import { ApiError, internalError } from "../lib/errors.ts";
+import { ApiError, internalError, invalidRequest } from "../lib/errors.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorMatch, type Actor } from "../lib/actor.ts";
@@ -222,6 +222,27 @@ async function isScheduleActorValid(
     .where(and(eq(endUsers.id, actor.id), eq(endUsers.spaceId, spaceId)))
     .limit(1);
   return row !== undefined;
+}
+
+/** Why {@link isScheduleActorValid} refused — one wording for the fire and the write. */
+function invalidScheduleActorReason(actor: Actor): string {
+  return actor.type === "user"
+    ? "its actor is not a member of this organization or cannot run agents in this space"
+    : "its end-user actor does not exist in this space";
+}
+
+/**
+ * The fire-time actor check, run when an armed schedule is written: an actor who could never fire
+ * it is refused before any connection is resolved on their behalf.
+ */
+export async function assertScheduleActorValid(
+  actor: Actor,
+  orgId: string,
+  spaceId: string,
+): Promise<void> {
+  if (!(await isScheduleActorValid(actor, orgId, spaceId))) {
+    throw invalidRequest(`Schedule refused: ${invalidScheduleActorReason(actor)}`, "actor");
+  }
 }
 
 /**
@@ -502,11 +523,7 @@ export async function triggerScheduledRun(
         actorId: actor.id,
       });
       await disableScheduleForInvalidActor(scheduleId);
-      await failSchedule(
-        actor.type === "user"
-          ? "Schedule disabled: its actor is no longer a member of this organization or cannot run agents in this space"
-          : "Schedule disabled: its end-user actor no longer exists in this space",
-      );
+      await failSchedule(`Schedule disabled: ${invalidScheduleActorReason(actor)}`);
       return;
     }
 

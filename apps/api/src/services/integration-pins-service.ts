@@ -44,7 +44,7 @@ import {
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
 import { notFound, invalidRequest, conflict } from "../lib/errors.ts";
-import { isUniqueViolation } from "../lib/db-helpers.ts";
+import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
@@ -53,7 +53,11 @@ import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integration-service.ts";
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
-import { assertConnectionsUnpinned, lockConnectionLabels } from "./integration-connections.ts";
+import {
+  assertConnectionsUnpinned,
+  lockConnectionLabels,
+  lockConnectionRows,
+} from "./integration-connections.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
@@ -248,21 +252,25 @@ async function upsertPin(args: {
   createdBy: string | null;
 }): Promise<PinSummary> {
   const { scope, agentPackageId, integrationId, connectionIds, userIdValue, createdBy } = args;
-  await Promise.all(
-    connectionIds.map((id) => validatePinTarget(scope, integrationId, id, args.validateOpts)),
-  );
   await assertAgentActiveHere(scope, agentPackageId);
 
   const ids = sql`ARRAY[${sql.join(
     connectionIds.map((id) => sql`${id}`),
     sql`, `,
   )}]::uuid[]`;
-  const [row] = toRows<{
-    connection_ids: string | unknown[];
-    created_at: string | Date;
-    updated_at: string | Date;
-  }>(
-    await db.execute(sql`
+  const [row] = await db.transaction(async (tx) => {
+    // Validated under a share lock, written in the same transaction: an unshare or delete of a
+    // member serializes against this write (`assertConnectionsUnpinned`).
+    await lockConnectionRows(tx, connectionIds, "share");
+    for (const id of connectionIds) {
+      await validatePinTarget(scope, integrationId, id, args.validateOpts, tx);
+    }
+    return toRows<{
+      connection_ids: string | unknown[];
+      created_at: string | Date;
+      updated_at: string | Date;
+    }>(
+      await tx.execute(sql`
       INSERT INTO ${integrationPins}
         (space_id, package_id, integration_package_id, user_id, connection_ids, created_by)
       VALUES (${scope.spaceId}, ${agentPackageId}, ${integrationId}, ${userIdValue}, ${ids}, ${createdBy})
@@ -273,7 +281,8 @@ async function upsertPin(args: {
         updated_at = now()
       RETURNING connection_ids, created_at, updated_at
     `),
-  );
+    );
+  });
   return {
     packageId: agentPackageId,
     integration_package_id: integrationId,
@@ -326,8 +335,9 @@ export async function validatePinTarget(
   integrationId: string,
   connectionId: string,
   opts: { requireShared?: boolean; allowOwnedBy?: string },
+  executor: DbOrTx = db,
 ): Promise<ConnectionRow> {
-  const [conn] = await db
+  const [conn] = await executor
     .select()
     .from(integrationConnections)
     .where(eq(integrationConnections.id, connectionId))
@@ -461,10 +471,6 @@ export async function updateConnectionMetadata(
   connectionId: string,
   input: UpdateConnectionMetadataInput,
 ): Promise<ConnectionRow> {
-  if (input.sharedWithOrg === false) {
-    await assertConnectionsUnpinned([connectionId], "Connection cannot be unshared");
-  }
-
   const updates: { label?: string; sharedWithOrg?: boolean; updatedAt: Date } = {
     updatedAt: new Date(),
   };
@@ -473,6 +479,9 @@ export async function updateConnectionMetadata(
 
   const result = await db
     .transaction(async (tx) => {
+      if (input.sharedWithOrg === false) {
+        await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be unshared");
+      }
       if (input.label !== undefined) {
         const [conn] = await tx
           .select({

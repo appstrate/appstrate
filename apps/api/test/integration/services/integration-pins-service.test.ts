@@ -47,6 +47,7 @@ import {
   updateConnectionMetadata,
 } from "../../../src/services/integration-pins-service.ts";
 import {
+  assertConnectionsUnpinned,
   deleteIntegrationConnection,
   deleteIntegrationOAuthClient,
 } from "../../../src/services/integration-connections.ts";
@@ -576,7 +577,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         return row!.connectionOverrides;
       }
 
-      it("prunes the owner's own schedule overrides: a set shrinks, an emptied one drops", async () => {
+      it("prunes the owner's own schedule overrides: a set shrinks, an emptied one drops and disables", async () => {
         const [a, b, c] = await seedSharedConnections(3);
         const shrinks = await scheduleWith({ [INTEGRATION]: [a!, b!] });
         const dropsKey = await scheduleWith({ [INTEGRATION]: [b!], [OTHER_INTEGRATION]: [c!] });
@@ -589,6 +590,17 @@ describe("integration-pins-service — DB access/ownership", () => {
         expect(await overridesOf(dropsKey)).toEqual({ [OTHER_INTEGRATION]: [c!] });
         expect(await overridesOf(nulls)).toBeNull();
         expect(await overridesOf(untouched)).toEqual({ [INTEGRATION]: [a!] });
+        // Only a schedule whose set was EMPTIED stops: it would otherwise fall back unattended.
+        const enabled = await db
+          .select({ id: schedules.id, enabled: schedules.enabled })
+          .from(schedules)
+          .where(inArray(schedules.id, [shrinks, dropsKey, nulls, untouched]));
+        expect(Object.fromEntries(enabled.map((r) => [r.id, r.enabled]))).toEqual({
+          [shrinks]: true,
+          [dropsKey]: false,
+          [nulls]: false,
+          [untouched]: true,
+        });
       });
 
       it("keeps the id in a COLLEAGUE's schedule — it fails loudly, it never shrinks", async () => {
@@ -689,6 +701,41 @@ describe("integration-pins-service — DB access/ownership", () => {
         .from(integrationOauthClients)
         .where(eq(integrationOauthClients.id, client!.id));
       expect(kept?.id).toBe(client!.id);
+    });
+
+    it("a pin upsert racing an unshare waits on the row lock and is refused", async () => {
+      // The unshare holds its transaction open after its write; without the share lock the
+      // upsert would read the still-committed `shared` flag and pin a row about to go private.
+      const [id] = await seedSharedConnections(1);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      let written!: () => void;
+      const unshareWritten = new Promise<void>((resolve) => (written = resolve));
+      const unshare = db.transaction(async (tx) => {
+        await assertConnectionsUnpinned(tx, [id!], "Connection cannot be unshared");
+        await tx
+          .update(integrationConnections)
+          .set({ sharedWithOrg: false })
+          .where(eq(integrationConnections.id, id!));
+        written();
+        await gate;
+      });
+      await unshareWritten;
+
+      const pin = upsertIntegrationPin(scope, INTEGRATION, {
+        agentPackageId: AGENT,
+        connectionIds: [id!],
+        createdBy: ctx.user.id,
+      }).then(
+        () => "pinned",
+        (err: Error) => err.message,
+      );
+      await Bun.sleep(100); // let the upsert reach its lock
+      release();
+      await unshare;
+
+      expect(await pin).toMatch(/sharedWithOrg/i);
+      expect(await listIntegrationPins(scope, INTEGRATION)).toEqual([]);
     });
 
     it("refuses the whole set when ONE member is not shared", async () => {

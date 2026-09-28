@@ -22,6 +22,7 @@ import { integrationOrgDefaults } from "@appstrate/db/schema";
 import type { IntegrationOrgDefault } from "@appstrate/shared-types";
 import type { SpaceScope } from "../lib/scope.ts";
 import { validatePinTarget } from "./integration-pins-service.ts";
+import { lockConnectionRows } from "./integration-connections.ts";
 
 /** Identical wire shape to {@link IntegrationOrgDefault}; aliased for the canonical pattern (cf. `PinSummary`). */
 type OrgDefaultSummary = IntegrationOrgDefault;
@@ -91,37 +92,39 @@ export async function upsertOrgDefault(
   integrationId: string,
   input: UpsertOrgDefaultInput,
 ): Promise<OrgDefaultSummary> {
-  await Promise.all(
-    input.connectionIds.map((connectionId) =>
-      validatePinTarget(scope, integrationId, connectionId, { requireShared: true }),
-    ),
-  );
-
   const now = new Date();
+  // Validated under a share lock, written in the same transaction: an unshare or delete of a
+  // member serializes against this write (`assertConnectionsUnpinned`).
   // Atomic upsert on the (space, integration) unique index — avoids the
   // check-then-insert race where two concurrent first-writers both miss the
   // SELECT and the loser's INSERT throws a raw unique-violation (500).
-  const [row] = await db
-    .insert(integrationOrgDefaults)
-    .values({
-      spaceId: scope.spaceId,
-      integrationId,
-      connectionIds: input.connectionIds,
-      enforce: input.enforce,
-      createdBy: input.createdBy,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [integrationOrgDefaults.spaceId, integrationOrgDefaults.integrationId],
-      set: {
+  const [row] = await db.transaction(async (tx) => {
+    await lockConnectionRows(tx, input.connectionIds, "share");
+    for (const connectionId of input.connectionIds) {
+      await validatePinTarget(scope, integrationId, connectionId, { requireShared: true }, tx);
+    }
+    return tx
+      .insert(integrationOrgDefaults)
+      .values({
+        spaceId: scope.spaceId,
+        integrationId,
         connectionIds: input.connectionIds,
         enforce: input.enforce,
         createdBy: input.createdBy,
+        createdAt: now,
         updatedAt: now,
-      },
-    })
-    .returning();
+      })
+      .onConflictDoUpdate({
+        target: [integrationOrgDefaults.spaceId, integrationOrgDefaults.integrationId],
+        set: {
+          connectionIds: input.connectionIds,
+          enforce: input.enforce,
+          createdBy: input.createdBy,
+          updatedAt: now,
+        },
+      })
+      .returning();
+  });
   return toSummary(row!);
 }
 
