@@ -204,9 +204,8 @@ router.get("/connections", requireCeiling("integrations", "read"), async (c) => 
  * `/api/me/integration-pins` — member-self pin CRUD.
  *
  * The persisted replacement for the R5 localStorage pick: when an agent
- * has >1 candidate connection on a required integration and the member picks
- * some, the choice is stored here and read by the resolver on every
- * subsequent run (cascade layer 5).
+ * has >1 candidate connection on a required integration, the member's pick is stored
+ * here and read by the resolver on every run (cascade layer 5).
  *
  * Member-only (no end-user surface — end-users are addressed via API key
  * impersonation and the calling member controls the choice via run
@@ -310,10 +309,9 @@ router.delete(
 /**
  * `DELETE /api/me/connections/:connectionId` — destructive global delete.
  *
- * Removes the underlying `integration_connections` row. The intent is
- * *destructive* — "I never want to use this credential anywhere again" — but
- * refused with 409 `connection_pinned` while an admin pin or an org default
- * names it (`assertConnectionsUnpinned`: the sets carry no FK).
+ * Removes the underlying `integration_connections` row — *destructive*: "I never
+ * want to use this credential anywhere again" — unless an admin pin or org default
+ * names it (409 `connection_pinned`, `assertConnectionsUnpinned`).
  *
  * This is the ONLY entrypoint for that delete, and it is owner-scoped by
  * construction. Surfaced only from `/connections` (the user-owned management

@@ -18,10 +18,6 @@ export function sharedLabels(rows: readonly { label: string }[]): string[] {
   return [...new Set(labelsSharedBy(rows).map((r) => r.label))];
 }
 
-function sameConnectionSet(a: string[], b: string[]): boolean {
-  return a.length === b.length && a.every((id) => b.includes(id));
-}
-
 /**
  * "Valider" writes a non-empty, addressable set that differs from the stored pick. Untouched,
  * that is only a stored pick naming an id no longer a candidate — never the cascade's fallback.
@@ -33,10 +29,8 @@ export function canApplyConnectionSet(
 ): boolean {
   if (checked.length === 0 || sharedLabels(checked).length > 0) return false;
   if (!touched && explicitIds.length === 0) return false;
-  return !sameConnectionSet(
-    checked.map((c) => c.id),
-    explicitIds,
-  );
+  const ids = checked.map((c) => c.id);
+  return !(ids.length === explicitIds.length && ids.every((id) => explicitIds.includes(id)));
 }
 
 /** Bound as displayed: an unpinned member still sees the cascade; an unpicked override inherits. */

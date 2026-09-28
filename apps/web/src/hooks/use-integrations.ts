@@ -447,7 +447,6 @@ export function useDeleteIntegrationOAuthClient(tier: IntegrationClientTier) {
       }
     },
     onSuccess,
-    // Refused (409 `connection_pinned`) while an admin pin or an org default names a connection it minted.
     onError: onMutationError,
   });
 }
@@ -529,8 +528,7 @@ export function useUpsertIntegrationPin() {
     },
     onSuccess: () => {
       toast.success(t("integration.admin.pin.upserted"));
-      // An admin pin sits at the TOP of the resolver cascade — every agent's
-      // readiness verdict changes with it, not just the pins list.
+      // Admin pins top the resolver cascade: every readiness verdict moves with them.
       void invalidateIntegrationQueries(qc);
     },
   });
@@ -630,12 +628,9 @@ export function useUpdateIntegrationConnection() {
     },
     onSuccess: () => {
       toast.success(t("integration.connection.updated"));
-      // A rename moves the label the agent addresses a bound connection by,
-      // so it can clear (or create) a `duplicate_connection_label` verdict —
-      // refresh the whole integration subtree, readiness included.
+      // A rename can clear or create a `duplicate_connection_label` verdict.
       void invalidateIntegrationQueries(qc);
     },
-    // Unsharing a connection an admin pin or an org default names is refused (409 `connection_pinned`).
     onError: onMutationError,
   });
 }

@@ -179,7 +179,6 @@ export interface ResolvedConnectionRow extends ActorConnectionRow {
 /** `account_id` of an identity-less connection ({@link extractIdentity} found no claim). */
 const PLACEHOLDER_ACCOUNT_ID = "default";
 
-/** The `account_id` column as an account, or `null` for the placeholder. */
 export function displayAccountId(accountId: string | null | undefined): string | null {
   return accountId && accountId !== PLACEHOLDER_ACCOUNT_ID ? accountId : null;
 }
@@ -2673,10 +2672,9 @@ export async function listUsableIntegrationsForActor(
 }
 
 /**
- * 409 `connection_pinned` while an admin pin or an org default names one of
- * `ids` — the references only an admin can clear (the sets have no FK). A member
- * pin never blocks: only its owner can clear it, so it keeps the id and that
- * member's next run fails with `pinned_connection_unavailable` until they re-pick.
+ * 409 `connection_pinned` while an admin pin or org default names one of `ids` (the sets have no
+ * FK).
+ * A member pin never blocks: that member's next run reports `pinned_connection_unavailable`.
  */
 export async function assertConnectionsUnpinned(
   ids: readonly string[],

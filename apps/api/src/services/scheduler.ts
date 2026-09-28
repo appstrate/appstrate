@@ -393,12 +393,7 @@ export async function initScheduleWorker(): Promise<void> {
     async (job) => {
       await handleScheduleJob(job);
     },
-    // Trigger work is IO-bound (run-pipeline preflight + DB writes), so
-    // concurrent processing is safe — each job targets a distinct schedule
-    // fire and the run pipeline handles concurrent runs per agent. The
-    // limiter is a global abuse backstop, not a serialization mechanism:
-    // the previous `concurrency: 1, max: 5/min` made every schedule on the
-    // instance share a 5-runs-per-minute serial ceiling.
+    // IO-bound: concurrency is safe; the limiter is a global abuse backstop, not serialisation.
     { concurrency: 10, limiter: { max: 30, duration: 60_000 } },
   );
 

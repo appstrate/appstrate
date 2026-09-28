@@ -14,10 +14,9 @@ import { logger } from "./logger.ts";
 export type PeerAttribution = (peer: Peer) => Promise<string | null | undefined>;
 
 /**
- * What a runner is attributed to: its connection, not its integration. N
- * connections of one integration are N runners with N credentials and N egress
- * allowlists (one SSH host each), so keying on the integration id would let one
- * runner reach its sibling's listeners.
+ * A runner is attributed to its connection, not its integration: N connections
+ * are N runners with their own credentials and egress allowlists, and must not
+ * reach a sibling's listeners.
  */
 export function runnerKeyOf(spec: { integrationId: string; connection?: { id: string } }): string {
   return spec.connection ? `${spec.integrationId}#${spec.connection.id}` : spec.integrationId;

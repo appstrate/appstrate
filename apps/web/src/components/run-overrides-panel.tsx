@@ -43,9 +43,7 @@ export interface RunOverridesValue {
   /**
    * Per-integration connection picks — frozen at schedule create/edit so
    * every fire uses the same rows. Loses to admin pins; beats
-   * schedule-less fallback + per-run overrides on the actor. Map of SETS:
-   * `{ "@scope/integration": ["<connection_id>", ...] }`, up to
-   * `MAX_CONNECTIONS_PER_INTEGRATION` per key.
+   * schedule-less fallback + per-run overrides on the actor.
    */
   connection_overrides?: Record<string, string[]>;
 }

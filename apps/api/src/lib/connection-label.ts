@@ -22,7 +22,6 @@ function isForbidden(cp: number): boolean {
   );
 }
 
-/** Why `label` cannot be stored as a connection label, or null when it can. */
 export function connectionLabelProblem(label: string): string | null {
   if (label.trim() === "") return "must not be empty";
   if (label.length > CONNECTION_LABEL_MAX) {

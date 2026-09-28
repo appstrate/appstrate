@@ -11,9 +11,9 @@
  * cascade in `integration-connection-resolver.ts`).
  *
  * Same target validation as admin pins (`validatePinTarget` with
- * `requireShared`), for every connection of the set: it must exist, belong
- * to this space, reference this integration, and be `sharedWithOrg = true`
- * — an admin can't coerce a member's personal connection.
+ * `requireShared`): the connection must exist, belong to this space,
+ * reference this integration, and be `sharedWithOrg = true` — an admin
+ * can't coerce a member's personal connection.
  */
 
 import { and, eq } from "drizzle-orm";
@@ -85,7 +85,7 @@ export async function listOrgDefaultsForResolver(
   );
 }
 
-/** Set or replace the org default set for (space, integration). */
+/** Set or replace the org default for (space, integration). */
 export async function upsertOrgDefault(
   scope: SpaceScope,
   integrationId: string,

@@ -85,9 +85,7 @@ export function RunConfigurationTab({ run, agentName }: RunConfigurationTabProps
       {connectionsUsed && connectionsUsed.length > 0 && (
         <SectionCard title={t("run.infoConnections")}>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {/* One entry per BOUND connection — an integration bound to
-                several contributes several — so the cards group by
-                integration and list every connection under it. */}
+            {/* One card per integration, listing every connection it bound. */}
             {groupByIntegration(connectionsUsed).map(([integrationId, bound]) => (
               <InfoCard
                 key={integrationId}

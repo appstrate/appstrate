@@ -44,12 +44,10 @@ import { connectionSetSchema } from "./connection-set.ts";
 import { isValidDependencyOverride } from "../services/input-parser.ts";
 
 /**
- * Per-integration connection picks:
- * `{ "@scope/integration": ["<connection_id>", ...] }`.
+ * Per-integration connection picks: `{ "@scope/integration": ["<connection_id>", ...] }`.
  *
- * `.min(1)` on the id is load-bearing on every surface, and it costs the most
- * on schedules: an empty-string id resolves to no row, so a schedule's frozen
- * map would answer 200 once and be refused at every fire after it.
+ * `.min(1)` on the id is load-bearing, most of all on schedules: an empty id resolves
+ * to no row, so a frozen map would answer 200 once and be refused at every fire.
  *
  * It is also owned here rather than delegated to `parseRequestInput`:
  * `POST /api/runs/inline/validate` never calls the parser, so the guard would

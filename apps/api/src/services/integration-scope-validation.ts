@@ -24,10 +24,9 @@
  *    catalog → the corresponding subset check is skipped (matches the
  *    Phase 0 schema semantics).
  *
- * `requireCallableTools` adds two freeze-point rules that are NOT subset checks
- * — the declared-but-empty gate (`no_tools_selected`) and an `auth_key` serving
- * none of the selected tools (`pinned_auth_serves_no_selected_tool`) — opt-in
- * per call site (a publish/import rule, not a draft or run rule).
+ * `requireCallableTools` adds two freeze-point rules that are NOT subset checks —
+ * `no_tools_selected` and `pinned_auth_serves_no_selected_tool` — opt-in per call
+ * site (a publish/import rule, not a draft or run rule).
  *
  * WHICH manifest every check above judges against is a SEPARATE axis: the
  * PINNED version the run will resolve whenever pins are available — the flag
@@ -490,8 +489,7 @@ export async function validateAgentIntegrationSelections(
       // Deliberately NO `continue`: `{ tools: [], scopes: ["bogus"] }` still
       // has a checkable scope, and both errors must land in one pass.
     }
-    // Freeze points only: at a run kickoff the resolver answers it as a 409 on
-    // `integrations.<id>`, and reporting it here too would double it.
+    // Freeze points only: at run kickoff the resolver already answers it as a 409.
     const pinnedMisfit =
       requireCallableTools && pinnedManifest
         ? pinnedAuthServingNoSelectedTool(

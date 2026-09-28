@@ -626,8 +626,6 @@ if ("error" in bootResult) {
     }).catch(() => {});
   }
   if (!bootReport.ok) {
-    // N connections of one integration fail independently, so the label is
-    // what tells two lines with the same integration id apart.
     const summary = bootReport.failed
       .map(
         (f) =>

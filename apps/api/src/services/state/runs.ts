@@ -608,17 +608,11 @@ interface CreateRunParams {
    */
   runnerKind?: string | null;
   /**
-   * Caller's per-integration connection override sets. Persisted verbatim on
-   * `runs.connection_overrides` for audit + "re-run with same picks" replay;
-   * the run-override layer of the cascade at kickoff. Null when the run used
+   * Caller's per-integration override sets, persisted verbatim on `runs.connection_overrides`
+   * (audit + replay); the run-override layer at kickoff. Null when the run used
    * defaults verbatim.
    */
   connectionOverrides?: ConnectionOverrides | null;
-  /**
-   * Snapshot of the resolver output at kickoff: per integration, the bound
-   * connections and the cascade layer each came from. Persisted on
-   * `runs.resolved_connections` for the spawn and credentials resolvers.
-   */
   resolvedConnections?: ResolvedConnectionMap | null;
   /**
    * Snapshot of each declared integration's resolved manifest version at

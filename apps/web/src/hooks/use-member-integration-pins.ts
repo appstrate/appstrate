@@ -26,7 +26,6 @@ import { onMutationError } from "../lib/mutation-error";
 interface UpsertMemberPinInput {
   agentPackageId: string;
   integrationId: string;
-  /** The whole set to bind, 1..MAX_CONNECTIONS_PER_INTEGRATION. Replaces the previous one. */
   connectionIds: string[];
 }
 

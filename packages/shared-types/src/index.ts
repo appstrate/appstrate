@@ -141,10 +141,9 @@ export interface RunWireDto {
 
 /**
  * One integration connection resolved for a run, projected from the internal
- * `runs.resolved_connections` snapshot for display — one entry per BOUND
- * connection, so an integration bound to several contributes several entries
- * sharing an `integration_id`. The raw `connectionId` is deliberately omitted
- * — only display-safe fields cross the wire.
+ * `runs.resolved_connections` snapshot for display — one entry per bound
+ * connection, so several may share an `integration_id`. The raw `connectionId`
+ * is deliberately omitted — only display-safe fields cross the wire.
  */
 export interface RunConnectionUsed {
   /** Integration package id (`@scope/integration`). */

@@ -73,9 +73,8 @@ export interface MissingIntegrationFieldError {
   /** Missing scopes — populated on insufficient_scopes for the OAuth re-consent upgrade. */
   missing_scopes?: string[];
   /**
-   * On `must_choose_connection`: the rows to choose among, for API and MCP
-   * callers — the row's picker lists a superset, so it is unread here. On
-   * `duplicate_connection_label`: the BOUND rows sharing a label, read by the rename remedy.
+   * `must_choose_connection`: rows to pick from, for API/MCP callers (the picker lists a superset).
+   * `duplicate_connection_label`: the BOUND rows sharing a label, read by `DuplicateLabelFix`.
    */
   candidate_connections?: {
     id: string;
@@ -90,10 +89,7 @@ export interface MissingIntegrationFieldError {
   connection_id?: string;
 }
 
-/**
- * Per-run picks in the run route's `connection_overrides` wire shape, validated in
- * `apps/api/src/lib/launch-schemas.ts` (up to `MAX_CONNECTIONS_PER_INTEGRATION` ids per key).
- */
+/** Per-run picks in the run route's `connection_overrides` shape (`launch-schemas.ts`). */
 type ConnectionOverridesMap = Record<string, string[]>;
 
 interface MissingConnectionsModalProps {
@@ -311,10 +307,8 @@ function MissingRow({
 }
 
 /**
- * Remedy for `duplicate_connection_label`: the agent addresses each bound
- * connection BY its label, so no re-pick fixes a collision — one has to be
- * renamed. Renaming a foreign shared row is refused server-side, so those ask
- * their owner instead of offering a control that would 403.
+ * `duplicate_connection_label` remedy: a run addresses each bound connection by label, so one
+ * must be renamed. Renaming a foreign row would 403, so that row names its owner instead.
  */
 function DuplicateLabelFix({
   packageId,
@@ -328,8 +322,7 @@ function DuplicateLabelFix({
   const { t } = useTranslation(["agents"]);
   const rename = useUpdateIntegrationConnection();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  // Without this the field snaps back to the stale 409 payload and lets the
-  // same PATCH be sent again.
+  // The 409 payload is stale: remember saved labels so the field and button see them.
   const [renamed, setRenamed] = useState<Record<string, string>>({});
 
   const ownerOf = (id: string): string =>

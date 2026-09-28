@@ -62,11 +62,7 @@ import {
   type SpawnedIntegration,
 } from "./integration-runtime-adapter.ts";
 
-/**
- * True when `value` names `path` inside a longer string (`-i /run/secrets/key`).
- * An occurrence followed by a path character names another file
- * (`/run/secrets/key.pub`), not this one.
- */
+/** `value` names `path` inside a longer string (`-i /run/secrets/key`), not `…/key.pub`. */
 function embedsMountPath(value: string, path: string): boolean {
   for (let at = value.indexOf(path); at !== -1; at = value.indexOf(path, at + 1)) {
     if (!/[A-Za-z0-9._-]/.test(value.charAt(at + path.length))) return true;
@@ -340,20 +336,12 @@ async function writeMountFile(path: string, bytes: Buffer, mode: number): Promis
 }
 
 /**
- * AFPS §7.6 (CC-5) — materialise `delivery.files` for the process
- * adapter. Subprocesses share the host filesystem, so we attempt to write
- * each entry at the manifest-declared absolute path with the requested
- * mode. When that fails (typically a dev machine without write permission
- * to `/run/`, `/etc/`, …), we fall back to a per-run (per-connection when
- * the spec binds one) scratch dir under the sidecar's tmp space and surface
- * the actual path via an env var `APPSTRATE_FILE_MOUNT_<sanitized-path>` so
- * the integration code can pick it up. Pure-Docker deployments don't hit the
- * fallback (the runner image always permits writes to `/tmp` and `/run/`).
- *
- * A path in `placement.relocate` (another connection of the run holds it)
- * goes straight to the scratch dir.
- *
- * Returns the set of created paths so `shutdown()` can clean them up.
+ * AFPS §7.6 (CC-5) — materialise `delivery.files` for the process adapter.
+ * Each entry goes to its declared absolute path; when that write fails (dev
+ * machine without write access to `/run/`, `/etc/`, …) or the path is in
+ * `placement.relocate`, it goes to a per-run scratch dir (per-connection when
+ * `placement.connectionId` is set), exposed as `APPSTRATE_FILE_MOUNT_<path>`.
+ * Returns the created paths so `shutdown()` can clean them up.
  */
 export async function materializeFileMountsOnHost(
   runId: string,

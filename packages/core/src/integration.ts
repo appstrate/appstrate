@@ -1301,10 +1301,7 @@ export function validateAgentIntegrationScopes(
 /** Cap on the connections one declared integration binds in a run, enforced at every write. */
 export const MAX_CONNECTIONS_PER_INTEGRATION = 10;
 
-/**
- * Rows whose `label` is shared verbatim with another row of the set — the one
- * definition of a collision, for the resolver and every UI composing a set.
- */
+/** Rows sharing their `label` verbatim with another row — the one definition of a collision. */
 export function labelsSharedBy<T extends { label: string }>(rows: readonly T[]): T[] {
   const counts = new Map<string, number>();
   for (const row of rows) counts.set(row.label, (counts.get(row.label) ?? 0) + 1);

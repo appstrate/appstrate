@@ -248,11 +248,8 @@ export interface IntegrationSpawnSpec {
   /** McpHost namespace — tool names are prefixed with `{namespace}__`. */
   namespace: string;
   /**
-   * The connection this spec is spawned for; N specs of one integration share
-   * the namespace and tool allowlist, each carrying its own auth's api_calls
-   * and login tool. `label` is the value of the sidecar's `connection` tool
-   * selector. Absent only on a connect run, which mints the credential that
-   * becomes a connection — every agent-run spec carries it.
+   * The bound connection this spec serves (N specs of one integration share the
+   * namespace); `label` is the `connection` selector value. Absent only on a connect run.
    */
   connection?: { id: string; label: string; accountId: string | null };
   /**

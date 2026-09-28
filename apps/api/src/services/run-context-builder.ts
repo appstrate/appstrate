@@ -113,10 +113,6 @@ export async function buildRunContext(params: {
    * (scheduler) leave it unset and the runtime mints a fresh trace.
    */
   traceparent?: string;
-  /**
-   * Snapshot of the connection resolver output (#199 cascade): the bound SET
-   * per integration, one spawn spec per member.
-   */
   resolvedConnections?: ResolvedConnectionMap | null;
   /**
    * Per-call-graph memo for integration manifest fetches — threaded into the

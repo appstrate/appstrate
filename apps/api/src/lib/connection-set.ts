@@ -4,9 +4,8 @@ import { z } from "zod";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 
 /**
- * A connection set on the wire: 1..{@link MAX_CONNECTIONS_PER_INTEGRATION} ids,
- * caller's order kept, no repeat. Lowercased because the resolver looks a pick
- * up by what Postgres returns, and `z.uuid()` accepts upper case.
+ * 1..{@link MAX_CONNECTIONS_PER_INTEGRATION} ids, caller's order kept, no repeat; lowercased
+ * because the resolver matches what Postgres returns and `z.uuid()` accepts upper case.
  */
 export function connectionSetSchema(id: z.ZodType<string>) {
   return z

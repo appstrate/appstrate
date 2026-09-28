@@ -2,8 +2,7 @@
 
 /**
  * Integration connection resolver — single source of truth for "which
- * connections does this run use for each integration?". Every layer yields a
- * SET; the first set wins whole, and every member must pass `checkHealth`.
+ * connections does this run use for each integration?" — every layer yields a SET, bound whole.
  *
  * Flat resolution cascade (highest precedence first):
  *
@@ -211,7 +210,6 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
   const errors: ConnectionResolutionError[] = [];
 
   const actorUserId = input.actorUserId ?? null;
-  // Member pins of OTHER users are ignored — each actor sees only their own.
   const pinIds = (integrationId: string, userId: string | null) =>
     nonEmpty(
       input.pins.find((p) => p.integrationId === integrationId && p.userId === userId)
@@ -258,8 +256,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
     const liveIndex = new Map<string, ConnectionRow>();
     for (const c of liveConnections) liveIndex.set(c.id, c);
 
-    // An agent configuration error, answered before any connection, pin or
-    // override is looked at: none of them can make the pinned auth serve a tool.
+    // Agent config error: no connection, pin or override can make that auth serve a tool.
     const pinnedMisfit = pinnedAuthServingNoSelectedTool(
       req.manifest,
       req.requiredAuthKey,
@@ -424,7 +421,6 @@ function bindSet(
   return { kind: "resolved", value };
 }
 
-/** The one wording for a colliding set (rule: `labelsSharedBy`), shared by the resolver and the writes. */
 export function duplicateLabelMessage(
   integrationId: string,
   colliding: readonly ConnectionRow[],
@@ -441,8 +437,7 @@ interface ExplicitLayer {
 }
 
 function resolveOne(args: ResolveOneArgs): ResolveOneResult {
-  // Layers 1-5: an explicit pick binds whole, or fails loudly naming the
-  // first member it cannot reach — never falls through.
+  // Layers 1-5: an explicit set binds whole or fails loudly — never falls through.
   const explicit: ExplicitLayer[] = [
     {
       ids: args.adminPinIds,
@@ -491,8 +486,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     return bindSet(args, owned.rows, layer.source);
   }
 
-  // 6. Org default SOFT — an unreachable member falls through to the fallback,
-  // logged since the admin has no other signal.
+  // 6. Org default SOFT — an unreachable member falls through (logged: the admin's only signal).
   const softIds = args.orgDefault?.enforce ? null : nonEmpty(args.orgDefault?.connectionIds);
   if (softIds) {
     const owned = ownedConns(args, softIds);
@@ -509,14 +503,11 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     (c) => c.integrationId === args.integrationId,
   );
 
-  // A connection whose auth serves none of the selected tools is never a
-  // candidate: with only those, the remedy is connecting on an auth that does.
-  const serving = candidates.filter((c) => servesSelection(args, c));
+  // A connection on an auth serving no selected tool is never a candidate.
+  const serving = candidates.filter((c) => servesAuth(args, c.authKey));
   if (serving.length === 0) {
-    // Nothing usable carries an `authKey` — name the auth the connect flow must
-    // target and the scopes that consent has to cover, or the user connects
-    // with `default_scopes` only and the very next resolution fails with
-    // `insufficient_scopes` on the tools that need more.
+    // Name the auth to connect on and the scopes consent must cover, else the next resolution fails
+    // `insufficient_scopes`.
     const authKey = connectTargetAuthKey(args);
     const requiredScopes = authKey === null ? [] : oauthScopesForAuth(args, authKey);
     return errorOf(args, {
@@ -565,20 +556,15 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   return bindSet(args, [serving[0]!], "fallback_auto");
 }
 
-function servesSelection(args: ResolveOneArgs, conn: ConnectionRow): boolean {
-  return servesAuth(args, conn.authKey);
-}
-
 function servesAuth(args: ResolveOneArgs, authKey: string): boolean {
   return args.servingAuthKeys === null || args.servingAuthKeys.has(authKey);
 }
 
 /**
  * Which manifest auth a fresh connect flow must target when the actor has NO
- * connection on an auth serving the selection. Only a serving auth qualifies
- * (`servesAuth`); among those, in order: the agent dep's pinned `auth_key`
- * (AFPS §4.1), else the single `oauth2` auth. `null` when the manifest
- * declares several serving oauth2 auths (or none) and the dep pins nothing —
+ * connection on an auth serving the selection (`servesAuth`): the agent dep's
+ * pinned `auth_key` (AFPS §4.1), else the single serving `oauth2` auth. `null`
+ * when several (or none) qualify and the dep pins nothing —
  * the resolver refuses to guess and the caller lets the user choose.
  *
  * A pin naming an auth the manifest no longer declares is `null` too — see
@@ -676,7 +662,7 @@ function checkHealth(
   const ownedByActor = isOwnedByActor(args, conn);
 
   // Checked first: neither a reconnect nor a scope upgrade gives this auth a tool.
-  if (!servesSelection(args, conn)) {
+  if (!servesAuth(args, conn.authKey)) {
     const serving = [...args.servingAuthKeys!].join(", ");
     return errorOf(args, {
       code: "auth_serves_no_selected_tool",
@@ -917,8 +903,7 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
     // Smuggle the candidates on must_choose_connection so a caller with no
     // picker of its own names its choice straight from the error, without a
     // second round-trip through the connection list to learn which uuid is
-    // which. Same field on duplicate_connection_label, where it names the
-    // rows to rename rather than the rows to pick from.
+    // which.
     ...(e.candidateConnections && e.candidateConnections.length > 0
       ? {
           candidate_connections: e.candidateConnections.map((c) => ({
@@ -972,7 +957,6 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
           ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
         }
       : {}),
-    // The agent's own `auth_key`, named so the caller knows what to change.
     ...(e.code === "pinned_auth_serves_no_selected_tool" && e.requiredAuthKey
       ? { required_auth_key: e.requiredAuthKey }
       : {}),

@@ -937,8 +937,7 @@ function BlockUserConnectionsToggle({
  * information as a badge instead, where a suffix would fight the rename UI.
  */
 function connectionOptionLabel(c: IntegrationConnection): string {
-  const base = c.label;
-  return c.owner_name ? `${base} — ${c.owner_name}` : base;
+  return c.owner_name ? `${c.label} — ${c.owner_name}` : c.label;
 }
 
 function OrgDefaultSection({ packageId }: { packageId: string }) {
@@ -958,8 +957,7 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
     orgDefault?.connection_ids ?? [],
     shared.map((c) => c.id),
   );
-  // Order carries no meaning in a set — sort so a server reordering does not
-  // read as a change and wipe the admin's in-progress edit.
+  // Sorted: a server reordering of the set must not read as a change and wipe the edit.
   const seededFor = orgDefault ? [...seedIds].sort().join(",") : null;
   const [seeded, setSeeded] = useState<string | null>(null);
   if (seededFor !== seeded) {
@@ -1004,7 +1002,6 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
               id="org-default-enforce"
               checked={enforce}
               onCheckedChange={(v) => setEnforce(v === true)}
-              aria-label={t("integration.admin.orgDefault.enforce")}
               data-testid="org-default-enforce"
             />
             <label htmlFor="org-default-enforce">{t("integration.admin.orgDefault.enforce")}</label>
@@ -1012,8 +1009,6 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
           <Button
             size="sm"
             onClick={() =>
-              connectionIds.length > 0 &&
-              colliding.length === 0 &&
               upsert.mutate({
                 params: { path: { packageId } },
                 body: { connection_ids: connectionIds, enforce },
@@ -1041,10 +1036,7 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   );
 }
 
-/**
- * One checkbox per connection composing a set (the write replaces the whole
- * set), capped at {@link MAX_CONNECTIONS_PER_INTEGRATION}; flags colliding labels.
- */
+/** Checkbox set capped at {@link MAX_CONNECTIONS_PER_INTEGRATION}; flags colliding labels. */
 function ConnectionSetChecklist({
   connections,
   value,
@@ -1090,11 +1082,8 @@ function ConnectionSetChecklist({
 }
 
 /**
- * Centralised pin management. One pin per (agent, integration), holding the
- * whole bound SET — admin picks which shared connections a given agent uses,
- * and a write replaces the set. Flat model: no authKey to disambiguate (each
- * connection's own authKey is implicit). With an org default in place, this
- * surface is for per-agent EXCEPTIONS.
+ * Per-agent pins: one per (agent, integration), holding the whole bound SET, replaced on
+ * write. With an org default in place, these are per-agent EXCEPTIONS.
  */
 function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
@@ -1121,9 +1110,10 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   const colliding = sharedLabels(
     pinnableConnections.filter((c) => newConnectionIds.includes(c.id)),
   );
+  const canAddPin = !!newAgent && newConnectionIds.length > 0 && colliding.length === 0;
 
   const onSubmitNewPin = () => {
-    if (!newAgent || newConnectionIds.length === 0 || colliding.length > 0) return;
+    if (!canAddPin) return;
     upsertPin.mutate(
       {
         params: { path: { packageId, agentPackageId: newAgent } },
@@ -1250,12 +1240,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
           <Button
             size="sm"
             onClick={onSubmitNewPin}
-            disabled={
-              !newAgent ||
-              newConnectionIds.length === 0 ||
-              colliding.length > 0 ||
-              upsertPin.isPending
-            }
+            disabled={!canAddPin || upsertPin.isPending}
             data-testid="pin-add-submit"
           >
             {t("integration.admin.pinManagement.add")}

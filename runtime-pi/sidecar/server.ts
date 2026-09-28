@@ -268,7 +268,6 @@ const runtimeToolDefs = journalRuntimeToolDefs(
 
 let integrationTools: AppstrateToolDefinition[] = [];
 const specs = readIntegrationSpecsFromEnv();
-// One spec per (integration, connection) — the report counts connections.
 const declaredConnections = specs?.length ?? 0;
 
 // Boot report fetched by the agent via `GET /integrations/boot-report`. Starts

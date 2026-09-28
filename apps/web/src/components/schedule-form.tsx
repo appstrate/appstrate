@@ -72,10 +72,8 @@ interface ScheduleSaveData {
   version_override?: string | null;
   /**
    * Per-integration connection picks frozen on the schedule row
-   * (`package_schedules.connection_overrides`). Map of SETS keyed by
-   * integration id: `{ "@scope/integration": ["<connection_id>", ...] }`, up
-   * to `MAX_CONNECTIONS_PER_INTEGRATION` per key. Same wire shape as the
-   * run-route's `connection_overrides`; `null` clears on edit.
+   * (`package_schedules.connection_overrides`), same wire shape as the run
+   * route's `connection_overrides`; `null` clears on edit.
    */
   connection_overrides?: Record<string, string[]> | null;
   /**

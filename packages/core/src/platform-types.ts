@@ -316,9 +316,7 @@ export interface InlineRunBody {
   proxyId?: string | null;
   /**
    * Per-integration connection picks for THIS run (flat map:
-   * `{ "@scope/integration": ["<connection_id>", ...] }`, cascade layer 3,
-   * the run override). Always an array, never a bare id: naming several binds them all, and
-   * a single pick is the one-element case, not a second shape. Read by the
+   * `{ "@scope/integration": ["<connection_id>", ...] }`, cascade layer 3). Read by the
    * preflight so a caller that disambiguates a `must_choose_connection` 409 by
    * re-posting its picks gets past the readiness gate — the same recovery loop
    * the cataloged run route supports.

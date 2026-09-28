@@ -66,8 +66,6 @@ import { useCanReach } from "../../hooks/use-can-reach";
  *  - `override` — controlled form value (schedule editor, per-run modal);
  *                 nothing is persisted until the form is. Empty = inherit.
  *
- * Either way a write carries the WHOLE set and replaces the previous one.
- *
  * Locks (admin pin, enforced org default) apply identically in both modes:
  * they sit above the schedule override in the resolver cascade, so a locked
  * set would beat a schedule pick anyway — surfacing the lock here is
@@ -204,12 +202,7 @@ export function IntegrationConnectionPicker({
       ? orgDefaultConnectionIds
       : [];
   if (lockedConnectionIds.length > 0) {
-    const label = lockedConnectionIds
-      .map((id) => {
-        const pinned = byId(id);
-        return pinned ? pinned.label : id;
-      })
-      .join(" · ");
+    const label = lockedConnectionIds.map((id) => byId(id)?.label ?? id).join(" · ");
     return (
       <div data-testid={`member-picker-${integrationId}`}>
         <Button
@@ -245,19 +238,16 @@ export function IntegrationConnectionPicker({
     resolvedIds: resolvedConnectionIds,
     candidateIds,
   });
-  const checked = new Set(checkedIds);
-  const atCap = checked.size >= MAX_CONNECTIONS_PER_INTEGRATION;
+  const atCap = checkedIds.length >= MAX_CONNECTIONS_PER_INTEGRATION;
   const oneClick = candidates.length === 1;
 
   const toConns = (ids: string[]) => ids.map(byId).filter((c): c is IntegrationCandidate => !!c);
   // The trigger reflects the bound set, never the uncommitted draft.
   const displayConns = toConns(boundIds);
   const checkedConns = toConns(checkedIds);
-  // Warnings answer for the set "Valider" would write, so an override with no
-  // pick — a valid inherit state — warns about nothing.
+  // Warnings judge the set "Valider" would write, not the bound one.
   const verdictConns = dirty ? checkedConns : displayConns;
   const underScopedConns = verdictConns.filter((c) => c.missing_scopes.length > 0);
-  const underScoped = underScopedConns.length > 0;
   const collidingLabels = sharedLabels(verdictConns);
   const hasCandidates = candidates.length > 0;
   const canApply = canApplyConnectionSet(checkedConns, explicitIds, dirty) && !upsertPin.isPending;
@@ -347,13 +337,11 @@ export function IntegrationConnectionPicker({
             : status === "stale"
               ? t("detail.integrationMemberPicker.reconfigureLabel")
               : t("detail.integrationMemberPicker.connectLabel");
-  // Amber on exactly the states that gate a run. Pin mode reads the server's
-  // `run_blocking` flag (the bulk readiness query the launch badge uses, same
-  // resolver as the run-kickoff 409), so the picker never disagrees with the
-  // badge. In override mode "no pick" is a valid inherit state, so only a
-  // picked set that is under-scoped or label-colliding warns.
+  // Amber on exactly the states that gate a run: pin mode reads the server's
+  // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
+  // override mode an empty pick inherits, so only an under-scoped or colliding set warns.
   const triggerWarn = overrideMode
-    ? underScoped || collidingLabels.length > 0
+    ? underScopedConns.length > 0 || collidingLabels.length > 0
     : (runBlocking ?? false);
   const TriggerIcon = triggerWarn ? AlertTriangle : displayConns.length > 0 ? Users : Plus;
 
@@ -434,7 +422,7 @@ export function IntegrationConnectionPicker({
           </DropdownMenuLabel>
           {candidates.map((c) => {
             const tl = typeLabel(c.auth_key);
-            const isChecked = checked.has(c.id);
+            const isChecked = checkedIds.includes(c.id);
             const isDefault = explicitIds.length === 0 && resolvedConnectionIds.includes(c.id);
             // Only the connection owner can renew via OAuth — a foreign
             // shared connection's tokens belong to someone else. We still
@@ -539,7 +527,7 @@ export function IntegrationConnectionPicker({
             >
               <Check className="size-3.5" />
               <span className="font-medium">
-                {t("detail.integrationMemberPicker.apply", { count: checked.size })}
+                {t("detail.integrationMemberPicker.apply", { count: checkedIds.length })}
               </span>
             </DropdownMenuItem>
           )}

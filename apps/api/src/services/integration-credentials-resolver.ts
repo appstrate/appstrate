@@ -70,9 +70,8 @@ interface ResolveLiveCredentialsOptions {
  * listener" and boot uncredentialed — so every unproducible credential throws.
  *
  * Throws ApiError on:
- *   - 404: integration not declared by the agent, not active, or the named
- *     connection is no longer reachable by the actor. Nothing exists to flag,
- *     so this is deliberately NOT the 410 below.
+ *   - 404: integration not declared by the agent, not active, or the named connection
+ *     is gone. Nothing exists to flag, so this is deliberately NOT the 410 below.
  *   - 409 `integration_auth_undeclared`: the connection's `auth_key` is not
  *     declared by the manifest VERSION this run is pinned to (auth renamed or
  *     removed since the connection was made). The credential is intact and may

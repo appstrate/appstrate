@@ -200,10 +200,8 @@ describe("mcp run_and_wait — connection_overrides", () => {
     });
   }, 60_000);
 
-  // The array is not decoration: two ids bind two connections, and the whole
-  // chain — tool schema, launch client, route, resolver — has to carry both.
-  // The single-id launch above is the control; a layer that kept only the first
-  // id would pass it and fail here.
+  // Two ids bind two connections end to end; a layer keeping only the first passes the test above,
+  // not this one.
   it("binds every connection the override names, in the run's snapshot", async () => {
     await seedConnectionTestIntegration(ctx, INTEGRATION);
     await seedDefaultOrgModel(ctx);
@@ -227,8 +225,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
     expect(resolved!.map((c) => c.connectionId).sort()).toEqual([first, second].sort());
   }, 60_000);
 
-  // A bare connection id is not a set. The route's 400 names the field, and
-  // nothing wraps it into a one-element set the model never asked for.
+  // A bare id is refused (400), never wrapped into a one-element set.
   it("refuses a bare connection id without launching", async () => {
     await seedConnectionTestIntegration(ctx, INTEGRATION);
     await seedDefaultOrgModel(ctx);

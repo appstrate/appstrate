@@ -384,7 +384,7 @@ interface UpsertMemberPinInput {
 }
 
 /**
- * Replace the member-scope pin set (`integration_pins` row with `user_id`).
+ * Upsert a member-scope pin (`integration_pins` row with `user_id` set).
  *
  * Member writes their own preference for this (agent, integration) —
  * the persisted row the resolver sees on every run (layer 5 of the
@@ -428,7 +428,7 @@ export async function deleteMemberPin(
 /**
  * List the caller's own member pins for an agent. Drives the agent-page
  * picker — UI checks "is this integration already pinned by me?" and
- * renders the collapsed "Using: X" row pointing at the pinned connections.
+ * renders the collapsed "Using: X" row pointing at the pinned connection.
  */
 interface MemberPinSummary {
   integration_package_id: string;
@@ -459,7 +459,6 @@ export async function listMemberPinsForAgent(
 // ─────────────────────────── Connection metadata edits ────────────────────────
 
 interface UpdateConnectionMetadataInput {
-  /** A rename, never a clear — the column is NOT NULL. */
   label?: string;
   sharedWithOrg?: boolean;
 }
@@ -470,9 +469,7 @@ interface UpdateConnectionMetadataInput {
  * (only the owner OR an admin can mutate metadata; sharedWithOrg
  * specifically requires the owner since sharing is consent).
  *
- * Refuses turning sharedWithOrg=false while an admin pin or an org default
- * names the connection (see `assertConnectionsUnpinned`); a member pin does
- * not block — that member's next run reports `pinned_connection_unavailable`.
+ * Refuses sharedWithOrg=false per `assertConnectionsUnpinned`.
  */
 export async function updateConnectionMetadata(
   connectionId: string,
@@ -708,18 +705,16 @@ async function resolveAgentIntegrationPick(args: {
       case "needs_reconnection":
         status = "needs_reconnection";
         break;
+      // The last one is agent configuration, not a connection: never `none`, whose remedy is a
+      // connect.
       case "pinned_connection_unavailable":
       case "override_connection_unavailable":
+      case "pinned_auth_serves_no_selected_tool":
         status = "stale";
         break;
       // Only an explicit set raises it (the fallback says `not_connected`): a pick to change.
       case "auth_serves_no_selected_tool":
         resolvedConnectionIds = err.boundConnectionIds ?? [];
-        status = "stale";
-        break;
-      // The agent's configuration, not a connection: `stale` ("needs
-      // reconfiguration"), never `none`, whose remedy is a connect.
-      case "pinned_auth_serves_no_selected_tool":
         status = "stale";
         break;
       default:

@@ -18,10 +18,7 @@ export interface RunLaunch {
    */
   version?: string;
   /**
-   * Per-integration connection sets for THIS run (cascade layer 3, the run override).
-   * Map of SETS: `{ "@scope/integration": ["<connectionId>", ...] }` — up to
-   * `MAX_CONNECTIONS_PER_INTEGRATION` per integration; each chosen connection
-   * carries its own `auth_key`. Wire format validated in
+   * Per-integration connection sets for THIS run (cascade layer 3), validated in
    * `apps/api/src/lib/launch-schemas.ts`. Set by the run-with-options modal
    * and, on a retry, by the connection-recovery modal (`retryLaunch`).
    */

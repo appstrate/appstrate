@@ -11,8 +11,8 @@
  *   2. Loads the integration's bundle bytes — system packages from the
  *      in-memory registry (loaded at boot), local packages from object
  *      storage via `downloadVersionZip`.
- *   3. Emits ONE spec per connection the run bound (`runs.resolved_connections`),
- *      decrypting each and (oauth2) refreshing past the lead window.
+ *   3. Emits ONE spec per bound connection, decrypting each (oauth2: refreshed past the lead
+ * window).
  *   4. Materialises the `delivery.env` mapping into a flat env dict
  *      (one entry per env var, value taken from the credential field
  *      named in `from`).
@@ -243,9 +243,9 @@ export async function resolveIntegrationSpawns(
 }
 
 /**
- * Resolve ONE declared integration into a spec per bound connection; the specs
- * differ only in credentials and `connection`. `toolAllowlist: undefined` is the
- * §4.4 wildcard; remote HTTP injects its own token (no `httpDeliveryAuths`, #543).
+ * One spec per bound connection, differing only in credentials and `connection`. `toolAllowlist:
+ * undefined` is the §4.4 wildcard; remote HTTP injects its own token (no `httpDeliveryAuths`,
+ * #543).
  */
 async function resolveOne(
   integrationId: string,
@@ -329,8 +329,8 @@ async function resolveOne(
   // `api_call` and its `api_upload` companion are granted as a pair: the upload
   // orchestration dispatches every chunk through the sibling api_call tool, so
   // selecting one without the other would either expose a broken upload tool or
-  // silently drop a selected capability. Picking either name grants both. Each
-  // api_call belongs to ONE auth: a spec keeps only its connection's (below).
+  // silently drop a selected capability. Picking either name grants both.
+  // Each api_call belongs to ONE auth: a spec keeps only its connection's (below).
   const wildcardSelection = isToolsWildcard(effectiveSelection);
   const selectedTools = wildcardSelection ? null : new Set(effectiveSelection ?? []);
   const selectedApiCalls: ApiCallSpec[] = getApiCallConfigs(manifest)
@@ -549,7 +549,6 @@ async function resolveOne(
         referencedMcpServer,
         requiredAuthKey,
       );
-      // resolveDeliveries logged why; the marker says only "no usable credential".
       if (!deliveries) return { reason: "no_delivery", connectionLabel: label };
       const apiCalls = selectedApiCalls.filter((cfg) => cfg.authKey === deliveries.authKey);
 
@@ -613,8 +612,7 @@ async function resolveOne(
     }),
   );
 
-  // A partial set is never spawned: a lone survivor gets no `connection`
-  // selector, so calls meant for a lost member would silently run on it.
+  // A partial set is never spawned: calls meant for a lost member would run on the survivor.
   const setIncomplete = outcomes.some((outcome) => "reason" in outcome) && outcomes.length > 1;
   const specs: IntegrationSpawnSpec[] = [];
   const drops: IntegrationDrop[] = [];
@@ -685,9 +683,8 @@ interface ResolvedDeliveries {
 }
 
 /**
- * Resolve the delivery plan (env + http) for ONE bound connection, against the
- * `manifest.auths[X]` of the auth it was made on. `null` when the row is no
- * longer reachable or its auth yields no usable delivery.
+ * Delivery plan (env + http) for ONE bound connection, from its auth's `manifest.auths[X]`;
+ * `null` when the row is no longer reachable or yields no usable delivery.
  */
 async function resolveDeliveries(
   integrationId: string,

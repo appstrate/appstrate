@@ -313,11 +313,9 @@ export function getIntegrationSourceKind(
 }
 
 /**
- * The auths whose connection exposes at least one tool of `selection` — `null`
- * when every auth does, or when none does: an integration exposing no selected
- * tool is not a connection problem, and spawn/readiness report it as such. A
- * local/remote server's own tools reach the agent through any connection; an
- * `api_call` tool only through its own auth's.
+ * Auths whose connection exposes a tool of `selection` — a server's own tools via any auth, an
+ * `api_call` only via its own. `null` when every auth does, or none does (not a connection
+ * problem).
  */
 export function authKeysServingSelection(
   manifest: IntegrationManifest,
@@ -353,9 +351,8 @@ export function authKeysServingSelection(
 }
 
 /**
- * The agent dep's `auth_key` (AFPS §4.1) when it names a declared auth that
- * serves none of `selection` — an agent configuration no connection can
- * satisfy — with the auths that do serve it. `null` otherwise.
+ * The dep's `auth_key` (AFPS §4.1) when it names a declared auth serving none of `selection` —
+ * no connection can satisfy it — with the auths that do; else `null`.
  */
 export function pinnedAuthServingNoSelectedTool(
   manifest: IntegrationManifest,

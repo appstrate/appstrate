@@ -6,16 +6,8 @@ import i18n from "../i18n";
 import { ApiError } from "../api/client";
 
 /**
- * Refusals whose server sentence is replaced rather than prefixed. The raw
- * `detail` is English, so a French UI falling back to it tells the user
- * nothing they can act on.
- *
- * The two lock codes are about ONE named field and the server puts its name in
- * `param` (`input.<field>` / `locked_fields.<field>`) — hence the `field`
- * interpolation, which a code carrying no `param` simply leaves empty.
- * `draft_not_writable` is the launch refusal: the draft is the author's
- * working copy and runs only for whoever can write the package in its home
- * space, so the sentence has to say which version WILL run instead.
+ * Refusals whose English server `detail` is replaced by a translated sentence. The lock codes
+ * interpolate the field named in `param`; `draft_not_writable` says which version will run instead.
  */
 const REFUSAL_ERROR_KEYS: Record<string, string> = {
   locked_input_field: "error.lockedInputField",

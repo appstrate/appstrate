@@ -576,8 +576,6 @@ export async function connectRemoteHttpIntegration(
  * when the login tool itself fails — the caller maps the throw onto the boot
  * result's `failed[]` list. Exported for unit testing; production callers go
  * through {@link bootIntegrations}.
- *
- * `client` is this spec's own runner; `allocatedNamespace` only labels diagnostics.
  */
 export async function runConnectLoginHook(
   spec: IntegrationSpawnSpec,

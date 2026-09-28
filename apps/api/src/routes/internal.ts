@@ -398,8 +398,6 @@ export function createInternalRouter() {
     }
   }
 
-  const connectionIdQuerySchema = z.uuid();
-
   /** The run-bound member `?connection_id` names, else 400 — the platform never picks one. */
   function requireBoundConnection(
     c: Context,
@@ -407,7 +405,7 @@ export function createInternalRouter() {
     run: { resolvedConnections: Record<string, { connectionId: string; source: string }[]> | null },
     runId: string,
   ): { connectionId: string; source: string } {
-    const parsed = connectionIdQuerySchema.safeParse(c.req.query("connection_id"));
+    const parsed = z.uuid().safeParse(c.req.query("connection_id"));
     if (!parsed.success) {
       throw invalidRequest(
         "`connection_id` is required and must be the uuid of a connection this run bound to " +

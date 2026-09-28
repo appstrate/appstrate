@@ -164,10 +164,8 @@ function withConnectionParam(descriptor: Tool, routes: Map<ConnectionKey, ToolRo
   const properties = { ...((schema.properties as Record<string, unknown> | undefined) ?? {}) };
   properties[CONNECTION_PARAM] = {
     type: "string",
-    // Enum values stay VERBATIM — they are the keys `callTool` looks up, so
-    // sanitising them would make a routable connection unselectable. The prose
-    // is the injection surface: `label` is member-editable and `accountId`
-    // provider-supplied, so the description goes through the text sanitiser.
+    // Enum values stay verbatim (they are the routing keys); the prose carries a
+    // member-editable label and a provider account id, so it is sanitised.
     enum: labels,
     description: sanitiseTextField(
       `${CONNECTION_DESCRIPTION_PREFIX}${labels
@@ -224,11 +222,9 @@ function connectionSelectionError(
  * exceed the schema-size cap after sanitisation are rejected.
  */
 export class McpHost {
-  // No namespace → client map: one namespace holds several connections' clients.
   private readonly namespaces = new Set<string>();
-  // Requested (raw) namespace → its allocated slot + the labels already there.
-  // Keyed on the RAW id so another connection of the same integration reuses
-  // the slot, while two different packages sharing a slug still get `_2`.
+  // Raw requested namespace → allocated slot + its labels. Raw, so sibling connections
+  // reuse the slot while two packages sharing a slug still get `_2`.
   private readonly namespaceSlots = new Map<string, { slot: string; labels: Set<ConnectionKey> }>();
   private readonly toolToNamespace = new Map<string, string>();
   // Per-tool → per-connection-label → owning client.
@@ -280,31 +276,23 @@ export class McpHost {
       );
     }
     const label: ConnectionKey = upstream.connection?.label ?? null;
-    const slot = this.namespaceSlots.get(upstream.namespace);
+    const slot = merging ? undefined : this.namespaceSlots.get(upstream.namespace);
     // Invariant: a duplicate label would leave one connection unaddressable.
-    if (!merging && slot?.labels.has(label)) {
+    if (slot?.labels.has(label)) {
       throw new Error(
         `McpHost: duplicate connection ${JSON.stringify(label)} for ${JSON.stringify(upstream.namespace)} — two spawn specs of one integration cannot share a label`,
       );
     }
-    const reusedSlot = !merging && slot !== undefined;
     const normalisedNs = merging
       ? upstream.intoNamespace!
-      : reusedSlot
-        ? slot!.slot
-        : this.allocateNamespace(baseNamespace);
-    if (!merging) {
-      if (reusedSlot) slot!.labels.add(label);
-      else {
-        this.namespaceSlots.set(upstream.namespace, {
-          slot: normalisedNs,
-          labels: new Set([label]),
-        });
-      }
+      : (slot?.slot ?? this.allocateNamespace(baseNamespace));
+    if (slot) slot.labels.add(label);
+    else if (!merging) {
+      this.namespaceSlots.set(upstream.namespace, { slot: normalisedNs, labels: new Set([label]) });
     }
     const effectiveUpstream: McpHostUpstream = { ...upstream, namespace: normalisedNs };
     this.clients.add(effectiveUpstream.client);
-    if (!merging && !reusedSlot && normalisedNs !== baseNamespace) {
+    if (!merging && !slot && normalisedNs !== baseNamespace) {
       this.options.onLog?.({
         source: `host:${normalisedNs}`,
         level: "warn",
@@ -605,8 +593,7 @@ export class McpHost {
     const thirdParty: AppstrateToolDefinition[] = [];
     for (const desc of this.toolDescriptors) {
       if (firstPartyNames.has(desc.name)) continue;
-      const routes = this.toolRoutes.get(desc.name);
-      if (!routes || routes.size === 0) continue;
+      const routes = this.toolRoutes.get(desc.name)!;
       const forward = async (
         route: ToolRoute,
         args: Record<string, unknown>,

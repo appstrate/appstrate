@@ -236,16 +236,11 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *  - `pinned`       — the actor's own member pin resolves.
  *  - `auto`         — no pin, exactly one accessible connection.
  *  - `must_choose`  — no pin, more than one candidate (member must pick).
- *  - `duplicate_label` — the bound set shares a label, so it is unaddressable;
- *                     the remedy is renaming a connection, not re-picking.
- *  - `none`         — no accessible connection on an auth serving the selected
- *                     tools (none at all, or only on auths that serve none).
- *  - `stale`        — a pin or an org default names a connection the run cannot
- *                     use: no longer accessible, or on an auth serving none of
- *                     the selected tools. Also the agent's own `auth_key`
- *                     naming an auth that serves none of them
- *                     (`pinned_auth_serves_no_selected_tool`): a
- *                     reconfiguration, which no connection clears.
+ *  - `duplicate_label` — the bound set shares a label; the remedy is renaming, not re-picking.
+ *  - `none`         — no accessible connection on an auth serving the selected tools.
+ *  - `stale`        — a pin or org default names a connection the run cannot use (gone, or
+ *                     on an auth serving no selected tool), or the agent's own `auth_key`
+ *                     serves none of them — a reconfiguration no connection clears.
  *  - `needs_reconnection` — the resolved connection is flagged for re-consent.
  */
 export type IntegrationPickStatus =
