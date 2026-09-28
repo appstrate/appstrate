@@ -2,16 +2,20 @@
 
 /**
  * `0077_connection_sets.sql` on a database at `0076`, holding the rows it
- * exists for: scalar pins and org defaults, connections with no label or an
- * empty one beside labels that already use the "Connexion N" series, and
- * labels shared within a (space, integration) beside a "<label> (2)" taken.
- * Same split as `migration-0059-drop-org-viewer.test.ts`: the replayed-journal
+ * exists for: scalar pins and org defaults, and connections with no label or
+ * an empty one beside labels that already use the "Connexion N" series. Same
+ * split as `migration-0059-drop-org-viewer.test.ts`: the replayed-journal
  * parity tests guard the shape, this file guards what the `.sql` does to rows.
+ *
+ * Duplicate labels are `scripts/migration/0032-connection-sets.sql`'s to
+ * rename (`migration-script-0032-connection-sets.test.ts`); here, only that a
+ * database which skipped it is refused whole.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { replayJournal } from "../helpers/journal.ts";
 
 const MIGRATIONS_DIR = resolve(import.meta.dir, "../../../../packages/db/drizzle");
 const MIGRATION = `${MIGRATIONS_DIR}/0077_connection_sets.sql`;
@@ -28,19 +32,14 @@ const AGENT = "@acme0077/agent";
 const conn = (n: number) => `c0770000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 const pg = new PGlite();
+/** What applying `0077` over a duplicate label raised, before the real apply. */
+let skippedScriptError: { code?: string } | null = null;
 
-async function replayThrough(lastTag: string): Promise<void> {
-  const journal = (await Bun.file(`${MIGRATIONS_DIR}/meta/_journal.json`).json()) as {
-    entries: { tag: string }[];
-  };
-  for (const entry of journal.entries) {
-    const source = await Bun.file(`${MIGRATIONS_DIR}/${entry.tag}.sql`).text();
-    await pg.transaction(async (tx) => {
-      await tx.exec(source.replaceAll("--> statement-breakpoint", ""));
-    });
-    if (entry.tag === lastTag) return;
-  }
-  throw new Error(`journal has no entry tagged ${lastTag}`);
+async function applyMigration(): Promise<void> {
+  const source = await Bun.file(MIGRATION).text();
+  await pg.transaction(async (tx) => {
+    await tx.exec(source.replaceAll("--> statement-breakpoint", ""));
+  });
 }
 
 async function labelOf(id: string): Promise<string | null> {
@@ -61,7 +60,7 @@ async function rejects(sql: string): Promise<boolean> {
 }
 
 beforeAll(async () => {
-  await replayThrough(REPLAY_THROUGH);
+  await replayJournal(pg, REPLAY_THROUGH);
   const connection = (n: number, integ: string, owner: string, label: string | null, at: string) =>
     `('${conn(n)}', '${integ}', 'primary', 'acct-${n}', '${SPACE}', '${owner}', 'x', ${
       label === null ? "NULL" : `'${label}'`
@@ -84,9 +83,6 @@ beforeAll(async () => {
       ${connection(4, GMAIL, BOB, "", "2026-01-04")},
       ${connection(5, GMAIL, ALICE, "prod", "2026-01-05")},
       ${connection(6, SLACK, ALICE, null, "2026-01-06")},
-      ${connection(7, GMAIL, BOB, "prod", "2026-01-07")},
-      ${connection(8, GMAIL, ALICE, "prod (2)", "2026-01-08")},
-      ${connection(9, GMAIL, ALICE, "prod", "2026-01-09")},
       ${connection(10, GMAIL, BOB, "Prod", "2026-01-10")},
       ${connection(11, SLACK, BOB, "prod", "2026-01-11")};
     INSERT INTO integration_pins (space_id, package_id, integration_package_id, user_id, connection_id)
@@ -95,10 +91,20 @@ beforeAll(async () => {
     INSERT INTO integration_org_defaults (space_id, integration_package_id, connection_id, enforce)
       VALUES ('${SPACE}', '${GMAIL}', '${conn(3)}', true);
   `);
-  await pg.transaction(async (tx) => {
-    const source = await Bun.file(MIGRATION).text();
-    await tx.exec(source.replaceAll("--> statement-breakpoint", ""));
-  });
+  // A database that skipped 0032: one duplicate label refuses the whole batch.
+  await pg.exec(`
+    INSERT INTO integration_connections
+      (id, integration_package_id, auth_key, account_id, space_id, user_id,
+       credentials_encrypted, label, shared_with_org, created_at)
+    VALUES ${connection(7, GMAIL, BOB, "prod", "2026-01-07")};
+  `);
+  try {
+    await applyMigration();
+  } catch (error) {
+    skippedScriptError = error as { code?: string };
+  }
+  await pg.exec(`DELETE FROM integration_connections WHERE id = '${conn(7)}'`);
+  await applyMigration();
   // A journal replay runs past the 15s default in `bunfig.toml`.
 }, 300_000);
 
@@ -133,24 +139,20 @@ describe("0077 — connection sets", () => {
     expect(await labelOf(conn(5))).toBe("prod");
   });
 
-  it("renames all but the oldest of a shared label past every '(n)' already held", async () => {
-    // "prod (2)" is an existing label, so the two late "prod" rows take 3 and 4.
-    expect(await labelOf(conn(7))).toBe("prod (3)");
-    expect(await labelOf(conn(9))).toBe("prod (4)");
-    expect(await labelOf(conn(8))).toBe("prod (2)");
-    // Verbatim comparison: case makes another label; another integration another group.
+  it("refuses, whole, a database that skipped 0032's label dedupe", async () => {
+    expect(skippedScriptError?.code).toBe("23505");
+  });
+
+  it("makes a label unique per (space, integration), verbatim", async () => {
+    // The index refuses a second holder in a group …
+    expect(
+      await rejects(`UPDATE integration_connections SET label = 'prod' WHERE id = '${conn(10)}'`),
+    ).toBe(true);
+    // … while case makes another label, and another integration another group.
     expect(await labelOf(conn(10))).toBe("Prod");
     expect(await labelOf(conn(11))).toBe("prod");
-    // The index refuses a second holder in a group; the other integration is another group.
     expect(
-      await rejects(
-        `UPDATE integration_connections SET label = 'prod (2)' WHERE id = '${conn(7)}'`,
-      ),
-    ).toBe(true);
-    expect(
-      await rejects(
-        `UPDATE integration_connections SET label = 'prod (3)' WHERE id = '${conn(11)}'`,
-      ),
+      await rejects(`UPDATE integration_connections SET label = 'Prod' WHERE id = '${conn(11)}'`),
     ).toBe(false);
   });
 

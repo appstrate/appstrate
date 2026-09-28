@@ -1,27 +1,38 @@
--- 0032 — the three connection jsonb columns hold SETS, not single picks; and
--- the shared connections the old fallback picked implicitly become member pins.
+-- 0032 — the row work the connection-sets release needs BEFORE its drizzle
+-- batch: the three connection jsonb columns become SETS, departed members stop
+-- sharing, the shared connections the old fallback picked implicitly become
+-- member pins, and labels become unique per (space, integration).
 --
 -- Run BEFORE the drizzle batch, with the platform STOPPED. The window is:
 -- stop → run this file → deploy the new image (`0077` applies at boot) →
 -- reopen.
 --
--- WHY that moment and not after the batch. It depends on nothing `0077` does —
--- the columns are jsonb and neither their type nor any constraint on them
--- moves — while the new readers raise on the old shape rather than degrade.
--- Rewriting with the platform down means no request ever meets an unrewritten
--- row. The order is safe in both directions: an array is what only the new code
--- reads, but the rows this file rewrites are not read again by the OLD code
--- either, since the old image is stopped the moment the rewrite starts.
--- The pin freeze below is the one part that DOES depend on the moment: it
--- reads `integration_org_defaults.connection_id` and writes
+-- WHY that moment and not after the batch. Three of the four sections depend on
+-- it: the pin freeze reads `integration_org_defaults.connection_id` and writes
 -- `integration_pins.connection_id`, the two scalar columns `0077` folds into
--- `connection_ids` and drops — so before the batch is the only time it can run.
+-- `connection_ids` and drops; and the label dedupe is the precondition of
+-- `0077`'s `CREATE UNIQUE INDEX "idx_integration_conn_label"`, which
+-- `docs/NO_TRANSITIONAL_CODE.md` §2 does not license a repair beside. The shape
+-- rewrite depends on nothing `0077` does — the columns are jsonb and neither
+-- their type nor any constraint on them moves — but the new readers raise on
+-- the old shape rather than degrade, so with the platform down no request ever
+-- meets an unrewritten row. The old code never reads a rewritten row either:
+-- its image is stopped the moment the rewrite starts.
 --
--- (The `integration_connections.label` backfill that `0077`'s `SET NOT NULL`
--- preconditions is NOT here: it lives in `0077` itself, licensed by
--- `docs/NO_TRANSITIONAL_CODE.md` §2, "the precondition of a constraint".)
+-- A database that skipped this file does NOT boot half-migrated: if it holds a
+-- duplicate label, `0077`'s unique index raises 23505 and the whole batch rolls
+-- back, loudly. (One holding no duplicate boots, and misses only the shape
+-- rewrite — whose readers then raise on the first old row — and the freeze.)
 --
--- ═══ WHAT IT REWRITES ═══
+-- (The `integration_connections.label` BACKFILL — NULL or '' → "Connexion N" —
+-- is NOT here: it is the precondition of `0077`'s `SET NOT NULL` and `CHECK`,
+-- which §2 does license, so it lives in `0077`.)
+--
+-- Sections, in order, in ONE transaction: 1. shape rewrite, 2. unshare
+-- departed members, 3. freeze implicit shared picks, 4. label dedupe. Three
+-- `UPDATE`s + one `UPDATE` + one `INSERT` + one `UPDATE`, no `DELETE`.
+--
+-- ═══ 1. SHAPE — the three snapshot columns hold SETS ═══
 --
 -- An integration now binds 1..N connections per run, so three snapshot columns
 -- change SHAPE (not type — all three stay jsonb):
@@ -32,16 +43,15 @@
 --
 -- The new readers expect an array and there is no scalar path left to fall
 -- back to — that is the doctrine (`docs/NO_TRANSITIONAL_CODE.md`), and it is
--- what makes this file necessary rather than optional. A row left in the old
+-- what makes this section necessary rather than optional. A row left in the old
 -- shape fails loudly at the next read; `runs.resolved_connections` in
 -- particular is read long after kickoff by the live-credentials route, so a
 -- finished-but-still-referenced run is not a safe thing to skip.
 --
--- Values ALREADY an array are left untouched, which is what makes the file
--- idempotent: the `EXISTS (… jsonb_typeof(v) <> 'array')` guard is exactly the
--- condition each `UPDATE` removes, so a second run matches zero rows. It also
--- leaves `{}` alone — `jsonb_object_agg` over zero pairs returns NULL, and an
--- empty map must stay an empty map rather than become NULL.
+-- Values ALREADY an array are left untouched: the
+-- `EXISTS (… jsonb_typeof(v) <> 'array')` guard is exactly the condition each
+-- `UPDATE` removes. It also leaves `{}` alone — `jsonb_object_agg` over zero
+-- pairs returns NULL, and an empty map must stay an empty map.
 --
 -- NOT rewritten, and nothing to do: the copy of
 -- `package_schedules.connection_overrides` that each schedule's BullMQ job
@@ -53,7 +63,31 @@
 -- failed run for it instead of launching (`apps/api/src/services/scheduler.ts`,
 -- `initScheduleWorker` and `triggerScheduledRun`).
 --
--- ═══ WHAT IT INSERTS — implicit shared picks frozen as member pins ═══
+-- ═══ 2. UNSHARE — connections of owners who left the organization ═══
+--
+-- The release unshares a member's `shared_with_org` connections the moment they
+-- lose access to the space (`unshareConnectionsOfOwnersWithoutAccess`,
+-- `apps/api/src/services/space-members.ts`) — but only on writes made from now
+-- on. A member who left the organization BEFORE the deploy still shares. This
+-- section unshares every user-owned `shared_with_org = true` connection whose
+-- owner is no longer in `org_members` for the organization of the connection's
+-- space, the service's "no org membership" branch, with the same write
+-- (`shared_with_org = false`, `updated_at = now()`). It runs before the freeze,
+-- so the freeze neither pins such a connection nor counts it as reachable.
+--
+-- An admin pin or an org default still naming one of them then fails with
+-- `pinned_connection_unavailable`, as it does after a live departure; the
+-- "before" line prints how many pins and defaults name one, so the rehearsal
+-- sizes that.
+--
+-- NOT covered: SPACE-level access loss before the deploy — an owner still in
+-- the organization but removed from a closed space, or whose space closed,
+-- keeps sharing there. That predicate is `resolveSpaceRole` (role presets,
+-- custom space roles, visibility), which this file does not reproduce. It is
+-- repaired the next time any write touching that member or that space runs the
+-- service; until then, the old behaviour stands for those rows.
+--
+-- ═══ 3. FREEZE — implicit shared picks become member pins ═══
 --
 -- The resolver's last layer (the fallback, then layer 7, now layer 6 of
 -- `apps/api/src/services/integration-connection-resolver.ts`) used to
@@ -68,15 +102,28 @@
 -- So the pick the old fallback made for them is written down, as the member
 -- pin they would have created had the picker asked. One pin per
 -- (space, agent, integration, user), taken from the most recent qualifying run
--- of the last 30 days, where ALL of the following hold:
+-- among:
+--
+--   - every run of the last 30 days, and
+--   - the latest run of each currently ENABLED schedule that recorded a
+--     resolution (`resolved_connections IS NOT NULL`), WHATEVER ITS AGE — a
+--     monthly, quarterly or yearly schedule leaning on a colleague's
+--     connection would otherwise fail every fire after the deploy. A run that
+--     failed before resolving records no pick, so it is skipped for the one
+--     before it;
+--
+-- where ALL of the following hold:
 --
 --   - the run's actor is a platform user (`user_id` set, `end_user_id` NULL)
---     and its agent is a real package (not deleted, not an inline shadow row);
+--     who is still a member of the space's organization, and its agent is a
+--     real package (not deleted, not an inline shadow row);
 --   - its resolved set for the integration is ONE connection whose source is
 --     `fallback_auto`;
 --   - that connection still exists in the run's space, on that integration,
---     is `shared_with_org = true`, is NOT owned by the user, and is healthy
---     (`needs_reconnection = false`);
+--     is `shared_with_org = true`, is NOT owned by the user, is owned by a
+--     platform user who is still a member of the space's organization (never
+--     an end-user's, never a departed member's — section 2 has just unshared
+--     the latter anyway), and is healthy (`needs_reconnection = false`);
 --   - the old fallback would STILL pick it today: it is the only healthy
 --     connection the user can reach there — no other healthy shared one, and
 --     no healthy one of the user's own (the new fallback binds that one by
@@ -90,6 +137,13 @@
 -- It is written in the PRE-PR shape (scalar `connection_id`), because this file
 -- runs before the batch; `0077` then folds it into `connection_ids` with every
 -- other pin.
+--
+-- The candidate set is MATERIALIZED once (`CREATE TEMP TABLE … ON COMMIT
+-- DROP`): `runs` has no index leading with `started_at`, so the 30-day scan is
+-- a sequential scan, and it is paid once, not three times. The "after" line
+-- does not re-read that set blindly: it counts candidates for which no member
+-- pin holding exactly that connection exists, so a candidate the `INSERT`
+-- skipped reads non-zero.
 --
 -- NOT covered: end-users. They own no member pins (the resolver never reads
 -- one for them), so there is nothing to freeze. An end-user run that leaned on
@@ -106,38 +160,69 @@
 -- healthy candidate of the integration. That can only SKIP a pin the old
 -- fallback would have honoured, never write one it would not.
 --
--- Placement: AFTER the three `UPDATE`s, inside the same transaction, so it
--- reads `runs.resolved_connections` in exactly one shape — the array the
--- rewrite leaves — on the first run and on every re-run alike.
+-- ═══ 4. DEDUPE — labels unique per (space, integration) ═══
 --
--- One transaction, fenced. Three `UPDATE`s and one `INSERT`, no `DELETE`.
+-- A label is how a tool call names its connection, so `0077` makes it unique
+-- per (space, integration). Until now it was minted per (space, integration,
+-- OWNER) and freely editable, so two rows of a group can share one. Every row
+-- after the first (by `created_at`, `id`) of a group sharing a label becomes
+-- "<base> (n)". `base` is the label itself, or — when the label would not leave
+-- room for the suffix — its longest prefix that does, right-trimmed; the room
+-- is `CONNECTION_LABEL_MAX` (80, `apps/api/src/lib/connection-label.ts`) minus
+-- the widest suffix the group can take, " (2·size+1)", and it is counted the
+-- way that constant is, in UTF-16 code units (a character above U+FFFF counts
+-- two). Every renamed label is therefore ≤ 80.
 --
--- Re-running is safe BEFORE the batch: every candidate the first run pinned
--- now has a member pin, which the "no member pin" condition excludes, so the
--- `INSERT` matches zero rows (and `ON CONFLICT DO NOTHING` backs it). AFTER
--- the batch the file cannot half-apply: `0077` drops both `connection_id`
--- columns the freeze names, so it raises (42703) and — under psql's
--- `ON_ERROR_STOP` — the whole transaction rolls back, rewrite included.
+-- The renamed rows of one (group, base) take, in (`created_at`, `id`) order,
+-- the smallest n ≥ 2 whose "<base> (n)" no row of the group holds yet. That
+-- cannot collide:
+--   - with a label already held — excluded by construction;
+--   - with another renamed label — "<b1> (n1)" = "<b2> (n2)" forces n1 = n2 (a
+--     label ends with exactly one trailing "(digits)" we appended) and then
+--     b1 = b2, and within one base every renamed row takes a different n;
+--   - with a label `0077` mints later — those are "Connexion N" with N above
+--     every "Connexion <n>" the group holds, and a renamed label ends in ")",
+--     so it is never "Connexion <digits>".
+-- [2, 2·size+1] always holds enough free n: at most `size` labels of the
+-- group are excluded, and at most `size − 1` rows of it are renamed.
 --
--- Rows: NOT YET REHEARSED. Production holds rows in all three columns (every
--- run since the snapshot shipped carries `resolved_connections`), so this is
--- not a state no reachable database is in: rehearse against a restored dump
--- (README, "Writing one", requirement 4) and record the before/after counts
--- here BEFORE the window. The "after" counts must all read 0. The pin count is
--- sized by that rehearsal too: its query reads the rewritten shape, so it has
--- no standalone pre-flight twin below.
+-- NULL and '' labels are SKIPPED, not deduplicated: `0077` backfills each with
+-- its own "Connexion N" before the index, as argued above. Comparison is
+-- verbatim — "Prod" and "prod" are two labels, as they are to the index.
+--
+-- ═══ Idempotency ═══
+--
+-- Re-running BEFORE the batch changes nothing: every `WHERE` is the condition
+-- its write removes — no non-array value is left, no departed owner still
+-- shares, every frozen candidate now has a member pin (which the "no member
+-- pin" condition excludes, and `ON CONFLICT DO NOTHING` backs), and no group
+-- holds a label twice. AFTER the batch the file cannot half-apply: `0077`
+-- drops both `connection_id` columns the freeze names, so it raises (42703)
+-- and — under psql's `ON_ERROR_STOP` — the whole transaction rolls back.
+--
+-- Rows: NOT YET REHEARSED. Production holds rows in all three shape columns
+-- (every run since the snapshot shipped carries `resolved_connections`), so
+-- this is not a state no reachable database is in: rehearse against a restored
+-- dump (README, "Writing one", requirement 4) and record every before/after
+-- count here BEFORE the window. The "after" counts must all read 0. The pin
+-- count is sized by that rehearsal too: its query reads the rewritten shape,
+-- so it has no standalone pre-flight twin below.
 --
 -- ROLLBACK: none is offered, and none is wanted. Collapsing an array back to
 -- its first element is lossy the moment a run has bound more than one
 -- connection, and it would restore a shape no deployed reader accepts. Recover
 -- from the pre-run `pg_dump` instead. The frozen pins are ordinary member pins:
--- a member drops one from the agent page like any pin they set themselves.
+-- a member drops one from the agent page like any pin they set themselves. An
+-- unshared connection is re-shared by its owner, should they rejoin; a renamed
+-- label is edited like any other.
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '120s';
 
--- ═══ VERIFY (before) — rows still holding a non-array value ═══
+-- ═══ 1. SHAPE ═══
+
+-- VERIFY (before) — rows still holding a non-array value
 SELECT
   (SELECT count(*) FROM runs r
     WHERE r.connection_overrides IS NOT NULL
@@ -179,16 +264,74 @@ WHERE connection_overrides IS NOT NULL
   AND EXISTS (SELECT 1 FROM jsonb_each(connection_overrides) AS e(k, v)
                WHERE jsonb_typeof(v) <> 'array');
 
--- ═══ FREEZE implicit shared picks as member pins ═══
+-- ═══ 2. UNSHARE ═══
 --
--- One definition, read three times: count, insert, count again. A TEMP VIEW
--- rather than a table, so the "after" count re-evaluates against the pins the
--- `INSERT` just wrote; created and dropped inside the transaction, so an abort
--- leaves nothing behind. `connectionId` / `source` are the keys the pre-PR
--- resolver wrote into each element (`ResolvedConnection`, camelCase TS
--- serialised as-is). The connection is matched on `id::text`, so a malformed
--- snapshot value simply matches nothing instead of failing a `::uuid` cast.
-CREATE TEMP VIEW _0032_implicit_shared_picks AS
+-- The predicate is written three times (before, UPDATE, after) on purpose: the
+-- after line must re-evaluate it, not trust the UPDATE's own row count.
+
+SELECT
+  (SELECT count(*) FROM integration_connections c
+    WHERE c.shared_with_org = true
+      AND c.user_id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM spaces sp
+        JOIN org_members m ON m.org_id = sp.org_id AND m.user_id = c.user_id
+        WHERE sp.id = c.space_id))                               AS departed_shared_before,
+  -- admin pins and org defaults that name one: they fail with
+  -- `pinned_connection_unavailable` once it is unshared
+  (SELECT count(*) FROM (
+     SELECT p.connection_id FROM integration_pins p WHERE p.user_id IS NULL
+     UNION ALL
+     SELECT d.connection_id FROM integration_org_defaults d
+   ) named
+   JOIN integration_connections c ON c.id = named.connection_id
+   WHERE c.shared_with_org = true
+     AND c.user_id IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM spaces sp
+       JOIN org_members m ON m.org_id = sp.org_id AND m.user_id = c.user_id
+       WHERE sp.id = c.space_id))                                AS departed_shared_named_by_admin;
+
+UPDATE integration_connections c
+SET shared_with_org = false,
+    updated_at = now()
+WHERE c.shared_with_org = true
+  AND c.user_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM spaces sp
+    JOIN org_members m ON m.org_id = sp.org_id AND m.user_id = c.user_id
+    WHERE sp.id = c.space_id);
+
+-- must print 0
+SELECT count(*) AS departed_shared_after
+FROM integration_connections c
+WHERE c.shared_with_org = true
+  AND c.user_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM spaces sp
+    JOIN org_members m ON m.org_id = sp.org_id AND m.user_id = c.user_id
+    WHERE sp.id = c.space_id);
+
+-- ═══ 3. FREEZE ═══
+--
+-- `connectionId` / `source` are the keys the pre-PR resolver wrote into each
+-- element (`ResolvedConnection`, camelCase TS serialised as-is). The connection
+-- is matched on `id::text`, so a malformed snapshot value simply matches
+-- nothing instead of failing a `::uuid` cast. `ON COMMIT DROP`: an abort or a
+-- commit leaves nothing behind.
+CREATE TEMP TABLE _0032_implicit_shared_picks ON COMMIT DROP AS
+WITH latest_scheduled AS (
+  -- the latest run that recorded a resolution, per enabled schedule, any age
+  SELECT latest.id
+  FROM package_schedules s
+  CROSS JOIN LATERAL (
+    SELECT r.id FROM runs r
+    WHERE r.schedule_id = s.id
+      AND r.resolved_connections IS NOT NULL
+    ORDER BY r.started_at DESC, r.id DESC
+    LIMIT 1) AS latest
+  WHERE s.enabled = true
+)
 SELECT DISTINCT ON (r.space_id, r.package_id, e.integration_id, r.user_id)
        r.space_id,
        r.package_id,
@@ -204,19 +347,30 @@ JOIN integration_connections c
   ON c.id::text = e.v -> 0 ->> 'connectionId'
  AND c.space_id = r.space_id
  AND c.integration_package_id = e.integration_id
-WHERE r.started_at >= now() - interval '30 days'
-  -- platform user, not an end-user
+WHERE (r.started_at >= now() - interval '30 days'
+       OR r.id IN (SELECT id FROM latest_scheduled))
+  -- platform user, not an end-user, still in the organization
   AND r.user_id IS NOT NULL
   AND r.end_user_id IS NULL
+  AND EXISTS (
+    SELECT 1 FROM spaces sp
+    JOIN org_members m ON m.org_id = sp.org_id AND m.user_id = r.user_id
+    WHERE sp.id = r.space_id)
   -- a single connection, picked by the fallback
   AND r.resolved_connections IS NOT NULL
   AND jsonb_typeof(e.v) = 'array'
   AND jsonb_array_length(e.v) = 1
   AND e.v -> 0 ->> 'source' = 'fallback_auto'
-  -- still someone else's shared, healthy connection
+  -- still someone else's shared, healthy connection …
   AND c.shared_with_org = true
   AND c.user_id IS DISTINCT FROM r.user_id
   AND c.needs_reconnection = false
+  -- … owned by a member of the organization, never an end-user or a departed one
+  AND c.user_id IS NOT NULL
+  AND EXISTS (
+    SELECT 1 FROM spaces sp
+    JOIN org_members m ON m.org_id = sp.org_id AND m.user_id = c.user_id
+    WHERE sp.id = c.space_id)
   -- the old fallback would still pick it: no OTHER healthy connection the user
   -- can reach there — neither another shared one nor one of their own
   AND NOT EXISTS (
@@ -242,7 +396,7 @@ WHERE r.started_at >= now() - interval '30 days'
       AND dc.space_id = r.space_id
       AND dc.integration_package_id = e.integration_id
       AND (dc.shared_with_org = true OR dc.user_id = r.user_id))
-ORDER BY r.space_id, r.package_id, e.integration_id, r.user_id, r.started_at DESC;
+ORDER BY r.space_id, r.package_id, e.integration_id, r.user_id, r.started_at DESC, r.id DESC;
 
 SELECT count(*) AS implicit_shared_picks_before FROM _0032_implicit_shared_picks;
 
@@ -254,10 +408,101 @@ SELECT space_id, package_id, integration_id, user_id, connection_id,
 FROM _0032_implicit_shared_picks
 ON CONFLICT DO NOTHING;
 
--- must print 0: every pick now has a member pin, which the view excludes
-SELECT count(*) AS implicit_shared_picks_after FROM _0032_implicit_shared_picks;
+-- must print 0: every candidate now has a member pin naming exactly its connection
+SELECT count(*) AS implicit_shared_picks_unpinned_after
+FROM _0032_implicit_shared_picks k
+WHERE NOT EXISTS (
+  SELECT 1 FROM integration_pins p
+  WHERE p.space_id = k.space_id
+    AND p.package_id = k.package_id
+    AND p.integration_package_id = k.integration_id
+    AND p.user_id = k.user_id
+    AND p.connection_id = k.connection_id);
 
-DROP VIEW _0032_implicit_shared_picks;
+DROP TABLE _0032_implicit_shared_picks;
+
+-- ═══ 4. DEDUPE ═══
+
+-- groups holding a non-empty label more than once
+SELECT count(*) AS duplicate_labels_before FROM (
+  SELECT 1 FROM integration_connections
+  WHERE label IS NOT NULL AND label <> ''
+  GROUP BY space_id, integration_package_id, label
+  HAVING count(*) > 1) dup;
+
+CREATE TEMP TABLE _0032_label_renames ON COMMIT DROP AS
+WITH grp AS (
+  SELECT space_id, integration_package_id,
+         count(*) AS size,
+         -- room for the base: 80 minus the widest suffix, " (2·size+1)"
+         80 - length(' (' || (2 * count(*) + 1)::text || ')') AS room
+  FROM integration_connections
+  GROUP BY space_id, integration_package_id
+),
+held AS (
+  SELECT c.id, c.space_id, c.integration_package_id, c.label, c.created_at,
+         g.size, g.room,
+         row_number() OVER (
+           PARTITION BY c.space_id, c.integration_package_id, c.label
+           ORDER BY c.created_at, c.id) AS nth
+  FROM integration_connections c
+  JOIN grp g USING (space_id, integration_package_id)
+  WHERE c.label IS NOT NULL AND c.label <> ''
+),
+moved AS (
+  SELECT h.id, h.space_id, h.integration_package_id, h.created_at, h.size,
+         CASE WHEN w.width <= h.room THEN h.label ELSE rtrim(w.prefix) END AS base
+  FROM held h
+  -- UTF-16 width, as `CONNECTION_LABEL_MAX` counts it: the whole label's, and
+  -- its longest prefix that fits the room
+  CROSS JOIN LATERAL (
+    SELECT max(ch.run) AS width,
+           string_agg(ch.c, '' ORDER BY ch.i) FILTER (WHERE ch.run <= h.room) AS prefix
+    FROM (
+      SELECT t.c, t.i,
+             sum(CASE WHEN ascii(t.c) > 65535 THEN 2 ELSE 1 END) OVER (ORDER BY t.i) AS run
+      FROM regexp_split_to_table(h.label, '') WITH ORDINALITY AS t(c, i)
+    ) ch
+  ) w
+  WHERE h.nth > 1
+),
+ranked AS (
+  SELECT m.*,
+         row_number() OVER (
+           PARTITION BY m.space_id, m.integration_package_id, m.base
+           ORDER BY m.created_at, m.id) AS k
+  FROM moved m
+)
+SELECT r.id, s.label
+FROM ranked r
+CROSS JOIN LATERAL (
+  SELECT r.base || ' (' || n || ')' AS label
+  FROM generate_series(2, 2 * r.size + 1) AS n
+  WHERE NOT EXISTS (
+    SELECT 1 FROM integration_connections t
+    WHERE t.space_id = r.space_id
+      AND t.integration_package_id = r.integration_package_id
+      AND t.label = r.base || ' (' || n || ')')
+  ORDER BY n
+  OFFSET r.k - 1
+  LIMIT 1) AS s;
+
+SELECT count(*) AS labels_renamed FROM _0032_label_renames;
+
+UPDATE integration_connections c
+SET label = r.label,
+    updated_at = now()
+FROM _0032_label_renames r
+WHERE c.id = r.id;
+
+DROP TABLE _0032_label_renames;
+
+-- must print 0
+SELECT count(*) AS duplicate_labels_after FROM (
+  SELECT 1 FROM integration_connections
+  WHERE label IS NOT NULL AND label <> ''
+  GROUP BY space_id, integration_package_id, label
+  HAVING count(*) > 1) dup;
 
 -- ═══ VERIFY (after) — all three must print 0 ═══
 SELECT
@@ -278,11 +523,24 @@ COMMIT;
 
 -- ═══ Standalone counts — run read-only, before the window and after the fact ═══
 --
--- The same three counts, outside any transaction. Before the window they size
--- the work; after the run they must all read 0. A total of 0 BEFORE is not by
--- itself proof the file is unnecessary — pair it with the control below, which
--- counts every row that HAS a value, so "nothing to rewrite" and "nothing at
--- all" read differently.
+-- The shape, unshare and dedupe counts, outside any transaction (the freeze has
+-- no twin: it reads the rewritten shape). Before the window they size the work;
+-- after the run the five `_todo` counts must all read 0. A shape total of 0
+-- BEFORE is not by itself proof the file is unnecessary — pair it with the
+-- control below, which counts every row that HAS a value, so "nothing to
+-- rewrite" and "nothing at all" read differently.
+--
+--   SELECT
+--     (SELECT count(*) FROM integration_connections c
+--       WHERE c.shared_with_org = true AND c.user_id IS NOT NULL
+--         AND NOT EXISTS (SELECT 1 FROM spaces sp
+--                         JOIN org_members m ON m.org_id = sp.org_id AND m.user_id = c.user_id
+--                         WHERE sp.id = c.space_id))              AS departed_shared_todo,
+--     (SELECT count(*) FROM (
+--        SELECT 1 FROM integration_connections
+--        WHERE label IS NOT NULL AND label <> ''
+--        GROUP BY space_id, integration_package_id, label
+--        HAVING count(*) > 1) d)                                  AS duplicate_labels_todo;
 --
 --   SELECT
 --     (SELECT count(*) FROM runs r
