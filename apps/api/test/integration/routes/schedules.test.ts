@@ -547,7 +547,7 @@ describe("Schedules API", () => {
           body: JSON.stringify(body),
         });
 
-      const overrides = { "@runorg/svc": "conn_merge" };
+      const overrides = { "@runorg/svc": ["conn_merge"] };
       expect((await patch({ connection_overrides: overrides })).status).toBe(200);
       const cleared = await patch({ connection_overrides: null });
       expect(cleared.status).toBe(200);

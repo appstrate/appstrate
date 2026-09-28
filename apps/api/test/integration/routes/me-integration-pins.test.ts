@@ -473,7 +473,7 @@ describe("/api/me/integration-pins", () => {
         body: JSON.stringify({
           agent_package_id: AGENT,
           integration_package_id: INTEGRATION,
-          connection_id: connectionId,
+          connection_ids: [connectionId],
         }),
       });
     }
@@ -482,8 +482,8 @@ describe("/api/me/integration-pins", () => {
     async function pinnedConnections(): Promise<string[]> {
       const res = await app.request(listPath, { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: Array<{ connection_id: string }> };
-      return body.data.map((pin) => pin.connection_id);
+      const body = (await res.json()) as { data: Array<{ connection_ids: string[] }> };
+      return body.data.flatMap((pin) => pin.connection_ids);
     }
 
     it("PUT: a key without integrations:connect is refused and pins nothing", async () => {
@@ -544,8 +544,8 @@ describe("/api/me/integration-pins", () => {
       expect((await putPin(authHeaders(ctx), connectionId)).status).toBe(200);
       const res = await app.request(listPath, { headers: await keyHeaders(["integrations:read"]) });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: Array<{ connection_id: string }> };
-      expect(body.data.map((pin) => pin.connection_id)).toEqual([connectionId]);
+      const body = (await res.json()) as { data: Array<{ connection_ids: string[] }> };
+      expect(body.data.map((pin) => pin.connection_ids)).toEqual([[connectionId]]);
     });
   });
 });
