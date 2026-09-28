@@ -13,9 +13,9 @@
  *   2. surface the failure as a live `appstrate.error` event;
  *   3. best-effort final drain of any runtime events journaled before the
  *      throw (log/note/pin/output the agent produced mid-run);
- *   4. reduce the captured events into a {@link RunResult}, stamp the
- *      failure error + (optionally) `status = "failed"` + the runner's own
- *      token-usage snapshot, and `finalize` it.
+ *   4. reduce the captured events into a {@link TerminalRunResult}, stamp
+ *      the failure error + terminal status + the runner's own token-usage
+ *      snapshot, and `finalize` it.
  *
  * The pieces a runner may customise are injected so the epilogue stays
  * generic:
@@ -26,9 +26,6 @@
  *   default is `{ message, stack }`.
  * - **stamp** applies any extra terminal fields after usage — Pi stamps
  *   `cost`.
- * - **setFailedStatus** controls the explicit `status = "failed"` stamp.
- *   Pi leaves `status` unset in its thrown path (preserved verbatim — this
- *   helper does not "fix" that).
  *
  * The abort-rethrow MUST stay first, and the drain MUST be best-effort
  * (a dead drain cannot be allowed to mask the failure), so this helper
@@ -37,11 +34,16 @@
 
 import type { RunEvent } from "@afps-spec/types";
 import { reduceEvents } from "./reducer.ts";
-import type { RunError, RunResult, TokenUsage } from "../types/run-result.ts";
+import type {
+  RunError,
+  RunTerminalStatus,
+  TerminalRunResult,
+  TokenUsage,
+} from "../types/run-result.ts";
 
 /** Minimal sink surface the epilogue needs — just the terminal `finalize`. */
 interface FinalizeSink {
-  finalize(result: RunResult): Promise<void>;
+  finalize(result: TerminalRunResult): Promise<void>;
 }
 
 export interface FinalizeThrownFailureOptions {
@@ -74,17 +76,14 @@ export interface FinalizeThrownFailureOptions {
    * `{ message, stack }`.
    */
   buildError?: (message: string, err: unknown) => RunError;
-  /** Stamp the terminal status on the result. Defaults to `true`. */
-  setFailedStatus?: boolean;
   /**
-   * Terminal status stamped when {@link setFailedStatus} is not `false`.
-   * Defaults to `"failed"`. A runner-enforced timeout passes `"timeout"`
-   * so the run surfaces its specific terminal cause instead of a generic
-   * failure. Ignored when `setFailedStatus === false`.
+   * Terminal status stamped on the result. Defaults to `"failed"`. A
+   * runner-enforced timeout passes `"timeout"` so the run surfaces its
+   * specific terminal cause instead of a generic failure.
    */
-  terminalStatus?: NonNullable<RunResult["status"]>;
+  terminalStatus?: Exclude<RunTerminalStatus, "success">;
   /** Extra terminal stamping (cost / durationMs) applied after `usage`. */
-  stamp?: (result: RunResult, usage: TokenUsage) => void;
+  stamp?: (result: TerminalRunResult, usage: TokenUsage) => void;
 }
 
 /** Same extraction as `@appstrate/core/errors`' `getErrorMessage`, inlined to keep this package dep-free. */
@@ -137,9 +136,11 @@ export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions):
 
   // 4. Reduce → stamp → finalize. `reduceEvents` (not emptyRunResult) so any
   //    partial canonical output the agent emitted before the throw survives.
-  const result = reduceEvents(events, { error: resultError });
-  if (opts.setFailedStatus !== false) result.status = opts.terminalStatus ?? "failed";
-  result.usage = usage;
+  const result: TerminalRunResult = {
+    ...reduceEvents(events, { error: resultError }),
+    status: opts.terminalStatus ?? "failed",
+    usage,
+  };
   opts.stamp?.(result, usage);
   await eventSink.finalize(result);
 }

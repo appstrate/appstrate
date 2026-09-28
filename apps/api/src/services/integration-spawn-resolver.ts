@@ -68,6 +68,8 @@ import {
   getRemoteSource,
   getAppstrateConnectMeta,
   renderCredentialTemplate,
+  renderAuthAuthorizedUris,
+  runnerEgressFor,
   parseFileMode,
   isSafeDeliveryFilePath,
   DEFAULT_DELIVERY_FILE_MODE,
@@ -605,7 +607,7 @@ async function resolveOne(
         ...(deliveries.fileMounts && Object.keys(deliveries.fileMounts).length > 0
           ? { fileMounts: deliveries.fileMounts }
           : {}),
-        ...(deliveries.needsEgress && !isRemoteHttp ? { needsEgress: true } : {}),
+        ...(deliveries.egress && !isRemoteHttp ? { egress: deliveries.egress } : {}),
         ...workspaceMount,
       } satisfies IntegrationSpawnSpec;
     }),
@@ -678,14 +680,8 @@ interface ResolvedDeliveries {
    * onto `IntegrationSpawnSpec.connectLogin`.
    */
   connectLogin?: NonNullable<IntegrationSpawnSpec["connectLogin"]>;
-  /**
-   * Issue #543 — `true` when this local-source runner needs a controlled
-   * egress route but no header injection (a `delivery.env` auth that declares
-   * an outbound surface). The sidecar mounts a plain CONNECT egress listener
-   * for it. Never set for `mtls` (reaches upstream directly) or non-local
-   * sources. `resolveOne` copies this onto `IntegrationSpawnSpec.needsEgress`.
-   */
-  needsEgress?: boolean;
+  /** Local runner egress policy; `resolveOne` copies it onto `IntegrationSpawnSpec.egress`. */
+  egress?: NonNullable<IntegrationSpawnSpec["egress"]>;
 }
 
 /**
@@ -794,6 +790,10 @@ async function resolveDeliveries(
       allowServerOverride: false,
     };
     const authorizedUris = auth.authorized_uris ?? [];
+    const loginEgress =
+      getIntegrationSourceKind(manifest) === "local"
+        ? runnerEgressFor(auth, authorizedUris)
+        : undefined;
     const httpDeliveryAuths: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]> = {
       [row.authKey]: {
         ...placeholderPlan,
@@ -816,6 +816,7 @@ async function resolveDeliveries(
         inputs,
         ...(connectMeta.reauth_on ? { reauthOn: [...connectMeta.reauth_on] } : {}),
       },
+      ...(loginEgress ? { egress: loginEgress } : {}),
     };
   }
 
@@ -831,6 +832,7 @@ async function resolveDeliveries(
     return null;
   }
 
+  const renderedUris = renderAuthAuthorizedUris(auth, fields);
   const spawnEnv: Record<string, string> = {};
   const httpDeliveryAuths: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]> = {};
   const fileMounts: NonNullable<IntegrationSpawnSpec["fileMounts"]> = {};
@@ -985,43 +987,18 @@ async function resolveDeliveries(
       httpDeliveryAuths[row.authKey] = {
         ...plan,
         authType: auth.type,
-        authorizedUris: [...(auth.authorized_uris ?? [])],
+        authorizedUris: [...renderedUris],
         expiresAtEpochMs: row.expiresAt ? row.expiresAt.getTime() : null,
       };
       resolvedAtLeastOne = true;
     }
   }
 
-  // ─── egress signal for local runners (decoupled from injection, #543) ───
-  // A local-source runner sits on the per-run network (`internal: true` in
-  // docker mode) with NO direct egress; its only route out is a
-  // per-integration listener the sidecar mounts and hands it as `HTTPS_PROXY`.
-  //
-  // Egress and credential injection are orthogonal concerns. A `delivery.http`
-  // integration gets its egress route from the MITM listener its injection
-  // plan (`httpDeliveryAuths`) already mounts. A `delivery.env` integration
-  // (the server authenticates itself, e.g. a form/session login) resolves NO
-  // injection plan — so we raise an explicit `needsEgress` flag and the
-  // sidecar mounts a plain CONNECT egress listener for it (tunnel + SSRF
-  // floor, NO TLS termination, NO cert mint). The env credentials are
-  // delivered separately via `spawnEnv`.
-  //
-  // NEVER for `mtls`: routing a client-cert handshake through a proxy that
-  // terminates TLS would break it (same reason `mtls + delivery.http` is
-  // rejected at import) — `delivery.files`/mtls runners reach upstream
-  // directly. We set the flag for any non-mtls local runner that declares an
-  // outbound surface; when an http injection plan is ALSO present the sidecar
-  // picks the MITM listener (which already provides egress) — `needsEgress`
-  // is the fallback, decided MITM-first in `integrations-boot.ts`.
-  //
-  // Scope note: the egress listener is NOT an `authorized_uris` allowlist
-  // today — it forwards to any external host and only hard-blocks
-  // internal/cloud-metadata targets (SSRF floor). Turning `authorized_uris`
-  // into a hard per-integration egress allowlist is a separate, deliberate
-  // security decision (see #543); the listener seam accepts it when we choose.
-  const isLocalSource = getIntegrationSourceKind(manifest) === "local";
-  const declaresEgress = (auth.authorized_uris?.length ?? 0) > 0 || auth.allow_all_uris === true;
-  const needsEgress = isLocalSource && resolvedAtLeastOne && auth.type !== "mtls" && declaresEgress;
+  // Local runner egress (#1458) — mtls included: the CONNECT plane relays TLS blindly.
+  const egress =
+    getIntegrationSourceKind(manifest) === "local" && resolvedAtLeastOne
+      ? runnerEgressFor(auth, renderedUris)
+      : undefined;
 
   // An auth with a selected api_call stays viable on the row alone: `custom`
   // resolves no plan but its fields are served via the live endpoint.
@@ -1031,6 +1008,6 @@ async function resolveDeliveries(
     spawnEnv,
     ...(Object.keys(httpDeliveryAuths).length > 0 ? { httpDeliveryAuths } : {}),
     ...(Object.keys(fileMounts).length > 0 ? { fileMounts } : {}),
-    ...(needsEgress ? { needsEgress: true } : {}),
+    ...(egress ? { egress } : {}),
   };
 }

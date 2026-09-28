@@ -25,7 +25,8 @@
 #   APPSTRATE_BIN_DIR        CLI install location (default: /usr/local/bin —
 #                            system-wide, since the runner host is root-managed).
 #   APPSTRATE_SKIP_VERIFY=1  Skip signature/checksum verification (CI debug,
-#                            requires CI=true — do NOT set on real hosts).
+#                            requires CI=true and a pinned version — do NOT
+#                            set on real hosts).
 
 set -euo pipefail
 
@@ -75,64 +76,79 @@ _appstrate_runner_bootstrap() {
 
   # Same key as scripts/bootstrap.sh — signs every release's checksums.txt.
   APPSTRATE_MINISIGN_PUBKEY="RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaXEfQ4cFi5XN0KCtKr0e"
+  # Signed channel manifest naming the "latest" tag (same key, `.minisig`).
+  CHANNEL_URL="https://get.appstrate.dev/channels/latest.json"
 
   TMPDIR=$(mktemp -d)
   trap 'rm -rf "$TMPDIR"' EXIT
   log() { printf '\033[0;36m→\033[0m  %s\n' "$*"; }
   err() { printf '\033[0;31m✗\033[0m  %s\n' "$*" >&2; }
 
-  # Same resolver as scripts/bootstrap.sh — see the comment there. Only a
-  # platform `v*` Release carries the CLI binaries; `releases/latest` can name
-  # an npm-package Release instead.
-  resolve_latest_platform_release() {
-    local page fields tag
-    for page in 1 2 3 4 5; do
-      fields=$(curl -fsSL -H 'Accept: application/vnd.github+json' \
-        "https://api.github.com/repos/appstrate/appstrate/releases?per_page=30&page=${page}" |
-        grep -oE '"(tag_name|draft|prerelease)": *("[^"]*"|true|false)') || true
-      [ -z "$fields" ] && return 1
-      tag=$(printf '%s\n' "$fields" | awk -F': *' '
-          $1 ~ /tag_name/   { gsub(/"/, "", $2); tag = $2; draft = ""; pre = "" }
-          $1 ~ /"draft"/    { draft = $2 }
-          $1 ~ /prerelease/ { pre = $2 }
-          tag != "" && draft != "" && pre != "" {
-            if (tag ~ /^v[0-9]+\.[0-9]+\.[0-9]+/ && draft == "false" && pre == "false") { print tag; exit }
-            tag = ""
-          }')
-      if [ -n "$tag" ]; then
-        printf '%s\n' "$tag"
-        return 0
-      fi
-    done
-    return 1
+  # Same resolver as scripts/bootstrap.sh — see the comment there; keep the
+  # two in step. Verifies the manifest signature before reading it, then
+  # validates schema/channel/tag strictly. Tag on stdout, errors on stderr.
+  resolve_latest_tag() {
+    local manifest="$TMPDIR/latest.json" json schema channel tag
+    local tag_re='^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$'
+    if ! curl -fsSL "$CHANNEL_URL" -o "$manifest" ||
+      ! curl -fsSL "$CHANNEL_URL.minisig" -o "$manifest.minisig"; then
+      err "Could not download the release channel manifest ($CHANNEL_URL)."
+      return 1
+    fi
+    if ! minisign -Vm "$manifest" -x "$manifest.minisig" -P "$APPSTRATE_MINISIGN_PUBKEY" >/dev/null; then
+      err "Channel manifest signature verification FAILED — it was NOT signed by the Appstrate key."
+      return 1
+    fi
+    # One line, then a field is read only if its key occurs exactly once and
+    # its value ends at `,` or `}` (rejects `1.5`, `\"` inside a tag, dupes).
+    json=$(tr '\r\n\t' '   ' <"$manifest")
+    field() {
+      [ "$(grep -o "\"$1\"" <<<"$json" | wc -l)" -eq 1 ] &&
+        grep -oE "\"$1\"[[:space:]]*:[[:space:]]*$2[[:space:]]*[,}]" <<<"$json" |
+        sed -E 's/^[^:]*:[[:space:]]*"?//; s/"?[[:space:]]*[,}]$//'
+    }
+    schema=$(field schema '[0-9]+')
+    channel=$(field channel '"[^"\\]*"')
+    tag=$(field tag '"[^"\\]*"')
+    if [ "$schema" != "1" ] || [ "$channel" != "latest" ] || ! [[ "$tag" =~ $tag_re ]]; then
+      err "Channel manifest is malformed (expected schema 1, channel \"latest\", one vX.Y.Z tag)."
+      return 1
+    fi
+    printf '%s\n' "$tag"
   }
 
-  if [ "$VERSION" = "latest" ]; then
-    VERSION=$(resolve_latest_platform_release || true)
-    if [ -z "$VERSION" ]; then
-      err "No platform v* release found among the newest GitHub Releases. Pin one with APPSTRATE_VERSION=vX.Y.Z."
+  # Verification prerequisites come first: resolving "latest" needs minisign.
+  if [ "${APPSTRATE_SKIP_VERIFY:-0}" = "1" ]; then
+    if [ "${CI:-}" != "true" ]; then
+      err "APPSTRATE_SKIP_VERIFY=1 requires CI=true — refusing to skip verification on a real host."
       exit 1
     fi
-    log "Resolved latest platform release: $VERSION"
+    # An unverified manifest would let an on-path attacker pick the version.
+    if [ "$VERSION" = "latest" ]; then
+      err "APPSTRATE_SKIP_VERIFY=1 cannot resolve \"latest\". Pin a release with APPSTRATE_VERSION=vX.Y.Z."
+      exit 1
+    fi
+    err "APPSTRATE_SKIP_VERIFY=1 — integrity/provenance checks skipped (CI debug only)."
+  elif ! command -v minisign >/dev/null 2>&1; then
+    err "minisign is required to verify the download:"
+    err "  → Debian:  apt install minisign    → Alpine: apk add minisign"
+    err "  → RHEL:    dnf install minisign     → other:  https://jedisct1.github.io/minisign/"
+    exit 1
+  fi
+
+  if [ "$VERSION" = "latest" ]; then
+    VERSION=$(resolve_latest_tag) || {
+      err "Could not resolve the latest release. Pin one with APPSTRATE_VERSION=vX.Y.Z."
+      exit 1
+    }
+    log "Resolved latest release: $VERSION"
   fi
   URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
 
   log "Downloading Appstrate CLI ($OS/$ARCH, $VERSION)"
   curl -fsSL "${URL_BASE}/${ASSET}" -o "$TMPDIR/$ASSET"
 
-  if [ "${APPSTRATE_SKIP_VERIFY:-0}" = "1" ]; then
-    if [ "${CI:-}" != "true" ]; then
-      err "APPSTRATE_SKIP_VERIFY=1 requires CI=true — refusing to skip verification on a real host."
-      exit 1
-    fi
-    err "APPSTRATE_SKIP_VERIFY=1 — integrity/provenance checks skipped (CI debug only)."
-  else
-    if ! command -v minisign >/dev/null 2>&1; then
-      err "minisign is required to verify the download:"
-      err "  → Debian:  apt install minisign    → Alpine: apk add minisign"
-      err "  → RHEL:    dnf install minisign     → other:  https://jedisct1.github.io/minisign/"
-      exit 1
-    fi
+  if [ "${APPSTRATE_SKIP_VERIFY:-0}" != "1" ]; then
     log "Verifying signature + checksum"
     curl -fsSL "${URL_BASE}/checksums.txt" -o "$TMPDIR/checksums.txt"
     curl -fsSL "${URL_BASE}/checksums.txt.minisig" -o "$TMPDIR/checksums.txt.minisig"

@@ -14,9 +14,12 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { listOrgModels, loadModel } from "../../../src/services/org-models.ts";
+import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
+
+getTestApp(); // boots the model registry
 
 describe("org-models — aliased flag (DB path)", () => {
   let ctx: TestContext;
@@ -79,5 +82,31 @@ describe("org-models — aliased flag (DB path)", () => {
     // The user-selected alias is the row id; the real backing is hidden behind it.
     expect(resolved!.aliasId).toBe(model.id);
     expect(resolved!.modelId).toBe("gpt-4o");
+  });
+
+  it("gives an alias its public level set on every internal surface, not its backing's", async () => {
+    const cred = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      providerId: "deepseek",
+      apiShape: "openai-completions",
+      baseUrl: "https://api.deepseek.com/v1",
+      apiKey: "sk-test",
+    });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: cred.id,
+      modelId: "deepseek-flash", // takes off/low/high/max
+      aliased: true,
+    });
+    const levels = {
+      off: "supported",
+      minimal: "supported",
+      low: "supported",
+      medium: "supported",
+      high: "supported",
+    } as const;
+    const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
+    expect(listed!.generation?.reasoning.levels).toEqual(levels);
+    expect((await loadModel(ctx.orgId, model.id))!.generation?.reasoning.levels).toEqual(levels);
   });
 });

@@ -32,7 +32,7 @@ interface AgentReadinessParams {
   spaceId: string;
   /**
    * Actor whose integration connections we validate. Run kickoff paths
-   * pass an actor so missing or under-scoped connections produce a 412
+   * pass an actor so missing or under-scoped connections produce a 409
    * before the run is created. `null` skips integration gating — callers
    * that resolve the actor from request context may not have one.
    */
@@ -78,7 +78,7 @@ interface AgentReadinessParams {
  */
 /**
  * Map an {@link IntegrationManifestLoadFailure} to a structured readiness
- * error. The `integrations.` field prefix routes it into the 412 envelope
+ * error. The `integrations.` field prefix routes it into the 409 envelope
  * in `validateAgentReadiness` (request runs) and into `failSchedule`
  * (scheduled runs), so a declared-but-unspawnable integration produces a
  * visible failed run instead of a silent success (#737).
@@ -290,7 +290,7 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
   const errors = await collectAgentReadinessErrors(params);
   if (errors.length === 0) return;
 
-  // Integration errors get their own 412 envelope with every integration
+  // Integration errors get their own 409 envelope with every integration
   // failure populated on `errors[]` so the dashboard's MissingConnections
   // modal can render the full list in one round trip.
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
@@ -327,7 +327,7 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
           })
         : integrationErrors;
     throw new ApiError({
-      status: 412,
+      status: 409,
       code: "missing_integration_connection",
       title: "Missing Integration Connection",
       detail: first.message,

@@ -7,14 +7,14 @@
  * as if it were the real provider. That works only because our base URL mirrors
  * each vendor SDK's own path convention, and those conventions disagree:
  *
- *   - the OpenAI client appends `/chat/completions`, so `/v1` belongs in the
- *     BASE (`https://api.openai.com/v1`);
+ *   - the OpenAI client appends `/chat/completions` (Responses: `/responses`),
+ *     so `/v1` belongs in the BASE (`https://api.openai.com/v1`);
  *   - the Anthropic client appends `/v1/messages`, so the base is the bare host
  *     (`https://api.anthropic.com`);
  *   - the Mistral transport appends `/v1/chat/completions` — the Anthropic
  *     convention, not the OpenAI one.
  *
- * So `/v1` sits in the base for `openai-completions` and in the suffix for the
+ * So `/v1` sits in the base for the two OpenAI shapes and in the suffix for the
  * other two. That looks like an inconsistency and is not one, which is exactly
  * why it kept being copied by hand: the route table in `apps/api`, the chat
  * engine's base-URL builder and the CLI's each spelled the same three strings
@@ -62,9 +62,18 @@ interface LlmProxyRoute {
  */
 export const LLM_PROXY_ROUTES = {
   "openai-completions": { baseSuffix: "/v1", sdkPath: "/chat/completions" },
+  "openai-responses": { baseSuffix: "/v1", sdkPath: "/responses" },
   "anthropic-messages": { baseSuffix: "", sdkPath: "/v1/messages" },
   "mistral-conversations": { baseSuffix: "", sdkPath: "/v1/chat/completions" },
 } as const satisfies Record<string, LlmProxyRoute>;
+
+/** Where the proxy is mounted for API callers (API key, OIDC, chat loopback). */
+export const LLM_PROXY_MOUNT = "/api/llm-proxy";
+
+/** Where the proxy is mounted for a platform run's sidecar, authenticated by the run token. */
+export const RUN_LLM_PROXY_MOUNT = "/internal/llm-proxy";
+
+type LlmProxyMount = typeof LLM_PROXY_MOUNT | typeof RUN_LLM_PROXY_MOUNT;
 
 /** Api shapes the llm-proxy can route, derived from the table itself. */
 export type ProxiedApiShape = keyof typeof LLM_PROXY_ROUTES;
@@ -86,25 +95,39 @@ export function isProxiedApiShape(apiShape: string): apiShape is ProxiedApiShape
  * of a path convention into one function is the moment to enforce its
  * precondition once too, instead of restating it.
  */
-export function llmProxyBaseUrl(origin: string, apiShape: string): string | null {
+export function llmProxyBaseUrl(
+  origin: string,
+  apiShape: ProxiedApiShape,
+  mount?: LlmProxyMount,
+): string;
+export function llmProxyBaseUrl(
+  origin: string,
+  apiShape: string,
+  mount?: LlmProxyMount,
+): string | null;
+export function llmProxyBaseUrl(
+  origin: string,
+  apiShape: string,
+  mount: LlmProxyMount = LLM_PROXY_MOUNT,
+): string | null {
   if (!isProxiedApiShape(apiShape)) return null;
-  // Index scan, not `origin.replace(/\/+$/, "")`. That regex is the textbook
-  // polynomial-ReDoS shape (`js/polynomial-redos`, and the same `\s+$` case
-  // CodeQL's own docs use): `/+` is ambiguous about where it starts matching,
-  // so on a string of many slashes that does NOT end in one the engine retries
-  // from each slash and the cost goes quadratic. `origin` here reaches an
-  // EXPORTED function from a package — chat passes `CHAT_SELF_ORIGIN`, the CLI
-  // passes `--instance` — which is exactly the "uncontrolled data" the rule is
-  // about. This loop is linear and needs no argument.
-  let end = origin.length;
-  while (end > 0 && origin.charCodeAt(end - 1) === 47 /* "/" */) end--;
-  const base = origin.slice(0, end);
-  return `${base}/api/llm-proxy/${apiShape}${LLM_PROXY_ROUTES[apiShape].baseSuffix}`;
+  return `${trimTrailingSlashes(origin)}${mount}/${apiShape}${LLM_PROXY_ROUTES[apiShape].baseSuffix}`;
 }
 
 /**
- * Path the proxy listens on for one shape, relative to the `/api/llm-proxy`
- * mount — i.e. the base suffix plus whatever the client appends to it.
+ * `url` without its trailing slashes. An index scan, not `replace(/\/+$/, "")`:
+ * that regex is the polynomial-ReDoS shape (`js/polynomial-redos`), and callers
+ * pass operator- or caller-supplied URLs.
+ */
+export function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url.charCodeAt(end - 1) === 47 /* "/" */) end--;
+  return url.slice(0, end);
+}
+
+/**
+ * Path the proxy listens on for one shape, relative to its mount — i.e. the
+ * base suffix plus whatever the client appends to it.
  */
 export function llmProxyUrlPath(apiShape: ProxiedApiShape): string {
   const route = LLM_PROXY_ROUTES[apiShape];

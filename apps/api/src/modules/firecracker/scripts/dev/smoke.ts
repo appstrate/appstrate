@@ -21,6 +21,13 @@
  * ONLY the expected entries, and the jail tree dies with the teardown.
  * Requires root in that mode (vm-smoke.sh sudo-wraps this script).
  *
+ * A FOURTH VM (#1547) boots the REAL sidecar with three probe integration
+ * runners and asserts runner egress isolation on the real guest kernel — see
+ * `smoke-runner-egress.ts` (its guest programs live in
+ * `runner-egress-probes/`). REQUIRES INTERNET ACCESS from the KVM host: the
+ * guest's sidecar dials example.com / example.org (the Lima dev VM and
+ * GitHub-hosted runners have it).
+ *
  * Run inside the Lima dev VM / a Linux KVM host via
  * `bun run test:firecracker` (apps/api/src/modules/firecracker/scripts/dev/vm-smoke.sh).
  */
@@ -36,6 +43,7 @@ process.env.FIRECRACKER_DATA_DIR ??= "./data/firecracker/runs";
 
 const { FirecrackerOrchestrator } = await import("../../orchestrator.ts");
 const { platformAliasIp } = await import("../../subnet.ts");
+const { createRunnerEgressVm } = await import("./smoke-runner-egress.ts");
 const { readdir, stat } = await import("node:fs/promises");
 const { dirname, join } = await import("node:path");
 
@@ -52,27 +60,38 @@ const BROKER = process.env.FIRECRACKER_CREDENTIAL_BROKER ?? "mmds";
 const FAKE_RUN_TOKEN = "smoke-fake-secret-DEADBEEFCAFE";
 /**
  * Distinctive fake model API key pushed through the AGENT env. In MMDS
- * mode it must be brokered too (skipSidecar/direct-provider runs put the
- * REAL provider key in the agent env — regression guard for it landing
- * on the config drive).
+ * mode it must be brokered too (regression guard for a credential-named
+ * key landing on the config drive).
  */
 const FAKE_MODEL_KEY = "sk-smoke-fake-model-key-0DEFACED";
 
-const VM_EXIT_TIMEOUT_MS = 90_000;
+// Timing for VMs 1-3. Generous on purpose: the dev path runs this smoke under
+// NESTED virtualization (Lima → Firecracker), where a guest cold start —
+// sidecar included — has been observed anywhere from 40 to 300 s. Both values
+// are BOUNDS that end as soon as their condition holds, so an L1 KVM host (CI)
+// pays nothing for them. The fourth VM keeps its own (smoke-runner-egress.ts).
+/** Host: VM boot → exit marker. */
+const VM_EXIT_TIMEOUT_MS = 360_000;
+/** VM1 guest: the in-guest sidecar's /health must answer 200 within this. */
+const VM1_SIDECAR_HEALTH_WAIT_S = 180;
 
 /**
  * Bound a VM exit wait without leaving the losing timeout alive. Bun keeps
  * referenced timers on its event loop, so a bare Promise.race made every
- * successful smoke wait ~90 seconds after `SMOKE PASS` before the process
- * could exit. Clearing in `finally` also covers early waitForExit failures.
+ * successful smoke wait out the full timeout after `SMOKE PASS` before the
+ * process could exit. Clearing in `finally` also covers early waitForExit failures.
  */
-async function withExitTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
+async function withExitTimeout<T>(
+  promise: Promise<T>,
+  message: string,
+  timeoutMs = VM_EXIT_TIMEOUT_MS,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), VM_EXIT_TIMEOUT_MS);
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
       }),
     ]);
   } finally {
@@ -194,9 +213,13 @@ async function dumpConsole(runDir: string, label: string): Promise<void> {
 const aliasIp = platformAliasIp(process.env.FIRECRACKER_SUBNET_CIDR ?? "10.231.0.0/16");
 const platformPort = Number(process.env.PORT ?? "3000");
 
-// The probe script runs as the RESTRICTED agent (uid 1001, no
-// unrestricted_egress): direct internet egress must be firewall-dropped,
-// the platform alias must stay reachable, the config drive must be gone
+// The #1547 VM bundles its guest probe programs up front: a bundling error
+// fails here, before any VM boots.
+const runnerEgress = await createRunnerEgressVm({ aliasIp, platformPort, fail });
+
+// The probe script runs as the agent (uid 1001): direct internet egress
+// must be firewall-dropped, the platform alias must stay reachable, the
+// config drive must be gone
 // (unmounted before workloads start) AND its raw block node unreadable,
 // the in-guest sidecar must answer its /health endpoint, and hidepid=2
 // must hide foreign-uid /proc entries. Each probe prints a marker the
@@ -221,9 +244,10 @@ const PROBE_SCRIPT = [
   // (connect timeout) makes it fail.
   `if bun -e "const ok=await fetch('http://169.254.169.254/latest/api/token',{method:'PUT',headers:{'X-metadata-token-ttl-seconds':'60'},signal:AbortSignal.timeout(3000)}).then(r=>r.ok,()=>false);process.exit(ok?0:1)" >/dev/null 2>&1; then echo "smoke-mmds=reachable"; else echo "smoke-mmds=blocked"; fi`,
   // In-guest sidecar liveness: /health must answer 200 (wget fails on
-  // 503). The sidecar cold-starts in parallel with the agent, so retry
-  // for up to 30s — a sidecar that crashed at ms 1 never answers.
-  '{ i=0; ok=0; while [ "$i" -lt 30 ]; do if wget -q -T 2 -O /dev/null http://127.0.0.1:8080/health 2>/dev/null; then ok=1; break; fi; i=$((i+1)); sleep 1; done; if [ "$ok" = 1 ]; then echo "smoke-sidecar=up"; else echo "smoke-sidecar=down"; fi; }',
+  // 503). The sidecar cold-starts in parallel with the agent — minutes
+  // under nested virt — so retry until a deadline; a sidecar that crashed
+  // at ms 1 never answers. The loop exits on the first 200.
+  `{ deadline=$(( $(date +%s) + ${VM1_SIDECAR_HEALTH_WAIT_S} )); ok=0; while [ "$(date +%s)" -lt "$deadline" ]; do if wget -q -T 2 -O /dev/null http://127.0.0.1:8080/health 2>/dev/null; then ok=1; break; fi; sleep 1; done; if [ "$ok" = 1 ]; then echo "smoke-sidecar=up"; else echo "smoke-sidecar=down"; fi; }`,
   // hidepid=2: foreign-uid /proc entries must be invisible to the agent
   // (the sidecar's environ carries the run credentials). PID 1 is the
   // root supervisor: with hidepid=2 its /proc dir does not exist for
@@ -249,10 +273,16 @@ await orch.cleanupOrphans();
 // Stand-in for the platform API on the loopback alias — gives the guest's
 // "platform reachable" probe something to answer it. Bound AFTER
 // initialize() (which creates the alias).
+// It also serves VM4's routes (smoke-runner-egress.ts): the probe mcp-server
+// bundle the in-guest sidecar fetches exactly like the real
+// /internal/mcp-server-bundle route, the MITM integration's credential
+// exactly like /internal/integration-credentials (the run token is not
+// checked — nothing else is served), and the counter paths of the #1547
+// direct-egress assertion.
 const platformStub = Bun.serve({
   hostname: aliasIp,
   port: platformPort,
-  fetch: () => new Response("ok"),
+  fetch: (req) => runnerEgress.handleStubRequest(req) ?? new Response("ok"),
 });
 
 console.log("==> boundary");
@@ -296,12 +326,15 @@ try {
         ? join(state.chrootPath, "config.img")
         : join(boundary.id, "config.img");
     await assertConfigDriveOmitsSecret(imagePath, FAKE_RUN_TOKEN);
-    // Agent-env secret: the model API key (real on direct-provider runs)
-    // must be brokered off the drive too.
+    // Agent-env key named for a credential: brokered off the drive too,
+    // whatever its value.
     await assertConfigDriveOmitsSecret(imagePath, FAKE_MODEL_KEY);
   }
 
-  const exitCode = await withExitTimeout(orch.waitForExit(agent), "VM did not exit within 90s");
+  const exitCode = await withExitTimeout(
+    orch.waitForExit(agent),
+    `VM did not exit within ${VM_EXIT_TIMEOUT_MS / 1000}s`,
+  );
   console.log(`==> guest exit marker: ${exitCode} (${Date.now() - bootStart} ms boot→exit)`);
 
   // Console diagnostics for the assertion below + human debugging.
@@ -344,9 +377,9 @@ try {
   await orch.removeWorkload(agent);
 
   // ---------------------------------------------------------------------
-  // Second minimal VM: non-zero exit-code propagation. No sidecar (the
-  // skipSidecar path), trivial agent — the guest's `exit 42` must round-
-  // trip through the nonce-authenticated marker to waitForExit.
+  // Second minimal VM: non-zero exit-code propagation. Trivial agent — the
+  // guest's `exit 42` must round-trip through the nonce-authenticated marker
+  // to waitForExit.
   // ---------------------------------------------------------------------
   console.log("==> second microVM (exit-code propagation)");
   const RUN_ID2 = `${RUN_ID}_exit42`;
@@ -355,6 +388,7 @@ try {
   Reflect.set(orch, "agentArgvOverride", ["/bin/sh", "-c", "exit 42"]);
   const boundary2 = await orch.createIsolationBoundary(RUN_ID2);
   try {
+    const sidecar2 = await orch.createSidecar(RUN_ID2, boundary2, { runToken: FAKE_RUN_TOKEN });
     const agent2 = await orch.createWorkload(
       {
         runId: RUN_ID2,
@@ -368,13 +402,14 @@ try {
     await orch.startWorkload(agent2);
     const exitCode2 = await withExitTimeout(
       orch.waitForExit(agent2),
-      "second VM did not exit within 90s",
+      `second VM did not exit within ${VM_EXIT_TIMEOUT_MS / 1000}s`,
     );
     console.log(`==> second guest exit marker: ${exitCode2}`);
     await dumpConsole(boundary2.id, "vm2");
     if (exitCode2 !== 42) {
       fail(`expected exit marker 42 from the second VM, got ${exitCode2}`);
     }
+    await orch.removeWorkload(sidecar2);
     await orch.removeWorkload(agent2);
   } catch (err) {
     await dumpConsole(boundary2.id, "vm2 exception");
@@ -385,8 +420,8 @@ try {
 
   // ---------------------------------------------------------------------
   // Third VM (B4): the REAL agent entrypoint — NO argv override, so the
-  // supervisor runs the baked default `bun run /runtime/dist/entrypoint.js`.
-  // skipSidecar + a minimal agent env (no valid platform sink) makes the
+  // supervisor runs the baked default (`launcher.js` → `entrypoint.js`).
+  // A minimal agent env (no valid platform sink) makes the
   // bundle LOAD, run under bun in-guest, and fail env validation — leaving
   // runtime-pi's `[runtime-pi fatal]` last-resort line on the serial
   // console. This catches module-resolution / transpiler breakage that the
@@ -398,8 +433,9 @@ try {
   Reflect.set(orch, "agentArgvOverride", undefined);
   const boundary3 = await orch.createIsolationBoundary(RUN_ID3);
   try {
-    // No createSidecar → skipSidecar path. Minimal env: the entrypoint's
-    // parseRuntimeEnv fails fast on the missing APPSTRATE_SINK_* contract.
+    // Minimal env: the entrypoint's parseRuntimeEnv fails fast on the
+    // missing APPSTRATE_SINK_* contract.
+    const sidecar3 = await orch.createSidecar(RUN_ID3, boundary3, { runToken: FAKE_RUN_TOKEN });
     const agent3 = await orch.createWorkload(
       {
         runId: RUN_ID3,
@@ -411,7 +447,10 @@ try {
       boundary3,
     );
     await orch.startWorkload(agent3);
-    await withExitTimeout(orch.waitForExit(agent3), "third VM did not exit within 90s");
+    await withExitTimeout(
+      orch.waitForExit(agent3),
+      `third VM did not exit within ${VM_EXIT_TIMEOUT_MS / 1000}s`,
+    );
     const console3 = await Bun.file(`${boundary3.id}/console.log`)
       .text()
       .catch(() => "");
@@ -423,6 +462,7 @@ try {
       );
     }
     console.log("==> real entrypoint loaded + reported its fatal diagnostic ok");
+    await orch.removeWorkload(sidecar3);
     await orch.removeWorkload(agent3);
   } catch (err) {
     await dumpConsole(boundary3.id, "vm3 exception");
@@ -430,6 +470,20 @@ try {
   } finally {
     await orch.removeIsolationBoundary(boundary3).catch(() => {});
   }
+
+  // ---------------------------------------------------------------------
+  // Fourth VM (#1547): the REAL in-guest sidecar boots three probe
+  // integration runners; every verdict on runner egress isolation is taken
+  // host-side from the console. See smoke-runner-egress.ts.
+  // ---------------------------------------------------------------------
+  console.log("==> fourth microVM (integration runner egress, #1547)");
+  await runnerEgress.run({
+    orch,
+    runId: `${RUN_ID}_runneregress`,
+    runToken: FAKE_RUN_TOKEN,
+    dumpConsole,
+    withExitTimeout,
+  });
 } catch (err) {
   await dumpConsole(boundary.id, "vm1 exception");
   throw err;

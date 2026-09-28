@@ -23,7 +23,7 @@ import { useEndUsers, useEndUser } from "../hooks/use-end-users";
  * An execution identity. Exactly one field is set; `undefined` means no
  * selection. Mirrors the platform `actor` wire shape (user XOR end-user).
  */
-export type ActorValue = { user_id?: string; end_user_id?: string };
+export type ActorValue = { userId?: string; endUserId?: string };
 
 interface ActorSelectProps {
   value?: ActorValue;
@@ -97,7 +97,7 @@ export function ActorSelect({
           (m.email ?? "").toLowerCase().includes(q),
       )
       .map((m) => ({
-        actor: { user_id: m.userId },
+        actor: { userId: m.userId },
         name: primaryLabel(m.displayName, m.email ?? null, m.userId),
         email: m.email ?? null,
       }));
@@ -106,7 +106,7 @@ export function ActorSelect({
   const endUserOptions = useMemo<Option[]>(
     () =>
       endUsers.map((eu) => ({
-        actor: { end_user_id: eu.id },
+        actor: { endUserId: eu.id },
         name: primaryLabel(eu.name, eu.email, eu.externalId || eu.id),
         email: eu.email,
       })),
@@ -115,19 +115,19 @@ export function ActorSelect({
 
   // Resolve the selected end-user's label even when it isn't in the current
   // search page (the trigger must show it regardless of the active query).
-  const selectedEndUserInList = endUsers.some((eu) => eu.id === value?.end_user_id);
+  const selectedEndUserInList = endUsers.some((eu) => eu.id === value?.endUserId);
   const { data: selectedEndUser } = useEndUser(
-    !selectedEndUserInList && value?.end_user_id ? value.end_user_id : "",
+    !selectedEndUserInList && value?.endUserId ? value.endUserId : "",
   );
 
   const selectedLabel = useMemo(() => {
-    if (value?.user_id) {
-      const m = members.find((mm) => mm.userId === value.user_id);
+    if (value?.userId) {
+      const m = members.find((mm) => mm.userId === value.userId);
       if (m) return primaryLabel(m.displayName, m.email ?? null, m.userId);
-      return value.user_id;
+      return value.userId;
     }
-    if (value?.end_user_id) {
-      const inList = endUsers.find((eu) => eu.id === value.end_user_id);
+    if (value?.endUserId) {
+      const inList = endUsers.find((eu) => eu.id === value.endUserId);
       if (inList) return primaryLabel(inList.name, inList.email, inList.externalId || inList.id);
       if (selectedEndUser) {
         return primaryLabel(
@@ -136,7 +136,7 @@ export function ActorSelect({
           selectedEndUser.externalId || selectedEndUser.id,
         );
       }
-      return value.end_user_id;
+      return value.endUserId;
     }
     return null;
   }, [value, members, endUsers, selectedEndUser]);
@@ -148,8 +148,8 @@ export function ActorSelect({
   };
 
   const isActive = (actor: ActorValue) =>
-    (actor.user_id && actor.user_id === value?.user_id) ||
-    (actor.end_user_id && actor.end_user_id === value?.end_user_id);
+    (actor.userId && actor.userId === value?.userId) ||
+    (actor.endUserId && actor.endUserId === value?.endUserId);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -180,8 +180,8 @@ export function ActorSelect({
               <CommandGroup heading={t("actorSelect.groupMembers")}>
                 {memberOptions.map((o) => (
                   <CommandItem
-                    key={`u:${o.actor.user_id}`}
-                    value={`u:${o.actor.user_id}`}
+                    key={`u:${o.actor.userId}`}
+                    value={`u:${o.actor.userId}`}
                     onSelect={() => select(o.actor)}
                   >
                     <Check
@@ -207,8 +207,8 @@ export function ActorSelect({
               <CommandGroup heading={t("actorSelect.groupEndUsers")}>
                 {endUserOptions.map((o) => (
                   <CommandItem
-                    key={`e:${o.actor.end_user_id}`}
-                    value={`e:${o.actor.end_user_id}`}
+                    key={`e:${o.actor.endUserId}`}
+                    value={`e:${o.actor.endUserId}`}
                     onSelect={() => select(o.actor)}
                   >
                     <Check

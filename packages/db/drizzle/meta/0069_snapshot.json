@@ -1,5 +1,5 @@
 {
-  "id": "197824cc-79fc-46a0-a8b1-e4659f5a0013",
+  "id": "1fda171f-0f85-4a59-9783-42da5f1b7919",
   "prevId": "287f825a-4f22-49a8-81e9-ca81535f1c9e",
   "version": "7",
   "dialect": "postgresql",
@@ -3007,7 +3007,7 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "bigserial",
           "primaryKey": true,
           "notNull": true
         },
@@ -3611,7 +3611,7 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "bigserial",
           "primaryKey": true,
           "notNull": true
         },
@@ -5052,7 +5052,7 @@
           "name": "label",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "shared_with_org": {
           "name": "shared_with_org",
@@ -5229,10 +5229,6 @@
         "integration_connections_auth_key_valid": {
           "name": "integration_connections_auth_key_valid",
           "value": "\"auth_key\" ~ '^[a-z][a-z0-9_]*$'"
-        },
-        "integration_connections_label_not_empty": {
-          "name": "integration_connections_label_not_empty",
-          "value": "label <> ''"
         }
       },
       "isRLSEnabled": false
@@ -5489,9 +5485,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "connection_ids": {
-          "name": "connection_ids",
-          "type": "uuid[]",
+        "connection_id": {
+          "name": "connection_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -5550,11 +5546,11 @@
           "method": "btree",
           "with": {}
         },
-        "idx_integration_pins_connection_ids": {
-          "name": "idx_integration_pins_connection_ids",
+        "idx_integration_pins_connection": {
+          "name": "idx_integration_pins_connection",
           "columns": [
             {
-              "expression": "connection_ids",
+              "expression": "connection_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -5562,7 +5558,7 @@
           ],
           "isUnique": false,
           "concurrently": false,
-          "method": "gin",
+          "method": "btree",
           "with": {}
         },
         "idx_integration_pins_user": {
@@ -5619,6 +5615,15 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+        "integration_pins_connection_id_integration_connections_id_fk": {
+          "name": "integration_pins_connection_id_integration_connections_id_fk",
+          "tableFrom": "integration_pins",
+          "tableTo": "integration_connections",
+          "columnsFrom": ["connection_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "integration_pins_created_by_user_id_fk": {
           "name": "integration_pins_created_by_user_id_fk",
           "tableFrom": "integration_pins",
@@ -5632,12 +5637,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "integration_pins_connection_ids_cardinality": {
-          "name": "integration_pins_connection_ids_cardinality",
-          "value": "cardinality(connection_ids) BETWEEN 1 AND 10"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.integration_org_defaults": {
@@ -5663,9 +5663,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "connection_ids": {
-          "name": "connection_ids",
-          "type": "uuid[]",
+        "connection_id": {
+          "name": "connection_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -5719,11 +5719,11 @@
           "method": "btree",
           "with": {}
         },
-        "idx_integration_org_defaults_connection_ids": {
-          "name": "idx_integration_org_defaults_connection_ids",
+        "idx_integration_org_defaults_connection": {
+          "name": "idx_integration_org_defaults_connection",
           "columns": [
             {
-              "expression": "connection_ids",
+              "expression": "connection_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -5731,7 +5731,7 @@
           ],
           "isUnique": false,
           "concurrently": false,
-          "method": "gin",
+          "method": "btree",
           "with": {}
         }
       },
@@ -5762,17 +5762,21 @@
           "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
+        },
+        "integration_org_defaults_connection_id_fk": {
+          "name": "integration_org_defaults_connection_id_fk",
+          "tableFrom": "integration_org_defaults",
+          "tableTo": "integration_connections",
+          "columnsFrom": ["connection_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "integration_org_defaults_connection_ids_cardinality": {
-          "name": "integration_org_defaults_connection_ids_cardinality",
-          "value": "cardinality(connection_ids) BETWEEN 1 AND 10"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.uploads": {
@@ -8785,7 +8789,7 @@
       "columns": {
         "seq": {
           "name": "seq",
-          "type": "serial",
+          "type": "bigserial",
           "primaryKey": true,
           "notNull": true
         },
@@ -8903,13 +8907,13 @@
         },
         "last_assistant_seq": {
           "name": "last_assistant_seq",
-          "type": "integer",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false
         },
         "last_read_seq": {
           "name": "last_read_seq",
-          "type": "integer",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false
         },

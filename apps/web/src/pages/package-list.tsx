@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { type LucideIcon, Layers } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
+import { PACKAGE_WRITE_PERMISSIONS } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { useAgents } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
@@ -126,16 +127,18 @@ export function PackageList() {
         emptyHint={<SpaceLibraryHint type="agent" />}
         emptyIcon={Layers}
         extraActions={
-          can("agents:write") ? (
-            <>
+          <>
+            {PACKAGE_WRITE_PERMISSIONS.some(can) && (
               <Button variant="outline" onClick={() => setImportOpen(true)}>
                 {t("nav.import", { ns: "common" })}
               </Button>
+            )}
+            {can("agents:write") && (
               <Link to="/agents/new">
                 <Button>{t("list.create")}</Button>
               </Link>
-            </>
-          ) : undefined
+            )}
+          </>
         }
       />
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />

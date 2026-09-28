@@ -14,7 +14,7 @@ import {
 
 /** The tools the router declares for `ctx`'s caller. */
 export function toolsFor(ctx: McpToolContext) {
-  return buildMcpTools(ctx, deriveMcpSurface(ctx.permissions, ctx.actor));
+  return buildMcpTools(ctx, deriveMcpSurface(ctx.permissions, ctx.ceiling, ctx.actor));
 }
 
 /** The instructions the router serves a user holding `permissions`. */
@@ -22,7 +22,8 @@ export function instructionsFor(permissions: Iterable<string>, contextInjected =
   const set = new Set(permissions);
   return buildServerInstructions(
     set,
-    deriveMcpSurface(set, { type: "user", id: "user_1" }),
+    undefined,
+    deriveMcpSurface(set, undefined, { type: "user", id: "user_1" }),
     contextInjected,
   );
 }

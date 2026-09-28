@@ -103,7 +103,7 @@ describe("fixtures/reference — end-to-end round trip", () => {
       await sink.handle(event);
     }
     const result = reduceEvents(emitted);
-    await sink.finalize(result);
+    await sink.finalize({ ...result, status: "success" });
 
     expect(emitted).toHaveLength(events.length);
     expect(result.memories).toHaveLength(1);

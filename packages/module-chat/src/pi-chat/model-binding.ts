@@ -15,20 +15,14 @@ import type {
   SubscriptionChatModel,
   ChatModelResolution,
 } from "@appstrate/core/chat-contract";
-import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
-import {
-  derivePiProvider,
-  llmProxyBaseUrl,
-  type Api,
-  type ExtensionFactory,
-  type Model,
-} from "@appstrate/runner-pi";
+import { llmProxyBaseUrl, type Api, type ExtensionFactory, type Model } from "@appstrate/runner-pi";
+import { buildPiModel } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../llm.ts";
 
 interface PiChatModelBindingBase {
   /** Fully resolved Pi model. No provider secret is ever stored on this object. */
   model: Model<Api>;
-  /** AuthStorage key derived from the Pi API shape. */
+  /** AuthStorage key: the model's Pi provider key. */
   provider: string;
 }
 
@@ -72,45 +66,6 @@ type PiChatModelBindingResolution =
   | { status: "needs-reconnection" }
   | { status: "unsupported" };
 
-function toPiModel(input: {
-  id: string;
-  label?: string;
-  apiShape: string;
-  baseUrl: string;
-  reasoning?: boolean | null;
-  reasoningLevelMap?: SubscriptionChatModel["reasoningLevelMap"];
-  input?: string[] | null;
-  cost?: ChatUsageRecord["cost"];
-  contextWindow?: number | null;
-  maxTokens?: number | null;
-  /**
-   * Appstrate provider id of the REAL backing. `baseUrl` below is the proxy's,
-   * so this is the only detection input Pi has left — see `derivePiProvider`.
-   */
-  providerId?: string | null;
-}): Model<Api> {
-  const provider = derivePiProvider(input.providerId, input.apiShape);
-  return {
-    id: input.id,
-    name: input.label ?? input.id,
-    api: input.apiShape as Api,
-    provider,
-    baseUrl: input.baseUrl,
-    reasoning: input.reasoning === true,
-    ...(input.reasoningLevelMap ? { thinkingLevelMap: input.reasoningLevelMap } : {}),
-    input: (input.input ?? ["text"]) as Model<Api>["input"],
-    // `Model.cost` is required by the Pi SDK; an unpriced model still carries
-    // the shape. One spelling of those zeros — see `ZERO_MODEL_COST`.
-    cost: (input.cost ?? { ...ZERO_MODEL_COST }) as Model<Api>["cost"],
-    // One rule, one constant — see `PLATFORM_MODEL_COMPAT`. Chat runs in the
-    // API process, so `PI_CACHE_RETENTION` is reachable by whoever configures
-    // the deployment; the flag on the record is what holds regardless.
-    compat: { ...PLATFORM_MODEL_COMPAT },
-    contextWindow: input.contextWindow ?? undefined,
-    maxTokens: input.maxTokens ?? undefined,
-  } as Model<Api>;
-}
-
 /** Inject a fresh process-local bearer into every provider request. */
 export function createPiProxyAuthExtension(mintBearer: () => string): ExtensionFactory {
   return (pi) => {
@@ -128,22 +83,23 @@ export function createPiProxyModelBinding(args: {
   const baseUrl = llmProxyBaseUrl(args.origin, args.model.apiShape);
   if (!baseUrl) return null;
 
-  const model = toPiModel({
+  const support = args.model.generation?.reasoning.supported;
+  const model = buildPiModel({
     // llm-proxy resolves this preset id and replaces it with the real upstream
     // model. Passing modelId here would bypass aliasing and usage attribution.
     id: args.model.id,
-    label: args.model.label,
+    // The loopback listing is unprojected: an alias carries its backing's id.
+    registryModelId: args.model.modelId,
     apiShape: args.model.apiShape,
+    piProvider: args.model.pi_provider,
     baseUrl,
-    reasoning: args.model.reasoning ?? args.model.generation?.reasoning.supported === "supported",
-    reasoningLevelMap: args.model.generation?.reasoning.nativeLevels,
+    reasoning:
+      args.model.reasoning ??
+      (support && support !== "unknown" ? support === "supported" : undefined),
     input: args.model.input,
     cost: args.model.cost,
     contextWindow: args.model.contextWindow,
     maxTokens: args.model.maxTokens,
-    // The proxy base URL above erases one of Pi's two provider-detection
-    // inputs; keep the other one real so it still recognises the upstream.
-    providerId: args.model.providerId,
   });
 
   return {
@@ -156,13 +112,17 @@ export function createPiProxyModelBinding(args: {
   };
 }
 
-export function createPiOAuthModelBinding(model: SubscriptionChatModel): PiOAuthModelBinding {
-  const piModel = toPiModel({
+export function createPiOAuthModelBinding(
+  model: SubscriptionChatModel,
+  piProvider: string | null,
+): PiOAuthModelBinding {
+  const piModel = buildPiModel({
     id: model.modelId,
+    registryModelId: model.modelId,
     apiShape: model.apiShape,
+    piProvider,
     baseUrl: model.baseUrl,
     reasoning: model.reasoning,
-    reasoningLevelMap: model.reasoningLevelMap,
     input: model.input,
     cost: model.cost,
     contextWindow: model.contextWindow,
@@ -186,7 +146,8 @@ export function resolvePiChatModelBinding(args: {
 }): PiChatModelBindingResolution {
   if (args.subscription.subscription) {
     if ("needsReconnection" in args.subscription) return { status: "needs-reconnection" };
-    return { status: "ready", binding: createPiOAuthModelBinding(args.subscription.model) };
+    const binding = createPiOAuthModelBinding(args.subscription.model, args.model.pi_provider);
+    return { status: "ready", binding };
   }
   const binding = createPiProxyModelBinding(args);
   return binding ? { status: "ready", binding } : { status: "unsupported" };

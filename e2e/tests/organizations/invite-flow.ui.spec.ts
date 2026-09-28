@@ -316,7 +316,7 @@ test("a pending standard invitation can become a guest invitation with a space a
   await page.getByRole("option", { name: "Default", exact: true }).click();
   const updated = page.waitForResponse(
     (response) =>
-      response.request().method() === "PUT" &&
+      response.request().method() === "PATCH" &&
       response.url().endsWith(`/api/orgs/${browserCtx.org.orgId}/invitations/${invitation.id}`),
   );
   await dialog.getByRole("button", { name: /Enregistrer|Save/ }).click();
@@ -324,7 +324,7 @@ test("a pending standard invitation can become a guest invitation with a space a
   expect(response.status()).toBe(200);
   expect(await response.json()).toMatchObject({
     role: "guest",
-    space_assignments: [{ space_id: browserCtx.org.defaultSpaceId, preset_role: "operator" }],
+    space_assignments: [{ spaceId: browserCtx.org.defaultSpaceId, preset_role: "operator" }],
   });
   await expect(dialog).toHaveCount(0);
   const persisted = await orgOnlyClient.get(`/orgs/${browserCtx.org.orgId}`);
@@ -333,7 +333,7 @@ test("a pending standard invitation can become a guest invitation with a space a
   ).toMatchObject({
     email,
     role: "guest",
-    space_assignments: [{ space_id: browserCtx.org.defaultSpaceId, preset_role: "operator" }],
+    space_assignments: [{ spaceId: browserCtx.org.defaultSpaceId, preset_role: "operator" }],
   });
 });
 

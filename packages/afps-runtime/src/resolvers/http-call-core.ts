@@ -1934,21 +1934,19 @@ function normalizeAuthorizedUriPattern(pattern: string): string | undefined {
   return normalized.split(double).join("**").split(single).join("*");
 }
 
-function compileAuthorizedUriPattern(rawPattern: string): string {
+/** Normalised scheme/authority/path; `authority: null` = `scheme://**`, `undefined` = no scheme. */
+function splitAuthorizedUriPattern(
+  rawPattern: string,
+): { scheme: string; authority: string | null; rest: string } | undefined {
   const rawSchemeMatch = rawPattern.match(URI_PATTERN_SCHEME_RE);
-  if (!rawSchemeMatch) {
-    // No `scheme://authority` prefix — compile the whole pattern as a path
-    // (preserves the historical `**` → `.*` behavior for opaque targets).
-    // Nothing to normalise: there is no URL here to canonicalise.
-    return compileUriComponent(rawPattern, true);
-  }
+  if (!rawSchemeMatch) return undefined;
   // The bare `scheme://**` catch-all is decided on the RAW pattern, BEFORE
   // normalisation: `new URL("https://<placeholder>")` would hand back a
   // trailing `/`, turning the catch-all into `^https://[^/]*/$` and breaking
   // the "any host, any path" contract the SSRF-gate branch tests rely on.
   if (rawPattern.slice(rawSchemeMatch[0].length) === "**") {
     // Scheme is case-insensitive and the target's is lowercased by `URL`.
-    return escapeUriLiteral(rawSchemeMatch[0].toLowerCase()) + ".*";
+    return { scheme: rawSchemeMatch[0].toLowerCase(), authority: null, rest: "" };
   }
   // Fall back to the raw pattern when it cannot be canonicalised — a pattern
   // we cannot normalise matches strictly LESS than before, never more, since
@@ -1968,9 +1966,87 @@ function compileAuthorizedUriPattern(rawPattern: string): string {
   // host it admits is still refused downstream by the SSRF gate.
   const authority = slashIdx === -1 ? afterScheme : afterScheme.slice(0, slashIdx);
   const rest = slashIdx === -1 ? "" : afterScheme.slice(slashIdx);
+  return { scheme, authority, rest };
+}
+
+function compileAuthorizedUriPattern(rawPattern: string): string {
+  const parts = splitAuthorizedUriPattern(rawPattern);
+  if (!parts) {
+    // No `scheme://authority` prefix: compile the whole pattern as a path.
+    return compileUriComponent(rawPattern, true);
+  }
+  if (parts.authority === null) return escapeUriLiteral(parts.scheme) + ".*";
   return (
-    escapeUriLiteral(scheme) +
-    compileUriComponent(authority, false) +
-    compileUriComponent(rest, true)
+    escapeUriLiteral(parts.scheme) +
+    compileUriComponent(parts.authority, false) +
+    compileUriComponent(parts.rest, true)
   );
+}
+
+/** A connection's rendered `authorized_uris`, compiled for URL and (host, port) checks (#1458). */
+export interface EgressPolicy {
+  allowsAuthority(host: string, port: number): boolean;
+  allowsUrl(url: string): boolean;
+}
+
+const EGRESS_DEFAULT_PORTS: Readonly<Record<string, number>> = {
+  https: 443,
+  wss: 443,
+  http: 80,
+  ws: 80,
+  ssh: 22,
+  sftp: 22,
+};
+
+// Hostname / IPv4 only: `[`, `@`, `?`, `#` could smuggle an allowed suffix past `[^/]*`.
+const EGRESS_HOST_RE = /^[a-z0-9_.-]+$/;
+
+// WHATWG elides default ports, so only these suffixes name a port explicitly.
+const EGRESS_EXPLICIT_PORT_RE = /:(?:\d+|\*\*?)$/;
+
+export function compileEgressPolicy(input: {
+  authorizedUris: readonly string[];
+  allowAllUris: boolean;
+}): EgressPolicy {
+  if (input.allowAllUris) return { allowsAuthority: () => true, allowsUrl: () => true };
+  const urlRegexes = input.authorizedUris.map(
+    (p) => new RegExp("^" + compileAuthorizedUriPattern(p) + "$"),
+  );
+  let anyAuthority = false;
+  const authorityRules: {
+    regex: RegExp;
+    explicitPort: boolean;
+    defaultPort: number | undefined;
+  }[] = [];
+  for (const pattern of input.authorizedUris) {
+    const parts = splitAuthorizedUriPattern(pattern);
+    // Scheme-less patterns name no transport: they grant nothing at TCP level.
+    if (!parts) continue;
+    if (parts.authority === null) {
+      anyAuthority = true;
+      continue;
+    }
+    authorityRules.push({
+      regex: new RegExp("^" + compileUriComponent(parts.authority, false) + "$", "i"),
+      explicitPort: EGRESS_EXPLICIT_PORT_RE.test(parts.authority),
+      defaultPort: EGRESS_DEFAULT_PORTS[parts.scheme.slice(0, -3).toLowerCase()],
+    });
+  }
+  return {
+    allowsUrl(url) {
+      const normalized = stripUserInfoAndFragment(url);
+      return normalized !== undefined && urlRegexes.some((r) => r.test(normalized));
+    },
+    allowsAuthority(host, port) {
+      const h = host.toLowerCase();
+      if (!EGRESS_HOST_RE.test(h) || !Number.isInteger(port) || port < 1 || port > 65535) {
+        return false;
+      }
+      if (anyAuthority) return true;
+      // No explicit port = scheme default only, on the bare host (`[^/]*` can't span `:port`).
+      return authorityRules.some((r) =>
+        r.explicitPort ? r.regex.test(`${h}:${port}`) : r.defaultPort === port && r.regex.test(h),
+      );
+    },
+  };
 }

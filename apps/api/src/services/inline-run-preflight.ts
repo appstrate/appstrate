@@ -60,7 +60,7 @@ export interface InlineRunPreflightResult {
   /**
    * Caller's per-integration connection picks (cascade layer 3, the run override), read off
    * the body ONCE below and carried here. Nothing else on the inline path feeds
-   * them to the readiness gate, so without this a `must_choose_connection` 412
+   * them to the readiness gate, so without this a `must_choose_connection` 409
    * is inescapable here; and every consumer — both readiness branches and
    * `prepareAndExecuteRun` — must gate on this one value, since a second
    * independent read is how two passes come to disagree about which connection
@@ -160,7 +160,7 @@ export async function runInlinePreflight(params: {
   //
   // `requireCallableTools` stays OFF: its rules are freeze-point rules (publish /
   // import), and an inline agent freezes nothing — readiness below answers an
-  // `auth_key` misfit as the resolver's 412. The subset checks below are
+  // `auth_key` misfit as the resolver's 409. The subset checks below are
   // the whole point here.
   //
   // The memo below is what makes those checks judge the PINNED integration

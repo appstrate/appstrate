@@ -165,7 +165,7 @@ describe("buildPublishFileDef", () => {
   it("emits a file.published event with no presentation field", () => {
     expect(filePublishedEvent(publishedFile)).toEqual({
       type: "file.published",
-      file_id: "file_primary",
+      fileId: "file_primary",
       uri: "appfile://file_primary",
       name: "Final report.html",
       mime: "text/html",
@@ -240,13 +240,13 @@ describe("run-event type compatibility (#1177)", () => {
       {
         [RUNTIME_TOOL_EVENTS_META_KEY]: [
           { type: "document.published", document_id: "file_legacy" },
-          { type: "file.published", file_id: "file_new" },
+          { type: "file.published", fileId: "file_new" },
           { type: "forged.event", x: 1 },
         ],
       },
       (e) => emitted.push(e),
     );
-    expect(emitted).toEqual([{ type: "file.published", file_id: "file_new" }]);
+    expect(emitted).toEqual([{ type: "file.published", fileId: "file_new" }]);
   });
 });
 

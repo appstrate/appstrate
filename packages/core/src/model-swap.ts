@@ -11,34 +11,25 @@
 import type { ModelApiShape, ModelSwap } from "./sidecar-types.ts";
 
 /**
- * The protocols an alias can be BACKED by. Only these carry the model id in the
- * request BODY; url-model shapes cannot back an alias.
- */
-const ALIAS_BACKING_SHAPES = [
-  "anthropic-messages",
-  "openai-completions",
-  "openai-responses",
-  "openai-codex-responses",
-  "mistral-conversations",
-] as const satisfies readonly ModelApiShape[];
-
-/** A protocol an alias can be BACKED by — never one a client speaks. */
-export type AliasBackingApiShape = (typeof ALIAS_BACKING_SHAPES)[number];
-
-export function isAliasBackingShape(shape: ModelApiShape): shape is AliasBackingApiShape {
-  return (ALIAS_BACKING_SHAPES as readonly ModelApiShape[]).includes(shape);
-}
-
-/**
  * The protocol an ALIASED run's container speaks — pi-ai's vendor-neutral
  * `pi-messages`. `buildRuntimePiEnv` emits it as `MODEL_API` and the launcher
  * stamps it on `ModelSwap.clientApiShape`; split the two and the sidecar's inbound
  * allowlist refuses every call the container makes.
  */
-export const ALIAS_CLIENT_API_SHAPE: ModelApiShape = "pi-messages";
+export const ALIAS_CLIENT_API_SHAPE = "pi-messages" as const satisfies ModelApiShape;
 
 export function isAliasClientShape(shape: ModelApiShape): boolean {
   return shape === ALIAS_CLIENT_API_SHAPE;
+}
+
+/**
+ * A protocol an alias can be BACKED by: every vendor protocol (each carries the
+ * model id in the request BODY) — i.e. every shape but the client dialect.
+ */
+export type AliasBackingApiShape = Exclude<ModelApiShape, typeof ALIAS_CLIENT_API_SHAPE>;
+
+export function isAliasBackingShape(shape: ModelApiShape): shape is AliasBackingApiShape {
+  return !isAliasClientShape(shape);
 }
 
 // Sidecar boot pins `clientApiShape` to the client dialect, so one path is exact.
@@ -59,11 +50,13 @@ export function isAliasInferenceCall(method: string, path: string): boolean {
  * Reason an aliased model fails its configuration invariants, or `null`:
  *   - `missing_label` — a derived label names the real backing, leaking it on
  *     `/api/models` and `run.model_label`.
- *   - `non_aliasable_shape` — model id in the URL, or the client-only dialect.
  *   - `oauth_provider` — the oauth `/llm` mode is a pure bearer-swap carrying no
  *     `modelSwap`, so an alias there could never be swapped.
+ *
+ * No shape rule: a backing's shape is its provider's, and provider registration
+ * refuses the client dialect.
  */
-export type AliasInvariantViolation = "missing_label" | "non_aliasable_shape" | "oauth_provider";
+export type AliasInvariantViolation = "missing_label" | "oauth_provider";
 
 /**
  * The alias invariants, shared by the two boundaries that accept one: the
@@ -71,11 +64,9 @@ export type AliasInvariantViolation = "missing_label" | "non_aliasable_shape" | 
  */
 export function checkAliasInvariants(input: {
   label?: string | null;
-  apiShape: ModelApiShape;
   authMode: "api_key" | "oauth2";
 }): AliasInvariantViolation | null {
   if (!input.label) return "missing_label";
-  if (!isAliasBackingShape(input.apiShape)) return "non_aliasable_shape";
   if (input.authMode === "oauth2") return "oauth_provider";
   return null;
 }
@@ -142,7 +133,7 @@ const ALIAS_UPSTREAM_ERROR_MESSAGE = "Upstream model error";
  *
  * 1. VENDOR IDENTITY — may the number be disclosed at all? A status normally
  *    describes the TRANSACTION, not the backing: every candidate backing
- *    ({@link ALIAS_BACKING_SHAPES} — `anthropic-messages`,
+ *    ({@link AliasBackingApiShape} — `anthropic-messages`,
  *    `openai-completions`, `openai-responses`, `openai-codex-responses`,
  *    `mistral-conversations`) answers 429 when throttled and 400 on a bad
  *    request, so forwarding one costs no opacity. A status only SOME of them
@@ -325,14 +316,22 @@ export function syntheticAliasClassifierMessage(status?: number): string {
  * retryable outage. A structured field cannot be mistaken for prose.
  */
 export function syntheticAliasErrorBody(swap: ModelSwap, status?: number): string {
-  return JSON.stringify({
-    type: "error",
-    error: {
-      type: "upstream_error",
-      message: syntheticAliasClassifierMessage(status),
-      model: swap.alias,
-    },
+  return llmProxyErrorBody("upstream_error", syntheticAliasClassifierMessage(status), {
+    model: swap.alias,
   });
+}
+
+/**
+ * Error envelope for refusals the sidecar's `/llm/*` proxy answers itself. One
+ * body parses in every dialect: Anthropic's SDK keys on `type: "error"` +
+ * `error.{type,message}`, the OpenAI family reads `error.{message,type}`.
+ */
+export function llmProxyErrorBody(
+  type: string,
+  message: string,
+  extra?: Record<string, unknown>,
+): string {
+  return JSON.stringify({ type: "error", error: { type, message, ...extra } });
 }
 
 function isErrorObject(value: unknown): boolean {

@@ -33,7 +33,7 @@ Put the optional hint in the Appstrate resource namespace:
   "name": "@acme/report-agent",
   "version": "1.0.0",
   "type": "agent",
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "display_name": "Report agent",
   "author": "Acme",
   "_meta": {

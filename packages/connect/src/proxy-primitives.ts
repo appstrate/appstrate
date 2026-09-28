@@ -301,14 +301,12 @@ export function filterHeaders(
  * sidecar, `LLM_PROXY_STREAM_IDLE_TIMEOUT_MS` on the platform).
  *
  * This is the bound that fixes the reported bug. Pi's SDK passes a `timeoutMs`
- * down to its provider adapters, but four of the api shapes this platform maps
- * ignore it entirely (`google-generative-ai`, `google-vertex`,
- * `bedrock-converse-stream`, `pi-messages` — grep `timeoutMs` in
- * `@earendil-works/pi-ai/dist/api/*.js`, they honour only `options.signal`). A
- * stalled Gemini/Vertex/Bedrock stream was therefore bounded by nothing tighter
- * than each proxy's absolute cap, and runs died on their wall-clock watchdog
- * with no error to show the user. An Appstrate-owned proxy is the only
- * provider-agnostic place that covers all four shapes.
+ * down to its provider adapters, but not every adapter honours it (`pi-messages`
+ * does not — grep `timeoutMs` in `@earendil-works/pi-ai/dist/api/*.js`; it
+ * honours only `options.signal`). A stalled stream on such a shape is bounded by
+ * nothing tighter than each proxy's absolute cap, and the run dies on its
+ * wall-clock watchdog with no error to show the user. An Appstrate-owned proxy
+ * is the only provider-agnostic place that covers every shape.
  *
  * 120 s, i.e. deliberately looser than either proxy's first-response (TTFB)
  * bound: once a provider has started streaming, a long pause is a real (if

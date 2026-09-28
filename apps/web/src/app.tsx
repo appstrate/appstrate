@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, lazy, Suspense } from "react";
+import { useEffect, lazy, Suspense, type ReactNode } from "react";
 import { Routes, Route, Outlet, useLocation, useSearchParams, Navigate } from "react-router-dom";
 import { PackageList } from "./pages/package-list";
 import { DashboardPage } from "./pages/dashboard";
@@ -26,17 +26,18 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
-import { RequirePermission, RequireOrgCatalogAdmin } from "./components/require-permission";
+import { RouteGate, RequireOrgCatalogAdmin } from "./components/route-gate";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@appstrate/ui/components/sidebar";
 import { AppToaster } from "./components/app-toaster";
-import { WEBHOOK_READ_PERMISSIONS } from "./lib/webhook-permissions";
+import type { RoutePath } from "./lib/route-access";
 
 // Module-owned pages live under `apps/web/src/modules/<name>/` and are
 // lazy-loaded so their bundle is never fetched when the corresponding module
-// is disabled (zero-footprint invariant).
+// is disabled (zero-footprint invariant): `RouteGate` redirects before
+// rendering a route whose declared `feature` is off.
 const WebhooksPage = lazy(() =>
   import("./modules/webhooks/pages/webhooks-page").then((m) => ({ default: m.WebhooksPage })),
 );
@@ -197,6 +198,226 @@ const PreferencesDevicesPage = lazy(() =>
 /** Suspense boundary for lazy route elements — same fallback as module pages. */
 function LazyRoute({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<LoadingState />}>{children}</Suspense>;
+}
+
+/**
+ * The page of every route under `MainLayout`, keyed like its access
+ * declaration (`lib/route-access.ts`): a route without one, or one without a
+ * page, fails to compile. Mounted by `pageRoute`, always behind `RouteGate`.
+ */
+const PAGES: Record<RoutePath, ReactNode> = {
+  "/": <DashboardPage />,
+  "/agents": <PackageList />,
+  "/agents/new": (
+    <LazyRoute>
+      <PackageEditorPage type="agent" />
+    </LazyRoute>
+  ),
+  "/agents/:scope/:name/edit": (
+    <LazyRoute>
+      <PackageEditorPage type="agent" />
+    </LazyRoute>
+  ),
+  "/agents/:scope/:name": (
+    <LazyRoute>
+      <UnifiedPackageDetailPage type="agent" />
+    </LazyRoute>
+  ),
+  "/agents/:scope/:name/:version": (
+    <LazyRoute>
+      <UnifiedPackageDetailPage type="agent" />
+    </LazyRoute>
+  ),
+  "/agents/:scope/:name/runs/:runId": (
+    <LazyRoute>
+      <RunDetailPage />
+    </LazyRoute>
+  ),
+  "/runs": (
+    <LazyRoute>
+      <RunsPage />
+    </LazyRoute>
+  ),
+  "/files": (
+    <LazyRoute>
+      <FilesPage />
+    </LazyRoute>
+  ),
+  "/schedules": (
+    <LazyRoute>
+      <SchedulesListPage />
+    </LazyRoute>
+  ),
+  "/schedules/new": (
+    <LazyRoute>
+      <ScheduleCreatePage />
+    </LazyRoute>
+  ),
+  "/schedules/:id": (
+    <LazyRoute>
+      <ScheduleDetailPage />
+    </LazyRoute>
+  ),
+  "/schedules/:id/edit": (
+    <LazyRoute>
+      <ScheduleEditPage />
+    </LazyRoute>
+  ),
+  "/skills": (
+    <LazyRoute>
+      <SkillsPage />
+    </LazyRoute>
+  ),
+  "/skills/new": (
+    <LazyRoute>
+      <PackageEditorPage type="skill" />
+    </LazyRoute>
+  ),
+  "/skills/:scope/:name/edit": (
+    <LazyRoute>
+      <PackageEditorPage type="skill" />
+    </LazyRoute>
+  ),
+  "/skills/:scope/:name": (
+    <LazyRoute>
+      <UnifiedPackageDetailPage type="skill" />
+    </LazyRoute>
+  ),
+  "/skills/:scope/:name/:version": (
+    <LazyRoute>
+      <UnifiedPackageDetailPage type="skill" />
+    </LazyRoute>
+  ),
+  "/integrations": (
+    <LazyRoute>
+      <IntegrationsPage />
+    </LazyRoute>
+  ),
+  "/integrations/new": (
+    <LazyRoute>
+      <PackageEditorPage type="integration" />
+    </LazyRoute>
+  ),
+  "/integrations/:scope/:name/edit": (
+    <LazyRoute>
+      <PackageEditorPage type="integration" />
+    </LazyRoute>
+  ),
+  "/integrations/:scope/:name": (
+    <LazyRoute>
+      <IntegrationDetailPage />
+    </LazyRoute>
+  ),
+  "/mcp-servers": (
+    <LazyRoute>
+      <McpServersPage />
+    </LazyRoute>
+  ),
+  "/mcp-servers/:scope/:name/edit": (
+    <LazyRoute>
+      <PackageEditorPage type="mcp-server" />
+    </LazyRoute>
+  ),
+  "/mcp-servers/:scope/:name": (
+    <LazyRoute>
+      <UnifiedPackageDetailPage type="mcp-server" />
+    </LazyRoute>
+  ),
+  "/mcp-servers/:scope/:name/:version": (
+    <LazyRoute>
+      <UnifiedPackageDetailPage type="mcp-server" />
+    </LazyRoute>
+  ),
+  "/space/packages": (
+    <LazyRoute>
+      <SpacePackagesPage />
+    </LazyRoute>
+  ),
+  "/library": (
+    <RequireOrgCatalogAdmin>
+      <LazyRoute>
+        <LibraryPage />
+      </LazyRoute>
+    </RequireOrgCatalogAdmin>
+  ),
+  "/preferences": (
+    <LazyRoute>
+      <PreferencesLayout />
+    </LazyRoute>
+  ),
+  "/preferences/general": <PreferencesGeneralPage />,
+  "/preferences/appearance": <PreferencesAppearancePage />,
+  "/preferences/security": <PreferencesSecurityPage />,
+  "/preferences/devices": <PreferencesDevicesPage />,
+  "/preferences/connections": <PreferencesConnectionsPage />,
+  "/webhooks": (
+    <LazyRoute>
+      <WebhooksPage />
+    </LazyRoute>
+  ),
+  "/webhooks/:id": (
+    <LazyRoute>
+      <WebhookDetailPage />
+    </LazyRoute>
+  ),
+  "/chat": (
+    <LazyRoute>
+      <ChatModulePage />
+    </LazyRoute>
+  ),
+  "/chat/:conversationId": (
+    <LazyRoute>
+      <ChatModulePage />
+    </LazyRoute>
+  ),
+  "/end-users": (
+    <LazyRoute>
+      <EndUsersPage />
+    </LazyRoute>
+  ),
+  "/org-settings": (
+    <LazyRoute>
+      <OrgSettingsLayout />
+    </LazyRoute>
+  ),
+  "/org-settings/general": <OrgSettingsGeneralPage />,
+  "/org-settings/members": <OrgSettingsMembersPage />,
+  "/org-settings/roles": <OrgSettingsRolesPage />,
+  "/org-settings/spaces": <OrgSettingsSpacesPage />,
+  "/org-settings/models": <OrgSettingsModelsPage />,
+  "/org-settings/proxies": <OrgSettingsProxiesPage />,
+  "/org-settings/oauth": <OrgSettingsOAuthPage />,
+  "/org-settings/cli-sessions": <OrgSettingsCliSessionsPage />,
+  "/org-settings/billing": <OrgSettingsBillingPage />,
+  "/org-settings/space/general": <OrgSettingsSpaceGeneralPage />,
+  "/org-settings/space/members": <OrgSettingsSpaceMembersPage />,
+  "/org-settings/space/api-keys": <ApiKeysPage />,
+  "/org-settings/space/auth": <OrgSettingsSpaceAuthPage />,
+  "/org-settings/space/oauth": <OrgSettingsSpaceOauthPage />,
+};
+
+const PATHS = Object.keys(PAGES) as RoutePath[];
+
+/** The two nested layouts; each index redirects to its `general` child. */
+const LAYOUTS = ["/preferences", "/org-settings"] as const satisfies readonly RoutePath[];
+
+function pageRoute(path: RoutePath) {
+  return (
+    <Route key={path} path={path} element={<RouteGate path={path}>{PAGES[path]}</RouteGate>} />
+  );
+}
+
+function layoutRoute(layout: (typeof LAYOUTS)[number]) {
+  return (
+    <Route
+      key={layout}
+      path={layout}
+      element={<RouteGate path={layout}>{PAGES[layout]}</RouteGate>}
+    >
+      <Route index element={<Navigate to="general" replace />} />
+      {PATHS.filter((path) => path.startsWith(`${layout}/`)).map(pageRoute)}
+    </Route>
+  );
 }
 
 /**
@@ -589,443 +810,10 @@ export function App() {
               </GlobalRealtimeSync>
             }
           >
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/agents" element={<PackageList />} />
-            <Route
-              path="/agents/new"
-              element={
-                <RequirePermission permission="agents:write">
-                  <LazyRoute>
-                    <PackageEditorPage type="agent" />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            {/* No current-space permission gate: write authority is the
-                package's HOME space (`home_writable` on its own read, RBAC spec
-                §6.9), which the caller may hold while only READING the space
-                they are browsing from. The editor page renders the no-access
-                panel from that field instead. */}
-            <Route
-              path="/agents/:scope/:name/edit"
-              element={
-                <LazyRoute>
-                  <PackageEditorPage type="agent" />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/agents/:scope/:name"
-              element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="agent" />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/agents/:scope/:name/:version"
-              element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="agent" />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/agents/:scope/:name/runs/:runId"
-              element={
-                <LazyRoute>
-                  <RunDetailPage />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/runs"
-              element={
-                <LazyRoute>
-                  <RunsPage />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/files"
-              element={
-                <LazyRoute>
-                  <FilesPage />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/schedules"
-              element={
-                <RequirePermission permission="schedules:read">
-                  <LazyRoute>
-                    <SchedulesListPage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/schedules/new"
-              element={
-                <RequirePermission permission="schedules:write">
-                  <LazyRoute>
-                    <ScheduleCreatePage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/schedules/:id"
-              element={
-                <RequirePermission permission="schedules:read">
-                  <LazyRoute>
-                    <ScheduleDetailPage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/schedules/:id/edit"
-              element={
-                <RequirePermission permission="schedules:write">
-                  <LazyRoute>
-                    <ScheduleEditPage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/skills"
-              element={
-                <RequirePermission permission="skills:read">
-                  <LazyRoute>
-                    <SkillsPage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/integrations"
-              element={
-                <LazyRoute>
-                  <IntegrationsPage />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/integrations/new"
-              element={
-                <LazyRoute>
-                  <PackageEditorPage type="integration" />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/integrations/:scope/:name/edit"
-              element={
-                <LazyRoute>
-                  <PackageEditorPage type="integration" />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/integrations/:scope/:name"
-              element={
-                <LazyRoute>
-                  <IntegrationDetailPage />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/skills/new"
-              element={
-                <RequirePermission permission="skills:write">
-                  <LazyRoute>
-                    <PackageEditorPage type="skill" />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            {/* Same as the agent editor above: the home decides, not the
-                current space. */}
-            <Route
-              path="/skills/:scope/:name/edit"
-              element={
-                <LazyRoute>
-                  <PackageEditorPage type="skill" />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/skills/:scope/:name"
-              element={
-                <RequirePermission permission="skills:read">
-                  <LazyRoute>
-                    <UnifiedPackageDetailPage type="skill" />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/skills/:scope/:name/:version"
-              element={
-                <RequirePermission permission="skills:read">
-                  <LazyRoute>
-                    <UnifiedPackageDetailPage type="skill" />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/mcp-servers"
-              element={
-                <RequirePermission permission="mcp-servers:read">
-                  <LazyRoute>
-                    <McpServersPage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/mcp-servers/:scope/:name/edit"
-              element={
-                <LazyRoute>
-                  <PackageEditorPage type="mcp-server" />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/mcp-servers/:scope/:name"
-              element={
-                <RequirePermission permission="mcp-servers:read">
-                  <LazyRoute>
-                    <UnifiedPackageDetailPage type="mcp-server" />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/mcp-servers/:scope/:name/:version"
-              element={
-                <RequirePermission permission="mcp-servers:read">
-                  <LazyRoute>
-                    <UnifiedPackageDetailPage type="mcp-server" />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/space/packages"
-              element={
-                <RequirePermission permission="spaces:read">
-                  <LazyRoute>
-                    <SpacePackagesPage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/library"
-              element={
-                <RequireOrgCatalogAdmin>
-                  <LazyRoute>
-                    <LibraryPage />
-                  </LazyRoute>
-                </RequireOrgCatalogAdmin>
-              }
-            />
-            <Route
-              path="/preferences"
-              element={
-                <LazyRoute>
-                  <PreferencesLayout />
-                </LazyRoute>
-              }
-            >
-              <Route index element={<Navigate to="general" replace />} />
-              <Route path="general" element={<PreferencesGeneralPage />} />
-              <Route path="appearance" element={<PreferencesAppearancePage />} />
-              <Route path="security" element={<PreferencesSecurityPage />} />
-              <Route path="devices" element={<PreferencesDevicesPage />} />
-              <Route path="connections" element={<PreferencesConnectionsPage />} />
-            </Route>
-            {features.webhooks && (
-              <>
-                <Route
-                  path="/webhooks"
-                  element={
-                    <RequirePermission permission={WEBHOOK_READ_PERMISSIONS}>
-                      <Suspense fallback={<LoadingState />}>
-                        <WebhooksPage />
-                      </Suspense>
-                    </RequirePermission>
-                  }
-                />
-                <Route
-                  path="/webhooks/:id"
-                  element={
-                    <RequirePermission permission={WEBHOOK_READ_PERMISSIONS}>
-                      <Suspense fallback={<LoadingState />}>
-                        <WebhookDetailPage />
-                      </Suspense>
-                    </RequirePermission>
-                  }
-                />
-              </>
-            )}
-            {features.chat && (
-              <>
-                <Route
-                  path="/chat"
-                  element={
-                    <Suspense fallback={<LoadingState />}>
-                      <ChatModulePage />
-                    </Suspense>
-                  }
-                />
-                <Route
-                  path="/chat/:conversationId"
-                  element={
-                    <Suspense fallback={<LoadingState />}>
-                      <ChatModulePage />
-                    </Suspense>
-                  }
-                />
-              </>
-            )}
-            {/* Space-scoped routes (read spaceId from store, like orgId) */}
-            <Route
-              path="/end-users"
-              element={
-                <RequirePermission permission="end-users:read">
-                  <LazyRoute>
-                    <EndUsersPage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/org-settings"
-              element={
-                <LazyRoute>
-                  <OrgSettingsLayout />
-                </LazyRoute>
-              }
-            >
-              <Route index element={<Navigate to="general" replace />} />
-              <Route
-                path="general"
-                element={
-                  <RequirePermission permission="org:read">
-                    <OrgSettingsGeneralPage />
-                  </RequirePermission>
-                }
-              />
-              <Route
-                path="members"
-                element={
-                  <RequirePermission permission="members:read">
-                    <OrgSettingsMembersPage />
-                  </RequirePermission>
-                }
-              />
-              <Route
-                path="roles"
-                element={
-                  <RequirePermission permission="roles:read">
-                    <OrgSettingsRolesPage />
-                  </RequirePermission>
-                }
-              />
-              <Route
-                path="spaces"
-                element={
-                  <RequirePermission permission="spaces:read">
-                    <OrgSettingsSpacesPage />
-                  </RequirePermission>
-                }
-              />
-              <Route
-                path="models"
-                element={
-                  <RequirePermission permission="models:read">
-                    <OrgSettingsModelsPage />
-                  </RequirePermission>
-                }
-              />
-              <Route
-                path="proxies"
-                element={
-                  <RequirePermission permission="proxies:read">
-                    <OrgSettingsProxiesPage />
-                  </RequirePermission>
-                }
-              />
-              <Route
-                path="oauth"
-                element={
-                  <RequirePermission permission="oauth-clients:read">
-                    <OrgSettingsOAuthPage />
-                  </RequirePermission>
-                }
-              />
-              <Route
-                path="cli-sessions"
-                element={
-                  <RequirePermission permission="cli-sessions:read">
-                    <OrgSettingsCliSessionsPage />
-                  </RequirePermission>
-                }
-              />
-              <Route
-                path="billing"
-                element={
-                  <RequirePermission permission="billing:read">
-                    <OrgSettingsBillingPage />
-                  </RequirePermission>
-                }
-              />
-              <Route
-                path="space/general"
-                element={
-                  <RequirePermission permission="space-settings:write">
-                    <OrgSettingsSpaceGeneralPage />
-                  </RequirePermission>
-                }
-              />
-              <Route
-                path="space/members"
-                element={
-                  <RequirePermission permission={["space-members:read", "space-members:invite"]}>
-                    <OrgSettingsSpaceMembersPage />
-                  </RequirePermission>
-                }
-              />
-              <Route
-                path="space/api-keys"
-                element={
-                  <RequirePermission permission="api-keys:read">
-                    <ApiKeysPage />
-                  </RequirePermission>
-                }
-              />
-              <Route
-                path="space/auth"
-                element={
-                  <RequirePermission permission="space-settings:write">
-                    <OrgSettingsSpaceAuthPage />
-                  </RequirePermission>
-                }
-              />
-              <Route
-                path="space/oauth"
-                element={
-                  <RequirePermission permission="oauth-clients:read">
-                    <OrgSettingsSpaceOauthPage />
-                  </RequirePermission>
-                }
-              />
-            </Route>
+            {PATHS.filter(
+              (path) => !LAYOUTS.some((l) => path.startsWith(`${l}/`) || path === l),
+            ).map(pageRoute)}
+            {LAYOUTS.map(layoutRoute)}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

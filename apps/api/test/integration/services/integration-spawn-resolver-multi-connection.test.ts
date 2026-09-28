@@ -208,7 +208,7 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
   });
 
   // `account_id` is ONE value wherever it is shown: the column the cascade
-  // snapshots and the 412 candidates carry. Its identity-less placeholder is no
+  // snapshots and the 409 candidates carry. Its identity-less placeholder is no
   // account, so it reaches the sidecar as null.
   it("carries the account_id column, with the identity-less placeholder as null", async () => {
     const mail = await seedConnection({

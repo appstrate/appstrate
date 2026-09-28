@@ -297,9 +297,10 @@ describe("webhooks service", () => {
         },
       ]);
 
-      const deliveries = await listDeliveries({ orgId }, created.id);
+      const { data: deliveries, hasMore } = await listDeliveries({ orgId }, created.id);
 
       expect(deliveries).toHaveLength(2);
+      expect(hasMore).toBe(false);
       const statuses = deliveries.map((d) => d.status);
       expect(statuses).toContain("success");
       expect(statuses).toContain("failed");
@@ -310,7 +311,7 @@ describe("webhooks service", () => {
         appLevel({ url: "https://example.com/empty-deliveries" }),
       );
 
-      const deliveries = await listDeliveries({ orgId }, created.id);
+      const { data: deliveries } = await listDeliveries({ orgId }, created.id);
       expect(deliveries).toHaveLength(0);
     });
   });

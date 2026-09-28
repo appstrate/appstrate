@@ -1,24 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Server half of `appstrate skills sync`. No bulk endpoint exists, so it is one
- * list call, one resolution call per skill, and downloads only for what
+ * Server half of `appstrate code sync`. No bulk endpoint exists, so it is one
+ * list call, one resolution call per package, and downloads only for what
  * changed; concurrency is capped because the package routes are rate limited.
+ * Agent commands are rendered from their detail read and download nothing.
  */
 
-import { apiFetch, apiFetchRaw, apiList, ApiError } from "../api.ts";
+import { apiFetchRaw, apiFetchWithHeaders, apiList, ApiError, problemFields } from "../api.ts";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
-import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
-import {
-  PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES,
-  stripWrapperPrefix,
-  unzipArtifact,
-} from "@appstrate/core/zip";
 import { extractSkillMeta } from "@appstrate/core/validation";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
-import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
-import { collisionSlug, DROPPED_ENTRIES, SKILL_ENTRY, skillSlug } from "./materialize.ts";
+import {
+  draftRefusal,
+  fetchPackageDefinition,
+  PackageDefinitionError,
+} from "../package-definition.ts";
+import {
+  AGENT_SLUG_PREFIX,
+  agentSlug,
+  collisionSlug,
+  materializeAgent,
+  SKILL_ENTRY,
+  skillSlug,
+  treeIntegrity,
+  type AgentLaunchView,
+} from "./materialize.ts";
 import {
   emptyTargetState,
   STATE_VERSION,
@@ -45,69 +53,116 @@ class SkillSyncError extends Error {
 
 /**
  * `--source draft` NAMES the working copy, and every route that honours the
- * selector — the package detail as much as the file index and file content —
- * reserves that act to whoever may write the package: they answer
- * `403 draft_not_writable` to everybody else. "HTTP 403 Forbidden" would send
- * that reader hunting for a permission on the sync itself, so the refusal says
- * whose copy it is and what to run instead. One definition, called from each
- * of the three: a reader who hits the earliest refusal must not get a thinner
- * message than one whose grant is revoked mid-sync.
+ * selector — the package detail, the file index and the draft archive —
+ * reserves that act to whoever may write the package. One remedy for each of
+ * the three refusals: a reader who hits the earliest one must not get a
+ * thinner message than one whose grant is revoked mid-sync.
  */
-function draftRefusal(packageId: string, status: number, what: string): SkillSyncError | null {
-  if (status !== 403) return null;
-  return new SkillSyncError(
-    `The draft of ${packageId} is the author's working copy${what}`,
-    "`--source draft` reads it, which needs `skills:write` on the skill in its home space. Sync the published artifact with `--source published`.",
-  );
+const DRAFT_REMEDY = "Sync the published artifact with `--source published`.";
+
+const DRAFT_NOT_WRITABLE = "draft_not_writable";
+
+/** The author-only refusal: authority, not chance, so the next run is refused the same way. */
+export function isDraftRefusal(err: unknown): boolean {
+  return err instanceof PackageDefinitionError && err.code === DRAFT_NOT_WRITABLE;
 }
 
-interface SkillListRow {
+interface PackageListRow {
   id: string;
   source?: string;
-}
-
-export interface FileIndexEntry {
-  path?: unknown;
-  /** Full text of a small text file, already carried by the index. */
-  inline?: unknown;
 }
 
 export interface ResolvedSkill {
   packageId: string;
   spaceId?: string;
   version: string;
-  /** SRI for a published artifact, ETag + `lock_version` for a draft. */
+  /** SRI for a published artifact, the draft and file-index ETags for a draft. */
   integrity: string;
   /** Frontmatter `name` of the skill's `SKILL.md`, empty when it has none. */
   frontmatterName: string;
-  /** Draft only: the index whose ETag produced `integrity`, kept to avoid a refetch. */
-  draftIndex?: FileIndexEntry[];
 }
 
-export interface PlannedSkill extends ResolvedSkill {
+interface SlugClaim {
   slug: string;
-  /** Set when a collision forced the `<scope>-<name>` fallback (D4). */
+  /** Set when a collision forced the `<scope>-<name>` fallback (D4, D23). */
   renamedFrom?: string;
+}
+
+interface PlannedSkill extends ResolvedSkill, SlugClaim {
+  kind: "skill";
+}
+
+interface PlannedAgent extends SlugClaim {
+  kind: "agent";
+  packageId: string;
+  version: string;
+  /** SRI of the rendered tree (D22): a template, lock or space change moves it. */
+  integrity: string;
+  files: Record<string, Uint8Array>;
+}
+
+export type PlannedEntry = PlannedSkill | PlannedAgent;
+
+interface ListedPackage {
+  packageId: string;
+  system: boolean;
 }
 
 /**
  * Sorted by package id, which is what makes collision resolution reproducible
- * rather than server-order dependent. System packages are the platform's.
+ * rather than server-order dependent.
  *
- * The index listing IS the ACTIVE set, not merely the placed one. Activation is
- * what a space OFFERS — a skill switched off there is one somebody decided the
+ * Both listings ARE the ACTIVE set, not merely the placed one. Activation is
+ * what a space OFFERS — a package switched off there is one somebody decided the
  * space would not use, and writing it into the local Claude Code checkout anyway
- * would hand the switch no meaning outside the dashboard. A skill switched back
+ * would hand the switch no meaning outside the dashboard. A package switched back
  * on reappears on the next sync, because the sync reads this list every time.
  */
-export async function listSyncableSkills(profileName: string, spaceId?: string): Promise<string[]> {
-  const rows = await apiList<SkillListRow>(profileName, "/api/packages/skills", {
-    spaceId,
-  });
+async function listActive(
+  profileName: string,
+  path: string,
+  spaceId?: string,
+): Promise<ListedPackage[]> {
+  const rows = await apiList<PackageListRow>(profileName, path, { spaceId });
   return rows
-    .filter((row) => row.source !== "system" && typeof row.id === "string" && row.id.length > 0)
-    .map((row) => row.id)
-    .sort();
+    .filter((row) => typeof row.id === "string" && row.id.length > 0)
+    .map((row) => ({ packageId: row.id, system: row.source === "system" }))
+    .sort((a, b) => (a.packageId < b.packageId ? -1 : a.packageId > b.packageId ? 1 : 0));
+}
+
+/** System skills are the platform's, not the organization's. */
+export async function listSyncableSkills(profileName: string, spaceId?: string): Promise<string[]> {
+  const listed = await listActive(profileName, "/api/packages/skills", spaceId);
+  return listed.filter((row) => !row.system).map((row) => row.packageId);
+}
+
+/**
+ * `GET /api/agents` answers `agents:run` alone: it is the launchable set the
+ * MCP session of that space accepts (D19). System agents stay: they launch.
+ */
+export function listSyncableAgents(profileName: string, spaceId: string): Promise<ListedPackage[]> {
+  return listActive(profileName, "/api/agents", spaceId);
+}
+
+/** Both kinds: `null` on 404, the author-only refusal when the draft is named. */
+async function readDetail<T>(
+  profileName: string,
+  path: string,
+  packageId: string,
+  type: "skill" | "agent",
+  spaceId?: string,
+): Promise<{ body: T; headers: Headers } | null> {
+  try {
+    return await apiFetchWithHeaders<T>(profileName, path, { spaceId });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      if (err.status === 404) return null;
+      if (problemFields(err.body).code === DRAFT_NOT_WRITABLE) {
+        throw draftRefusal(packageId, type, DRAFT_REMEDY);
+      }
+    }
+    throw err;
+  }
 }
 
 /** `null` means no published version — a note on stderr, not a failure. */
@@ -132,17 +187,15 @@ async function resolvePublished(
     integrity?: unknown;
     content?: unknown;
   }
-  let detail: VersionDetail;
-  try {
-    detail = await apiFetch<VersionDetail>(
-      profileName,
-      `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/latest`,
-      { spaceId },
-    );
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null;
-    throw err;
-  }
+  const read = await readDetail<VersionDetail>(
+    profileName,
+    `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/latest`,
+    packageId,
+    "skill",
+    spaceId,
+  );
+  if (!read) return null;
+  const detail = read.body;
   if (typeof detail.version !== "string" || typeof detail.integrity !== "string") {
     throw new SkillSyncError(
       `Version detail for ${packageId} is missing version or integrity`,
@@ -165,27 +218,21 @@ async function resolveDraft(
 ): Promise<ResolvedSkill | null> {
   interface DraftDetail {
     content?: unknown;
-    lock_version?: unknown;
   }
-  let detail: DraftDetail;
-  try {
-    detail = await apiFetch<DraftDetail>(
-      profileName,
-      `/api/packages/skills/${encodePackageIdPath(packageId)}?version=draft`,
-      { spaceId },
-    );
-  } catch (err) {
-    if (err instanceof ApiError) {
-      if (err.status === 404) return null;
-      // This request names `?version=draft` as well, so for a non-author it is
-      // the FIRST one refused — before `/files` below ever runs. Relaying the
-      // raw 403 here is what would lose the actionable refusal entirely.
-      throw draftRefusal(packageId, err.status, ".") ?? err;
-    }
-    throw err;
-  }
+  // This request names `?version=draft` as well, so for a non-author it is
+  // the FIRST one refused — before `/files` below ever runs.
+  const read = await readDetail<DraftDetail>(
+    profileName,
+    `/api/packages/skills/${encodePackageIdPath(packageId)}?version=draft`,
+    packageId,
+    "skill",
+    spaceId,
+  );
+  if (!read) return null;
+  const detail = read.body;
+  const detailEtag = read.headers.get("etag") ?? "";
   // A draft has no immutable digest: the change token is the index ETag and
-  // `lock_version`, the two values that DO move with its content.
+  // the draft's own ETag, the two values that DO move with its content.
   // BOTH requests name `?version=draft`, never leaving it to the route's
   // default: omitted, detail and file routes alike serve the definition the
   // DETAIL page renders — the published version for anyone who cannot write
@@ -198,155 +245,174 @@ async function resolveDraft(
     { spaceId },
   );
   if (!res.ok) {
-    throw (
-      draftRefusal(packageId, res.status, ".") ??
-      new SkillSyncError(
-        `Draft file index for ${packageId} failed: HTTP ${res.status} ${res.statusText}`,
-        "Re-run without `--source draft`, or check that the skill still exists.",
-      )
+    const problem = problemFields(await res.json().catch(() => undefined));
+    if (problem.code === DRAFT_NOT_WRITABLE) {
+      throw draftRefusal(packageId, "skill", DRAFT_REMEDY);
+    }
+    throw new SkillSyncError(
+      `Draft file index for ${packageId} failed: ${problem.detail ?? `HTTP ${res.status} ${res.statusText}`}`,
+      "Re-run without `--source draft`, or check that the skill still exists.",
     );
   }
   const etag = res.headers.get("etag") ?? "";
-  const lock = typeof detail.lock_version === "number" ? String(detail.lock_version) : "0";
-  const index = (await res.json()) as { entries?: FileIndexEntry[] };
   return {
     packageId,
     ...(spaceId ? { spaceId } : {}),
     version: "draft",
-    integrity: `draft:${lock}:${etag}`,
+    integrity: `draft:${detailEtag}:${etag}`,
     frontmatterName: frontmatterNameOf(detail.content),
-    // This IS the index the download needs, and its ETag is only meaningful
-    // for the body it came with.
-    draftIndex: index.entries ?? [],
   };
 }
 
 /**
- * Input order decides collisions, and callers pass a list sorted by package id,
- * so the assignment never depends on request timing.
+ * The agent's launch contract in the pinned space: its definition at the
+ * selected version plus the space's input layer, in one read. `latest` is the
+ * dist-tag the detail route resolves (exact → dist-tag → range), answering 404
+ * when nothing is published; the pinned version is whatever it resolved to.
  */
-export function assignSlugs(
-  resolved: ResolvedSkill[],
-  reserved: ReadonlySet<string> = new Set(),
-): PlannedSkill[] {
-  // `reserved` = catalogued packages whose resolution failed: their directories
-  // are on disk, so a transient 500 must not reassign `/appstrate:<slug>`.
-  const taken = new Set<string>(reserved);
-  const planned: PlannedSkill[] = [];
-  for (const skill of resolved) {
-    const parsed = parseScopedName(skill.packageId);
-    const preferred = skillSlug(skill.frontmatterName, parsed?.name ?? skill.packageId);
-    if (!taken.has(preferred)) {
-      taken.add(preferred);
-      planned.push({ ...skill, slug: preferred });
-      continue;
-    }
-    const fallback = collisionSlug(skill.packageId, taken);
-    taken.add(fallback);
-    planned.push({ ...skill, slug: fallback, renamedFrom: preferred });
+export async function resolveAgent(
+  profileName: string,
+  packageId: string,
+  source: SkillSource,
+  spaceId: string,
+): Promise<AgentLaunchView | null> {
+  interface AgentDetailBody {
+    display_name?: unknown;
+    description?: unknown;
+    version?: unknown;
+    input?: unknown;
   }
-  return planned;
+  const selector = source === "draft" ? "draft" : "latest";
+  const read = await readDetail<AgentDetailBody>(
+    profileName,
+    `/api/packages/agents/${encodePackageIdPath(packageId)}?version=${selector}`,
+    packageId,
+    "agent",
+    spaceId,
+  );
+  if (!read) return null;
+  const { body } = read;
+  const version = source === "draft" ? "draft" : body.version;
+  if (typeof version !== "string" || !isLaunchInput(body.input)) {
+    throw new SkillSyncError(
+      `Agent detail for ${packageId} is missing version or input`,
+      "The instance is running an incompatible API version.",
+    );
+  }
+  return {
+    packageId,
+    spaceId,
+    version,
+    title:
+      typeof body.display_name === "string" && body.display_name.trim()
+        ? body.display_name
+        : packageId,
+    description: typeof body.description === "string" ? body.description : "",
+    input: body.input,
+  };
 }
 
-/** The published path checks `X-Integrity` before anything is unpacked. */
-export async function fetchSkillFiles(
+function isLaunchInput(value: unknown): value is AgentLaunchView["input"] {
+  if (typeof value !== "object" || value === null) return false;
+  const input = value as Record<string, unknown>;
+  return (
+    typeof input.values === "object" &&
+    input.values !== null &&
+    Array.isArray(input.locked_fields) &&
+    input.locked_fields.every((field) => typeof field === "string")
+  );
+}
+
+interface SlugAssignment {
+  planned: PlannedEntry[];
+  /** Agents whose command cannot be rendered: deterministic, so never kept as unresolved. */
+  failed: { packageId: string; error: unknown }[];
+}
+
+/**
+ * Newcomers collide in input order (sorted by package id); every skill before
+ * any agent (D23). `incumbents` (slug → wanted package id) are never handed to
+ * another package this run: an unattended sync must never make
+ * `/appstrate:<slug>` launch a different one. A package takes its preferred
+ * slug when free, else the one it holds, else a fallback.
+ */
+export function assignSlugs(
+  skills: ResolvedSkill[],
+  agents: AgentLaunchView[] = [],
+  incumbents: ReadonlyMap<string, string> = new Map(),
+): SlugAssignment {
+  const nameOf = (packageId: string): string => parseScopedName(packageId)?.name ?? packageId;
+  const taken = new Set<string>();
+  const pick = (packageId: string, preferred: string, prefix: string): SlugClaim => {
+    const blocked = new Set(taken);
+    let own: string | undefined;
+    for (const [slug, holder] of incumbents) {
+      if (holder !== packageId) blocked.add(slug);
+      else own ??= slug;
+    }
+    const slug = !blocked.has(preferred)
+      ? preferred
+      : (own ?? collisionSlug(packageId, blocked, prefix));
+    return slug === preferred ? { slug } : { slug, renamedFrom: preferred };
+  };
+
+  const planned: PlannedEntry[] = skills.map((skill) => {
+    const preferred = skillSlug(skill.frontmatterName, nameOf(skill.packageId));
+    const naming = pick(skill.packageId, preferred, "");
+    taken.add(naming.slug);
+    return { ...skill, kind: "skill" as const, ...naming };
+  });
+  const failed: SlugAssignment["failed"] = [];
+  for (const view of agents) {
+    const { packageId, version } = view;
+    try {
+      const naming = pick(packageId, agentSlug(nameOf(packageId)), AGENT_SLUG_PREFIX);
+      const files = materializeAgent(naming.slug, view);
+      taken.add(naming.slug);
+      planned.push({
+        kind: "agent",
+        packageId,
+        version,
+        integrity: treeIntegrity(files),
+        files,
+        ...naming,
+      });
+    } catch (error) {
+      failed.push({ packageId, error });
+    }
+  }
+  return { planned, failed };
+}
+
+/**
+ * Both sources are one archive (`../package-definition.ts`); the published one
+ * is checked against `X-Integrity` before anything is unpacked. A draft archive
+ * read after resolution may be newer than the token recorded for it — the next
+ * sync then sees the token move and fetches again, never the reverse.
+ */
+export function fetchSkillFiles(
   profileName: string,
   skill: ResolvedSkill,
   source: SkillSource,
 ): Promise<Record<string, Uint8Array>> {
-  return source === "published"
-    ? fetchPublishedFiles(profileName, skill)
-    : fetchDraftFiles(profileName, skill);
-}
-
-async function fetchPublishedFiles(
-  profileName: string,
-  skill: ResolvedSkill,
-): Promise<Record<string, Uint8Array>> {
-  const res = await apiFetchRaw(
+  return fetchPackageDefinition(
     profileName,
-    `/api/packages/${encodePackageIdPath(skill.packageId)}/${encodeURIComponent(skill.version)}/download`,
-    { spaceId: skill.spaceId },
+    source === "published"
+      ? {
+          packageId: skill.packageId,
+          spaceId: skill.spaceId,
+          source,
+          version: skill.version,
+          integrity: skill.integrity,
+        }
+      : {
+          packageId: skill.packageId,
+          type: "skill",
+          spaceId: skill.spaceId,
+          source,
+          refusalRemedy: DRAFT_REMEDY,
+        },
   );
-  if (!res.ok) {
-    throw new SkillSyncError(
-      `Download of ${skill.packageId}@${skill.version} failed: HTTP ${res.status} ${res.statusText}`,
-    );
-  }
-  // The header is what THIS response claims about THESE bytes; the fallback
-  // keeps the check meaningful on an instance that omits it.
-  const advertised = res.headers.get("x-integrity") ?? skill.integrity;
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  const verdict = verifyArtifactIntegrity(bytes, advertised);
-  if (!verdict.valid) {
-    throw new SkillSyncError(
-      `Integrity mismatch for ${skill.packageId}@${skill.version}: expected ${advertised}, downloaded ${verdict.computed}`,
-      "Retry the sync. If it persists, the instance or a proxy is corrupting artifacts.",
-    );
-  }
-  // `unzipArtifact`, not `parsePackageZip`: the latter re-validates the
-  // manifest with the author-input policy, which would make an old published
-  // artifact unsyncable. Its bounds and wrapper handling are kept explicitly.
-  return stripWrapperPrefix(
-    unzipArtifact(bytes, { maxDecompressedBytes: PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES }),
-  );
-}
-
-async function fetchDraftFiles(
-  profileName: string,
-  skill: ResolvedSkill,
-): Promise<Record<string, Uint8Array>> {
-  const packageId = skill.packageId;
-  const encoded = encodePackageIdPath(packageId);
-  // Resolution already read this index; a second call would describe a
-  // snapshot that may have moved.
-  const entries =
-    skill.draftIndex ??
-    (
-      await apiFetch<{ entries?: FileIndexEntry[] }>(
-        profileName,
-        `/api/packages/${encoded}/files?version=draft`,
-        { spaceId: skill.spaceId },
-      )
-    ).entries ??
-    [];
-
-  const wanted = entries
-    .filter(
-      (entry): entry is FileIndexEntry & { path: string } =>
-        typeof entry.path === "string" && entry.path.length > 0 && !DROPPED_ENTRIES.has(entry.path),
-    )
-    .sort((a, b) => a.path.localeCompare(b.path));
-
-  const files: Record<string, Uint8Array> = {};
-  const encoder = new TextEncoder();
-  // The index already carries the text of every small file.
-  const remaining = wanted.filter((entry) => {
-    if (typeof entry.inline !== "string") return true;
-    files[entry.path] = encoder.encode(entry.inline);
-    return false;
-  });
-
-  const fetched = await mapWithConcurrency(remaining, MAX_CONCURRENCY, async (entry) => {
-    const res = await apiFetchRaw(
-      profileName,
-      `/api/packages/${encoded}/files/content?version=draft&path=${encodeURIComponent(entry.path)}`,
-      { spaceId: skill.spaceId },
-    );
-    if (!res.ok) {
-      throw (
-        draftRefusal(packageId, res.status, `, and "${entry.path}" is part of it.`) ??
-        new SkillSyncError(
-          `Draft file "${entry.path}" of ${packageId} failed: HTTP ${res.status} ${res.statusText}`,
-        )
-      );
-    }
-    return new Uint8Array(await res.arrayBuffer());
-  });
-  remaining.forEach((entry, i) => {
-    files[entry.path] = fetched[i]!;
-  });
-  return files;
 }
 
 function frontmatterNameOf(content: unknown): string {
@@ -354,7 +420,7 @@ function frontmatterNameOf(content: unknown): string {
 }
 
 /** Slug assignment is global, so every plan indexes into the same map. */
-export type SkillsBySlug = ReadonlyMap<string, PlannedSkill>;
+export type EntriesBySlug = ReadonlyMap<string, PlannedEntry>;
 
 export interface TargetPlan {
   target: SyncTarget;
@@ -371,10 +437,15 @@ export interface TargetPlan {
   contextChanged: boolean;
 }
 
+/** D18: only the plugin ships `.mcp.json`; an agent command anywhere else fails every run. */
+export function targetCarries(target: SyncTarget, kind: PlannedEntry["kind"]): boolean {
+  return kind === "skill" || target === "claude-plugin";
+}
+
 export interface Catalogue {
-  bySlug: SkillsBySlug;
-  /** Listed but unresolvable — not the definite "not published". Decides deletion. */
-  unresolved: Set<string>;
+  bySlug: EntriesBySlug;
+  /** Listed but unresolvable (id → kind), unlike "not published". Decides deletion. */
+  unresolved: Map<string, PlannedEntry["kind"]>;
 }
 
 /**
@@ -408,6 +479,9 @@ export async function diffTarget(
     state.targets[target]?.root === targetRoot(target) && !sameContext(ledger.context, context);
   const stale = state.version !== STATE_VERSION || ledger.source !== source;
   const shared = target !== "claude-plugin";
+  const wanted = new Map(
+    [...catalogue.bySlug].filter(([, entry]) => targetCarries(target, entry.kind)),
+  );
   const present = new Set<string>();
   for (const slug of Object.keys(ledger.managed)) {
     if (await isMaterialized(target, slug)) present.add(slug);
@@ -423,7 +497,7 @@ export async function diffTarget(
     contextChanged,
   };
 
-  for (const [slug, skill] of catalogue.bySlug) {
+  for (const [slug, entry] of wanted) {
     const managed = ledger.managed[slug];
     if (!managed) {
       // The shared roots hold the user's own skills, and the swap deletes what
@@ -436,8 +510,8 @@ export async function diffTarget(
     // matching entry and would read as up to date forever.
     const current =
       !stale &&
-      managed.integrity === skill.integrity &&
-      managed.packageId === skill.packageId &&
+      managed.integrity === entry.integrity &&
+      managed.packageId === entry.packageId &&
       present.has(slug);
     (current ? plan.keep : plan.write).push(slug);
   }
@@ -445,7 +519,7 @@ export async function diffTarget(
   // Deletion is decided against the CATALOGUE, never against what resolved: a
   // 500 on `versions/latest` is not evidence that a skill is gone.
   for (const slug of Object.keys(ledger.managed).sort()) {
-    if (catalogue.bySlug.has(slug)) continue;
+    if (wanted.has(slug)) continue;
     // The plugin is rebuilt by COPYING carried-over directories.
     const keepable = catalogue.unresolved.has(ledger.managed[slug]!.packageId) && present.has(slug);
     (keepable ? plan.keep : plan.removed).push(slug);

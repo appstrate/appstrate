@@ -16,7 +16,11 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { PACKAGE_CONTENT_ENTRY, PACKAGE_CONTENT_FILE } from "../src/package-files.ts";
+import {
+  PACKAGE_CONTENT_ENTRY,
+  PACKAGE_CONTENT_FILE,
+  PACKAGE_TYPE_ROUTE_SEGMENT,
+} from "../src/package-files.ts";
 import { packageTypeEnum, type PackageType } from "../src/validation.ts";
 
 /**
@@ -87,5 +91,13 @@ describe("PACKAGE_CONTENT_FILE", () => {
       integration: "INTEGRATION.md",
       "mcp-server": null,
     });
+  });
+});
+
+describe("PACKAGE_TYPE_ROUTE_SEGMENT", () => {
+  it("names one distinct collection segment per package type", () => {
+    const segments = packageTypeEnum.options.map((type) => PACKAGE_TYPE_ROUTE_SEGMENT[type]);
+    expect(segments).toEqual(["agents", "skills", "mcp-servers", "integrations"]);
+    expect(new Set(segments).size).toBe(segments.length);
   });
 });

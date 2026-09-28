@@ -19,21 +19,27 @@
  */
 
 import type { Context } from "hono";
-import type { UIMessage } from "ai";
+import { safeValidateUIMessages, type UIMessage } from "ai";
 import { z } from "zod";
-import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
+import { parseBody, invalidRequest, conflict } from "@appstrate/core/api-errors";
+import { withByteCap } from "@appstrate/core/safe-json";
 import { isAttachmentUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
 import { listModels, pickModel } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
+import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
+import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments } from "./attachments.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
-import { acquirePiChatSlot, chatCapacityResponse } from "./pi-chat/concurrency.ts";
+import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
 import { turnPermissions } from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
+import { chatSkillModeValues } from "@appstrate/db/schema";
+import { scopedNameRegex } from "@appstrate/core/validation";
+import { DEFAULT_SKILL_SELECTION, MAX_PINNED_SKILLS, type ChatSkillSelection } from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
 import { ensureSession, persistUserMessage, persistAssistantMessage } from "./persistence.ts";
@@ -48,24 +54,6 @@ import {
   modelGenerationSettingsSchema,
   resolveModelGenerationSettings,
 } from "@appstrate/core/model-generation";
-
-/**
- * RFC 9457 `401` returned when the chosen subscription model's oauth credential
- * is dead (revoked/expired-beyond-refresh). The client renders a reconnect
- * prompt rather than the engine launching a session that would 401 upstream.
- */
-function subscriptionReconnectResponse(): Response {
-  return new Response(
-    JSON.stringify({
-      type: "https://docs.appstrate.dev/errors/subscription-reconnect",
-      title: "Reconnection required",
-      status: 401,
-      detail: "The selected model's subscription credential expired or was revoked.",
-      code: "needs_reconnection",
-    }),
-    { status: 401, headers: { "content-type": "application/problem+json" } },
-  );
-}
 
 /**
  * RFC 9457 response for a turn blocked by the platform admission gate
@@ -110,10 +98,12 @@ export type ChatEngine = (input: PiChatInput) => Response;
  */
 const CHAT_MESSAGE_ROLES = new Set(["user", "assistant"]);
 
+/** Ceiling on the turn's last (persisted) message; attachments ride as references. */
+export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
+
 // The client (assistant-ui / useChat) posts the full thread plus optional
-// session/model/context extras. `messages` are UIMessages; the shape itself is
-// the AI SDK's and stays loose here, with two tightenings the engine cannot
-// make for us:
+// session/model/context extras. The last message's UIMessage shape is checked by
+// `safeValidateUIMessages` in the handler; this schema adds:
 //   - `role` MUST be one of {@link CHAT_MESSAGE_ROLES}. Nothing legitimate
 //     sends another: the composer only produces user turns, and a reload
 //     replays what the server persisted — user or assistant, a server-authored
@@ -121,43 +111,61 @@ const CHAT_MESSAGE_ROLES = new Set(["user", "assistant"]);
 //   - any `file` part MUST reference an `upload://` or `appfile://` URI. That
 //     rejects inline `data:` bytes and arbitrary URLs in the chat channel
 //     (attachments flow only through the file store, never inline).
-export const chatStreamSchema = z.object({
-  id: z.string().optional(),
-  messages: z
-    .array(z.unknown())
-    .min(1, "messages must not be empty")
-    .superRefine((messages, ctx) => {
-      messages.forEach((message, i) => {
-        const role = (message as { role?: unknown }).role;
-        if (typeof role !== "string" || !CHAT_MESSAGE_ROLES.has(role)) {
-          ctx.addIssue({
-            code: "custom",
-            message: "Message role must be 'user' or 'assistant'.",
-            path: [i, "role"],
-          });
-        }
-        const parts = (message as { parts?: unknown }).parts;
-        if (!Array.isArray(parts)) return;
-        parts.forEach((part, j) => {
-          if (!part || typeof part !== "object" || (part as { type?: unknown }).type !== "file") {
-            return;
-          }
-          const url = (part as { url?: unknown }).url;
-          if (!isAttachmentUri(url)) {
+//   - `skill_mode` and `pinned_skills` come together or not at all: the
+//     picker's selection, written onto the session row by this turn.
+//   - `.strict()`: an unknown field is a 400, never silently dropped.
+export const chatStreamSchema = z
+  .object({
+    id: z.string().optional(),
+    messages: z
+      .array(z.unknown())
+      .min(1, "messages must not be empty")
+      .superRefine((messages, ctx) => {
+        messages.forEach((message, i) => {
+          const role = (message as { role?: unknown }).role;
+          if (typeof role !== "string" || !CHAT_MESSAGE_ROLES.has(role)) {
             ctx.addIssue({
               code: "custom",
-              message: "File attachment URI must be an 'upload://' or 'appfile://' URI.",
-              path: [i, "parts", j, "url"],
+              message: "Message role must be 'user' or 'assistant'.",
+              path: [i, "role"],
             });
           }
+          const parts = (message as { parts?: unknown }).parts;
+          if (!Array.isArray(parts)) return;
+          parts.forEach((part, j) => {
+            if (!part || typeof part !== "object" || (part as { type?: unknown }).type !== "file") {
+              return;
+            }
+            const url = (part as { url?: unknown }).url;
+            if (!isAttachmentUri(url)) {
+              ctx.addIssue({
+                code: "custom",
+                message: "File attachment URI must be an 'upload://' or 'appfile://' URI.",
+                path: [i, "parts", j, "url"],
+              });
+            }
+          });
         });
-      });
-    }),
-  modelId: z.string().optional(),
-  generation: modelGenerationSettingsSchema.optional(),
-  /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
-  agent_authoring: z.boolean().optional(),
-});
+        withByteCap(CHAT_MESSAGE_MAX_BYTES)(messages.at(-1), ctx);
+      }),
+    modelId: z.string().optional(),
+    generation: modelGenerationSettingsSchema.optional(),
+    /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
+    agent_authoring: z.boolean().optional(),
+    /** The conversation's skill selection; absent = the one stored on the session. */
+    skill_mode: z.enum(chatSkillModeValues).optional(),
+    pinned_skills: z
+      .array(
+        z.string().regex(scopedNameRegex, { error: "Must be a package id in @scope/name form" }),
+      )
+      .max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} chosen skills` })
+      .optional(),
+  })
+  .strict()
+  .refine((body) => (body.skill_mode === undefined) === (body.pinned_skills === undefined), {
+    error: "skill_mode and pinned_skills are sent together",
+    path: ["pinned_skills"],
+  });
 
 function clientErrorMessage(error: unknown): string {
   return clientTurnErrorMarker(classifyClientTurnError(error));
@@ -233,7 +241,12 @@ export async function handleChatStream(
   const persona = c.get("viewAs");
   const orgRole = persona?.orgRole ?? c.get("orgRole") ?? "member";
   const body = parseBody(chatStreamSchema, await c.req.json().catch(() => null));
-  const messages = body.messages as UIMessage[];
+  // Only the new message is validated: earlier turns are the server's own rows.
+  const validated = await safeValidateUIMessages({ messages: body.messages.slice(-1) });
+  if (!validated.success) {
+    throw invalidRequest(`Invalid chat message: ${validated.error.message}`, "messages");
+  }
+  const messages = [...(body.messages.slice(0, -1) as UIMessage[]), ...validated.data];
   logger.info("chat turn", { turns: messages.length });
 
   const sessionId = body.id;
@@ -264,10 +277,17 @@ export async function handleChatStream(
   // `Promise.all` — a foreign-tenant 404 still surfaces before anything is
   // materialized into the session, and attaching the join in the same tick is
   // what keeps a rejection from ever going unhandled.
-  const sessionReady: Promise<void> =
+  //
+  // The picker's selection rides the turn and is written in the same upsert, so
+  // nothing is stored before the first message; without one the row's stands.
+  const bodySkills: ChatSkillSelection | undefined =
+    body.skill_mode && body.pinned_skills
+      ? { skillMode: body.skill_mode, pinnedSkills: [...new Set(body.pinned_skills)].sort() }
+      : undefined;
+  const sessionSkills: Promise<ChatSkillSelection> =
     sessionId && lastMessage?.id
-      ? ensureSession(sessionId, orgId, user.id, spaceId)
-      : Promise.resolve();
+      ? ensureSession(sessionId, orgId, user.id, spaceId, bodySkills)
+      : Promise.resolve(bodySkills ?? DEFAULT_SKILL_SELECTION);
 
   const origin = selfOrigin();
   const headers = forwardedHeaders(c);
@@ -316,17 +336,28 @@ export async function handleChatStream(
   // answer (it also ignored an API key's pinned space).
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
 
-  // Flipping the switch changes the system prompt and, through the narrowed token, the
-  // MCP `run_and_wait` descriptor on the same turn: one prompt-cache miss.
-  const permissions = turnPermissions(c.get("permissions"), body.agent_authoring !== false);
-  const capabilities = turnCapabilities((permission) => permissions.includes(permission));
+  // Flipping a switch changes the system prompt and, through the narrowed token, the
+  // MCP tool descriptors on the same turn: one prompt-cache miss. The skill mode
+  // lives on the session row, so the turn's grants follow its upsert.
+  const turn = sessionSkills.then((skills) => {
+    const permissions = turnPermissions(c.get("permissions"), {
+      authoring: body.agent_authoring !== false,
+      skillMode: skills.skillMode,
+    });
+    const capabilities = turnCapabilities((permission) => permissions.includes(permission));
+    return { skills, permissions, capabilities };
+  });
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
-  // Only the caller-context block. It depends on the space id and the caller's
-  // headers — never on the chosen model or the admission gate — so it is chained
-  // on the space id and starts the moment that resolves (immediately when
-  // pinned), overlapping the model list, the attachment materialization, the
+  // The space's enforced skills depend on nothing but the ids, so they start
+  // now; phase A's join awaits them, so their 503 refuses the turn before any
+  // file is materialized.
+  const enforcedSkills = deps.loadEnforcedSkills(orgId, spaceId);
+  // Then the caller-context block. It depends on the space id and the caller's
+  // headers and the session row (the turn's grants and its skills) — never on the
+  // chosen model or the admission gate — so it starts the moment the row
+  // resolves, overlapping the model list, the attachment materialization, the
   // credential resolution and the gate rather than waiting behind them. It is a
   // READ (`/api/me/context`); a turn the gate rejects has dispatched it for
   // nothing, which is acceptable — what a rejected turn must not do is persist
@@ -346,30 +377,35 @@ export async function handleChatStream(
   // handler. The error is rethrown where the block is consumed.
   const phaseBStart = Date.now();
   let phaseBMs = 0;
-  const contextBlockPromise: Promise<{ ok: true; block: string } | { ok: false; error: unknown }> =
-    buildCallerContextBlock(c, {
-      origin,
-      headers,
-      spaceId,
-      user,
-      deps,
-      // UI language forwarded by the client; validated/defaulted in the builder.
-      locale: c.req.header("X-Chat-Locale"),
-      capabilities,
-      permissions,
-    })
-      .finally(() => {
-        // Wall time of the block itself.
+  const contextBlockPromise: Promise<
+    { ok: true; block: string; injectedSkills: InjectedSkills } | { ok: false; error: unknown }
+  > = turn
+    .then(({ skills, permissions, capabilities }) =>
+      buildCallerContextBlock(c, {
+        origin,
+        headers,
+        spaceId,
+        user,
+        deps,
+        // UI language forwarded by the client; validated/defaulted in the builder.
+        locale: c.req.header("X-Chat-Locale"),
+        capabilities,
+        permissions,
+        skills,
+        enforced: enforcedSkills,
+      }).finally(() => {
         phaseBMs = Date.now() - phaseBStart;
-      })
-      .then(
-        (block) => ({ ok: true as const, block }),
-        (error: unknown) => ({ ok: false as const, error }),
-      );
+      }),
+    )
+    .then(
+      ({ text, injected }) => ({ ok: true as const, block: text, injectedSkills: injected }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
 
-  const [models] = await Promise.all([
+  const [models, { permissions, capabilities }] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
-    sessionReady,
+    turn,
+    enforcedSkills,
   ]);
   const chosen = pickModel(models, modelId);
   let generationSettings;
@@ -448,12 +484,21 @@ export async function handleChatStream(
     sessionId: meteringSessionId,
     subscription: isSubscription,
   });
-  if (rejection) return usageRejectionResponse(rejection);
+  if (rejection) {
+    const refused = usageRejectionResponse(rejection);
+    logger.info("chat turn refused by admission gate", {
+      code: rejection.code,
+      status: refused.status,
+      orgId,
+      model: chosen.id,
+    });
+    return refused;
+  }
 
   // Join phase B. This is the one place its failure is allowed to surface.
   const contextResult = await contextBlockPromise;
   if (!contextResult.ok) throw contextResult.error;
-  const contextBlock = contextResult.block;
+  const { block: contextBlock, injectedSkills } = contextResult;
 
   // Assemble the system prompt: the tool-grounding prompt, with no inline MCP
   // instructions — the engine's own MCP handshake delivers them.
@@ -483,14 +528,17 @@ export async function handleChatStream(
   });
   if (resolution.status === "needs-reconnection") {
     // The oauth credential is dead → tell the client to reconnect rather than
-    // launching a session that would 401 upstream.
-    return subscriptionReconnectResponse();
+    // launching a session that would 401 upstream (409: the model's, not the caller's).
+    throw conflict(
+      "needs_reconnection",
+      "The selected model's subscription credential expired or was revoked.",
+    );
   }
   if (resolution.status !== "ready") {
     throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by the chat.`);
   }
   const slot = acquirePiChatSlot();
-  if (!slot) return chatCapacityResponse();
+  if (!slot) throw chatCapacityError();
   const modelBinding = resolution.binding;
 
   // ── Server-authoritative persistence + resumable streaming ───────────────
@@ -524,7 +572,7 @@ export async function handleChatStream(
   }
 
   // Everything before generation, for an ADMITTED turn: the two overlapped
-  // phases (their wall times, not a sum — `phaseBMs` runs under `phaseAMs`),
+  // phases (their wall times, not a sum — phase B may outlast phase A),
   // the claim/persist round trips, and the whole span since the request was
   // parsed. A rejected turn (gate, dead credential, unsupported family,
   // saturated capacity) returns above and is not measured here.
@@ -597,6 +645,8 @@ export async function handleChatStream(
       // The re-entered request carries no header, so without this the hop would
       // answer with the caller's real authority while a preview is on screen.
       viewAs: persona,
+      // What `read_skill` serves without `skills:*`: the definitions this prompt injected.
+      injectedSkills,
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },
   );
@@ -605,6 +655,7 @@ export async function handleChatStream(
     "x-org-id": orgId,
   };
   mcpHeaders["x-space-id"] = spaceId;
+  const mcpUrl = platformMcpUrl(origin, orgId);
   try {
     const response = await finalize(
       runEngine({
@@ -622,13 +673,14 @@ export async function handleChatStream(
         system,
         generation: generationSettings,
         platformMcp: {
-          url: platformMcpUrl(origin, orgId),
+          url: mcpUrl,
           headers: mcpHeaders,
-          // Same in-process seam the preamble reads through: the engine's three
+          // Same in-process seam the preamble reads through: the engine's
           // MCP hops re-enter the platform app directly instead of opening real
           // loopback sockets back into this process. Auth and RBAC still run on
           // every hop, so the scoped bearer above is exactly as load-bearing.
           fetch: platformFetch,
+          surfaceKey: platformMcpSurfaceKey(mcpUrl, permissions),
         },
         // Decoupled from the request connection (see `generation` above).
         abortSignal: generation.signal,

@@ -30,20 +30,12 @@ const ZIP_COMPRESSION_LEVEL = 6;
 /**
  * Download a versioned package ZIP from Storage.
  *
- * Two orthogonal integrity checks are applied when the inputs are
- * present:
+ * When `expectedIntegrity` (SRI sha256 over the raw ZIP bytes, stored in
+ * `package_versions.integrity` at publish) is given, a mismatch throws —
+ * storage corruption or tampering at rest. The signature policy is NOT
+ * applied here: see {@link downloadVersionZipForExecution}.
  *
- *   1. `expectedIntegrity` (SRI sha256 over the raw ZIP bytes, stored in
- *      `package_versions.integrity` when the version was published) —
- *      detects storage corruption and tampering of the artifact at
- *      rest.
- *   2. AFPS bundle signature (`signature.sig` inside the ZIP, verified
- *      against the `AFPS_TRUST_ROOT` + `AFPS_SIGNATURE_POLICY` env
- *      config) — detects tampering by anyone who could have written
- *      the ZIP since it was signed by the publisher.
- *
- * Returns `null` if the object does not exist. Throws on integrity or
- * (under policy=required) signature failure.
+ * Returns `null` if the object does not exist.
  */
 export async function downloadVersionZip(
   packageId: string,
@@ -76,12 +68,21 @@ export async function downloadVersionZip(
     }
   }
 
-  // Signature policy is applied here (and not inside the unzip path)
-  // so every code path that pulls a bundle from storage goes through
-  // the same gate: run path, re-publish, dependency resolution, etc.
-  await loadAndVerifyBundle(bytes, packageId);
-
   return Buffer.from(data);
+}
+
+/**
+ * {@link downloadVersionZip} plus the AFPS signature policy, for bytes about
+ * to be EXECUTED. Display/copy/export reads use the plain download.
+ */
+export async function downloadVersionZipForExecution(
+  packageId: string,
+  version: string,
+  expectedIntegrity?: string | null,
+): Promise<Buffer | null> {
+  const zip = await downloadVersionZip(packageId, version, expectedIntegrity);
+  if (zip) await loadAndVerifyBundle(new Uint8Array(zip), packageId);
+  return zip;
 }
 
 /**

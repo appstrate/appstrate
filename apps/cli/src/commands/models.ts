@@ -10,7 +10,7 @@
  */
 
 import { resolveActiveProfile, requireLoggedIn } from "../lib/config.ts";
-import { listModelPresets, PROXY_SUPPORTED_APIS } from "../lib/models.ts";
+import { isProxySupported, listModelPresets } from "../lib/models.ts";
 import { exitWithError } from "../lib/ui.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 
@@ -32,7 +32,7 @@ export async function modelsListCommand(
   try {
     let models = await listModelPresets(profileName);
     if (opts.proxyOnly) {
-      models = models.filter((m) => PROXY_SUPPORTED_APIS.has(m.apiShape));
+      models = models.filter((m) => isProxySupported(m.apiShape));
     }
 
     if (opts.json) {
@@ -47,14 +47,16 @@ export async function modelsListCommand(
 
     for (const m of models) {
       const suffixes: string[] = [];
-      if (m.isDefault) suffixes.push("default");
+      if (m.is_default) suffixes.push("default");
       if (!m.enabled) suffixes.push("disabled");
       // Listed, but the resolver refuses it — say so here, since this listing
       // is what the resolver's error tells the user to consult.
       if (m.needs_reconnection === true) suffixes.push("needs-reconnection");
-      if (!PROXY_SUPPORTED_APIS.has(m.apiShape)) suffixes.push("proxy-unsupported");
+      if (!isProxySupported(m.apiShape)) suffixes.push("proxy-unsupported");
       const suffix = suffixes.length > 0 ? ` [${suffixes.join(", ")}]` : "";
-      io.stdout.write(`  ${m.id.padEnd(36)}  ${m.apiShape.padEnd(24)}  ${m.label}${suffix}\n`);
+      io.stdout.write(
+        `  ${m.id.padEnd(36)}  ${(m.apiShape ?? "(alias)").padEnd(24)}  ${m.label}${suffix}\n`,
+      );
     }
   } catch (err) {
     // `io` is forwarded so the terminal error and the exit reach the caller's

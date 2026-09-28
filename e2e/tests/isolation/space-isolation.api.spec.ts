@@ -272,7 +272,7 @@ test.describe("Cross-space resource isolation", () => {
       await createAgent(clientA, scope, agentName);
       const schedule = await createSchedule(clientA, scope, agentName);
 
-      const res = await clientB.put(`/schedules/${schedule.id}`, { name: "Hijacked" });
+      const res = await clientB.patch(`/schedules/${schedule.id}`, { name: "Hijacked" });
       expect(res.status()).toBe(404);
     });
 

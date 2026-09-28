@@ -141,7 +141,7 @@ describe("auth-challenge responder", () => {
     // validation, the challenge names the error; a credential-less request
     // gets the bare scheme (error codes SHOULD be omitted in that case).
     const res = await appWith(401).request("http://inst.test/api/other", {
-      headers: { Authorization: "Bearer ask_invalid" },
+      headers: { Authorization: "Bearer apst_invalid" },
     });
     expect(res.headers.get("WWW-Authenticate")).toBe('Bearer error="invalid_token"');
   });

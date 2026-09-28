@@ -3,11 +3,11 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
-import type { AppEnv, OrgRole } from "../types/index.ts";
-import { requirePermission, rowAuthority } from "../middleware/require-permission.ts";
-import { spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
+import type { AppEnv } from "../types/index.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
+import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
-import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
+import { resolveListingViewAs } from "../lib/view-as.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
   createOrganization,
@@ -17,8 +17,8 @@ import {
   reserveOrgDeletion,
   deleteOrganization,
   getOrgMembers,
-  getOrgMember,
   getOrgMemberWithProfile,
+  leaveOrganization,
   removeMember,
   updateMemberRole,
   isSlugAvailable,
@@ -53,11 +53,8 @@ import { createDefaultSpace } from "../services/spaces.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
-import {
-  ASSIGNABLE_ORG_ROLES,
-  assignableRolesForMember,
-  canRemoveMember,
-} from "@appstrate/shared-types";
+import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
+import { ORG_ROLES } from "@appstrate/core/permissions";
 
 export const createOrgSchema = z
   .object({
@@ -83,7 +80,7 @@ export const addMemberSchema = z
 
 export const updateRoleSchema = z
   .object({
-    role: z.enum(ASSIGNABLE_ORG_ROLES),
+    role: z.enum(ORG_ROLES),
   })
   .strict();
 
@@ -99,14 +96,11 @@ export const updateInvitationSchema = z
   })
   .strict();
 
-/**
- * Org role the who-manages-whom policies judge against: the persona's under a
- * role preview. The route guard already proved membership; the throw is a backstop.
- */
-function actingOrgRole(c: Context<AppEnv>): OrgRole {
-  const role = callerOrgRole(c, c.req.param("orgId"));
-  if (!role) throw forbidden("Not a member of this organization");
-  return role;
+/** The service re-reads the actor's role under its lock; only the transport is passed. */
+function memberActor(c: Context<AppEnv>) {
+  // The transport, as in `admin-storage-deletion.ts`: a self-registered MCP
+  // client resolves as the user, so only the dashboard session counts.
+  return { userId: c.get("user").id, firstPartySession: c.get("authMethod") === "session" };
 }
 
 const router = new Hono<AppEnv>();
@@ -220,7 +214,7 @@ router.post("/", async (c) => {
 
 // --- Routes below require org context (orgId from params, verified via membership) ---
 
-// OrgDetail serializer — shared by GET /:orgId and PUT /:orgId so the update
+// OrgDetail serializer — shared by GET /:orgId and PATCH /:orgId so the update
 // response is the exact same resource shape as the detail read.
 async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
   const permissions = c.get("permissions");
@@ -285,8 +279,8 @@ router.get("/:orgId", async (c) => {
   return c.json(await buildOrgDetail(c, orgId));
 });
 
-// PUT /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
-router.put("/:orgId", requirePermission("org", "update"), async (c) => {
+// PATCH /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
+router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
   const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, updateOrgSchema);
 
@@ -310,7 +304,7 @@ router.put("/:orgId", requirePermission("org", "update"), async (c) => {
     action: "org.updated",
     resourceType: "org",
     resourceId: orgId,
-    after: data as unknown as Record<string, unknown>,
+    after: data,
     orgIdOverride: orgId,
   });
 
@@ -381,7 +375,7 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
 //
 // One pending invitation per (org, email): a duplicate is a 409
 // `invitation_already_pending` carrying `invitation_id`; the caller edits that
-// one (PUT /invitations/:id) instead — the space Members page relies on this.
+// one (PATCH /invitations/:id) instead — the space Members page relies on this.
 router.post("/:orgId/members", requirePermission("members", "invite"), async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId")!;
@@ -403,7 +397,11 @@ router.post("/:orgId/members", requirePermission("members", "invite"), async (c)
       action: "org.invitation_created",
       resourceType: "invitation",
       resourceId: invitation.id,
-      after: { email: invitation.email, role, space_assignments: invitation.spaceAssignments },
+      after: {
+        email: invitation.email,
+        role,
+        spaceAssignments: auditSpaceAssignments(invitation.spaceAssignments),
+      },
       orgIdOverride: orgId,
     });
 
@@ -461,8 +459,8 @@ router.delete(
   },
 );
 
-// PUT /api/orgs/:orgId/invitations/:invitationId — change invitation role (admin+)
-router.put(
+// PATCH /api/orgs/:orgId/invitations/:invitationId — merge-update an invitation (admin+)
+router.patch(
   "/:orgId/invitations/:invitationId",
   requirePermission("members", "change-role"),
   async (c) => {
@@ -490,7 +488,7 @@ router.put(
       action: "org.invitation_role_updated",
       resourceType: "invitation",
       resourceId: invitationId,
-      after: { role: data.role, space_assignments: spaceAssignments },
+      after: { role: data.role, spaceAssignments: auditSpaceAssignments(spaceAssignments) },
       orgIdOverride: orgId,
     });
 
@@ -509,112 +507,103 @@ router.put(
 );
 
 // DELETE /api/orgs/:orgId/members/:userId — remove a member (admin+)
-// `rowAuthority()`: the guard answers "may remove members at all"; the TARGET
-// member's own role answers "may remove THIS one" (`canRemoveMember`).
-router.delete(
-  "/:orgId/members/:userId",
-  requirePermission("members", "remove"),
-  rowAuthority(),
-  async (c) => {
-    const user = c.get("user");
-    const orgId = c.req.param("orgId")!;
-    const targetUserId = c.req.param("userId")!;
+// The guard answers "may remove members at all"; the target's
+// row, read by the service under lock, answers "may remove THIS one".
+router.delete("/:orgId/members/:userId", requirePermission("members", "remove"), async (c) => {
+  const orgId = c.req.param("orgId")!;
+  const targetUserId = c.req.param("userId")!;
 
-    // The guard answered "may remove members at all"; the policy answers "THIS one".
-    const actorRole = actingOrgRole(c);
-    const target = await getOrgMember(orgId, targetUserId);
-    if (!target) {
-      throw notFound("Member not found");
-    }
-    if (
-      !canRemoveMember({
-        actorRole,
-        targetRole: target.role,
-        isSelf: targetUserId === user.id,
-      })
-    ) {
-      throw forbidden("You cannot remove this member");
-    }
-
-    const { orphanedSpaceIds } = await removeMember(orgId, targetUserId);
-    await recordAuditFromContext(c, {
-      action: "org.member_removed",
-      resourceType: "member",
-      resourceId: targetUserId,
-      orgIdOverride: orgId,
-      // The personal space(s) the removal put on the 30-day clock (RBAC spec
-      // §3.6). Named here because this is the event an owner comes back to when
-      // deciding whether to convert one or sweep it: the sweeper's own log line
-      // arrives 30 days later, and by then the space is gone.
-      after: { orphanedSpaceIds },
-    });
-    return c.body(null, 204);
-  },
-);
+  const { orphanedSpaceIds, revokedApiKeyIds } = await removeMember(
+    orgId,
+    targetUserId,
+    memberActor(c),
+  );
+  await recordAuditFromContext(c, {
+    action: "org.member_removed",
+    resourceType: "member",
+    resourceId: targetUserId,
+    orgIdOverride: orgId,
+    // The personal space(s) the removal put on the 30-day clock (RBAC spec
+    // §3.6). Named here because this is the event an owner comes back to when
+    // deciding whether to convert one or sweep it: the sweeper's own log line
+    // arrives 30 days later, and by then the space is gone.
+    after: { orphanedSpaceIds, revokedApiKeyIds },
+  });
+  return c.body(null, 204);
+});
 
 // PUT /api/orgs/:orgId/members/:userId — change role (owner/admin hierarchy)
-// `rowAuthority()`: which roles are assignable is read off the TARGET
-// member's row (`assignableRolesForMember`), not off the mounted guard.
-router.put(
-  "/:orgId/members/:userId",
-  requirePermission("members", "change-role"),
-  rowAuthority(),
-  async (c) => {
-    const user = c.get("user");
-    const orgId = c.req.param("orgId")!;
-    const targetUserId = c.req.param("userId")!;
+// The assignable roles are read off the target's row, by the
+// service under lock, not off the mounted guard.
+router.put("/:orgId/members/:userId", requirePermission("members", "change-role"), async (c) => {
+  const orgId = c.req.param("orgId")!;
+  const targetUserId = c.req.param("userId")!;
+  const data = await readJsonBody(c, updateRoleSchema);
 
-    const actorRole = actingOrgRole(c);
-    const data = await readJsonBody(c, updateRoleSchema);
+  // Promoting to owner/admin drops the member's explicit space grants; the audit
+  // is the only record of what a later demotion will NOT restore.
+  const { previousRole, revoked } = await updateMemberRole(
+    orgId,
+    targetUserId,
+    data.role,
+    memberActor(c),
+  );
+  await recordAuditFromContext(c, {
+    action: "org.member_role_updated",
+    resourceType: "member",
+    resourceId: targetUserId,
+    before: {
+      role: previousRole,
+      revokedSpaceAssignments: revoked.map((row) => ({
+        spaceId: row.spaceId,
+        presetRole: row.presetRole,
+        customRoleId: row.customRoleId,
+      })),
+    },
+    after: { role: data.role },
+    orgIdOverride: orgId,
+  });
 
-    const target = await getOrgMember(orgId, targetUserId);
-    if (!target) {
-      throw notFound("Member not found");
-    }
+  // Bare updated resource — same serializer as the members list in
+  // GET /orgs/:orgId (issue #657).
+  const updated = await getOrgMemberWithProfile(orgId, targetUserId);
+  if (!updated) {
+    throw notFound("Member not found");
+  }
+  return c.json({
+    userId: updated.userId,
+    role: updated.role,
+    joinedAt: updated.joinedAt,
+    displayName: updated.displayName,
+    email: updated.email,
+  });
+});
 
-    const assignableRoles = assignableRolesForMember({
-      actorRole,
-      targetRole: target.role,
-      isSelf: targetUserId === user.id,
-    });
-    if (!assignableRoles.includes(data.role)) {
-      throw forbidden("You cannot assign this role to this member");
-    }
+// POST /api/orgs/:orgId/leave — the caller leaves the organization (any member)
+// No `requirePermission`: membership is the only precondition; the service
+// decides the last-owner rule on the real row. Not `DELETE …/members/me`,
+// which `:userId` would swallow.
+router.post("/:orgId/leave", async (c) => {
+  // The user's own decision, in the dashboard: `isUserPrincipal` would admit a
+  // self-registered MCP client, which resolves as the user.
+  if (c.get("authMethod") !== "session") {
+    throw forbidden("Leaving an organization requires signing in to the dashboard");
+  }
+  const user = c.get("user");
+  const orgId = c.req.param("orgId")!;
 
-    // Promoting to owner/admin drops the member's explicit space grants; the audit
-    // is the only record of what a later demotion will NOT restore.
-    const revoked = await updateMemberRole(orgId, targetUserId, data.role);
-    await recordAuditFromContext(c, {
-      action: "org.member_role_updated",
-      resourceType: "member",
-      resourceId: targetUserId,
-      before: {
-        role: target.role,
-        revoked_space_assignments: revoked.map((row) => ({
-          space_id: row.spaceId,
-          preset_role: row.presetRole,
-          custom_role_id: row.customRoleId,
-        })),
-      },
-      after: { role: data.role },
-      orgIdOverride: orgId,
-    });
+  if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
-    // Bare updated resource — same serializer as the members list in
-    // GET /orgs/:orgId (issue #657).
-    const updated = await getOrgMemberWithProfile(orgId, targetUserId);
-    if (!updated) {
-      throw notFound("Member not found");
-    }
-    return c.json({
-      userId: updated.userId,
-      role: updated.role,
-      joinedAt: updated.joinedAt,
-      displayName: updated.displayName,
-      email: updated.email,
-    });
-  },
-);
+  const { orphanedSpaceIds, revokedApiKeyIds } = await leaveOrganization(orgId, user.id);
+  await recordAuditFromContext(c, {
+    action: "org.member_left",
+    resourceType: "member",
+    resourceId: user.id,
+    orgIdOverride: orgId,
+    after: { orphanedSpaceIds, revokedApiKeyIds },
+  });
+  return c.body(null, 204);
+});
 
 // GET /api/orgs/:orgId/settings — get org settings (any member)
 router.get("/:orgId/settings", async (c) => {
@@ -628,8 +617,8 @@ router.get("/:orgId/settings", async (c) => {
   return c.json(settings);
 });
 
-// PUT /api/orgs/:orgId/settings — update org settings (owner/admin)
-router.put("/:orgId/settings", requirePermission("org", "settings"), async (c) => {
+// PATCH /api/orgs/:orgId/settings — update org settings (owner/admin)
+router.patch("/:orgId/settings", requirePermission("org", "settings"), async (c) => {
   const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, orgSettingsPatchSchema);
 
@@ -643,12 +632,12 @@ router.put("/:orgId/settings", requirePermission("org", "settings"), async (c) =
   //   - **Session (cookie) callers can always recover.** `skipOrgContext()`
   //     (`lib/auth-pipeline.ts`) returns true for `/api/orgs/`, so
   //     `requireOrgContext` never runs on this route and `c.get("orgId")` is
-  //     unset — the middleware's org-pin branch is skipped entirely and the PUT
+  //     unset — the middleware's org-pin branch is skipped entirely and the PATCH
   //     answers 200. Reproduced against an org pinned to "2020-01-01" directly
-  //     in the DB: `GET /api/runs` → 400, `PUT /api/orgs/:orgId/settings` → 200.
+  //     in the DB: `GET /api/runs` → 400, `PATCH /api/orgs/:orgId/settings` → 200.
   //   - **API-key callers cannot.** `applyAuthPipeline` sets `orgId` inline from
   //     the key, before any path-based skip, so the pin branch runs on *every*
-  //     route including this one. Same reproduction: `PUT` → 400. A headless
+  //     route including this one. Same reproduction: `PATCH` → 400. A headless
   //     operator with no dashboard session is locked out with no self-serve
   //     remedy.
   //
@@ -670,7 +659,11 @@ router.put("/:orgId/settings", requirePermission("org", "settings"), async (c) =
     action: "org.settings_updated",
     resourceType: "org",
     resourceId: orgId,
-    after: data as unknown as Record<string, unknown>,
+    after: {
+      apiVersion: data.api_version,
+      dashboardSsoEnabled: data.dashboard_sso_enabled,
+      restrictPackageCopy: data.restrict_package_copy,
+    },
     orgIdOverride: orgId,
   });
   return c.json(settings);

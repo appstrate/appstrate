@@ -54,6 +54,11 @@ import {
   promoteStagedDaemon,
 } from "../src/commands/runner.ts";
 import type { RunnerExec, RunnerFs, RunnerHttp } from "../src/lib/runner/exec.ts";
+import {
+  APPSTRATE_MINISIGN_PUBKEY,
+  MinisignMissingError,
+  type ReleaseChannelDeps,
+} from "../src/lib/self-update.ts";
 
 // ─── fakes ───────────────────────────────────────────────────────────────
 
@@ -128,20 +133,28 @@ function fakeFs(seed: Record<string, string> = {}): {
   return { fs, installed, removed, files };
 }
 
+const CHANNEL_MANIFEST_URL = "https://get.appstrate.dev/channels/latest.json";
+
+function channelManifest(tag: unknown): string {
+  return JSON.stringify({ schema: 1, channel: "latest", tag });
+}
+
 function fakeHttp(opts: {
   binary?: Uint8Array;
   sha?: string;
   health?: { status: number; body: unknown };
   /**
-   * Tag names the fake GitHub Releases API lists (newest first). A dev CLI
-   * resolves its daemon version through that listing (same resolver as
-   * `self-update`) instead of `releases/latest/download`, so the fake has to
-   * answer it — including the non-`v*` npm tags that must be skipped.
+   * Tag the fake signed channel manifest names. A dev CLI resolves its daemon
+   * version through that manifest (same resolver as `self-update`) instead of
+   * `releases/latest/download`, so the fake has to answer it.
    */
-  releaseTags?: string[];
+  channelTag?: unknown;
 }): RunnerHttp {
   const binary = opts.binary ?? new Uint8Array([1, 2, 3]);
-  const releaseTags = opts.releaseTags ?? ["cli@1.0.0-beta.56", "v9.9.9", "core@9.0.0"];
+  const refuseGitHubApi = (url: string) => {
+    // Version resolution never goes through the GitHub API any more.
+    if (url.includes("api.github.com")) throw new Error(`GitHub API requested: ${url}`);
+  };
   return {
     async fetchToFile(_url, _dest, onProgress) {
       // The daemon binary streams through here; return its on-the-fly digest so
@@ -149,27 +162,55 @@ function fakeHttp(opts: {
       onProgress?.({ received: binary.byteLength, total: binary.byteLength, rateBytesPerSec: 1 });
       return { sha256: sha256Hex(binary) };
     },
-    async fetchBinary() {
+    async fetchBinary(url) {
+      refuseGitHubApi(url);
       return binary;
     },
     async fetchText(url) {
-      // The Releases listing (version resolution) vs the signed checksums
+      refuseGitHubApi(url);
+      // The channel manifest (version resolution) vs the signed checksums
       // manifest — the only two things the runner installer fetches as text.
-      if (url.startsWith("https://api.github.com/")) {
-        // Page 1 carries every tag; page 2+ is empty. A page shorter than the
-        // API maximum ends the walk, so only page 1 is ever requested here.
-        return JSON.stringify(
-          url.includes("page=1")
-            ? releaseTags.map((tag) => ({ tag_name: tag, draft: false, prerelease: false }))
-            : [],
-        );
-      }
+      if (url === CHANNEL_MANIFEST_URL) return channelManifest(opts.channelTag ?? "v9.9.9");
       return opts.sha ?? "";
     },
     async getJson() {
       if (opts.health)
         return { reachable: true, status: opts.health.status, body: opts.health.body };
       return { reachable: false, error: "no fake health" };
+    },
+  };
+}
+
+/** Signed-artefact deps for `resolveDaemonReleaseVersion`, recording every fetch. */
+function fakeChannelDeps(
+  opts: { tag?: unknown; minisignOk?: boolean; minisignMissing?: boolean } = {},
+): {
+  deps: ReleaseChannelDeps;
+  fetched: string[];
+} {
+  const fetched: string[] = [];
+  return {
+    fetched,
+    deps: {
+      async fetchText(url) {
+        fetched.push(url);
+        return channelManifest(opts.tag ?? "v10.1.0");
+      },
+      async fetchBinary(url) {
+        fetched.push(url);
+        return new Uint8Array([0xde, 0xad]);
+      },
+      async runCommand(_cmd, args) {
+        // exitCode -1 is how `runCommand` reports ENOENT.
+        if (opts.minisignMissing) return { ok: false, exitCode: -1, stdout: "", stderr: "ENOENT" };
+        const ok = opts.minisignOk !== false || args[0] !== "-V";
+        return { ok, exitCode: ok ? 0 : 1, stdout: "", stderr: "" };
+      },
+      async writeFile() {},
+      async makeWorkDir() {
+        return "/tmp/fake-runner-channel";
+      },
+      async removeDir() {},
     },
   };
 }
@@ -525,26 +566,36 @@ describe("url builders", () => {
     expect(() => daemonUrls("latest", "x86_64")).toThrow(/requires a pinned release version/);
   });
 
-  it("resolveDaemonReleaseVersion: lists releases for `latest`, passes a pin through", async () => {
-    const http = fakeHttp({
-      releaseTags: ["cli@1.0.0-beta.56", "v2.0.0", "v10.1.0", "core@9.0.0"],
-    });
-    // Highest platform `v*` semver wins — NOT the first one listed (creation
-    // order and version order diverge when a hotfix is cut for an older line).
-    expect(await resolveDaemonReleaseVersion("latest", http)).toBe("10.1.0");
-    // A pin never hits the network.
-    expect(
-      await resolveDaemonReleaseVersion("1.4.2", {
-        fetchText: () => Promise.reject(new Error("must not fetch")),
-      }),
-    ).toBe("1.4.2");
+  it("resolveDaemonReleaseVersion: reads the signed channel manifest for `latest`", async () => {
+    const { deps, fetched } = fakeChannelDeps({ tag: "v10.1.0" });
+    expect(await resolveDaemonReleaseVersion("latest", deps)).toBe("10.1.0");
+    expect(fetched).toEqual([CHANNEL_MANIFEST_URL, `${CHANNEL_MANIFEST_URL}.minisig`]);
   });
 
-  it("resolveDaemonReleaseVersion: fails clearly when no platform v* release exists", async () => {
-    const http = fakeHttp({ releaseTags: ["cli@1.0.0-beta.56", "core@9.0.0"] });
-    await expect(resolveDaemonReleaseVersion("latest", http)).rejects.toThrow(
-      /No platform v\* release/,
-    );
+  it("resolveDaemonReleaseVersion: a pin never hits the network", async () => {
+    const { deps, fetched } = fakeChannelDeps();
+    expect(await resolveDaemonReleaseVersion("1.4.2", deps)).toBe("1.4.2");
+    expect(fetched).toEqual([]);
+  });
+
+  it("resolveDaemonReleaseVersion: fails closed with the release-CLI escape hatch", async () => {
+    for (const opts of [{ tag: "core@12.0.0" }, { minisignOk: false }]) {
+      await expect(
+        resolveDaemonReleaseVersion("latest", fakeChannelDeps(opts).deps),
+      ).rejects.toThrow(
+        /(not a platform v<semver>|Signature verification FAILED)[\s\S]*APPSTRATE_VERSION=vX\.Y\.Z bash -s -- --platform-url <url> --token <token>/,
+      );
+    }
+  });
+
+  it("resolveDaemonReleaseVersion: a missing minisign carries no release-CLI hint", async () => {
+    const { deps, fetched } = fakeChannelDeps({ minisignMissing: true });
+    const err = await resolveDaemonReleaseVersion("latest", deps).catch((e: unknown) => e);
+    // A release CLI verifies with minisign too, so the hint would mislead.
+    expect(err).toBeInstanceOf(MinisignMissingError);
+    expect((err as Error).message).toMatch(/^minisign is required/);
+    expect((err as Error).message).not.toContain("APPSTRATE_VERSION");
+    expect(fetched).toEqual([]);
   });
 
   it("firecrackerUrls: tarball + sha + inner paths (VMM and jailer from ONE archive)", () => {
@@ -563,7 +614,7 @@ describe("downloadDaemon", () => {
     // `sha` doubles as the checksums.txt body (fetchText) — one line for the asset.
     const http = fakeHttp({ binary: bytes, sha: `${sha}  appstrate-runner-x86_64` });
     const { fs } = fakeFs();
-    const { exec } = fakeExec(); // default minisign probe + -Vm both `ok`.
+    const { exec } = fakeExec(); // default minisign probe + -V both `ok`.
     const out = await downloadDaemon({
       http,
       exec,
@@ -584,7 +635,7 @@ describe("downloadDaemon", () => {
     const base = fakeHttp({
       binary: bytes,
       sha: `${sha}  appstrate-runner-x86_64`,
-      releaseTags: ["cli@1.0.0-beta.56", "v3.2.1"],
+      channelTag: "v3.2.1",
     });
     const urls: string[] = [];
     const http: RunnerHttp = {
@@ -612,10 +663,10 @@ describe("downloadDaemon", () => {
       arch: "x86_64",
       destPath: TEST_DAEMON_DEST,
     });
-    // Exactly one listing call, then only pinned `download/v3.2.1/...` paths —
-    // `releases/latest/download` is never built (a non-`v*` release marked
-    // latest carries no runner assets and would 404 all three).
-    expect(urls.filter((u) => u.startsWith("https://api.github.com/"))).toHaveLength(1);
+    // The signed channel manifest first, then only pinned `download/v3.2.1/...`
+    // paths — `releases/latest/download` is never built (a non-`v*` release
+    // marked latest carries no runner assets and would 404 all three).
+    expect(urls.slice(0, 2)).toEqual([CHANNEL_MANIFEST_URL, `${CHANNEL_MANIFEST_URL}.minisig`]);
     expect(urls.some((u) => u.includes("/latest/download/"))).toBe(false);
     for (const asset of ["appstrate-runner-x86_64", "checksums.txt", "checksums.txt.minisig"]) {
       expect(urls).toContain(`${APPSTRATE_RELEASE_BASE}/download/v3.2.1/${asset}`);
@@ -732,10 +783,10 @@ describe("downloadDaemon", () => {
     const sha = sha256Hex(bytes);
     const http = fakeHttp({ binary: bytes, sha: `${sha}  appstrate-runner-x86_64` });
     const { fs } = fakeFs();
-    // `minisign -Vm …` returns non-zero → signature rejected. The probe
+    // `minisign -V …` returns non-zero → signature rejected. The probe
     // (`minisign -v`, args[0] === "-v") must still succeed, so key on the verb.
-    const { exec } = fakeExec({
-      "minisign -Vm": () => ({ ok: false, exitCode: 1, stdout: "", stderr: "bad sig" }),
+    const { exec, calls } = fakeExec({
+      "minisign -V": () => ({ ok: false, exitCode: 1, stdout: "", stderr: "bad sig" }),
     });
     await expect(
       downloadDaemon({
@@ -747,6 +798,17 @@ describe("downloadDaemon", () => {
         destPath: TEST_DAEMON_DEST,
       }),
     ).rejects.toThrow(/Signature verification FAILED/);
+    // Same verification as `self-update`: the scratch copy against its
+    // explicit `.minisig`, with the pinned release key.
+    const verify = calls.find((c) => c[0] === "minisign" && c[1] === "-V")!;
+    expect(verify.slice(1, 3)).toEqual(["-V", "-m"]);
+    expect(verify[3]).toEndWith("/checksums.txt");
+    expect(verify.slice(4)).toEqual([
+      "-x",
+      `${verify[3]}.minisig`,
+      "-P",
+      APPSTRATE_MINISIGN_PUBKEY,
+    ]);
   });
 });
 

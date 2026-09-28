@@ -45,13 +45,13 @@ export function useAutoSeedFeaturedModels() {
       const { data } = await client.POST("/api/models/seed", {
         body: {
           credentialId,
-          modelIds: toSeed.map((m) => m.id),
+          model_ids: toSeed.map((m) => m.id),
         },
       });
       // Non-2xx throws via the client middleware, so `data` is defined here.
       if (!data) return { created: 0, promotedDefault: false };
       qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
-      return { created: data.created, promotedDefault: data.promotedDefault };
+      return { created: data.created, promotedDefault: data.promoted_default };
     } catch {
       // Seed is best-effort — onboarding can still continue if seeding fails.
       return { created: 0, promotedDefault: false };

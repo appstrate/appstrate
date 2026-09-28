@@ -1870,8 +1870,12 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
   // INTEGRATION_BOOT_WAIT_MS).
   let bootReady = options.integrationBootPromise;
   if (bootReady) {
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     bootReady = Promise.race([
       bootReady.then(() => {
+        // Disarm the deadline: a boot that finished in time must not log
+        // "exceeded" 30 s later on every run that outlives it (#1548).
+        clearTimeout(deadline);
         bootReady = undefined; // resolved — skip the race on later requests
       }),
       new Promise<void>((resolve) => {
@@ -1887,6 +1891,7 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
           resolve();
         }, INTEGRATION_BOOT_WAIT_MS);
         t.unref?.();
+        deadline = t;
       }),
     ]);
   }

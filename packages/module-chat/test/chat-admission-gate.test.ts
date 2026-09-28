@@ -23,7 +23,7 @@
  * (the harness boots it) so persistence side effects are observable.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "@appstrate/db/client";
@@ -33,6 +33,7 @@ import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
 import { assertDbCount } from "../../../apps/api/test/helpers/assertions.ts";
 import { handleChatStream, type ChatEnv } from "../src/chat-stream.ts";
+import { logger } from "../src/logger.ts";
 import type { ChatPlatformDeps } from "../src/platform-services.ts";
 import type { ChatModelResolution } from "@appstrate/core/chat-contract";
 import type { UsageRejection } from "@appstrate/core/module";
@@ -123,10 +124,12 @@ function fakeDeps(o: DepsOverrides): ChatPlatformDeps {
       return new Response("unexpected dispatch: " + path, { status: 500 });
     },
     rateLimit: () => async (_c, next) => next(),
+    publicOrigin: "http://localhost:3000",
     resolveChatModel:
       o.resolveChatModel ?? (async (): Promise<ChatModelResolution> => ({ subscription: false })),
     recordChatUsage: async () => {},
     checkUsageAllowed: o.checkUsageAllowed,
+    loadEnforcedSkills: async () => [],
   };
 }
 
@@ -181,6 +184,31 @@ describe("chat admission gate (handleChatStream)", () => {
     await assertDbCount(llmUsage, eq(llmUsage.orgId, ctx.orgId), 0);
   });
 
+  it("a refused turn logs exactly one info line carrying the refusal code", async () => {
+    const info = spyOn(logger, "info");
+    try {
+      const c = fakeContext({
+        orgId: ctx.orgId,
+        user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
+        spaceId: ctx.defaultSpaceId,
+        body: { messages: [userTurn("u1", "hello")] },
+      });
+      await handleChatStream(c, fakeDeps({ checkUsageAllowed: async () => REJECTION }));
+
+      const refusals = info.mock.calls.filter(
+        ([msg]) => msg === "chat turn refused by admission gate",
+      );
+      expect(refusals).toEqual([
+        [
+          "chat turn refused by admission gate",
+          { code: "over_cap", status: 402, orgId: ctx.orgId, model: "sysmodel" },
+        ],
+      ]);
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   it("a persisted-session turn blocked by the gate returns 402 and writes no user message or usage row", async () => {
     const sessionId = "chs_gate_persist";
     const c = fakeContext({
@@ -223,9 +251,9 @@ describe("chat admission gate (handleChatStream)", () => {
       body: { messages: [userTurn("u1", "hello")] },
     });
     // A subscription model whose credential is dead short-circuits to the
-    // reconnect response — a clean way to observe the turn past the gate
+    // reconnect refusal — a clean way to observe the turn past the gate
     // without standing up the Pi engine.
-    const res = await handleChatStream(
+    const refusal = handleChatStream(
       c,
       fakeDeps({
         checkUsageAllowed: async (args) => {
@@ -239,8 +267,8 @@ describe("chat admission gate (handleChatStream)", () => {
       }),
     );
 
-    // Admitted → the turn proceeds and hits the reconnect (401) branch.
-    expect(res.status).toBe(401);
+    // Admitted → the turn proceeds and hits the reconnect (409) branch.
+    await expect(refusal).rejects.toMatchObject({ status: 409, code: "needs_reconnection" });
     expect(gateArgs).toEqual([
       {
         orgId: ctx.orgId,

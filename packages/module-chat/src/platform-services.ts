@@ -26,6 +26,8 @@
 import type { MiddlewareHandler } from "hono";
 import type { db } from "@appstrate/db/client";
 import type { ModuleInitContext, UsageRejection } from "@appstrate/core/module";
+import { ApiError } from "@appstrate/core/api-errors";
+import { logger } from "./logger.ts";
 
 /** The chat module's open DB transaction handle (Drizzle tx). */
 type ChatDbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -34,6 +36,8 @@ import type {
   ChatUsageRecord,
   ResolvedChatAttachment,
   ChatModelResolution,
+  EnforcedChatSkill,
+  EnforcedChatSkillRef,
 } from "@appstrate/core/chat-contract";
 
 export interface ChatPlatformDeps {
@@ -45,6 +49,8 @@ export interface ChatPlatformDeps {
   dispatch(request: Request): Promise<Response>;
   /** Platform per-route rate limiter factory. */
   rateLimit(maxPerMinute: number): MiddlewareHandler;
+  /** Public origin (`APP_URL`) that pagination `Link` headers are rooted on. */
+  publicOrigin: string;
   /**
    * Resolve the chosen model row (`presetId`) for a chat turn: an API-key /
    * unknown provider yields `{ subscription: false }` (llm-proxy-bound); an oauth2
@@ -96,6 +102,33 @@ export interface ChatPlatformDeps {
     sessionId: string | null;
     subscription: boolean;
   }): Promise<UsageRejection | null>;
+  /**
+   * The space's enforced skills, read with the platform's authority: a member
+   * without `skills:read` still gets them. A failure rejects with a 503 so the
+   * turn is refused rather than run without them.
+   */
+  loadEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkill[]>;
+  /** Their names only, from the database (no archive read); same 503 on failure. */
+  listEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkillRef[]>;
+}
+
+/**
+ * A failed read of the space's enforced skills, as a 503. An `ApiError` cause
+ * (a lost archive) names the skill, so its detail is kept: that fault does not
+ * pass with a retry, and an admin must know which skill to release.
+ */
+function enforcedSkillsRead<T>(read: Promise<T>, orgId: string, spaceId: string): Promise<T> {
+  return read.catch((cause: unknown) => {
+    logger.warn("enforced chat skills unavailable", { orgId, spaceId, err: String(cause) });
+    const why = cause instanceof ApiError ? cause.message : "Retry shortly.";
+    throw new ApiError({
+      status: 503,
+      code: "enforced_skills_unavailable",
+      title: "Service Unavailable",
+      detail: `The skills this space requires in its conversations could not be loaded. ${why}`,
+      cause,
+    });
+  });
 }
 
 /**
@@ -115,10 +148,15 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
   return {
     dispatch: (request) => (inProcess ? inProcess.dispatch(request) : fetch(request)),
     rateLimit: (maxPerMinute) => ctx.services.http.rateLimit(maxPerMinute),
+    publicOrigin: ctx.appUrl,
     resolveChatModel: (orgId, presetId) => ctx.services.resolveChatModel(orgId, presetId),
     recordChatUsage: (record) => ctx.services.recordChatUsage(record),
     resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),
     cleanupSessionFiles: (chatSessionId, tx) => ctx.services.cleanupSessionFiles(chatSessionId, tx),
     checkUsageAllowed: (args) => ctx.services.checkUsageAllowed(args),
+    loadEnforcedSkills: (orgId, spaceId) =>
+      enforcedSkillsRead(ctx.services.loadEnforcedChatSkills(orgId, spaceId), orgId, spaceId),
+    listEnforcedSkills: (orgId, spaceId) =>
+      enforcedSkillsRead(ctx.services.listEnforcedChatSkills(orgId, spaceId), orgId, spaceId),
   };
 }

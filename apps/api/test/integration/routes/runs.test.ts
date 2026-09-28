@@ -17,6 +17,7 @@ import {
   seedAgent,
   seedApiKey,
   seedEndUser,
+  seedOrgModelProviderOAuth,
   seedPackageShare,
   seedRun,
   seedRunLog,
@@ -364,11 +365,14 @@ describe("Runs API", () => {
       const [row] = await db.select().from(runs).where(eq(runs.id, body.id!));
       expect(row!.modelLabel).toBe("Echo Default GPT");
       expect(row!.modelSource).toBe("org");
+      // The org's own API key is spent by the platform LLM proxy, on this pin.
+      expect(row!.inferenceRoute).toBe("proxy");
+      expect(row!.modelId).toBe(modelDbId);
       // Kickoff pricing snapshot (issue #1025 §C) — the platform-side fact the
-      // run's runner ledger row is classified against, resolved here from the
-      // vendored catalog (the org_models row carries no `cost` override). The
-      // RATES are catalog content and refresh weekly; what this pins is that a
-      // priced model reaches the row with a usable rate table at all.
+      // run's runner ledger row is classified against, resolved here from Pi's
+      // model registry (the org_models row carries no `cost` override). The
+      // RATES move with the pinned Pi version; what this pins is that a priced
+      // model reaches the row with a usable rate table at all.
       expect(row!.modelCost).toMatchObject({
         input: expect.any(Number),
         output: expect.any(Number),
@@ -411,6 +415,33 @@ describe("Runs API", () => {
       };
       expect(body.model_label).toBe("Echo Pinned GPT");
       expect(body.model_source).toBe("org");
+
+      await waitForRunPipelineSettled();
+    });
+
+    it("leaves an OAuth subscription run's inference with its sidecar", async () => {
+      await seedRunnableAgent();
+      const credential = await seedOrgModelProviderOAuth({ orgId: ctx.orgId });
+      const modelDbId = await createOrgModel(
+        ctx.orgId,
+        "Echo Subscription",
+        "gpt-5.5",
+        ctx.user.id,
+        credential.id,
+      );
+      await setDefaultModel(ctx.orgId, modelDbId);
+
+      const res = await app.request("/api/agents/@runorg/echo-agent/run?version=draft", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: {} }),
+      });
+
+      expect(res.status).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      const [row] = await db.select().from(runs).where(eq(runs.id, id));
+      expect(row!.inferenceRoute).toBe("sidecar");
+      expect(row!.modelId).toBe(modelDbId);
 
       await waitForRunPipelineSettled();
     });
@@ -1023,13 +1054,16 @@ describe("Runs API", () => {
       });
 
       // Stale or garbled cursors must not 400 — the polling tail must
-      // keep working through transient client-side malformation.
-      const res = await app.request(`/api/runs/${run.id}/logs?since=not-a-number`, {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: unknown[] };
-      expect(body.data).toHaveLength(1);
+      // keep working through transient client-side malformation. `1e30` is an
+      // integer past int8: it must fall back, not reach Postgres as a 500.
+      for (const since of ["not-a-number", "1e30"]) {
+        const res = await app.request(`/api/runs/${run.id}/logs?since=${since}`, {
+          headers: authHeaders(ctx),
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: unknown[] };
+        expect(body.data).toHaveLength(1);
+      }
     });
 
     it("?since=<highest_id> returns an empty array", async () => {
@@ -1052,12 +1086,15 @@ describe("Runs API", () => {
         level: "info",
       });
 
-      const res = await app.request(`/api/runs/${run.id}/logs?since=${log.id}`, {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: unknown[] };
-      expect(body.data).toHaveLength(0);
+      // The second cursor is past int4: `run_logs.id` is bigint (migration 0069).
+      for (const since of [String(log.id), "3000000000"]) {
+        const res = await app.request(`/api/runs/${run.id}/logs?since=${since}`, {
+          headers: authHeaders(ctx),
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: unknown[] };
+        expect(body.data).toHaveLength(0);
+      }
     });
 
     it("filters by ?level= minimum severity", async () => {

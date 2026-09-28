@@ -3,12 +3,16 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../../api/client.ts";
-import { RequirePermission } from "../../components/require-permission.tsx";
+import { RouteGate } from "../../components/route-gate.tsx";
 import { OrgSettingsSpaceMembersPage } from "../org-settings/space/members.tsx";
 import { orgStore } from "../../stores/org-store.ts";
 import { spaceStore } from "../../stores/space-store.ts";
 import { render } from "../../test/render.tsx";
 import { i18nReady } from "../../i18n.ts";
+import { installFakeStorage } from "../../test/fake-storage.ts";
+
+// `RouteGate` reads the module flags off `window.__APP_CONFIG__`.
+installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 await i18nReady;
 
@@ -123,9 +127,9 @@ function pageFor(
     queryClient.setQueryData(membersKey, { object: "list", data: [member], hasMore: false });
   try {
     const html = render(
-      <RequirePermission permission={["space-members:read", "space-members:invite"]}>
+      <RouteGate path="/org-settings/space/members">
         <OrgSettingsSpaceMembersPage />
-      </RequirePermission>,
+      </RouteGate>,
       { queryClient },
     );
     const membersQuery = queryClient.getQueryCache().find({ queryKey: membersKey });
@@ -203,7 +207,7 @@ describe("invite-only space member access", () => {
         id: "inv_here",
         email: "guest-here@example.com",
         role: "guest",
-        space_assignments: [{ space_id: "spc_inviter", preset_role: "viewer" }],
+        space_assignments: [{ spaceId: "spc_inviter", preset_role: "viewer" }],
         token: "tok_here",
         expiresAt: "2026-09-12T00:00:00Z",
         createdAt: "2026-09-05T00:00:00Z",
@@ -212,7 +216,7 @@ describe("invite-only space member access", () => {
         id: "inv_elsewhere",
         email: "guest-elsewhere@example.com",
         role: "guest",
-        space_assignments: [{ space_id: "spc_other", preset_role: "viewer" }],
+        space_assignments: [{ spaceId: "spc_other", preset_role: "viewer" }],
         token: "tok_elsewhere",
         expiresAt: "2026-09-12T00:00:00Z",
         createdAt: "2026-09-05T00:00:00Z",

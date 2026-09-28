@@ -20,6 +20,7 @@ import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 // auth strategy from.
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 import { turnPermissions } from "../../../../../packages/module-chat/src/turn-permissions.ts";
+import type { ChatSkillMode } from "@appstrate/db/schema";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -30,7 +31,7 @@ interface ListedSpace {
   permissions: string[];
 }
 
-let bearer: (authoring: boolean) => Record<string, string>;
+let bearer: (authoring: boolean, skillMode?: ChatSkillMode) => Record<string, string>;
 
 beforeEach(async () => {
   await truncateAll();
@@ -46,18 +47,18 @@ beforeEach(async () => {
   const { data } = (await listed.json()) as { data: ListedSpace[] };
   const resolved = data.find((space) => space.id === builder.defaultSpaceId)!.permissions;
   // The premise: the role grants both, so a 403 below can only come from the token.
-  for (const permission of ["agents:write", "agents:run", "mcp:read"]) {
+  for (const permission of ["agents:write", "agents:run", "mcp:read", "skills:read"]) {
     expect(resolved).toContain(permission);
   }
 
-  bearer = (authoring) => {
+  bearer = (authoring, skillMode = "auto") => {
     const token = mintMcpLoopbackToken({
       userId: builder.user.id,
       email: builder.user.email,
       name: builder.user.name,
       orgId: builder.orgId,
       orgRole: "member",
-      permissions: turnPermissions(resolved, authoring),
+      permissions: turnPermissions(resolved, { authoring, skillMode }),
     });
     return {
       Authorization: `Bearer ${token}`,
@@ -116,5 +117,27 @@ describe("a chat turn with agent authoring switched off", () => {
     expect(on.kind!.enum).toEqual(["agent", "inline"]);
     expect(Object.keys(on)).toContain("context_files");
     expect(Object.keys(on)).toContain("manifest");
+  });
+});
+
+describe("a chat turn in the strict skill mode", () => {
+  it("is refused the skill listing although the builder's role grants it", async () => {
+    const list = (skillMode: ChatSkillMode) =>
+      app.request("/api/packages/skills", { headers: bearer(true, skillMode) });
+    expect((await list("strict")).status).toBe(403);
+    // Control: the same bearer outside strict lists them.
+    expect((await list("manual")).status).toBe(200);
+  });
+
+  it("is refused writing a skill, whose response would echo its SKILL.md", async () => {
+    const create = (skillMode: ChatSkillMode) =>
+      app.request("/api/packages/skills", {
+        method: "POST",
+        headers: { ...bearer(true, skillMode), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+    expect((await create("strict")).status).toBe(403);
+    // Control: outside strict the guard passes and the empty body is judged.
+    expect((await create("manual")).status).toBe(400);
   });
 });

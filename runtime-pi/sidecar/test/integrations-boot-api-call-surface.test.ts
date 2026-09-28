@@ -19,6 +19,7 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { ApiCallToolDeps } from "../mcp.ts";
 import { TokenBudget } from "../token-budget.ts";
 import { bootIntegrations, hiddenToolsForNativeUpstream } from "../integrations-boot.ts";
+import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 
 const INTEGRATION_ID = "@appstrate/drive";
 
@@ -108,7 +109,7 @@ async function boot(...specs: IntegrationSpawnSpec[]) {
 
 async function bootWith(deps: ApiCallToolDeps, specs: IntegrationSpawnSpec[]) {
   const previousAdapter = process.env.INTEGRATION_RUNTIME_ADAPTER;
-  process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
+  process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
   try {
     return await bootIntegrations(
       specs,

@@ -6,21 +6,20 @@
  *
  * A pinned provider is the half of the model form that touches no network at
  * all: its endpoint is not the operator's to describe, and the models it offers
- * come from the vendored pricing catalog the platform already ships. So this
+ * come from the model catalog (Pi's registry) the platform already ships. So this
  * spec never stands up a mock endpoint — the key it types is never used for
  * anything but creating a credential row.
  *
  * The rename is the interesting half. `GET /api/models` returns RESOLVED
  * values, so the edit form opens on the catalog's own context window and max
  * output; if it read those as the operator's answers it would write them back
- * as overrides, and the row would silently stop following the weekly catalog
- * refresh. The intercepted request body is where that is either true or false.
+ * as overrides, and the row would silently stop following the catalog. The
+ * intercepted request body is where that is either true or false.
  */
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { selectOption } from "../../helpers/radix.ts";
 import type { APIResponse, Locator, Page } from "@playwright/test";
-import anthropicCatalog from "../../../apps/api/src/data/pricing/anthropic.json" with { type: "json" };
 
 const SETTINGS_PATH = "/org-settings/models";
 /** The form modal's title, identical to the button that opens it. */
@@ -29,25 +28,38 @@ const EDIT_MODEL = "Modifier le modèle";
 const PROVIDER = "Anthropic";
 
 /**
- * Two ids the vendored catalog carries for Anthropic — one to add, one that
- * must disappear when the list is searched. Both come from the catalog itself
- * (`apps/api/src/data/`), so no request describes them.
+ * Two ids the catalog carries for Anthropic — one to add, one that must
+ * disappear when the list is searched. Both come from the catalog itself, so
+ * no request describes them.
  */
 const MODEL_ID = "claude-sonnet-4-5-20250929";
-/** The catalog's own label for it, which the server derives the row's name from. */
-const MODEL_LABEL = "Claude Sonnet 4 5 20250929";
 /** Unique as a substring, so the row locator matches exactly one checkbox. */
-const OTHER_MODEL_ID = "claude-3-opus-20240229";
-/**
- * Read from the catalog, never restated: the weekly LiteLLM refresh moves it
- * (200k → 1M in #1479), and the assertion is "the row follows the catalog".
- */
-const CATALOG_CONTEXT_WINDOW = anthropicCatalog[MODEL_ID].contextWindow;
+const OTHER_MODEL_ID = "claude-opus-4-7";
 
 const NEW_LABEL = "Sonnet de l'équipe";
 
 /** The four the capabilities toggle owns — an "auto" row sends none of them. */
 const CATALOG_DERIVABLE = ["input", "contextWindow", "maxTokens", "reasoning"] as const;
+
+/**
+ * The catalog's own entry for {@link MODEL_ID}, read from the registry the
+ * form reads — never restated, since the assertion is "the row follows it".
+ */
+async function catalogEntry(apiClient: {
+  get(path: string): Promise<APIResponse>;
+}): Promise<{ label: string; contextWindow: number }> {
+  const res = await apiClient.get("/model-provider-credentials/registry");
+  expect(res.status()).toBe(200);
+  const providers = (await res.json()).data as Array<{
+    providerId: string;
+    models: Array<{ id: string; label: string; contextWindow: number }>;
+  }>;
+  const entry = providers
+    .find((p) => p.providerId === "anthropic")
+    ?.models.find((m) => m.id === MODEL_ID);
+  expect(entry).toBeDefined();
+  return entry!;
+}
 
 function pickRow(dialog: Locator, modelId: string): Locator {
   return dialog.getByRole("checkbox", { name: new RegExp(modelId) });
@@ -84,6 +96,7 @@ test.describe("Catalogued model — UI", () => {
     authedPage: page,
     apiClient,
   }) => {
+    const { label } = await catalogEntry(apiClient);
     const dialog = await addCatalogModel(page);
 
     // The catalog is free to read, so the list is there as soon as the endpoint
@@ -101,14 +114,14 @@ test.describe("Catalogued model — UI", () => {
     await dialog.getByRole("button", { name: "Ajouter 1 modèle", exact: true }).click();
 
     await expect(dialog).toBeHidden();
-    await expect(page.getByText(MODEL_LABEL).first()).toBeVisible();
+    await expect(page.getByText(label).first()).toBeVisible();
 
     const created = (await listModels(apiClient)).find((m) => m.modelId === MODEL_ID);
     // The row was created from the id alone: its name and every capability were
     // resolved server-side from the catalog it names.
     expect(created).toMatchObject({
       modelId: MODEL_ID,
-      label: MODEL_LABEL,
+      label,
       providerId: "anthropic",
       apiShape: "anthropic-messages",
     });
@@ -118,6 +131,7 @@ test.describe("Catalogued model — UI", () => {
     authedPage: page,
     apiClient,
   }) => {
+    const { contextWindow } = await catalogEntry(apiClient);
     const addDialog = await addCatalogModel(page);
     await pickRow(addDialog, MODEL_ID).click();
     await addDialog.getByRole("button", { name: "Ajouter 1 modèle", exact: true }).click();
@@ -138,7 +152,7 @@ test.describe("Catalogued model — UI", () => {
 
     await dialog.locator("#mdl-label").fill(NEW_LABEL);
     const saved = page.waitForRequest(
-      (req) => req.method() === "PUT" && /\/api\/models\/[^/]+$/.test(req.url()),
+      (req) => req.method() === "PATCH" && /\/api\/models\/[^/]+$/.test(req.url()),
     );
     await dialog.getByRole("button", { name: "Enregistrer" }).click();
 
@@ -146,18 +160,20 @@ test.describe("Catalogued model — UI", () => {
     expect(body.label).toBe(NEW_LABEL);
     // `null` clears an override and is a no-op for a row that never had one; a
     // real number here would be the catalog's own value written back as the
-    // operator's, cutting the row off from the weekly refresh.
+    // operator's, cutting the row off from the catalog.
     for (const field of CATALOG_DERIVABLE) expect(body[field] ?? null).toBeNull();
 
     await expect(dialog).toBeHidden();
     await expect(page.getByText(NEW_LABEL).first()).toBeVisible();
     const renamed = (await listModels(apiClient)).find((m) => m.modelId === MODEL_ID);
-    expect(renamed).toMatchObject({ label: NEW_LABEL, contextWindow: CATALOG_CONTEXT_WINDOW });
+    expect(renamed).toMatchObject({ label: NEW_LABEL, contextWindow });
   });
 
   test("answers for one capability without freezing the three it did not touch", async ({
     authedPage: page,
+    apiClient,
   }) => {
+    const { contextWindow } = await catalogEntry(apiClient);
     const addDialog = await addCatalogModel(page);
     await pickRow(addDialog, MODEL_ID).click();
     await addDialog.getByRole("button", { name: "Ajouter 1 modèle", exact: true }).click();
@@ -170,18 +186,18 @@ test.describe("Catalogued model — UI", () => {
     // Taking the capabilities on prefills the four with what `GET /api/models`
     // resolved — the catalog's own numbers. Untick "Image" and nothing else.
     await dialog.locator("#mdl-capabilities-explicit").click();
-    await expect(dialog.locator("#mdl-ctx")).toHaveValue(String(CATALOG_CONTEXT_WINDOW));
+    await expect(dialog.locator("#mdl-ctx")).toHaveValue(String(contextWindow));
     await dialog.locator("#mdl-input-image").click();
 
     const saved = page.waitForRequest(
-      (req) => req.method() === "PUT" && /\/api\/models\/[^/]+$/.test(req.url()),
+      (req) => req.method() === "PATCH" && /\/api\/models\/[^/]+$/.test(req.url()),
     );
     await dialog.getByRole("button", { name: "Enregistrer" }).click();
 
     const body = JSON.parse((await saved).postData() ?? "{}") as Record<string, unknown>;
     // The one answer the operator gave — and nothing else. A number here would
     // be the catalog's own value written back as an override, cutting the row
-    // off from the weekly refresh over an edit about modalities.
+    // off from the catalog over an edit about modalities.
     expect(body.input).toEqual(["text"]);
     for (const field of ["contextWindow", "maxTokens", "reasoning"] as const) {
       expect(body[field] ?? null).toBeNull();

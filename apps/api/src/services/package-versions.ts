@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { PackageVersionInfoResponse } from "@appstrate/shared-types";
 import { eq, and, desc, count, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
+import { ApiError } from "../lib/errors.ts";
 import {
   uploadPackageZip,
   downloadVersionZip,
+  downloadVersionZipForExecution,
   deleteVersionZip,
   buildMinimalZip,
 } from "./package-storage.ts";
@@ -25,15 +28,19 @@ import {
 import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/version-policy";
 
 import { parseScopedName } from "@appstrate/core/naming";
+import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import { dropRetiredRuntimeTools, type PackageType } from "@appstrate/core/validation";
 import { parsePackageZip, zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
+import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { downloadPackageFiles } from "./package-items/storage.ts";
 import { storageFolderForType, assertArchiveContentConforms } from "./package-items/config.ts";
 import { toISO } from "../lib/date-helpers.ts";
+import type { DbOrTx } from "../lib/db-helpers.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
 import { withPackageDraftLock } from "./package-draft-lock.ts";
+import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 
 // ─────────────────────────────────────────────
 // Version creation
@@ -252,8 +259,12 @@ export async function getExactVersionManifest(
 }
 
 /** 3-step version resolution: exact → dist-tag → semver range. */
-export async function resolveVersion(packageId: string, query: string): Promise<number | null> {
-  const allVersions: CatalogVersion[] = await db
+export async function resolveVersion(
+  packageId: string,
+  query: string,
+  executor: DbOrTx = db,
+): Promise<number | null> {
+  const allVersions: CatalogVersion[] = await executor
     .select({
       id: packageVersions.id,
       version: packageVersions.version,
@@ -262,7 +273,7 @@ export async function resolveVersion(packageId: string, query: string): Promise<
     .from(packageVersions)
     .where(eq(packageVersions.packageId, packageId));
 
-  const allDistTags: DistTagEntry[] = await db
+  const allDistTags: DistTagEntry[] = await executor
     .select({ tag: packageDistTags.tag, versionId: packageDistTags.versionId })
     .from(packageDistTags)
     .where(eq(packageDistTags.packageId, packageId));
@@ -303,11 +314,10 @@ export async function getVersionForDownload(
 // Version detail
 // ─────────────────────────────────────────────
 
-interface VersionDetail {
+export interface VersionDetail {
   id: number;
   version: string;
   manifest: Record<string, unknown>;
-  prompt: string | null;
   content: Record<string, Uint8Array> | null;
   yanked: boolean;
   yankedReason: string | null;
@@ -317,17 +327,33 @@ interface VersionDetail {
 }
 
 /**
- * Resolve a version query and return full version data including text content extracted from ZIP.
- * Returns null if the version cannot be resolved.
+ * Resolve a version query and return full version data including the files of its ZIP.
+ * Returns null if the version cannot be resolved. See {@link readVersionArchive} for `content`.
  */
 export async function getVersionDetail(
   packageId: string,
   versionSpec: string,
+  /**
+   * `forExecution`: the version will run — apply the AFPS signature policy to its
+   * bytes. `executor`: read the catalog inside the caller's transaction.
+   */
+  opts: { forExecution?: boolean; executor?: DbOrTx } = {},
 ): Promise<VersionDetail | null> {
-  const versionId = await resolveVersion(packageId, versionSpec);
+  const row = await getVersionRow(packageId, versionSpec, opts.executor);
+  if (!row) return null;
+  return { ...row, content: await readVersionArchive(packageId, row.version, opts) };
+}
+
+/** A version's catalog row — {@link getVersionDetail} without reading its archive. */
+export async function getVersionRow(
+  packageId: string,
+  versionSpec: string,
+  executor: DbOrTx = db,
+): Promise<Omit<VersionDetail, "content"> | null> {
+  const versionId = await resolveVersion(packageId, versionSpec, executor);
   if (!versionId) return null;
 
-  const [row] = await db
+  const [row] = await executor
     .select({
       id: packageVersions.id,
       version: packageVersions.version,
@@ -343,41 +369,150 @@ export async function getVersionDetail(
     .limit(1);
 
   if (!row) return null;
-
-  // Try to download and extract ZIP content
-  let prompt: string | null = null;
-  let content: Record<string, Uint8Array> | null = null;
-
-  try {
-    const zipBuffer = await downloadVersionZip(packageId, row.version);
-    if (zipBuffer) {
-      const files = unzipPackageArchive(zipBuffer);
-      content = files;
-      // Extract prompt.md from ZIP
-      const promptData = files["prompt.md"];
-      if (promptData) {
-        prompt = new TextDecoder().decode(promptData);
-      }
-    }
-  } catch (err) {
-    logger.warn("Failed to extract ZIP for version detail", {
-      packageId,
-      version: row.version,
-      error: getErrorMessage(err),
-    });
-  }
-
   return {
     id: row.id,
     version: row.version,
     manifest: asRecord(row.manifest),
-    prompt,
-    content,
     yanked: row.yanked,
     yankedReason: row.yankedReason,
     integrity: row.integrity,
     artifactSize: row.artifactSize,
     createdAt: toISO(row.createdAt),
+  };
+}
+
+/**
+ * A published version's files: null when the object is absent or will not unzip — a
+ * reader that needs the bytes goes through {@link requirePublishedArchive}. Storage errors
+ * propagate; bundle-layer refusals (the signature gate of an execution read) are coded (#878).
+ */
+export async function readVersionArchive(
+  packageId: string,
+  version: string,
+  /** The version will run: apply the AFPS signature policy to its bytes. */
+  opts: { forExecution?: boolean } = {},
+): Promise<Record<string, Uint8Array> | null> {
+  const download = opts.forExecution ? downloadVersionZipForExecution : downloadVersionZip;
+  let zipBuffer: Buffer | null;
+  try {
+    zipBuffer = await download(packageId, version);
+  } catch (err) {
+    throw toBundleApiError(err) ?? err;
+  }
+  if (!zipBuffer) return null;
+  try {
+    return unzipPackageArchive(zipBuffer);
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    logger.warn("Failed to extract ZIP for version detail", {
+      packageId,
+      version,
+      error: getErrorMessage(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * `422 version_artifact_unavailable`: a version that EXISTS but whose bytes cannot be
+ * read — a broken artifact, never a missing version. The only place this refusal is
+ * built, so the one place it is logged for ops.
+ */
+export function versionArtifactUnavailable(
+  packageId: string,
+  version: string,
+  what = "archive",
+): ApiError {
+  logger.warn("Published version artifact unavailable", { packageId, version, what });
+  return new ApiError({
+    status: 422,
+    code: "version_artifact_unavailable",
+    title: "Version Artifact Unavailable",
+    detail: `Published '${packageId}@${version}' has no readable ${what}`,
+  });
+}
+
+/**
+ * The archive of a published version, or {@link versionArtifactUnavailable} when it is
+ * unreadable or lacks its type's REQUIRED content entry (`PACKAGE_CONTENT_ENTRY`).
+ * `entry` is that entry's bytes; `undefined` when the type has none or the optional one is absent.
+ */
+export function requirePublishedArchive(
+  type: PackageType,
+  packageId: string,
+  detail: Pick<VersionDetail, "version" | "content">,
+): { files: Record<string, Uint8Array>; entry: Uint8Array | undefined } {
+  if (detail.content === null) throw versionArtifactUnavailable(packageId, detail.version);
+  const spec = PACKAGE_CONTENT_ENTRY[type];
+  const entry = spec ? detail.content[spec.path] : undefined;
+  if (spec?.required && !entry) {
+    throw versionArtifactUnavailable(packageId, detail.version, `'${spec.path}' in its archive`);
+  }
+  return { files: detail.content, entry };
+}
+
+/**
+ * The decoded `prompt.md` of a published agent version, via {@link requirePublishedArchive},
+ * which refuses a version without one (`prompt.md` is required for an agent).
+ */
+export function requirePublishedPrompt(
+  packageId: string,
+  detail: Pick<VersionDetail, "version" | "content">,
+): string {
+  return new TextDecoder().decode(requirePublishedArchive("agent", packageId, detail).entry);
+}
+
+/** {@link loadPublishedDefinition}'s projection — `getOrgItem`'s fields, from a snapshot. */
+export interface PublishedDefinition {
+  name: string;
+  description: string | null;
+  version: string | null;
+  manifest_name: string | null;
+  manifest: Record<string, unknown>;
+  content: string;
+}
+
+/**
+ * The manifest-derived half of a package detail, read from a PUBLISHED
+ * snapshot instead of the draft columns — `getOrgItem`'s projection applied to
+ * a version's own manifest and archive, so the two halves of a detail response
+ * never come from two different definitions. `null` when `spec` resolves to no
+ * version.
+ *
+ * The manifest is the `package_versions.manifest` column: authoritative, one
+ * DB read, and immune to an archive that will not open. The CONTENT is the
+ * archive entry this type is authored around ({@link PACKAGE_CONTENT_ENTRY}),
+ * and the fallbacks below are the exact inverse of `applyDraftOverlay`: a type
+ * with no content entry at all (`mcp-server`, whose content IS its manifest)
+ * and an `integration` published without its optional `INTEGRATION.md` both
+ * store the manifest TEXT in `draft_content`, so the published projection
+ * reproduces that rather than handing back a `null` the editor would render as
+ * an empty file.
+ *
+ * That fallback stands only for an entry missing from an archive that opened:
+ * an unreadable archive, or one without a REQUIRED entry, is refused by
+ * {@link requirePublishedArchive} — the same 422 the run and restore paths answer.
+ */
+export async function loadPublishedDefinition(
+  type: PackageType,
+  packageId: string,
+  spec: string,
+  executor?: DbOrTx,
+): Promise<PublishedDefinition | null> {
+  const detail = await getVersionDetail(packageId, spec, { executor });
+  if (!detail) return null;
+  const m = asRecord(detail.manifest);
+  const { entry } = requirePublishedArchive(type, packageId, detail);
+  return {
+    // Same projection `getOrgItem` runs over the draft manifest, field for
+    // field: a reader must not be able to tell which definition answered by
+    // the SHAPE of what came back.
+    name: typeof m.display_name === "string" ? m.display_name : packageId,
+    description: typeof m.description === "string" ? m.description : null,
+    version: typeof m.version === "string" ? m.version : null,
+    manifest_name: typeof m.name === "string" ? m.name : null,
+    manifest: m,
+    content: entry ? decodeSkillMarkdown(entry) : JSON.stringify(m, null, 2),
   };
 }
 
@@ -493,7 +628,7 @@ export async function getMatchingDistTags(packageId: string, version: string): P
 export async function getVersionInfo(
   packageId: string,
   orgId: string,
-): Promise<{ latest_published_version: string | null; active_version: string | null }> {
+): Promise<PackageVersionInfoResponse> {
   const [[pkg], [latestTag]] = await Promise.all([
     db
       .select({ draftManifest: packages.draftManifest })
@@ -581,6 +716,11 @@ export async function createVersionFromDraft(params: {
   orgId: string;
   userId: string;
   version?: string;
+  /**
+   * Asserts the draft version the caller read (the route's `If-Match`) against
+   * the snapshot taken under the draft lock; when it throws, nothing is cut.
+   */
+  assertVersion?: (current: number) => void;
   /** Context-dependent publish gates must validate the captured manifest. */
   validateManifest?: (manifest: Record<string, unknown>, type: PackageType) => Promise<unknown>;
 }): Promise<CreateVersionResult> {
@@ -610,6 +750,7 @@ export async function createVersionFromDraft(params: {
   });
   if (!snapshot) return { error: "invalid_version" };
   const { pkg, storedFiles } = snapshot;
+  params.assertVersion?.(pkg.lockVersion);
 
   const baseManifest = asRecord(pkg.draftManifest);
   const content = (pkg.draftContent ?? "") as string;
@@ -655,20 +796,24 @@ export async function createVersionFromDraft(params: {
 
   await params.validateManifest?.(finalManifest, pkg.type);
 
-  // Build ZIP depending on package type
-  let zipBuffer: Buffer;
-  let frozenEntries: Record<string, Uint8Array> | undefined;
-  if (pkg.type === "agent") {
-    if (storedFiles) {
-      const entries: Record<string, Uint8Array> = { ...storedFiles };
-      entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
-      entries["prompt.md"] = new TextEncoder().encode(content);
-      zipBuffer = Buffer.from(zipArtifact(entries, 6));
-    } else {
+  // Build ZIP depending on package type. A function of the manifest, because
+  // the duplicate-content check below freezes the same draft a second time
+  // under a different `version`.
+  const buildArtifact = (
+    frozenManifest: Record<string, unknown>,
+  ): { zip: Buffer; entries?: Record<string, Uint8Array> } => {
+    if (pkg.type === "agent") {
+      if (storedFiles) {
+        const entries: Record<string, Uint8Array> = { ...storedFiles };
+        entries["manifest.json"] = new TextEncoder().encode(
+          JSON.stringify(frozenManifest, null, 2),
+        );
+        entries["prompt.md"] = new TextEncoder().encode(content);
+        return { zip: Buffer.from(zipArtifact(entries, 6)) };
+      }
       // Locally-created agents have no stored files — minimal ZIP is correct
-      zipBuffer = buildMinimalZip(finalManifest, content);
+      return { zip: buildMinimalZip(frozenManifest, content) };
     }
-  } else {
     // pkg.type === "skill" | "integration" | "mcp-server" — all three bundle
     // their stored files (skill content / integration entrypoint+bundle /
     // MCPB payload) plus the rewritten manifest, from their respective storage
@@ -682,10 +827,10 @@ export async function createVersionFromDraft(params: {
       );
     }
     const entries: Record<string, Uint8Array> = { ...storedFiles };
-    entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
-    zipBuffer = Buffer.from(zipArtifact(entries, 6));
-    frozenEntries = entries;
-  }
+    entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(frozenManifest, null, 2));
+    return { zip: Buffer.from(zipArtifact(entries, 6)), entries };
+  };
+  const { zip: zipBuffer, entries: frozenEntries } = buildArtifact(finalManifest);
 
   // The bytes that ACTUALLY get frozen: the artifact's content entry comes from
   // STORAGE, and `packages.draft_content` is a second copy that can drift.
@@ -714,10 +859,26 @@ export async function createVersionFromDraft(params: {
     }
   }
 
-  // Check for duplicate content — reject if identical to the latest version
-  const newIntegrity = computeIntegrity(new Uint8Array(zipBuffer));
+  // Check for duplicate content — reject if identical to the latest version.
+  // An OVERRIDE is a number the publish surface picks for a draft still at
+  // the published version (the dialog's bump, `packages publish --bump`); it
+  // is not a change, so the draft is compared under its OWN version. A
+  // version the author wrote into the manifest is compared as is: promoting
+  // `1.0.0-rc.1` to `1.0.0`, or deliberately re-cutting content, is theirs.
+  const ownVersion = baseManifest.version;
+  const comparable =
+    params.version !== undefined && params.version !== ownVersion
+      ? buildArtifact({ ...finalManifest, version: ownVersion }).zip
+      : zipBuffer;
+  const newIntegrity = computeIntegrity(new Uint8Array(comparable));
   const latestIntegrity = await getLatestVersionIntegrity(packageId);
   if (latestIntegrity && newIntegrity === latestIntegrity) {
+    // The draft IS the latest version (a revert, a save of identical bytes):
+    // clear the marker, so neither the dashboard nor the CLI keeps offering a
+    // publish that can only answer `no_changes`.
+    await withPackageDraftLock(packageId, (tx) =>
+      settleDraftAgainstLatest(tx, packageId, orgId, pkg.lockVersion),
+    );
     return { error: "no_changes" };
   }
 
@@ -744,6 +905,33 @@ export async function createVersionFromDraft(params: {
   return { id: result.id, version: result.version };
 }
 
+/**
+ * The draft's unpublished-changes marker (`updatedAt` against the latest
+ * version's `createdAt`), settled for a snapshot captured at `lockVersion`: the
+ * latest version holds that snapshot, so the draft is clean — unless a save
+ * landed since (the lock moved), which stays dirty even when it preceded the
+ * version's creation timestamp.
+ */
+async function settleDraftAgainstLatest(
+  tx: Parameters<Parameters<typeof withPackageDraftLock>[1]>[0],
+  packageId: string,
+  orgId: string,
+  lockVersion: number,
+): Promise<void> {
+  const publishedAt = sql`(
+    SELECT MAX(${packageVersions.createdAt}) FROM ${packageVersions}
+    WHERE ${packageVersions.packageId} = ${packageId}
+  )`;
+  await tx
+    .update(packages)
+    .set({
+      updatedAt: sql`CASE WHEN ${packages.lockVersion} = ${lockVersion}
+        THEN LEAST(${packages.updatedAt}, ${publishedAt})
+        ELSE GREATEST(${packages.updatedAt}, ${publishedAt} + interval '1 millisecond') END`,
+    })
+    .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
+}
+
 /** Reconcile a published snapshot with the draft without hiding concurrent edits. */
 export async function finalizeDraftPublication(params: {
   packageId: string;
@@ -765,22 +953,7 @@ export async function finalizeDraftPublication(params: {
     // the draft state finalized by a later one.
     if (latest?.id !== versionId) return;
 
-    // A save during validation can precede the version's creation timestamp,
-    // even though its changes were not captured. Keep that newer draft dirty
-    // under the existing timestamp-based unpublished-changes contract. If this
-    // snapshot is still current, clear any dirty marker left by an older publish.
-    const publishedAt = sql`(
-      SELECT MAX(${packageVersions.createdAt}) FROM ${packageVersions}
-      WHERE ${packageVersions.packageId} = ${packageId}
-    )`;
-    await tx
-      .update(packages)
-      .set({
-        updatedAt: sql`CASE WHEN ${packages.lockVersion} = ${lockVersion}
-          THEN LEAST(${packages.updatedAt}, ${publishedAt})
-          ELSE GREATEST(${packages.updatedAt}, ${publishedAt} + interval '1 millisecond') END`,
-      })
-      .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
+    await settleDraftAgainstLatest(tx, packageId, orgId, lockVersion);
 
     // Reflect an override only in the unchanged draft, after successful publish.
     // Advance its editor token, but not updatedAt: this change is already published.

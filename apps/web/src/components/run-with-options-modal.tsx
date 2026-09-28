@@ -16,13 +16,13 @@ import { useScheduleFormDeps } from "../hooks/use-schedules";
 import type { AgentDetail } from "@appstrate/shared-types";
 
 /**
- * Everything the modal collects, mapped 1:1 onto the run API body by the
- * caller: `version` rides the `?version=` query; `overrides` carries the
+ * Everything the modal collects, mapped onto a launch by `launchFromOptions`:
+ * `version` rides the `?version=` query; `overrides` carries the
  * schedule-shaped delta for model / proxy / connections (reused from
  * `RunOverridesPanel`); `dependencyOverrides` the per-skill
  * `dependency_overrides` map. Defaults across the board mirror plain "Lancer".
  */
-interface RunWithOptionsSubmit {
+export interface RunWithOptionsSubmit {
   input: Record<string, unknown>;
   version: string;
   overrides: RunOverridesValue;

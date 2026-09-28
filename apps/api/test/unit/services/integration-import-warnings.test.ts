@@ -5,7 +5,6 @@
  *
  * Covers AFPS §7.7 corners the Appstrate login engine cannot evaluate:
  *   - Arazzo Selector Object `type: "xpath"`
- *   - Multi-value JSONPath selectors (wildcards / filters / slices / recursive descent)
  *   - Criterion `type: "xpath"`
  *
  * Pure function — no DB, no setup, just shape-checking on a manifest object.
@@ -84,53 +83,6 @@ describe("collectConnectLoginWarnings", () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("XPath selector not supported");
     expect(warnings[0]).toContain("auths.primary.connect.login.outputs.token");
-  });
-
-  it("warns on multi-value JSONPath (wildcards, filters, slices, recursive descent)", () => {
-    const wildcardManifest = makeIntegrationManifest({
-      type: "custom",
-      delivery: { http: { in: "header", name: "X-Token", value: "{$credential.token}" } },
-      connect: {
-        login: {
-          request: { method: "POST", url: "https://example.com/login" },
-          outputs: {
-            tokens: { context: "$response.body", selector: "$.items[*].token", type: "jsonpath" },
-          },
-        },
-      },
-    });
-    const filterManifest = makeIntegrationManifest({
-      type: "custom",
-      delivery: { http: { in: "header", name: "X-Token", value: "{$credential.token}" } },
-      connect: {
-        login: {
-          request: { method: "POST", url: "https://example.com/login" },
-          outputs: {
-            token: {
-              context: "$response.body",
-              selector: "$.items[?(@.active)].token",
-              type: "jsonpath",
-            },
-          },
-        },
-      },
-    });
-    const recursiveManifest = makeIntegrationManifest({
-      type: "custom",
-      delivery: { http: { in: "header", name: "X-Token", value: "{$credential.token}" } },
-      connect: {
-        login: {
-          request: { method: "POST", url: "https://example.com/login" },
-          outputs: {
-            token: { context: "$response.body", selector: "$..token", type: "jsonpath" },
-          },
-        },
-      },
-    });
-    expect(collectConnectLoginWarnings(wildcardManifest)).toHaveLength(1);
-    expect(collectConnectLoginWarnings(filterManifest)).toHaveLength(1);
-    expect(collectConnectLoginWarnings(recursiveManifest)).toHaveLength(1);
-    expect(collectConnectLoginWarnings(wildcardManifest)[0]).toContain("single-value subset");
   });
 
   it("warns on xpath success criteria type", () => {

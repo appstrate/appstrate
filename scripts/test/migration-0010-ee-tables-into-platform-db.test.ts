@@ -406,10 +406,10 @@ describeRequiresPostgres("scripts/migration/0010-ee-tables-into-platform-db", ()
         `SELECT last_llm_usage_id, floor_id FROM ee_billing_cursor`,
       );
       expect(rows).toHaveLength(1);
-      expect(rows[0].last_llm_usage_id).toBe(41);
+      expect(Number(rows[0].last_llm_usage_id)).toBe(41);
       // The source predates 0006, so its cursor has no floor of its own: the
       // column takes the declared default rather than the boot's 7000.
-      expect(rows[0].floor_id).toBe(0);
+      expect(Number(rows[0].floor_id)).toBe(0);
 
       const [{ accounts }] = await bootedTarget.unsafe(
         `SELECT count(*)::int AS accounts FROM ee_billing_accounts`,
@@ -499,7 +499,7 @@ describeRequiresPostgres("scripts/migration/0010-ee-tables-into-platform-db", ()
       expect(managers).toBe(0);
 
       const [cursor] = await legacyTarget.unsafe(`SELECT last_llm_usage_id FROM ee_billing_cursor`);
-      expect(cursor.last_llm_usage_id).toBe(41);
+      expect(Number(cursor.last_llm_usage_id)).toBe(41);
     }, 60_000);
   });
 

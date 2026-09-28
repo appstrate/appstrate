@@ -325,7 +325,6 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
     keys: ["runtimeTools"],
     reason: RUNTIME_TOOLS_INTERNAL,
   },
-  { path: "runtime-pi/entrypoint.ts", keys: ["runtimeTools"], reason: RUNTIME_TOOLS_INTERNAL },
   { path: "runtime-pi/sidecar/server.ts", keys: ["runtimeTools"], reason: RUNTIME_TOOLS_INTERNAL },
 ];
 

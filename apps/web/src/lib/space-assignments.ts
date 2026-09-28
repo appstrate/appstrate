@@ -12,14 +12,14 @@ import type { AssignableOrgRole } from "@appstrate/shared-types";
 type SpaceAssignment = components["schemas"]["SpaceAssignment"];
 
 export interface AssignmentDraft {
-  space_id: string;
+  spaceId: string;
   role: string;
 }
 
 export function toSpaceAssignments(drafts: AssignmentDraft[]): SpaceAssignment[] {
   return drafts
-    .filter((d) => d.space_id && d.role)
-    .map((d) => ({ space_id: d.space_id, ...spaceRoleAssignment(d.role) }));
+    .filter((d) => d.spaceId && d.role)
+    .map((d) => ({ spaceId: d.spaceId, ...spaceRoleAssignment(d.role) }));
 }
 
 /** `admin` already runs every space: the API refuses a non-empty list for it (400). */
@@ -38,7 +38,7 @@ export function hasUnavailableAssignments(
 ): boolean {
   return drafts.some(
     (draft) =>
-      !spaces.some((space) => space.id === draft.space_id) ||
+      !spaces.some((space) => space.id === draft.spaceId) ||
       !roles.some((role) => role.value === draft.role),
   );
 }

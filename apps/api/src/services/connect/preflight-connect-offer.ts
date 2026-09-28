@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Mint a hosted-connect link into the run-kickoff 412 (issue #1207).
+ * Mint a hosted-connect link into the run-kickoff 409 (issue #1207).
  *
  * The readiness gate already names WHICH auth a connect flow must target and
  * WHICH scopes it must request (`auth_key` + `required_scopes`, relayed by
@@ -37,7 +37,7 @@ import type { SpaceScope } from "../../lib/scope.ts";
 import type { Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
 
-/** What one 412 item needs connected, when a connect flow can clear it here. */
+/** What one 409 item needs connected, when a connect flow can clear it here. */
 export interface ConnectOfferTarget {
   integrationId: string;
   authKey: string;
@@ -58,7 +58,7 @@ const FIELD_PREFIX = "integrations.";
 const IN_PLACE_CODES: ReadonlySet<string> = new Set(["insufficient_scopes", "needs_reconnection"]);
 
 /**
- * Decide whether one 412 item is something the CALLING actor can clear by
+ * Decide whether one 409 item is something the CALLING actor can clear by
  * opening a link, and with which claims. Pure.
  *
  * `not_connected` qualifies outright (a fresh connect, no `connection_id`).
@@ -87,13 +87,13 @@ export function connectOfferTarget(e: ResolutionFieldError): ConnectOfferTarget 
 }
 
 /**
- * Return a copy of `errors` with `connect_url` / `expires_at` / `package_id`
+ * Return a copy of `errors` with `connect_url` / `expiresAt` / `packageId`
  * attached to every item this actor can clear by opening a link.
  *
  * Never mutates its input: the same array is projected into the
  * `onRunConnectionMissing` webhook payload, which must stay link-free.
  *
- * A mint that throws costs that ONE item its offer — the 412 still describes
+ * A mint that throws costs that ONE item its offer — the 409 still describes
  * every failure, and the modal's manual connect path still works. Failing the
  * whole response because a convenience could not be produced would turn a
  * legible readiness error into a 500.
@@ -163,8 +163,8 @@ export async function attachConnectOffers(params: {
         return {
           ...e,
           connect_url: connectUrl,
-          expires_at: expiresAt,
-          package_id: target.integrationId,
+          expiresAt,
+          packageId: target.integrationId,
         };
       } catch (err) {
         logger.warn("Connect offer mint failed for readiness error", {

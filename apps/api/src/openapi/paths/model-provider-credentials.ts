@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
 export const modelProviderCredentialsPaths = {
@@ -22,7 +23,7 @@ export const modelProviderCredentialsPaths = {
           name: "fields",
           in: "query",
           description:
-            "Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, featured, models. An unknown field is a 400.",
+            "Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, featured, live_model_search, models. An unknown field is a 400.",
           schema: { type: "string" },
         },
       ],
@@ -48,12 +49,10 @@ export const modelProviderCredentialsPaths = {
                       // `displayName`, `iconUrl`, `docsUrl`, `apiShape`,
                       // `defaultBaseUrl`, `baseUrlOverridable`, `authMode`,
                       // `featured`) and the nested model fields (`contextWindow`,
-                      // `maxTokens`, `cacheRead`, `cacheWrite`) are camelCase on
-                      // the wire, diverging from the snake_case wire default.
-                      // This is an in-code vendored registry (module-supplied
-                      // `ModelProviderDef`) serialized verbatim; the spec matches
-                      // that runtime output (spec==runtime). Intentional — do NOT
-                      // rename to snake_case.
+                      // `maxTokens`, `cacheRead`, `cacheWrite`, `tiers`,
+                      // `inputTokensAbove`) are the 4e carve-out names of
+                      // `docs/CASING_CONVENTIONS.md`, camelCase on the wire; any
+                      // other field (`live_model_search`) is snake_case.
                       required: ["providerId"],
                       properties: {
                         providerId: { type: "string" },
@@ -69,10 +68,6 @@ export const modelProviderCredentialsPaths = {
                             "openai-responses",
                             "openai-codex-responses",
                             "mistral-conversations",
-                            "google-generative-ai",
-                            "google-vertex",
-                            "azure-openai-responses",
-                            "bedrock-converse-stream",
                           ],
                         },
                         defaultBaseUrl: { type: "string" },
@@ -83,6 +78,11 @@ export const modelProviderCredentialsPaths = {
                           description:
                             "Surface this provider in the picker's 'Featured' group (above an 'Other' divider). Module-supplied metadata; never gates writes — any registry entry stays selectable.",
                         },
+                        live_model_search: {
+                          type: "boolean",
+                          description:
+                            "The provider serves more models than `models` lists: they are searched live on the provider (`GET /api/models/openrouter`) and any model id is accepted, not only the listed ones.",
+                        },
                         models: {
                           type: "array",
                           items: {
@@ -92,6 +92,7 @@ export const modelProviderCredentialsPaths = {
                               "label",
                               "contextWindow",
                               "capabilities",
+                              "generation",
                               "cost",
                               "featured",
                             ],
@@ -99,8 +100,7 @@ export const modelProviderCredentialsPaths = {
                               id: { type: "string" },
                               label: {
                                 type: "string",
-                                description:
-                                  "Human-readable label, derived from the id at vendoring time.",
+                                description: "Human-readable label — the registry record's name.",
                               },
                               contextWindow: { type: "integer" },
                               maxTokens: { type: ["integer", "null"] },
@@ -109,19 +109,24 @@ export const modelProviderCredentialsPaths = {
                                 $ref: "#/components/schemas/ModelGenerationCapabilities",
                               },
                               cost: {
-                                type: "object",
-                                description: "Per-1M-token cost (USD).",
+                                type: ["object", "null"],
+                                description:
+                                  "Per-1M-token cost (USD); null when the registry leaves the model unpriced.",
                                 properties: {
                                   input: { type: "number" },
                                   output: { type: "number" },
                                   cacheRead: { type: "number" },
                                   cacheWrite: { type: "number" },
+                                  tiers: {
+                                    type: "array",
+                                    items: { $ref: "#/components/schemas/ModelCostTier" },
+                                  },
                                 },
                               },
                               featured: {
                                 type: "boolean",
                                 description:
-                                  "Surface in the picker's 'Featured' group for this provider AND auto-seed in `org_models` on first connection. True when the model id appears in the provider's curated `featuredModels` whitelist; the rest of the catalog falls under 'All models'.",
+                                  "Surface in the picker's 'Featured' group for this provider AND auto-seed in `org_models` on first connection. True when the model id appears in the provider's pinned `featuredModels` list; the rest of the offer falls under 'All models'.",
                               },
                             },
                           },
@@ -175,7 +180,7 @@ export const modelProviderCredentialsPaths = {
                     id: "cm7stu901",
                     label: "OpenAI Production",
                     apiShape: "openai-completions",
-                    baseUrl: "https://api.openai.com",
+                    base_url: "https://api.openai.com",
                     source: "custom",
                     authMode: "api_key",
                     created_by: "usr_cm3abc123",
@@ -204,13 +209,13 @@ export const modelProviderCredentialsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["providerId", "apiKey"],
+              required: ["providerId", "api_key"],
               properties: {
                 label: {
                   type: "string",
                   minLength: 1,
                   description:
-                    "Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the endpoint host (`localhost:11434 · OpenAI-compatible (custom)`) when `baseUrlOverride` is supplied to a `baseUrlOverridable` provider. Either way it is deduped against existing org credentials.",
+                    "Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the endpoint host (`localhost:11434 · OpenAI-compatible (custom)`) when `base_url_override` is supplied to a `baseUrlOverridable` provider. Either way it is deduped against existing org credentials.",
                 },
                 providerId: {
                   type: "string",
@@ -218,8 +223,12 @@ export const modelProviderCredentialsPaths = {
                   description:
                     "Canonical registry providerId (`openai`, `anthropic`, `openai-compatible`, …). Discovered via `GET /api/model-provider-credentials/registry`. Only providers with `authMode: api_key` are accepted here; OAuth providers go through the pairing flow.",
                 },
-                apiKey: { type: "string", minLength: 1, description: "API key for authentication" },
-                baseUrlOverride: {
+                api_key: {
+                  type: "string",
+                  minLength: 1,
+                  description: "API key for authentication",
+                },
+                base_url_override: {
                   type: ["string", "null"],
                   format: "uri",
                   description:
@@ -270,7 +279,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Test model provider credential configuration inline",
       description:
-        "Test a model provider credential configuration without saving it first. If editing an existing credential, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
+        "Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId`: its provider, API shape and base URL are used, and its stored API key when `api_key` is omitted. `base_url` must then equal the credential's, unless `api_key` is supplied for a provider accepting a base URL override; a built-in (system) credential is refused with 403. Without a stored credential, the provider's own API shape is used and `base_url` must be its default unless it accepts an override. The test follows the provider's definition: a provider whose model listing is unauthenticated is tested with one minimal chat completion instead of `GET <base_url>/models`. Rate limited to 5 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -278,23 +287,24 @@ export const modelProviderCredentialsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["apiShape", "baseUrl"],
+              required: ["providerId", "base_url"],
               properties: {
-                apiShape: {
+                providerId: {
                   type: "string",
                   minLength: 1,
-                  description: "Wire format / API shape",
+                  description:
+                    "Registry id of the provider being configured. Unknown ids are rejected with 400.",
                 },
-                baseUrl: {
+                base_url: {
                   type: "string",
                   format: "uri",
                   description: "Model provider API base URL",
                 },
-                apiKey: {
+                api_key: {
                   type: "string",
                   description: "API key (required for new credentials)",
                 },
-                existingKeyId: {
+                credentialId: {
                   type: "string",
                   description: "Existing credential ID to fall back to for stored API key",
                 },
@@ -328,7 +338,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Enumerate the models an endpoint serves",
       description:
-        "Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists no model state**: no credential is created, no `available_model_ids` is written (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.",
+        "Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the model catalog (Pi's pinned registry) otherwise; `source` says which described a given model. `label` always comes from the catalog. It works BEFORE a credential exists — the operator supplies `providerId` + `api_key` inline, or names a stored `credentialId` — and it **persists nothing**: no credential is created (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A provider whose listing is unauthenticated has its key checked first by one minimal chat completion, so a rejected key answers `auth_failed` instead of a listing it did not unlock. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -337,15 +347,15 @@ export const modelProviderCredentialsPaths = {
             schema: {
               type: "object",
               description:
-                "Exactly one of the two forms: `credential_id` alone, or `provider_id` + `api_key` (+ optional `base_url_override`). Both forms together, or neither, is a 400.",
+                "Exactly one of the two forms: `credentialId` alone, or `providerId` + `api_key` (+ optional `base_url_override`). Both forms together, or neither, is a 400.",
               properties: {
-                credential_id: {
+                credentialId: {
                   type: "string",
                   format: "uuid",
                   description:
                     "An existing organization credential to enumerate. Built-in/system credentials are refused (`operation_not_allowed`).",
                 },
-                provider_id: {
+                providerId: {
                   type: "string",
                   minLength: 1,
                   description:
@@ -415,8 +425,8 @@ export const modelProviderCredentialsPaths = {
                         max_tokens: { type: ["integer", "null"] },
                         input: {
                           type: ["array", "null"],
-                          items: { type: "string" },
-                          description: "Accepted input modalities (`text`, `image`).",
+                          items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
+                          description: "Accepted input modalities.",
                         },
                         reasoning: { type: ["boolean", "null"] },
                         source: {
@@ -436,7 +446,7 @@ export const modelProviderCredentialsPaths = {
                             input: {
                               type: "array",
                               minItems: 1,
-                              items: { type: "string", enum: ["text", "image"] },
+                              items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
                             },
                             reasoning: { type: "boolean" },
                           },
@@ -461,7 +471,7 @@ export const modelProviderCredentialsPaths = {
         },
         "400": {
           description:
-            "Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when both/neither form is supplied, `provider_id` is unknown or OAuth-only, or `base_url_override` is sent to a provider that does not accept one.",
+            "Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when both/neither form is supplied, `providerId` is unknown or OAuth-only, or `base_url_override` is sent to a provider that does not accept one.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -471,7 +481,7 @@ export const modelProviderCredentialsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description:
-            "Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `credential_id` refers to a built-in/system credential.",
+            "Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `credentialId` refers to a built-in/system credential.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -485,12 +495,12 @@ export const modelProviderCredentialsPaths = {
     },
   },
   "/api/model-provider-credentials/{id}": {
-    put: {
+    patch: {
       operationId: "updateModelProviderCredential",
       tags: ["Model Provider Credentials"],
       summary: "Update a model provider credential",
       description:
-        "Update a model provider credential's mutable fields. The `apiShape` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers.",
+        "Update a model provider credential's mutable fields. The `apiShape` and `base_url` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -503,7 +513,7 @@ export const modelProviderCredentialsPaths = {
               type: "object",
               properties: {
                 label: { type: "string", minLength: 1 },
-                apiKey: { type: "string", minLength: 1 },
+                api_key: { type: "string", minLength: 1 },
               },
               additionalProperties: false,
             },
@@ -590,55 +600,6 @@ export const modelProviderCredentialsPaths = {
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/TestResult" },
-            },
-          },
-        },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "429": { $ref: "#/components/responses/RateLimited" },
-        "500": { $ref: "#/components/responses/InternalServerError" },
-      },
-    },
-  },
-  "/api/model-provider-credentials/{id}/refresh-models": {
-    post: {
-      operationId: "refreshModelProviderCredentialModels",
-      tags: ["Model Provider Credentials"],
-      summary: "Discover the models this credential serves",
-      description:
-        "Discovers the models a credential serves. For API-key providers this is empirical: the credential's provider is asked for its model listing (`GET <base_url>/models`) — a listing that declares a next page is followed to its end, under a page cap, a model cap and a per-page byte budget — and the discovery candidates present in that listing are persisted as `available_model_ids`. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is derived from the provider definition and the pricing catalog on every read. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the listing path an auth failure, an unreadable listing, a listing cut short by one of those caps, or an empty intersection leaves the previously persisted list untouched; a `429` from the provider is replayed once before the attempt is abandoned.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { name: "id", in: "path", required: true, schema: { type: "string" } },
-      ],
-      responses: {
-        "200": {
-          description: "Discovery outcome + the credential's current verified list",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["outcome", "candidate_count", "available_model_ids"],
-                properties: {
-                  outcome: {
-                    type: "string",
-                    enum: ["ok", "auth_failed", "nothing_verified", "no_candidates"],
-                    description:
-                      "`ok` — list resolved (persisted on the listing path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — the listing could not be read, it was read but cut short by the page, model or byte cap (intersecting against a partial view would drop candidates sitting past it), or no candidate appeared in it; a provider `429` is replayed once before the read counts as failed. Previous list kept. `no_candidates` — provider resolves no discovery candidate.",
-                  },
-                  candidate_count: {
-                    type: "integer",
-                    description:
-                      "Number of discovery candidates the provider declares, after dedupe and cap — the same meaning on both paths. Not a request count: the listing path's requests are bounded by the listing's own pagination, not by the candidate count, and `offline`-validation providers (codex, claude-code) spend none. Not a count of what is served either: `available_model_ids` carries that.",
-                  },
-                  available_model_ids: {
-                    type: ["array", "null"],
-                    items: { type: "string" },
-                  },
-                },
-              },
             },
           },
         },

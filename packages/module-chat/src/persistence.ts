@@ -23,10 +23,12 @@
 
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions } from "@appstrate/db/schema";
+import { chatMessages, chatSessions, type ChatMessageContent } from "@appstrate/db/schema";
+import { toPgSafe } from "@appstrate/db/pg-safe";
 import { notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
 import { notifySessionUpdate } from "./realtime.ts";
+import type { ChatSkillSelection } from "./skills.ts";
 import type { UIMessage } from "ai";
 
 /**
@@ -38,23 +40,24 @@ import type { UIMessage } from "ai";
 type ChatDbClient = Pick<typeof db, "select" | "insert" | "update">;
 
 /** Storage content = UIMessage minus its id (the id rides in `message_id`). */
-function toContent(message: UIMessage): Record<string, unknown> {
+function toContent(message: UIMessage): ChatMessageContent {
   const { id: _id, ...rest } = message;
-  return rest as Record<string, unknown>;
+  return rest;
 }
 
 /**
  * Create the session row if it does not exist yet (idempotent). The client
- * creates sessions up front, but a lazy ensure here closes the orphan-session
- * window (a row with zero messages) and lets the stream route be the single
- * writer of record.
+ * mints the id; the stream route creates the row through here, writing the
+ * turn's skill `selection` in the same statement when it carries one. Returns
+ * the row's skill selection.
  */
 export async function ensureSession(
   id: string,
   orgId: string,
   userId: string,
   spaceId: string,
-): Promise<void> {
+  selection?: ChatSkillSelection,
+): Promise<ChatSkillSelection> {
   // The id is client-minted, so a caller could send an id that already belongs
   // to another tenant; a plain `DO NOTHING` would leave that row intact and we'd
   // then persist a message into it. `DO UPDATE … SET id = id` is a no-op write
@@ -76,10 +79,11 @@ export async function ensureSession(
   // 404, not 403, so we don't reveal that the id exists for someone else.
   const [row] = await db
     .insert(chatSessions)
-    .values({ id, orgId, userId, spaceId, title: null })
+    .values({ id, orgId, userId, spaceId, title: null, ...selection })
     .onConflictDoUpdate({
       target: chatSessions.id,
-      set: { id: sql`${chatSessions.id}` },
+      // `updatedAt` stays either way, so a pin never reorders the sidebar.
+      set: selection ?? { id: sql`${chatSessions.id}` },
       setWhere: and(
         eq(chatSessions.orgId, orgId),
         eq(chatSessions.userId, userId),
@@ -91,10 +95,13 @@ export async function ensureSession(
       orgId: chatSessions.orgId,
       userId: chatSessions.userId,
       spaceId: chatSessions.spaceId,
+      skillMode: chatSessions.skillMode,
+      pinnedSkills: chatSessions.pinnedSkills,
     });
   if (!row || row.orgId !== orgId || row.userId !== userId || row.spaceId !== spaceId) {
     throw notFound("Chat session not found");
   }
+  return { skillMode: row.skillMode, pinnedSkills: row.pinnedSkills };
 }
 
 /** Most recent message id in a session — the one a new message follows, or null. */
@@ -141,9 +148,11 @@ async function deterministicMessageId(
 async function upsertMessage(
   client: ChatDbClient,
   sessionId: string,
-  message: UIMessage,
+  rawMessage: UIMessage,
   precedingMessageId: string | null,
 ): Promise<{ messageId: string; seq: number }> {
+  // A NUL (tool/MCP output, model delta) makes Postgres refuse the row: the message is lost (#1501).
+  const message = toPgSafe(rawMessage);
   // Why the hash material cannot be trimmed now that no column stores it: every
   // `gen_…` id already in the table was derived WITH `precedingMessageId`, so
   // dropping it from the material would mint a different id for the same
@@ -156,7 +165,7 @@ async function upsertMessage(
   // *random* fallback id would instead break idempotency — a retried finalize
   // would mint a new id each attempt and insert a duplicate row — so derive a
   // stable, content-addressed id when one is missing.
-  const content = toContent(message) as typeof chatMessages.$inferInsert.content;
+  const content = toContent(message);
   const messageId =
     message.id || (await deterministicMessageId(sessionId, precedingMessageId, content));
   // `seq` feeds the read-state watermark. On a retried finalize the conflict
@@ -414,7 +423,8 @@ function titleCandidate(message: UIMessage): string | null {
 /** A message's text as a title: trimmed to 60 chars (57 + ellipsis); null when empty. */
 function titleFromText(text: string): string | null {
   if (!text) return null;
-  return text.length > 60 ? `${text.slice(0, 57)}…` : text;
+  // `chat_sessions.title` is text: a NUL would fail the turn's session UPDATE (#1501).
+  return toPgSafe(text.length > 60 ? `${text.slice(0, 57)}…` : text);
 }
 
 /**

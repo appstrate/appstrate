@@ -96,9 +96,9 @@ function readAndConfigureDoors(packageId: string): Record<string, () => Promise<
     getRuns: () => req(`/api/agents/${packageId}/runs`, { headers: h }),
     getSchedules: () => req(`/api/agents/${packageId}/schedules`, { headers: h }),
     getDetail: () => req(`/api/packages/agents/${packageId}`, { headers: h }),
-    putModel: () =>
+    patchModel: () =>
       req(`/api/agents/${packageId}/model`, {
-        method: "PUT",
+        method: "PATCH",
         headers: json,
         body: JSON.stringify({ modelId: null }),
       }),
@@ -116,7 +116,7 @@ function readAndConfigureDoors(packageId: string): Record<string, () => Promise<
       }),
     putSpacePackage: () =>
       req(`/api/spaces/${ctx.defaultSpaceId}/packages/${packageId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: json,
         body: JSON.stringify({ proxyId: "none" }),
       }),
@@ -203,7 +203,7 @@ describe("a placed-but-switched-off agent", () => {
       getRuns: 200,
       getSchedules: 200,
       getDetail: 200,
-      putModel: 200,
+      patchModel: 200,
       putProxy: 200,
       putInputSettings: 200,
       putSpacePackage: 200,

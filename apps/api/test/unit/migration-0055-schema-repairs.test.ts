@@ -88,7 +88,7 @@ const FKEY_SPELLING = {
 } as const;
 
 /**
- * The last migration whose catalog still holds both FKs: `0069` folds
+ * A migration whose catalog still holds both FKs: `0077` folds
  * `integration_org_defaults.connection_id` into an array and drops it.
  */
 const REPLAY_THROUGH = "0068_packages_org_home_validate";

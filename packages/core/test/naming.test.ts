@@ -167,13 +167,17 @@ describe("isValidToolName", () => {
     expect(isValidToolName("fs_read_file")).toBe(false);
   });
 
-  it("rejects mixed-case", () => {
+  it("keeps the upstream body's case, hyphens and inner __, but not the namespace's", () => {
+    expect(isValidToolName("fs__readFile")).toBe(true);
+    expect(isValidToolName("fs__read-file")).toBe(true);
+    expect(isValidToolName("fs__github__list_issues")).toBe(true);
     expect(isValidToolName("FS__readFile")).toBe(false);
-    expect(isValidToolName("Fs__read_file")).toBe(false);
+    expect(isValidToolName("mcp-fs__read_file")).toBe(false);
   });
 
-  it("rejects hyphens (mixed separator hurts tokenisation per V3)", () => {
-    expect(isValidToolName("mcp-fs__read_file")).toBe(false);
+  it("rejects characters LLM providers refuse", () => {
+    expect(isValidToolName("fs__read.file")).toBe(false);
+    expect(isValidToolName("fs__read file")).toBe(false);
   });
 
   it("accepts a digit-leading namespace (scopes like @1password are valid slugs)", () => {
@@ -181,8 +185,8 @@ describe("isValidToolName", () => {
     expect(isValidToolName("1fs__read_file")).toBe(true);
   });
 
-  it("rejects a digit-leading tool token", () => {
-    expect(isValidToolName("fs__1file")).toBe(false);
+  it("accepts a digit-leading tool token", () => {
+    expect(isValidToolName("fs__1file")).toBe(true);
   });
 
   it("rejects names exceeding TOOL_NAME_MAX_LEN", () => {
@@ -191,9 +195,8 @@ describe("isValidToolName", () => {
     expect(isValidToolName(long)).toBe(false);
   });
 
-  it("rejects empty / non-string input", () => {
+  it("rejects an empty name", () => {
     expect(isValidToolName("")).toBe(false);
-    expect(isValidToolName(undefined as unknown as string)).toBe(false);
   });
 });
 

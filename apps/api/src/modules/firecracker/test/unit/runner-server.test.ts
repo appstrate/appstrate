@@ -205,17 +205,19 @@ describe("runner server routes", () => {
     expect(body.platformReachable).toBe(true);
   });
 
-  it("creates a boundary and forwards runId + opts", async () => {
+  it("creates a boundary and forwards the runId", async () => {
     const { app, calls } = makeApp();
-    const res = await post(app, RUNNER_ROUTES.createBoundary, {
-      runId: "run-1",
-      opts: { skipSidecar: true },
-    });
+    const res = await post(app, RUNNER_ROUTES.createBoundary, { runId: "run-1" });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(BOUNDARY as unknown as Record<string, unknown>);
-    expect(calls).toEqual([
-      { method: "createIsolationBoundary", args: ["run-1", { skipSidecar: true }] },
-    ]);
+    expect(calls).toEqual([{ method: "createIsolationBoundary", args: ["run-1"] }]);
+  });
+
+  it("refuses a boundary body with an unknown field (400, strict body)", async () => {
+    const { app, calls } = makeApp();
+    const res = await post(app, RUNNER_ROUTES.createBoundary, { runId: "run-1", extra: true });
+    expect(res.status).toBe(400);
+    expect(calls).toEqual([]);
   });
 
   it("returns 400 with a message summary on an invalid body", async () => {

@@ -21,7 +21,11 @@ import { describe, it, expect } from "bun:test";
 import { RunResultSchema } from "../../src/routes/runs-events.ts";
 
 /** A minimal, valid terminal payload. */
-const BASE = { status: "success" as const, output: { ok: true } };
+const BASE = {
+  status: "success" as const,
+  output: { ok: true },
+  usage: { input_tokens: 10, output_tokens: 5 },
+};
 
 describe("finalize artifacts tolerance", () => {
   it("accepts a well-formed summary unchanged", () => {

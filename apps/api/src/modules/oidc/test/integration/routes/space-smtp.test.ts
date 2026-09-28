@@ -38,13 +38,20 @@ describe("/api/spaces/:id/smtp-config", () => {
         port: 587,
         username: "apikey",
         pass: "super-secret-pass",
-        fromAddress: "noreply@tenant.example",
-        fromName: "Tenant",
+        from_address: "noreply@tenant.example",
+        from_name: "Tenant",
+        secure_mode: "starttls",
       }),
     });
     expect(putRes.status).toBe(200);
     const created = (await putRes.json()) as Record<string, unknown>;
     expect(created.host).toBe("smtp.sendgrid.net");
+    expect(created.from_address).toBe("noreply@tenant.example");
+    expect(created.from_name).toBe("Tenant");
+    expect(created.secure_mode).toBe("starttls");
+    for (const camel of ["fromAddress", "fromName", "secureMode"]) {
+      expect(created).not.toHaveProperty(camel);
+    }
     expect(created).not.toHaveProperty("pass");
     expect(created).not.toHaveProperty("passEncrypted");
 
@@ -54,6 +61,7 @@ describe("/api/spaces/:id/smtp-config", () => {
     expect(getRes.status).toBe(200);
     const got = (await getRes.json()) as Record<string, unknown>;
     expect(got.host).toBe("smtp.sendgrid.net");
+    expect(got.from_address).toBe("noreply@tenant.example");
     expect(got).not.toHaveProperty("pass");
 
     const delRes = await app.request(`/api/spaces/${ctx.defaultSpaceId}/smtp-config`, {
@@ -68,6 +76,23 @@ describe("/api/spaces/:id/smtp-config", () => {
     expect(notFound.status).toBe(404);
   });
 
+  it("rejects camelCase body keys", async () => {
+    const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/smtp-config`, {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        host: "smtp.sendgrid.net",
+        port: 587,
+        username: "apikey",
+        pass: "p",
+        fromAddress: "noreply@tenant.example",
+        fromName: "Tenant",
+        secureMode: "tls",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("rejects SSRF hosts", async () => {
     const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/smtp-config`, {
       method: "PUT",
@@ -77,7 +102,7 @@ describe("/api/spaces/:id/smtp-config", () => {
         port: 25,
         username: "u",
         pass: "p",
-        fromAddress: "evil@tenant.example",
+        from_address: "evil@tenant.example",
       }),
     });
     expect(res.status).toBe(400);
@@ -92,7 +117,7 @@ describe("/api/spaces/:id/smtp-config", () => {
         port: 587,
         username: "u",
         pass: "p",
-        fromAddress: "a@b.c",
+        from_address: "a@b.c",
       }),
     });
     expect(res.status).toBe(404);
@@ -129,7 +154,7 @@ describe("/api/spaces/:id/smtp-config", () => {
         port: 587,
         username: "u",
         pass: "p",
-        fromAddress: "noreply@tenant.example",
+        from_address: "noreply@tenant.example",
       }),
     });
 
@@ -139,8 +164,10 @@ describe("/api/spaces/:id/smtp-config", () => {
       body: JSON.stringify({ to: "admin@tenant.example" }),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean };
+    const body = (await res.json()) as Record<string, unknown>;
     expect(body.ok).toBe(true);
+    expect(typeof body.message_id).toBe("string");
+    expect(body).not.toHaveProperty("messageId");
   });
 });
 
@@ -177,7 +204,7 @@ describe("/api/spaces/:id/smtp-config — space membership gate", () => {
         port: 587,
         username: "apikey",
         pass: "super-secret-pass",
-        fromAddress: "noreply@tenant.example",
+        from_address: "noreply@tenant.example",
       }),
     });
     expect(seeded.status).toBe(200);
@@ -234,7 +261,7 @@ describe("/api/spaces/:id/smtp-config — space membership gate", () => {
         port: 587,
         username: "u",
         pass: "p",
-        fromAddress: "a@b.c",
+        from_address: "a@b.c",
       }),
     });
     expect(res.status).toBe(403);

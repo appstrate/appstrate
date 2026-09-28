@@ -51,6 +51,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { replayJournal } from "../helpers/journal.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
 const MIGRATIONS_DIR = `${REPO_ROOT}/packages/db/drizzle`;
@@ -72,27 +73,6 @@ const VIEWER_B = "usr_0008_viewer_b";
 const MEMBER = "usr_0008_member";
 
 let pg: PGlite;
-
-/**
- * Replay the journal up to and including `lastTag`, the way the Tier 0 runner
- * does (`apps/api/src/lib/pglite-migrate.ts`): whole file, breakpoints
- * stripped, one transaction each. Throws rather than stopping silently if the
- * tag is absent, so a renamed migration fails this file instead of quietly
- * replaying past the narrowing and turning every seed below into a `22P02`.
- */
-async function replayThrough(db: PGlite, lastTag: string): Promise<void> {
-  const journal = (await Bun.file(`${MIGRATIONS_DIR}/meta/_journal.json`).json()) as {
-    entries: { idx: number; tag: string }[];
-  };
-  for (const entry of journal.entries) {
-    const source = await Bun.file(`${MIGRATIONS_DIR}/${entry.tag}.sql`).text();
-    await db.transaction(async (tx) => {
-      await tx.exec(source.replaceAll("--> statement-breakpoint", ""));
-    });
-    if (entry.tag === lastTag) return;
-  }
-  throw new Error(`journal has no entry tagged ${lastTag}`);
-}
 
 /**
  * Run an operator script (its own `BEGIN` / `COMMIT`) through the raw driver.
@@ -159,7 +139,7 @@ async function seed(): Promise<void> {
 
 beforeEach(async () => {
   pg = new PGlite();
-  await replayThrough(pg, REPLAY_THROUGH);
+  await replayJournal(pg, REPLAY_THROUGH);
   await seed();
   // The journal replay runs past the 15s default in `bunfig.toml` on a cold
   // machine, and an abandoned hook does not stop — it keeps replaying into an

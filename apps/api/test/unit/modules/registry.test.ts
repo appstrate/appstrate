@@ -2,7 +2,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { _resetCacheForTesting } from "@appstrate/env";
-import { getModuleRegistry, buildModuleInitContext } from "../../../src/lib/modules/registry.ts";
+import { buildModuleInitContext } from "../../../src/lib/modules/registry.ts";
+import { getModuleRegistry } from "../../../src/lib/modules/module-loader.ts";
 
 /**
  * `getModuleRegistry` reads `MODULES` through the cached `getEnv()` snapshot

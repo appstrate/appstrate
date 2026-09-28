@@ -33,31 +33,22 @@ import {
 } from "../../src/services/system-packages.ts";
 
 /**
- * Provisioning is honoured for system packages only, and the boot registry that
- * says which ids those are is empty under test — so this file installs one for
- * its own id and hands the registry back afterwards, since every file after it
- * in the same `bun test` process reads the same module state.
+ * Provisioning answers only for a loaded system package, and the boot registry
+ * that says which ids those are is empty under test — so this file installs
+ * one for its own id and hands the registry back afterwards, since every file
+ * after it in the same `bun test` process reads the same module state.
  */
 const SSH_ID = "@appstrate/ssh";
+const SSH_AUTH_KEY = "primary";
+const SSH_REGISTRY = new Map([[SSH_ID, { packageId: SSH_ID } as SystemPackageEntry]]);
 let restoreRegistry: () => void;
 /** One bundle for every test that only reads it; reconnect tests mint their own. */
 let minted: Record<string, string>;
 beforeAll(async () => {
-  restoreRegistry = _setSystemPackagesForTesting(
-    new Map([[SSH_ID, { packageId: SSH_ID } as SystemPackageEntry]]),
-  );
-  minted = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
+  restoreRegistry = _setSystemPackagesForTesting(SSH_REGISTRY);
+  minted = (await provisionCredentials(SSH_ID, SSH_AUTH_KEY, { ...base }, null))!;
 });
 afterAll(() => restoreRegistry());
-
-const SSH_AUTH = {
-  type: "custom",
-  _meta: {
-    "dev.appstrate/provisioning": {
-      kind: "ssh_keypair",
-    },
-  },
-};
 
 /**
  * The handoff is a LIST of typed steps, so the tests reach into it by role
@@ -71,7 +62,7 @@ const SSH_AUTH = {
  * file can pass against a block the platform had to keep a copy of.
  */
 function shellOf(credentials: Record<string, string>, deferred: boolean): string {
-  const step = handoffStepsFor(SSH_ID, SSH_AUTH, credentials).find(
+  const step = handoffStepsFor(SSH_ID, SSH_AUTH_KEY, credentials).find(
     (s) => s.kind === "command" && !!s.deferred === deferred,
   );
   if (!step || step.kind !== "command")
@@ -81,59 +72,45 @@ function shellOf(credentials: Record<string, string>, deferred: boolean): string
 const installShell = (credentials: Record<string, string>) => shellOf(credentials, false);
 const revokeShell = (credentials: Record<string, string>) => shellOf(credentials, true);
 const stepsOf = (credentials: Record<string, string>) =>
-  handoffStepsFor(SSH_ID, SSH_AUTH, credentials);
+  handoffStepsFor(SSH_ID, SSH_AUTH_KEY, credentials);
 
 describe("readProvisioning", () => {
-  it("returns null for an auth that declares nothing", () => {
-    expect(readProvisioning(SSH_ID, { type: "custom" })).toBeNull();
-    expect(readProvisioning(SSH_ID, null)).toBeNull();
+  /**
+   * The table is keyed by package id AND auth key, in code: nothing a manifest
+   * says opts an auth in.
+   */
+  it("provisions the SSH package's auth, minting the private key only", () => {
+    expect(readProvisioning(SSH_ID, SSH_AUTH_KEY)?.provides).toEqual(["private_key"]);
+  });
+
+  it("provisions nothing for the same auth key on another package", async () => {
+    expect(readProvisioning("@acme/ssh", SSH_AUTH_KEY)).toBeNull();
+    expect(await provisionCredentials("@acme/ssh", SSH_AUTH_KEY, { ...base }, null)).toBeNull();
+    // The same complete bundle yields every step under the SSH id, so the
+    // empty list below is the lookup and not an incomplete bundle.
+    expect(handoffStepsFor(SSH_ID, SSH_AUTH_KEY, minted)).toHaveLength(3);
+    expect(handoffStepsFor("@acme/ssh", SSH_AUTH_KEY, minted)).toEqual([]);
+  });
+
+  it("provisions nothing for an auth key the SSH package does not provision", () => {
+    for (const authKey of ["secondary", "toString", "__proto__"]) {
+      expect(readProvisioning(SSH_ID, authKey)).toBeNull();
+    }
   });
 
   /**
-   * The manifest names the KIND and nothing else: what a kind mints is read
-   * from the code table beside the provisioner. A manifest is immutable once
-   * published, so a list inside one could only ever drift from the provisioner
-   * it claims to describe.
+   * The id alone is not enough: an org row carrying `@appstrate/ssh` (say the
+   * shipped archive failed to load at boot) must not get a platform-minted key
+   * and a root install block.
    */
-  it("derives the names the platform owns from the kind alone", () => {
-    expect(readProvisioning(SSH_ID, SSH_AUTH)?.provides).toEqual(["private_key"]);
-  });
-
-  /**
-   * The block has the platform mint a key and author a root install script, so
-   * only a package the platform ships may declare it. Refused loudly: reading
-   * it as "provisions nothing" would ask the user to type the key the manifest
-   * expects to be minted.
-   */
-  it("refuses the block, and minting, on a package that is not a system package", async () => {
-    expect(() => readProvisioning("@acme/ssh", SSH_AUTH)).toThrow(/only system packages may/);
-    expect(() => authWithoutMintedCredentials("@acme/ssh", SSH_AUTH)).toThrow(
-      /only system packages may/,
-    );
-    await expect(provisionCredentials("@acme/ssh", SSH_AUTH, { ...base }, null)).rejects.toThrow(
-      /only system packages may/,
-    );
-  });
-
-  it("reads nothing into a non-system package that declares no block", () => {
-    expect(readProvisioning("@acme/ssh", { type: "custom" })).toBeNull();
-  });
-
-  it("answers no handoff steps rather than throwing, for a non-system package", () => {
-    // The same complete bundle yields every step under the system id, so the
-    // empty list below is the refusal and not an incomplete bundle.
-    expect(handoffStepsFor(SSH_ID, SSH_AUTH, minted)).toHaveLength(3);
-    // The deletion surface reads this: a refusal must never block a deletion.
-    expect(handoffStepsFor("@acme/ssh", SSH_AUTH, minted)).toEqual([]);
-  });
-
-  it("throws on a kind this build has no provisioner for", () => {
-    // Falling back to "the user types it" would silently turn a
-    // platform-minted credential into a field nobody filled. Inherited
-    // `Object.prototype` names are not kinds either.
-    for (const kind of ["quantum_key", "toString", "__proto__"]) {
-      const auth = { _meta: { "dev.appstrate/provisioning": { kind } } };
-      expect(() => readProvisioning(SSH_ID, auth)).toThrow(/unknown credential provisioning kind/);
+  it("provisions nothing when the id is not loaded as a system package", async () => {
+    const restore = _setSystemPackagesForTesting(new Map());
+    try {
+      expect(readProvisioning(SSH_ID, SSH_AUTH_KEY)).toBeNull();
+      expect(await provisionCredentials(SSH_ID, SSH_AUTH_KEY, { ...base }, null)).toBeNull();
+      expect(handoffStepsFor(SSH_ID, SSH_AUTH_KEY, minted)).toEqual([]);
+    } finally {
+      restore();
     }
   });
 });
@@ -145,7 +122,7 @@ describe("readProvisioning", () => {
  */
 describe("authWithoutMintedCredentials", () => {
   const withSchema = {
-    ...SSH_AUTH,
+    type: "custom",
     credentials: {
       schema: {
         type: "object",
@@ -160,7 +137,7 @@ describe("authWithoutMintedCredentials", () => {
   };
 
   it("removes the minted names from `properties` and `required`", () => {
-    const shown = authWithoutMintedCredentials(SSH_ID, withSchema);
+    const shown = authWithoutMintedCredentials(SSH_ID, SSH_AUTH_KEY, withSchema);
     expect(Object.keys(shown.credentials.schema.properties)).toEqual(["host", "user"]);
     expect(shown.credentials.schema.required).toEqual(["host", "user"]);
     // Everything else the form renders against survives untouched.
@@ -171,14 +148,14 @@ describe("authWithoutMintedCredentials", () => {
   it("copies rather than writes through the manifest it was given", () => {
     // The manifest is shared: stripping it in place would strip it for the
     // submit door too, which validates against the FULL schema.
-    authWithoutMintedCredentials(SSH_ID, withSchema);
+    authWithoutMintedCredentials(SSH_ID, SSH_AUTH_KEY, withSchema);
     expect(Object.keys(withSchema.credentials.schema.properties)).toContain("private_key");
     expect(withSchema.credentials.schema.required).toContain("private_key");
   });
 
   it("hands back an auth that provisions nothing unchanged", () => {
     const plain = { type: "api_key", credentials: { schema: { properties: { api_key: {} } } } };
-    expect(authWithoutMintedCredentials(SSH_ID, plain)).toBe(plain);
+    expect(authWithoutMintedCredentials("@acme/other", SSH_AUTH_KEY, plain)).toBe(plain);
   });
 });
 
@@ -191,7 +168,7 @@ describe("provisionCredentials — the runner floor is mirrored at the form", ()
     ["localhost", "localhost"],
   ])("refuses %s (%s) before minting anything", async (host) => {
     await expect(
-      provisionCredentials(SSH_ID, SSH_AUTH, { host, user: "agent", port: "22" }, null),
+      provisionCredentials(SSH_ID, SSH_AUTH_KEY, { host, user: "agent", port: "22" }, null),
     ).rejects.toThrow(/runs cannot reach this host/);
   });
 
@@ -207,7 +184,7 @@ describe("provisionCredentials — the runner floor is mirrored at the form", ()
     resetEnvCache();
     try {
       await expect(
-        provisionCredentials(SSH_ID, SSH_AUTH, { host: "127.0.0.1", user: "agent" }, null),
+        provisionCredentials(SSH_ID, SSH_AUTH_KEY, { host: "127.0.0.1", user: "agent" }, null),
       ).rejects.toThrow(/runs cannot reach this host/);
     } finally {
       if (prev === undefined) delete process.env.EGRESS_ALLOW_INTERNAL_HOSTS;
@@ -221,10 +198,10 @@ describe("provisionCredentials — input validation", () => {
   const badHostFree = { host: "ssh.example.test" };
 
   it("requires a host and a user", async () => {
-    await expect(provisionCredentials(SSH_ID, SSH_AUTH, { user: "agent" }, null)).rejects.toThrow(
-      /`host` is required/,
-    );
-    await expect(provisionCredentials(SSH_ID, SSH_AUTH, badHostFree, null)).rejects.toThrow(
+    await expect(
+      provisionCredentials(SSH_ID, SSH_AUTH_KEY, { user: "agent" }, null),
+    ).rejects.toThrow(/`host` is required/);
+    await expect(provisionCredentials(SSH_ID, SSH_AUTH_KEY, badHostFree, null)).rejects.toThrow(
       /`user` is required/,
     );
   });
@@ -235,14 +212,14 @@ describe("provisionCredentials — input validation", () => {
       // The account name is interpolated into the generated script, so the
       // character class is the whole defence — there is no quoting to rely on.
       await expect(
-        provisionCredentials(SSH_ID, SSH_AUTH, { ...badHostFree, user }, null),
+        provisionCredentials(SSH_ID, SSH_AUTH_KEY, { ...badHostFree, user }, null),
       ).rejects.toThrow(/Unix account name/);
     },
   );
 
   it.each(["0", "70000", "-1", "22abc"])("refuses port %p", async (port) => {
     await expect(
-      provisionCredentials(SSH_ID, SSH_AUTH, { ...badHostFree, user: "agent", port }, null),
+      provisionCredentials(SSH_ID, SSH_AUTH_KEY, { ...badHostFree, user: "agent", port }, null),
     ).rejects.toThrow(/`port` must be a number between 1 and 65535/);
   });
 });
@@ -279,7 +256,7 @@ describe("provisionCredentials — what gets minted and rendered", () => {
     // there would silently skip the check that the pinned key is this server's.
     const rsa = (await provisionCredentials(
       SSH_ID,
-      SSH_AUTH,
+      SSH_AUTH_KEY,
       { ...base, host_key: RSA_HOST_KEY },
       null,
     ))!;
@@ -372,7 +349,7 @@ describe("provisionCredentials — what gets minted and rendered", () => {
       ...base,
       private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\nattacker\n",
     };
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, fields, null))!;
+    const res = (await provisionCredentials(SSH_ID, SSH_AUTH_KEY, fields, null))!;
     expect(res.private_key).not.toContain("attacker");
     expect(publicKeyFromOpenSshPrivateKey(res.private_key!)).toMatch(/^ssh-ed25519 /);
 
@@ -396,15 +373,15 @@ describe("provisionCredentials — what gets minted and rendered", () => {
     ["a blob that names another type", `ssh-rsa ${HOST_KEY.split(" ")[1]}`],
   ])("mints nothing for a host key with %s", async (_label, host_key) => {
     await expect(
-      provisionCredentials(SSH_ID, SSH_AUTH, { ...base, host_key }, null),
+      provisionCredentials(SSH_ID, SSH_AUTH_KEY, { ...base, host_key }, null),
     ).rejects.toThrow(/`host_key` must be a `ssh-ed25519 <base64>` or `ssh-rsa <base64>` line/);
   });
 
   it("mints nothing without a host key at all", async () => {
     const { host_key: _dropped, ...noHostKey } = base;
-    await expect(provisionCredentials(SSH_ID, SSH_AUTH, { ...noHostKey }, null)).rejects.toThrow(
-      /`host_key` is required/,
-    );
+    await expect(
+      provisionCredentials(SSH_ID, SSH_AUTH_KEY, { ...noHostKey }, null),
+    ).rejects.toThrow(/`host_key` is required/);
   });
 });
 
@@ -526,7 +503,12 @@ describe("the generated install script", () => {
     // `nobody` is /usr/bin/false on macOS and /usr/sbin/nologin on Debian —
     // both are the shape that runs no command. The guard runs before the `su`,
     // so this is safe to execute unprivileged.
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base, user: "nobody" }, null))!;
+    const res = (await provisionCredentials(
+      SSH_ID,
+      SSH_AUTH_KEY,
+      { ...base, user: "nobody" },
+      null,
+    ))!;
     const run = await runScript(installShell(res));
     expect(run.code).toBe(1);
     expect(run.stderr).toContain("login shell");
@@ -963,8 +945,8 @@ describe("the generated revoke script", () => {
  */
 describe("provisionCredentials — reconnect", () => {
   it("reuses the stored pair, so the installed line is the one already on the target", async () => {
-    const first = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    const again = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, first))!;
+    const first = (await provisionCredentials(SSH_ID, SSH_AUTH_KEY, { ...base }, null))!;
+    const again = (await provisionCredentials(SSH_ID, SSH_AUTH_KEY, { ...base }, first))!;
 
     expect(again.private_key).toBe(first.private_key);
     expect(installShell(again)).toContain(publicKeyFromOpenSshPrivateKey(first.private_key!));
@@ -975,8 +957,8 @@ describe("provisionCredentials — reconnect", () => {
     ["port", { port: "2200" }],
     ["host", { host: "other.example.test" }],
   ])("mints a fresh pair when the %s is not the one it was installed on", async (_label, moved) => {
-    const first = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base, ...moved }, first))!;
+    const first = (await provisionCredentials(SSH_ID, SSH_AUTH_KEY, { ...base }, null))!;
+    const res = (await provisionCredentials(SSH_ID, SSH_AUTH_KEY, { ...base, ...moved }, first))!;
 
     expect(res.private_key).not.toBe(first.private_key);
     expect(installShell(res)).not.toContain(publicKeyFromOpenSshPrivateKey(first.private_key!));
@@ -991,10 +973,10 @@ describe("provisionCredentials — reconnect", () => {
     // Nothing is protected by keeping bytes no block could be rendered from.
     // The bundle names the SAME target, so the target comparison passes and
     // what refuses the reuse can only be the key itself.
-    const first = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
+    const first = (await provisionCredentials(SSH_ID, SSH_AUTH_KEY, { ...base }, null))!;
     const res = (await provisionCredentials(
       SSH_ID,
-      SSH_AUTH,
+      SSH_AUTH_KEY,
       { ...base },
       { ...base, private_key },
     ))!;
@@ -1007,7 +989,7 @@ describe("provisionCredentials — reconnect", () => {
 describe("provisionCredentials — no-op path", () => {
   it("returns null and leaves the bag alone for an auth with no provisioning", async () => {
     const fields = { api_key: "secret" };
-    expect(await provisionCredentials(SSH_ID, { type: "api_key" }, fields, null)).toBeNull();
+    expect(await provisionCredentials("@acme/other", SSH_AUTH_KEY, fields, null)).toBeNull();
     expect(fields).toEqual({ api_key: "secret" });
   });
 });

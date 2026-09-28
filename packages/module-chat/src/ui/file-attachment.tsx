@@ -13,15 +13,14 @@
  * seam, so callers pass a file and nothing else.
  */
 
-import { DownloadIcon, EyeIcon } from "lucide-react";
+import { DownloadIcon, EyeIcon, FileIcon } from "lucide-react";
 import { isImageMime } from "@appstrate/core/mime";
 import { fileActivation } from "./file-activation.ts";
 import { UNNAMED_FILE } from "./run-events.ts";
 import { useChatHost } from "./runtime-context.ts";
 import type { OpenFile } from "./runtime-context.ts";
 
-/** Base chip look, shared with the inert composer/attachment chips in the thread. */
-export const ATTACHMENT_CHIP_CLASS =
+const ATTACHMENT_CHIP_CLASS =
   "bg-background text-foreground inline-flex max-w-52 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs";
 
 /**
@@ -29,6 +28,16 @@ export const ATTACHMENT_CHIP_CLASS =
  * attachments, staged uploads, run-card files): a 64px cover-cropped square.
  */
 export const ATTACHMENT_IMAGE_CLASS = "size-16 shrink-0 rounded-lg border object-cover";
+
+/** Inert chip: no file id to act on yet, or no grant to act on it. */
+export function InertAttachmentChip({ name, title }: { name: string; title?: string }) {
+  return (
+    <div className={ATTACHMENT_CHIP_CLASS} title={title}>
+      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
+      <span className="truncate font-medium">{name || UNNAMED_FILE}</span>
+    </div>
+  );
+}
 
 /**
  * Clickable chip: the action glyph (eye when an in-app preview opener is
@@ -116,7 +125,10 @@ export function FileAttachment({
 }: {
   file: { id: string; name: string; mime?: string | null };
 }) {
-  const { openFile: opener, downloadFile, t } = useChatHost();
+  const { openFile: opener, downloadFile, t, can } = useChatHost();
+  // Preview, download and thumbnail all read the file's content (`files:read`).
+  if (!can("files:read"))
+    return <InertAttachmentChip name={file.name} title={t("file.noAccess")} />;
   const { onActivate, label } = fileActivation(file, opener, downloadFile, t);
   if (isImageMime(file.mime)) {
     return (

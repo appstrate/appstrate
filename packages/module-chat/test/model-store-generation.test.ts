@@ -193,12 +193,12 @@ describe("the stored preference follows the default model", () => {
       { id: "model-b", generation: NO_TEMPERATURE },
     ]);
     setSelectedModel("model-a");
-    editGenerationSettings({ temperature: 0.7, reasoningLevel: "high" });
+    editGenerationSettings({ temperature: 0.7, reasoning_level: "high" });
 
     setSelectedModel("model-b");
     setSelectedModel("model-a");
 
-    expect(getCompatibleGenerationSettings()).toEqual({ reasoningLevel: "high" });
+    expect(getCompatibleGenerationSettings()).toEqual({ reasoning_level: "high" });
   });
 
   it("sends only what the selected model accepts", () => {
@@ -217,7 +217,7 @@ describe("generation settings follow the model that is actually sent", () => {
       { id: "model-a", generation: NO_REASONING },
     ]);
     setSelectedModel("default-model");
-    editGenerationSettings({ reasoningLevel: "high" });
+    editGenerationSettings({ reasoning_level: "high" });
   });
 
   it("reconciles against a pre-selected model, not the stored default", () => {
@@ -232,28 +232,28 @@ describe("generation settings follow the model that is actually sent", () => {
     attachConversation("chs_a", "model-a");
     attachConversation("chs_new", null);
 
-    expect(getCompatibleGenerationSettings()).toEqual({ reasoningLevel: "high" });
+    expect(getCompatibleGenerationSettings()).toEqual({ reasoning_level: "high" });
   });
 
   it("keeps the default's reasoning when a setting is edited on a model without it", () => {
     // The picker shows `{}` on model-a; tuning the temperature there must not
-    // write `{ temperature }` over the stored `{ reasoningLevel: "high" }`.
+    // write `{ temperature }` over the stored `{ reasoning_level: "high" }`.
     attachConversation("chs_a", "model-a");
     editGenerationSettings({ ...getCompatibleGenerationSettings(), temperature: 0.2 });
     expect(getCompatibleGenerationSettings()).toEqual({ temperature: 0.2 });
 
     attachConversation("chs_new", null);
     expect(getCompatibleGenerationSettings()).toEqual({
-      reasoningLevel: "high",
+      reasoning_level: "high",
       temperature: 0.2,
     });
   });
 
   it("clears a shown setting the edit drops", () => {
-    editGenerationSettings({ reasoningLevel: "high", temperature: 0.2 });
-    editGenerationSettings({ reasoningLevel: "high" });
+    editGenerationSettings({ reasoning_level: "high", temperature: 0.2 });
+    editGenerationSettings({ reasoning_level: "high" });
 
-    expect(getCompatibleGenerationSettings()).toEqual({ reasoningLevel: "high" });
+    expect(getCompatibleGenerationSettings()).toEqual({ reasoning_level: "high" });
   });
 
   it("returns a stable snapshot while nothing changed", () => {

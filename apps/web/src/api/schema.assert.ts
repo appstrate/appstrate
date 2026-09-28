@@ -38,12 +38,12 @@ type _HasProblemDetail = Assert<Has<"ProblemDetail", _Components>>;
 type _HasRunLog = Assert<Has<"RunLog", _Components>>;
 
 // The RFC 9457 error body must keep the fields the client middleware reads
-// (`code`/`detail`/`requestId`) — these drive `ApiError`.
+// (`code`/`detail`/`request_id`) — these drive `ApiError`.
 type _ProblemDetail = components["schemas"]["ProblemDetail"];
 type _ProblemDetailContract = Assert<
   Has<"code", keyof _ProblemDetail> extends true
     ? Has<"detail", keyof _ProblemDetail> extends true
-      ? Has<"requestId", keyof _ProblemDetail>
+      ? Has<"request_id", keyof _ProblemDetail>
       : false
     : false
 >;

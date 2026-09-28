@@ -34,14 +34,14 @@ organization, so use that org's endpoint — no `X-Org-Id` header:
 
 ```sh
 claude mcp add --transport http appstrate-<org> https://YOUR_INSTANCE/api/mcp/o/<orgId> \
-  --header "Authorization: Bearer ask_xxx"
+  --header "Authorization: Bearer apst_xxx"
 ```
 
 The `<orgId>` in the URL must be the key's own organization (the dashboard gives
 you the matching command).
 
 - `mcp:read` — connect, `search_operations`, `describe_operation`, and the
-  read-only helpers `read_file`, `validate_package_file`,
+  read-only helpers `read_file`, `read_skill`, `validate_package_file`,
   `get_runtime_capabilities` and `get_me`.
 - `mcp:invoke` — `invoke_operation` (call an operation). Defence in depth: the
   dispatched operation still enforces its own permission, so an MCP call can
@@ -158,12 +158,20 @@ guards require today. The package `:write` permissions are `agents:write`,
 | `search_operations`        | `mcp:read`                                                   | Find operations by keyword/tag → operationIds. A keyword search also returns `best_match` with its full input schema.                                                       |
 | `describe_operation`       | `mcp:read`                                                   | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                                                        |
 | `read_file`                | `mcp:read`                                                   | Read one `appfile://` URI; the file's own ACL decides on the row.                                                                                                           |
+| `read_skill`               | `mcp:read`                                                   | A skill's `SKILL.md` and files; `skills:read`, or a skill the chat turn injected (see below).                                                                               |
 | `validate_package_file`    | `mcp:read`                                                   | Check an `.afps`/ZIP archive before importing it.                                                                                                                           |
 | `get_runtime_capabilities` | `mcp:read`                                                   | The MCP-server runtimes and manifest templates package authoring works from.                                                                                                |
 | `invoke_operation`         | `mcp:invoke`                                                 | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                                         |
 | `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status.                                 |
 | `list_files`               | `files:read`                                                 | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
 | `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users  | Import a validated archive as a package.                                                                                                                                    |
+
+`read_skill` needs `skills:read`, except for a skill a chat turn injected:
+that turn's own bearer reads it at the definition injected (a draft only at the
+`lock_version` injected, else 409 `injected_draft_changed`), in the turn's
+space and while the caller holds `chat:write` there — even if the skill is
+switched off or `skills:read` is withdrawn mid-turn, since its `SKILL.md` is
+already in context.
 
 `run_and_wait` needs both halves because it launches AND polls the run back
 under your own credentials: `agents:run` without a run-read permission would
@@ -176,17 +184,23 @@ operation index in the server instructions, `search_operations` (matches you
 cannot invoke come back under `denied` with their `required_permissions`, never
 mixed into `operations`) and
 `describe_operation` (`granted`, `required_permissions`,
-`target_space_permissions`, `conditional`). What your role makes impossible is
+`target_space_permissions`, `ceiling_permissions`). What your role makes impossible is
 **not shown** rather than shown and refused — but an operation your permission
-set alone cannot decide stays listed and is marked `conditional`: either the
-loaded row decides it (a file ACL, a draft's home space), or a guard on it is
-enforced in the space the path names rather than the one you are calling from.
+set alone cannot decide stays listed: either the loaded row decides it (a file
+ACL, a draft's home space), or a guard on it is enforced in the space the path
+names rather than the one you are calling from. A row decision is not announced
+in advance; the route's own refusal names it.
 The two are separate fields: `required_permissions` carries the guards read in
 the space you are calling from — the only ones filtering tests — and
 `target_space_permissions` carries those enforced in the space the path names,
-shown so you can see them and never used to filter. `search_operations`'
-`denied[].required_permissions` and the `403` hint below carry the caller-space
-half alone. Enforcement itself never moves: `invoke_operation` always
+shown so you can see them and never used to filter. `ceiling_permissions`
+carries the scopes a delegated credential (API key, OAuth token) must include
+for an operation authorized by ownership rather than a role, such as deleting
+your own connection. A session is never filtered on them; a delegated credential
+whose scopes omit one sees the operation as not granted, and its
+`search_operations` `denied[]` entry and `403` answer name them as
+`ceiling_permissions`. Otherwise `denied[].required_permissions` and the `403`
+hint below carry the caller-space half alone. Enforcement itself never moves: `invoke_operation` always
 dispatches. A `403` attributable to a permission
 missing from your own space comes back with `required_permissions` and a hint to
 report it rather than retry; a refusal decided by the row, or by the space the

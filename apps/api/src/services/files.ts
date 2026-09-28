@@ -512,11 +512,8 @@ export function createHashingCounter(caps?: HashingCounterCaps): {
 /**
  * Wire shape for a file. Field casing follows CASING_CONVENTIONS.md
  * carve-out 4b (universal DB-convention fields stay camelCase EVERYWHERE):
- * `spaceId`, `packageId`, `createdAt`, `expiresAt` are on that exact list.
- * `run_id` / `chat_session_id` are NOT on it (the list carves out `scheduleId`,
- * `apiKeyId`, `endUserId` but deliberately not `runId`), so they stay snake_case
- * as domain fields — matching the `notification` DTO's `run_id` and the `Run`
- * DTO's treatment of non-listed `*_id` fields.
+ * `spaceId`, `runId`, `packageId`, `createdAt`, `expiresAt` are on that exact
+ * list. `chat_session_id` is NOT on it, so it stays a snake_case domain field.
  */
 interface FileDto {
   object: "file";
@@ -524,7 +521,7 @@ interface FileDto {
   uri: string;
   purpose: FilePurpose;
   spaceId: string;
-  run_id: string | null;
+  runId: string | null;
   chat_session_id: string | null;
   packageId: string | null;
   /**
@@ -640,7 +637,7 @@ export function toFileDto(
     uri: fileUri(row.id),
     purpose: row.purpose,
     spaceId: row.spaceId,
-    run_id: row.runId,
+    runId: row.runId,
     chat_session_id: row.chatSessionId,
     packageId: row.packageId,
     name: view.name,

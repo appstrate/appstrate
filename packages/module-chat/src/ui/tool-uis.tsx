@@ -324,7 +324,7 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
           <OAuthConnectCard
             authUrl={offer?.authUrl}
             state={offer?.state}
-            // The session route returns no `package_id`; the call's own path
+            // The session route returns no `packageId`; the call's own path
             // param is the integration this card connects.
             packageId={args?.path_params?.packageId}
             toolCallId={props.toolCallId}
@@ -406,7 +406,7 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
 // the call's whole life (launch failures render inside it) — no generic-card
 // fallback swap.
 //
-// A launch refused for a missing connection (412) carries a ready-to-open
+// A launch refused for a missing connection (409) carries a ready-to-open
 // `connect_url` per actionable integration (#1207), so the connect cards render
 // UNDER the run panel and the user clicks straight through — the model is never
 // asked to kick a connect flow off, and never sees the link. Zero offers (every

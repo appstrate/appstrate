@@ -7,8 +7,8 @@
  *   - `chat_sessions` / `chat_messages` persistence (tables live in the core
  *     schema per the "modules own no tables" rule — this module only reads
  *     and writes them).
- *   - REST surface under `/api/chat/*`: session CRUD, history READ, resume and
- *     stop — none of which writes a message. Persistence is server-authoritative
+ *   - REST surface under `/api/chat/*`: session CRUD, history READ, resume,
+ *     stop and the space's enforced-skill names — none of which writes a message. Persistence is server-authoritative
  *     and its two writers both live in `persistence.ts`; exactly ONE route
  *     reaches them, `POST /api/chat` (the conversational loop below), which
  *     stores the user turn before inference and the assistant turn when the
@@ -40,6 +40,7 @@ import {
 import { reconcileChatRun } from "./run-reconcile.ts";
 import { logger } from "./logger.ts";
 import { warnIfDefaultChatConcurrency } from "./pi-chat/concurrency.ts";
+import { getChatEnv } from "./env.ts";
 import { loadPiCodingAgentSdk } from "@appstrate/runner-pi";
 import { z } from "zod";
 
@@ -63,6 +64,8 @@ const chatModule: AppstrateModule = {
   manifest: { id: "chat", name: "Chat", version: "0.1.0", dependencies: ["mcp"] },
 
   async init(ctx: ModuleInitContext) {
+    // Fail boot on a bad CHAT_* value rather than on the first chat turn.
+    getChatEnv();
     // Tables are centralized in the core schema — nothing to migrate. No
     // workers: chat is request-driven. Capture the platform deps once: the
     // rate limiter, the in-process dispatcher (re-enters the platform app for

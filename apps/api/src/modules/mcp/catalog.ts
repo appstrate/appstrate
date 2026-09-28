@@ -121,18 +121,27 @@ function buildCatalog(source: PlatformOperations): OperationCatalog {
   return { operations, componentSchemas };
 }
 
-export function operationGranted(op: CatalogOperation, permissions: ReadonlySet<string>): boolean {
-  return isGranted(op.requirement, permissions);
+/** `ceiling`: the delegated credential's scopes (`c.get("scopeCeiling")`), `undefined` for a session. */
+export function operationGranted(
+  op: CatalogOperation,
+  permissions: ReadonlySet<string>,
+  ceiling: ReadonlySet<string> | undefined,
+): boolean {
+  return isGranted(op.requirement, permissions, ceiling);
 }
 
 /**
  * {@link operationGranted} for an operation the code names. An unknown id is a
  * rename this code did not follow — a programming error, never a denial.
  */
-export function operationIdGranted(operationId: string, permissions: ReadonlySet<string>): boolean {
+export function operationIdGranted(
+  operationId: string,
+  permissions: ReadonlySet<string>,
+  ceiling: ReadonlySet<string> | undefined,
+): boolean {
   const op = getCatalog().operations.get(operationId);
   if (!op) throw new Error(`Catalog has no \`${operationId}\` operation`);
-  return operationGranted(op, permissions);
+  return operationGranted(op, permissions, ceiling);
 }
 
 /**
@@ -140,11 +149,14 @@ export function operationIdGranted(operationId: string, permissions: ReadonlySet
  * filter is context reduction, not a security boundary: the dispatched route
  * re-enforces RBAC on every call.
  */
-export function buildOperationIndex(permissions: ReadonlySet<string>): string {
+export function buildOperationIndex(
+  permissions: ReadonlySet<string>,
+  ceiling: ReadonlySet<string> | undefined,
+): string {
   const { operations } = getCatalog();
   const byTag = new Map<string, string[]>();
   for (const op of operations.values()) {
-    if (!operationGranted(op, permissions)) continue;
+    if (!operationGranted(op, permissions, ceiling)) continue;
     const tag = op.tags[0] ?? "Other";
     // operationId only: summaries would cost several KB on every uncached turn.
     (byTag.get(tag) ?? byTag.set(tag, []).get(tag)!).push(op.operationId);

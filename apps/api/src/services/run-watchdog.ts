@@ -36,9 +36,9 @@
  * This service sweeps open-sink rows matching either predicate, and routes
  * each one through the same
  * {@link finalizeRun} used by natural termination and container-exit
- * synthesis. Each stalled run's workload is also stopped through the
- * orchestrator (same route as user cancel) — fire-and-forget, so a
- * wedged daemon or runtime can never block the finalize — because a
+ * synthesis. Each stalled run's workload is also aborted and stopped
+ * (same route as user cancel) — bounded, so a wedged daemon or runtime
+ * can never block the finalize — because a
  * stalled runner is not necessarily a dead one (e.g. a firecracker
  * microVM that lost network keeps executing and billing).
  * `finalizeRun`'s CAS on `sink_closed_at IS NULL` makes the
@@ -67,7 +67,8 @@ import { runs } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { applyRecoveredOutput, finalizeRun, getRunSinkContext } from "./run-event-ingestion.ts";
 import { stopWorkloadAndWait } from "./stop-workload.ts";
-import { emptyRunResult } from "@appstrate/afps-runtime/runner";
+import { abortRun } from "./run-tracker.ts";
+import { emptyRunResult, type TerminalRunResult } from "@appstrate/afps-runtime/runner";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
@@ -273,15 +274,21 @@ async function finalizeStalledRun(
   // makes this call a no-op. We don't gate here to keep the convergence
   // point identical to every other finalize path.
 
-  const result = emptyRunResult();
-  result.status = "failed";
-  result.error = {
-    message:
-      candidate.reason === "boot-deadline"
-        ? `Run never started executing — the runner posted no event within its ${candidate.bootBudgetSeconds}s provisioning budget. The runtime image pull, container boot, or sandbox provisioning did not finish in time.`
-        : `Runner stopped reporting — no heartbeat for ${stallThresholdSeconds}s. The runner process may have crashed or lost network connectivity.`,
+  const result: TerminalRunResult = {
+    ...emptyRunResult(),
+    status: "failed",
+    error: {
+      message:
+        candidate.reason === "boot-deadline"
+          ? `Run never started executing — the runner posted no event within its ${candidate.bootBudgetSeconds}s provisioning budget. The runtime image pull, container boot, or sandbox provisioning did not finish in time.`
+          : `Runner stopped reporting — no heartbeat for ${stallThresholdSeconds}s. The runner process may have crashed or lost network connectivity.`,
+    },
   };
 
+  // Abort first, as the cancel route does: the launcher's signal is how it
+  // tells a requested stop from a sidecar/agent crash (and it then leaves the
+  // terminal to us). Pub/sub reaches the owning replica — any replica sweeps.
+  abortRun(runId);
   // Stop the workload and WAIT (bounded) for the stop to ack before
   // finalizing — a stalled runner is not necessarily dead (a remote microVM
   // that lost its event path keeps executing and billing with live

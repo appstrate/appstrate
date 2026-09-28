@@ -650,7 +650,7 @@ function applyDeliveryPlan(headers: Record<string, string>, plan: HttpDeliveryPl
 interface RemoteAppstrateIntegrationResolverOptions {
   /** Base URL of the Appstrate instance. */
   instance: string;
-  /** API key (ask_...) or device-flow JWT with `credential-proxy:call`. */
+  /** API key (apst_...) or device-flow JWT with `credential-proxy:call`. */
   apiKey: string;
   /** Space id (spc_...) the caller is scoped to. */
   spaceId: string;

@@ -6,6 +6,8 @@ import { client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
+import { usePermissions } from "./use-permissions";
+import { packageSightPermissions } from "@appstrate/core/permissions";
 import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
@@ -22,9 +24,19 @@ import type { AgentDetail, ScheduleWireDto, EnrichedSchedule } from "@appstrate/
 // it through `usePaginatedRuns`. The `scheduleKeys.runs` cache key is still
 // invalidated by `use-global-run-sync` for that list.
 
+// Every schedules read requires `schedules:read`, which some space roles
+// (`runner`, and any custom role without it) do not hold. Gating here rather
+// than at each call site keeps a surface that shows schedules incidentally —
+// the dashboard — from firing a request the server is bound to refuse.
+function useCanReadSchedules(): boolean {
+  const { can } = usePermissions();
+  return can("schedules:read");
+}
+
 export function useAllSchedules() {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const canRead = useCanReadSchedules();
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync invalidates by the
     // ["schedules", orgId, spaceId] prefix on SSE events.
@@ -33,13 +45,14 @@ export function useAllSchedules() {
       const { data } = await client.GET("/api/schedules");
       return data?.data ?? [];
     },
-    enabled: !!orgId && !!spaceId,
+    enabled: canRead && !!orgId && !!spaceId,
   });
 }
 
 export function useScheduleById(id: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const canRead = useCanReadSchedules();
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync invalidates
     // ["schedule", orgId, spaceId, scheduleId] on SSE events.
@@ -51,13 +64,14 @@ export function useScheduleById(id: string | undefined) {
       // Non-2xx throws via the client middleware, so `data` is defined here.
       return data!;
     },
-    enabled: !!id && !!spaceId,
+    enabled: canRead && !!id && !!spaceId,
   });
 }
 
 export function useSchedules(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const canRead = useCanReadSchedules();
   return useQuery({
     // Key pinned to the legacy shape (under the ["schedules", orgId,
     // spaceId] prefix invalidated by use-global-run-sync).
@@ -69,7 +83,7 @@ export function useSchedules(packageId: string | undefined) {
       });
       return data?.data ?? [];
     },
-    enabled: !!packageId && !!spaceId,
+    enabled: canRead && !!packageId && !!spaceId,
   });
 }
 
@@ -81,7 +95,7 @@ function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
 type CreateScheduleBody =
   paths["/api/agents/{scope}/{name}/schedules"]["post"]["requestBody"]["content"]["application/json"];
 type UpdateScheduleBody =
-  paths["/api/schedules/{id}"]["put"]["requestBody"]["content"]["application/json"];
+  paths["/api/schedules/{id}"]["patch"]["requestBody"]["content"]["application/json"];
 
 export function useCreateSchedule(packageId: string) {
   const qc = useQueryClient();
@@ -96,7 +110,7 @@ export function useCreateSchedule(packageId: string) {
       proxy_id_override?: string | null;
       version_override?: string | null;
       connection_overrides?: Record<string, string[]> | null;
-      actor?: { user_id?: string; end_user_id?: string };
+      actor?: { userId?: string; endUserId?: string };
     }): Promise<ScheduleWireDto> => {
       const { scope, name } = splitPackageRef(packageId);
       const { data: created } = await client.POST("/api/agents/{scope}/{name}/schedules", {
@@ -129,9 +143,9 @@ export function useUpdateSchedule() {
       proxy_id_override?: string | null;
       version_override?: string | null;
       connection_overrides?: Record<string, string[]> | null;
-      actor?: { user_id?: string; end_user_id?: string };
+      actor?: { userId?: string; endUserId?: string };
     }): Promise<ScheduleWireDto> => {
-      const { data: updated } = await client.PUT("/api/schedules/{id}", {
+      const { data: updated } = await client.PATCH("/api/schedules/{id}", {
         params: { path: { id } },
         // Spec body types `input` as a bare object.
         body: data as UpdateScheduleBody,
@@ -211,10 +225,14 @@ interface ScheduleFormDeps {
 export function useScheduleFormDeps(
   packageId: string | undefined,
   version?: string,
-): { deps: ScheduleFormDeps | null; error: Error | null } {
+): { deps: ScheduleFormDeps | null; error: Error | null; denied: boolean } {
   const { data: agentDetail, error } = usePackageDetail("agent", packageId, { version });
   const { data: agentModel } = useAgentModel(packageId);
   const { data: agentProxy } = useAgentProxy(packageId);
+  // The detail read gates itself, so a caller who may not see the agent gets
+  // neither data nor error: without this the page would wait forever.
+  const { can, ready } = usePermissions();
+  const denied = !!packageId && ready && !packageSightPermissions("agent").some(can);
 
   // `deps` stays null until the AGENT DETAIL itself lands, not merely until an
   // agent is picked: `ScheduleForm` seeds its input state once, in a `useState`
@@ -222,7 +240,7 @@ export function useScheduleFormDeps(
   // has since been locked — unremovable through the UI and refused on save
   // (400 `locked_input_field`). `key={schedule.id}` means no remount when the
   // detail arrives, so the only safe answer while it is in flight is "not yet".
-  if (!packageId || !agentDetail) return { deps: null, error };
+  if (!packageId || !agentDetail) return { deps: null, error, denied };
 
   const integrationDeps = agentDetail.dependencies.integrations.map((d) => ({
     id: d.id,
@@ -250,5 +268,6 @@ export function useScheduleFormDeps(
       skills: skillDeps,
     },
     error,
+    denied,
   };
 }

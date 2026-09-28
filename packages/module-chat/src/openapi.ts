@@ -7,6 +7,18 @@
  * clients automatically (search/describe/invoke_operation).
  */
 
+import { scopedNameRegex } from "@appstrate/core/validation";
+import { chatSkillModeValues } from "@appstrate/db/schema";
+import { MAX_PINNED_SKILLS } from "./skills.ts";
+
+/** `enforced_skills_unavailable`, shared by the turn and the names read. */
+const enforcedSkillsUnavailableResponse = (description: string) => ({
+  description: `\`enforced_skills_unavailable\` — ${description} RFC 9457 problem+json.`,
+  content: {
+    "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+  },
+});
+
 const stdHeaders = {
   "Request-Id": { $ref: "#/components/headers/RequestId" },
   "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -15,7 +27,16 @@ const stdHeaders = {
 export const chatComponentSchemas = {
   ChatSession: {
     type: "object",
-    required: ["object", "id", "generating", "unread", "createdAt", "updatedAt"],
+    required: [
+      "object",
+      "id",
+      "generating",
+      "unread",
+      "skill_mode",
+      "pinned_skills",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
       object: { type: "string", enum: ["chat_session"] },
       id: { type: "string", description: "Session ID (chs_ prefix)" },
@@ -28,6 +49,18 @@ export const chatComponentSchemas = {
         type: "boolean",
         description:
           "Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read.",
+      },
+      skill_mode: {
+        type: "string",
+        enum: [...chatSkillModeValues],
+        description:
+          "How turns use skills. `auto`: the space's skills are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. In every mode, the skills the space enforces (GET /api/chat/enforced-skills) are injected first. Written by the turn that carries it (POST /api/chat).",
+      },
+      pinned_skills: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`.",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -65,15 +98,28 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "List chat sessions",
       description:
-        "List the caller's chat sessions in the current organization (most recent first).",
+        "List the caller's chat sessions in the current space, most recent activity (`updatedAt`) first. Keyset-paginated: when `hasMore` is `true`, pass the last session's `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel=\"next\"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        {
+          name: "limit",
+          in: "query",
+          description: "Page size. Out-of-range or non-numeric values fall back to 100.",
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 100 },
+        },
+        {
+          name: "startingAfter",
+          in: "query",
+          description:
+            "Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's sessions in this space is a 400.",
+          schema: { type: "string" },
+        },
       ],
       responses: {
         "200": {
-          description: "Sessions list",
-          headers: stdHeaders,
+          description: "Sessions page",
+          headers: { ...stdHeaders, Link: { $ref: "#/components/headers/Link" } },
           content: {
             "application/json": {
               schema: {
@@ -82,12 +128,16 @@ export const chatPaths = {
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: { type: "array", items: { $ref: "#/components/schemas/ChatSession" } },
-                  hasMore: { type: "boolean" },
+                  hasMore: {
+                    type: "boolean",
+                    description: "True when older sessions follow this page.",
+                  },
                 },
               },
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
@@ -252,6 +302,57 @@ export const chatPaths = {
       },
     },
   },
+  "/api/chat/enforced-skills": {
+    get: {
+      operationId: "listChatEnforcedSkills",
+      tags: ["Chat"],
+      summary: "List the skills the space enforces in chat",
+      description:
+        "The skills the current space imposes on every chat conversation, whatever the conversation's `skill_mode` and the caller's `skills:*` grants: each turn injects their latest published `SKILL.md`. Names only — the content is never returned here. Sorted by id.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+      ],
+      responses: {
+        "200": {
+          description: "Enforced skills",
+          headers: stdHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["id", "name", "version"],
+                      properties: {
+                        id: { type: "string", description: "`@scope/name` package id" },
+                        name: { type: "string", description: "Display name, else the id" },
+                        version: {
+                          type: ["string", "null"],
+                          description:
+                            "Latest published version; null when none can be read now (the turn then tells the model the skill is unavailable).",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "429": { description: "Rate limited (120/min per caller)" },
+        "503": enforcedSkillsUnavailableResponse(
+          "the space's enforced skills could not be loaded.",
+        ),
+      },
+    },
+  },
   "/api/chat": {
     post: {
       operationId: "streamChat",
@@ -290,8 +391,26 @@ export const chatPaths = {
                   description:
                     "Lets the assistant author agents (create, edit, compose inline) this turn; absent = on. Narrows the caller's own grants, never widens them.",
                 },
+                skill_mode: {
+                  type: "string",
+                  enum: [...chatSkillModeValues],
+                  description:
+                    "The conversation's skill mode (see ChatSession `skill_mode`), written onto the session by this turn. Sent with `pinned_skills` or not at all; absent = the stored selection (`auto` for a new conversation).",
+                },
+                pinned_skills: {
+                  type: "array",
+                  maxItems: MAX_PINNED_SKILLS,
+                  items: {
+                    type: "string",
+                    pattern: scopedNameRegex.source,
+                    description: "`@scope/name` package id",
+                  },
+                  description:
+                    "The skills chosen for the conversation, written with `skill_mode`. Deduped server-side; the cap applies to the array as sent.",
+                },
                 id: { type: "string", description: "Session id (the assistant-ui thread id)" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -302,10 +421,9 @@ export const chatPaths = {
           headers: stdHeaders,
           content: { "text/event-stream": { schema: { type: "string" } } },
         },
-        "400": { description: "No enabled model configured, or invalid body" },
-        "401": {
+        "400": {
           description:
-            'The selected model\'s subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json with `code: "needs_reconnection"`.',
+            "No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, or a last message whose JSON exceeds 256 KB.",
         },
         "402": {
           description:
@@ -315,9 +433,16 @@ export const chatPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. RFC 9457 problem+json.",
+            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json.",
         },
-        "429": { description: "Rate limited (20/min per caller)" },
+        "429": {
+          $ref: "#/components/responses/RateLimited",
+          description:
+            "Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`.",
+        },
+        "503": enforcedSkillsUnavailableResponse(
+          "the skills the space enforces could not be loaded, so the turn is refused before anything is persisted.",
+        ),
       },
     },
   },

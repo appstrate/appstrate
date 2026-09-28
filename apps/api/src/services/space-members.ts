@@ -124,8 +124,12 @@ export async function listSpaceMembers(
   return out;
 }
 
-/** Hold the membership lock until the caller's grant transaction commits. */
-export async function lockOrgMemberForSpaceGrant(tx: DbOrTx, orgId: string, userId: string) {
+/**
+ * Lock an org member's row until the caller's transaction commits — the lock
+ * every org-role change, org removal and space grant takes, so the role read
+ * here cannot move under the caller. `undefined` when they are not a member.
+ */
+export async function lockOrgMember(tx: DbOrTx, orgId: string, userId: string) {
   const [member] = await tx
     .select({ role: organizationMembers.role })
     .from(organizationMembers)
@@ -157,7 +161,7 @@ export async function saveSpaceMember(params: {
   // up space memberships. A transaction alone would still allow stale grants.
   return db.transaction(async (tx) => {
     await assertSpaceTakesMembers(tx, spaceId);
-    const target = await lockOrgMemberForSpaceGrant(tx, orgId, userId);
+    const target = await lockOrgMember(tx, orgId, userId);
     const targetRole = target?.role;
     if (!targetRole) throw notFound("User is not a member of this organization");
     if (targetRole === "owner" || targetRole === "admin") {
@@ -262,8 +266,8 @@ export interface SpaceMemberRemoval {
  * Grant first, so a caller who may not touch this target learns nothing about
  * whether the row exists.
  *
- * What the lock covers, precisely: `lockOrgMemberForSpaceGrant` is the lock org
- * promotion and removal take before touching space memberships, so the ORG ROLE
+ * What the lock covers, precisely: `lockOrgMember` is the lock org promotion,
+ * demotion and removal take before touching space memberships, so the ORG ROLE
  * and the MEMBER ROW cannot move under the delete. The SPACE row is the request
  * pipeline's (`c.get("space")`), pinned for the request like everywhere else —
  * `applySpacePermissions` resolved the caller's own ceiling from that same row,
@@ -284,7 +288,7 @@ export async function removeSpaceMember(params: {
 }): Promise<SpaceMemberRemoval> {
   const { orgId, space, userId } = params;
   return db.transaction(async (tx) => {
-    const target = await lockOrgMemberForSpaceGrant(tx, orgId, userId);
+    const target = await lockOrgMember(tx, orgId, userId);
     // The standing is the TARGET's, so the caller id is theirs — a personal
     // space resolves `admin` for its owner and nothing for anyone else. No
     // member row: the removal is about to delete the only one there could be.

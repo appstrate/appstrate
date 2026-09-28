@@ -36,29 +36,36 @@ function buildDownloadFilename(scope: string, name: string, version: string): st
 // Download response headers
 // ─────────────────────────────────────────────
 
-/** Input for building standard package download response headers. */
-export interface DownloadHeadersInput {
-  /** SRI integrity hash of the artifact. */
-  integrity: string;
-  /** Whether the version has been yanked. */
-  yanked: boolean;
-  /** Package scope (e.g. "@myorg"). */
-  scope: string;
-  /** Package name without scope. */
-  name: string;
-  /** Semver version string. */
-  version: string;
-}
+/**
+ * Input for building standard package download response headers — a published
+ * VERSION, which always carries its SRI digest, or the DRAFT, which is no
+ * immutable artifact and has none. Two shapes rather than an optional digest,
+ * so a version cannot be served without `X-Integrity` by omission.
+ */
+export type DownloadHeadersInput =
+  | {
+      /** Semver version string. */
+      version: string;
+      /** SRI integrity hash of the artifact. */
+      integrity: string;
+      /** Whether the version has been yanked. */
+      yanked: boolean;
+      /** Package scope (e.g. "@myorg"). */
+      scope: string;
+      /** Package name without scope. */
+      name: string;
+    }
+  | { version: "draft"; scope: string; name: string };
 
 /** Build standard download response headers (Content-Type, Content-Disposition, X-Integrity, X-Yanked). */
 export function buildDownloadHeaders(meta: DownloadHeadersInput): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/afps+zip",
-    "X-Integrity": meta.integrity,
     "Content-Disposition": `attachment; filename="${buildDownloadFilename(meta.scope, meta.name, meta.version)}"`,
   };
-  if (meta.yanked) {
-    headers["X-Yanked"] = "true";
+  if ("integrity" in meta) {
+    headers["X-Integrity"] = meta.integrity;
+    if (meta.yanked) headers["X-Yanked"] = "true";
   }
   return headers;
 }

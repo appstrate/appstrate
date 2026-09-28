@@ -239,7 +239,6 @@ describe("runner preset", () => {
       mcp_servers: [],
       integrations: [{ id: INTEGRATION_ID, version: "^1.0.0" }],
     });
-    expect(detail).toHaveProperty("lock_version");
     expect(detail).toHaveProperty("version_count");
     expect(detail).toHaveProperty("forked_from");
   });
@@ -265,21 +264,21 @@ describe("runner preset", () => {
       const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
       return (await res.json()) as {
-        agents: { package_id: string }[];
+        agents: { packageId: string }[];
         agents_total: number;
-        skills: { package_id: string }[];
+        skills: { packageId: string }[];
         skills_total: number;
       };
     };
 
     const asRunner = await contextFor(runner);
-    expect(asRunner.agents.map((a) => a.package_id)).toContain(AGENT_ID);
+    expect(asRunner.agents.map((a) => a.packageId)).toContain(AGENT_ID);
     expect(asRunner.skills).toEqual([]);
     expect(asRunner.skills_total).toBe(0);
 
     const asOperator = await contextFor(operator);
-    expect(asOperator.agents.map((a) => a.package_id)).toContain(AGENT_ID);
-    expect(asOperator.skills.map((sk) => sk.package_id)).toEqual([SKILL_ID]);
+    expect(asOperator.agents.map((a) => a.packageId)).toContain(AGENT_ID);
+    expect(asOperator.skills.map((sk) => sk.packageId)).toEqual([SKILL_ID]);
     expect(asOperator.skills_total).toBe(1);
   });
 
@@ -469,8 +468,8 @@ describe("runner preset", () => {
       {
         label: "update agent",
         path: AGENT_DETAIL_PATH,
-        method: "PUT",
-        body: JSON.stringify({ lock_version: 1, content: "rewritten" }),
+        method: "PATCH",
+        body: JSON.stringify({ content: "rewritten" }),
       },
       {
         label: "create agent",

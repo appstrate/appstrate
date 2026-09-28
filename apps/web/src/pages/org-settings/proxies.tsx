@@ -188,7 +188,7 @@ export function OrgSettingsProxiesPage() {
           if (editProxy) {
             // The credential-bearing URL is never returned to the client, so the
             // edit form starts blank. An empty field means "keep the current
-            // URL" — omit it entirely (`url` is optional on PUT); sending `""`
+            // URL" — omit it entirely (`url` is optional on PATCH); sending `""`
             // fails the server's `z.url()` and 400s a label-only edit.
             updateMutation.mutate(
               {

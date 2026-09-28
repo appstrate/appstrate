@@ -15,6 +15,7 @@
  */
 
 import { z } from "zod";
+import { withByteCap } from "@appstrate/core/safe-json";
 
 const KB = 1024;
 
@@ -28,18 +29,6 @@ const jsonValueSchema: z.ZodType<unknown> = z.lazy(() =>
     z.record(z.string(), jsonValueSchema),
   ]),
 );
-
-function withByteCap(maxBytes: number) {
-  return (value: unknown, ctx: z.RefinementCtx): void => {
-    const size = Buffer.byteLength(JSON.stringify(value), "utf8");
-    if (size > maxBytes) {
-      ctx.addIssue({
-        code: "custom",
-        message: `JSON payload is ${size} bytes; max is ${maxBytes}`,
-      });
-    }
-  };
-}
 
 /** `package_schedules.input` — JSON input replayed into every triggered run. */
 export const scheduleInputSchema = z

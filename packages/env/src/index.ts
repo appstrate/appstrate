@@ -422,13 +422,15 @@ export const envSchema = z
     // it early with an actionable "reconnect" cause instead of every scheduled
     // run dying opaquely at integration boot. The expiry gate prevents a
     // temporary upstream outage on a still-valid token from bricking the
-    // connection — escalation requires the token to be genuinely dead.
+    // connection — escalation requires the token to be genuinely dead. An auth
+    // that cannot refresh counts upstream 401s against the same limit, with no
+    // expiry gate and no reset short of a reconnect (cumulative, not a streak).
     INTEGRATION_REFRESH_MAX_FAILURES: z.coerce.number().int().positive().default(5),
     INTEGRATION_REFRESH_GRACE_SECONDS: z.coerce.number().int().nonnegative().default(3600),
 
-    // Modules (comma-separated specifiers). API-key LLM calls are routed
-    // directly to the upstream provider — retry is handled by the Pi SDK
-    // natively (Retry-After honoring + jitter). The default set is the
+    // Modules (comma-separated specifiers). LLM calls go through the run's
+    // sidecar `/llm` proxy — retry is handled by the Pi SDK natively
+    // (Retry-After honoring + jitter). The default set is the
     // built-in OSS modules ONLY. The two reference OAuth-subscription modules
     // — `@appstrate/module-codex` (ChatGPT/Codex) and
     // `@appstrate/module-claude-code` (Claude Pro/Max/Team) — are OPT-IN: a
@@ -564,6 +566,11 @@ export const envSchema = z
     // Docker images (override for GHCR / custom registries)
     PI_IMAGE: z.string().default("appstrate-pi:latest"),
     SIDECAR_IMAGE: z.string().default("appstrate-sidecar:latest"),
+
+    // Agent-container Pi loops (unset byte limit = the runner's 2048 default).
+    MODEL_RETRY_ENABLED: boolEnv("true"),
+    MODEL_COMPACTION_ENABLED: boolEnv("true"),
+    TOOL_RESULT_BYTE_LIMIT: z.coerce.number().int().positive().optional(),
 
     // Runtime-image warm-keeping sweep (Docker orchestrator only). Every
     // tick: re-pull PI_IMAGE/SIDECAR_IMAGE if they went missing, and
@@ -794,10 +801,11 @@ export const envSchema = z
     // rejected when AFPS_SIGNATURE_POLICY=required.
     AFPS_TRUST_ROOT: jsonEnv<unknown[]>("[]"),
     // AFPS_SIGNATURE_POLICY — how to treat bundle signatures at load:
-    //   - "off"      (default) — no verification, unsigned bundles accepted
-    //   - "warn"     — verify if signed; log warnings on unsigned/invalid
+    //   - "off"      — no verification, unsigned bundles accepted
+    //   - "warn"     (default) — verify if signed; log warnings on unsigned/invalid
     //   - "required" — reject unsigned and invalid bundles (load fails)
-    AFPS_SIGNATURE_POLICY: z.enum(["off", "warn", "required"]).default("off"),
+    // System packages ship inside the image and are exempt from all three.
+    AFPS_SIGNATURE_POLICY: z.enum(["off", "warn", "required"]).default("warn"),
 
     // SMTP (optional — enables email verification when all are set)
     SMTP_HOST: z.string().optional(),

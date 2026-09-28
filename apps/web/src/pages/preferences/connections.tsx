@@ -18,6 +18,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";
 import { ConnectionTeardownSteps } from "../../components/integration-connect/connection-teardown-steps";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
+import { useCanReach } from "../../hooks/use-can-reach";
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -296,6 +297,7 @@ function SourceGroupCard({
 export function PreferencesConnectionsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { data: groups, isLoading } = useMyConnections();
+  const canBrowseIntegrations = useCanReach()("/integrations");
 
   const disconnectIntegration = useDisconnectIntegrationConnection();
   const updateIntegration = useUpdateMeIntegrationConnection();
@@ -343,10 +345,18 @@ export function PreferencesConnectionsPage() {
 
       <div className="border-border bg-card mb-4 rounded-lg border p-5">
         <p className="text-muted-foreground text-sm">
-          {t("connections.descriptionUnified")}{" "}
-          <Link to="/integrations" className="text-primary text-sm no-underline hover:underline">
-            {t("connections.connectMore")}
-          </Link>
+          {t("connections.descriptionUnified")}
+          {canBrowseIntegrations && (
+            <>
+              {" "}
+              <Link
+                to="/integrations"
+                className="text-primary text-sm no-underline hover:underline"
+              >
+                {t("connections.connectMore")}
+              </Link>
+            </>
+          )}
         </p>
       </div>
 
@@ -356,9 +366,11 @@ export function PreferencesConnectionsPage() {
           hint={t("connections.noConnectionsHint")}
           icon={Unplug}
         >
-          <Link to="/integrations">
-            <Button variant="outline">{t("connections.goToConnections")}</Button>
-          </Link>
+          {canBrowseIntegrations && (
+            <Link to="/integrations">
+              <Button variant="outline">{t("connections.goToConnections")}</Button>
+            </Link>
+          )}
         </EmptyState>
       ) : (
         <div className="flex flex-col gap-3">

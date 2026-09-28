@@ -199,7 +199,7 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
     const body = await readBody(c, createBoundaryBodySchema);
     if (!body.ok) return body.res;
     try {
-      const boundary = await orchestrator.createIsolationBoundary(body.data.runId, body.data.opts);
+      const boundary = await orchestrator.createIsolationBoundary(body.data.runId);
       return c.json(boundary);
     } catch (err) {
       // Replay/duplicate guard: on a plaintext-bearer transport a captured

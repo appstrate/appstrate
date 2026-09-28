@@ -489,8 +489,6 @@ describe("handleIntegrationOAuthCallback", () => {
     expect(result.accessToken).toBe("AT");
     expect(result.refreshToken).toBe("RT");
     expect(result.scopesGranted).toEqual(["openid", "email"]);
-    expect(result.scopeShortfall).toEqual([]);
-    expect(result.scopeCreep).toEqual([]);
     expect(result.actor).toEqual({ type: "user", id: "u_1" });
 
     // State row is consumed
@@ -669,7 +667,7 @@ describe("handleIntegrationOAuthCallback", () => {
     expect((err as OAuthCallbackError).kind).toBe("transient");
   });
 
-  it("flags scope shortfall when the IdP returns fewer scopes than requested", async () => {
+  it("returns granted and requested scopes when the IdP narrows the request", async () => {
     const { state } = await seedState({ scopes: ["openid", "email", "profile"] });
     const stub = (async () =>
       new Response(
@@ -684,7 +682,7 @@ describe("handleIntegrationOAuthCallback", () => {
 
     const result = await handleIntegrationOAuthCallback(store, "CODE", state, stub);
     expect(result.scopesGranted).toEqual(["openid", "email"]);
-    expect(result.scopeShortfall).toEqual(["profile"]);
+    expect(result.scopesRequested).toEqual(["openid", "email", "profile"]);
   });
 });
 

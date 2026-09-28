@@ -11,6 +11,11 @@
 import { describe, expect, it } from "bun:test";
 import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
+import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
+
+/** The block's text; the skills it injected are pinned in caller-context.test.ts. */
+const contextText = (...args: Parameters<typeof formatCallerContext>) =>
+  formatCallerContext(...args).text;
 
 /** The turn's capabilities, from a permission set a role can actually hold. */
 function caps(permissions: readonly string[]) {
@@ -25,14 +30,24 @@ function promptFor(permissions: readonly string[]): string {
 /** The transport floor plus the dispatching tool — nothing acts without both. */
 const MCP = ["mcp:read", "mcp:invoke"];
 /** A builder as the platform grants it. */
-const BUILDER = [...MCP, "agents:read", "agents:run", "agents:write", "runs:read"];
+const BUILDER = [...MCP, "agents:read", "agents:run", "agents:write", "runs:read", "skills:read"];
 
 /** The full persona; the reduced ones have their own blocks at the end. */
 const FULL = promptFor(BUILDER);
 /** Builder minus `agents:write`: runs existing agents, composes and authors nothing. */
 const REDUCED = promptFor(BUILDER.filter((permission) => permission !== "agents:write"));
 /** May author an agent, may not launch one. */
-const NO_RUNS_AUTHOR = promptFor([...MCP, "agents:write"]);
+const NO_RUNS_AUTHOR = promptFor([...MCP, "agents:write", "skills:read"]);
+
+/** `formatCallerContext` options for a builder turn with the default skill selection. */
+const CONTEXT_OPTS = {
+  capabilities: caps(BUILDER),
+  rolePreview: false,
+  spaceRole: "builder",
+  permissions: ["agents:read", "mcp:invoke"],
+  skills: DEFAULT_SKILL_SELECTION,
+  enforced: [],
+};
 
 describe("full persona invariants", () => {
   it("keeps the single-sub-agent rule for chained external actions", () => {
@@ -119,7 +134,7 @@ describe("full persona invariants", () => {
   });
 
   it("routes integration_not_active to activation, never to a retry", () => {
-    // Retrying the run or re-running the connect flow can never clear a 412:
+    // Retrying the run or re-running the connect flow can never clear a 409:
     // connecting is personal, activating is per space. The persona names the
     // real catalog operation with its path and body, because the model is told
     // never to guess an operationId. `activatePackage` is decided in the space
@@ -133,6 +148,66 @@ describe("full persona invariants", () => {
     expect(FULL).not.toContain("activateIntegration");
     expect(FULL).toMatch(/report the refusal with its error and stop/);
     expect(FULL).not.toMatch(/the 403 names the permission it required/);
+  });
+
+  it("teaches loading a skill through `read_skill`, one at a time, before acting", () => {
+    expect(FULL).toContain("guides for YOU");
+    expect(FULL).toContain("LOAD IT BEFORE acting: call `read_skill` with its `id`");
+    expect(FULL).toContain("KEEP the leading `@`");
+    expect(FULL).toContain("Load ONE at a time");
+    expect(FULL).toContain("Never load a skill whose content already appears");
+    expect(FULL).toContain("call `read_skill` with the skill's `id` and the file's `path`");
+    // The injected ones are already loaded; `read_skill` is for a skill listed by name.
+    expect(FULL).toContain("One shown in full, inside a `<skill>` tag, is already loaded");
+    expect(FULL).not.toContain("getSkill");
+  });
+
+  it("names the same heading the context block renders", () => {
+    const block = contextText(
+      {
+        user: { name: "Ada" },
+        skills: [{ packageId: "@acme/mine" }],
+      },
+      CONTEXT_OPTS,
+    );
+    expect(block).toContain("## Skills");
+    expect(FULL).toContain("`## Skills`");
+  });
+
+  it("teaches the loading rules whatever the turn may author", () => {
+    const readerOnly = promptFor([...MCP, "skills:read"]);
+    expect(readerOnly).toContain("call `read_skill` with its `id`");
+    expect(readerOnly).toContain("guides for YOU");
+  });
+
+  it("teaches `read_skill` without dispatch, and `listSkills` only with it", () => {
+    // `read_skill` is declared on every MCP connection; `listSkills` goes through `invoke_operation`.
+    const noDispatch = promptFor(["mcp:read", "skills:read"]);
+    expect(noDispatch).toContain("call `read_skill` with its `id`");
+    expect(noDispatch).toContain("and the skills available");
+    expect(noDispatch).not.toContain("listSkills");
+  });
+
+  it("names `listSkills` for an unlisted request here, and for a truncated list only in the list bullet", () => {
+    expect(FULL).toContain("Call `listSkills` only when the user asks for a skill you do not see.");
+    expect(FULL.split("listSkills")).toHaveLength(3);
+  });
+
+  it("teaches nothing about skills to a turn without `skills:read`", () => {
+    const noSkills = promptFor(BUILDER.filter((permission) => permission !== "skills:read"));
+    for (const skillRule of [
+      "read_skill",
+      "listSkills",
+      "## Skills",
+      "Skills are not run on their own",
+      "attach it under `dependencies.skills`",
+      "and the skills available",
+      "in `dependencies.skills`",
+    ]) {
+      expect(FULL).toContain(skillRule);
+      expect(noSkills).not.toContain(skillRule);
+    }
+    expect(noSkills).toContain('`operation_id: "listAgents"` for the full one');
   });
 
   it("drops the stale claim that a prompt-pasted appfile:// URI gives no access", () => {
@@ -162,47 +237,29 @@ describe("caller-context prompt hygiene", () => {
   const identity = { user: { name: "Ada" }, org: { role: "member" } };
 
   it("renders the forwarded locale in the reply-language line", () => {
-    const out = formatCallerContext(identity, {
-      locale: "en-US",
-      capabilities: caps(BUILDER),
-      rolePreview: false,
-      spaceRole: "builder",
-      permissions: ["agents:read", "mcp:invoke"],
-    });
+    const out = contextText(identity, { ...CONTEXT_OPTS, locale: "en-US" });
     expect(out).toContain("Reply in the user's language (en)");
   });
 
   it("defaults the reply language to fr without a locale", () => {
-    expect(
-      formatCallerContext(identity, {
-        capabilities: caps(BUILDER),
-        rolePreview: false,
-        spaceRole: "builder",
-        permissions: ["agents:read", "mcp:invoke"],
-      }),
-    ).toContain("Reply in the user's language (fr)");
+    expect(contextText(identity, CONTEXT_OPTS)).toContain("Reply in the user's language (fr)");
   });
 
   it("keeps the block free of standing instructions — they belong to the system prompt", () => {
     // Everything the model must DO with the context lives in the persona
     // (`buildSystemPrompt`). The block renders data only; the sole exception is the
     // reply-language line, which is parameterised by the `X-Chat-Locale` header.
-    const out = formatCallerContext(
+    const out = contextText(
       {
         user: { name: "Ada" },
         org: { role: "member" },
         connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
-        agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+        agents: [{ packageId: "@appstrate/triage", takes_input: false }],
         agents_truncated: true,
-        skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+        skills: [{ packageId: "@appstrate/web-research", version: "1.2.0" }],
         skills_truncated: true,
       },
-      {
-        capabilities: caps(BUILDER),
-        rolePreview: false,
-        spaceRole: "builder",
-        permissions: ["agents:read", "mcp:invoke"],
-      },
+      CONTEXT_OPTS,
     );
     // Gone from the block…
     for (const imperative of [
@@ -390,33 +447,38 @@ describe("the persona without agent runs", () => {
   });
 
   it("names the full-list operation only for a list the context renders", () => {
-    // Skills are listed on authoring, agents on running: each operation is
+    // Skills are listed on reading them, agents on running: each operation is
     // named under the gate that shows its list, never under the other one.
     expect(NO_RUNS_AUTHOR).toContain('`operation_id: "listSkills"`');
     expect(NO_RUNS_AUTHOR).not.toContain("listAgents");
-    expect(REDUCED).toContain('`operation_id: "listAgents"`');
-    expect(REDUCED).not.toContain("listSkills");
+    const runsNoSkills = promptFor(BUILDER.filter((permission) => permission !== "skills:read"));
+    expect(runsNoSkills).toContain('`operation_id: "listAgents"`');
+    expect(runsNoSkills).not.toContain("listSkills");
   });
 
   it("lists no agent as runnable in the caller-context block", () => {
     const raw = {
       user: { name: "Ada" },
       org: { role: "member" },
-      agents: [{ package_id: "@acme/triage", takes_input: false }],
+      agents: [{ packageId: "@acme/triage", takes_input: false }],
     };
     expect(
-      formatCallerContext(raw, {
+      contextText(raw, {
         capabilities: caps(BUILDER),
         rolePreview: false,
         spaceRole: "builder",
         permissions: ["agents:read", "mcp:invoke"],
+        skills: DEFAULT_SKILL_SELECTION,
+        enforced: [],
       }),
     ).toContain("## Existing agents you can run");
-    const off = formatCallerContext(raw, {
+    const off = contextText(raw, {
       capabilities: caps([...MCP, "agents:write"]),
       rolePreview: false,
       spaceRole: "builder",
       permissions: ["agents:read", "mcp:invoke"],
+      skills: DEFAULT_SKILL_SELECTION,
+      enforced: [],
     });
     expect(off).not.toContain("## Existing agents you can run");
     expect(off).not.toContain("@acme/triage");

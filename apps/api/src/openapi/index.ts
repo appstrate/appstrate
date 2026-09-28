@@ -25,6 +25,7 @@ import { runsPaths } from "./paths/runs.ts";
 import { realtimePaths } from "./paths/realtime.ts";
 import { schedulesPaths } from "./paths/schedules.ts";
 import { integrationsPaths } from "./paths/integrations.ts";
+import { orgIntegrationsPaths } from "./paths/org-integrations.ts";
 import { modelsPaths } from "./paths/models.ts";
 import { modelProviderCredentialsPaths } from "./paths/model-provider-credentials.ts";
 import { modelProvidersOAuthPaths } from "./paths/model-providers-oauth.ts";
@@ -46,7 +47,7 @@ import { uploadsPaths } from "./paths/uploads.ts";
 import { filesPaths } from "./paths/files.ts";
 import { adminStorageDeletionPaths } from "./paths/admin-storage-deletion.ts";
 import { credentialProxyPaths } from "./paths/credential-proxy.ts";
-import { llmProxyPaths } from "./paths/llm-proxy.ts";
+import { llmProxyPaths, runLlmProxyPaths } from "./paths/llm-proxy.ts";
 import { libraryPaths } from "./paths/library.ts";
 
 const corePaths = {
@@ -57,6 +58,7 @@ const corePaths = {
   ...realtimePaths,
   ...schedulesPaths,
   ...integrationsPaths,
+  ...orgIntegrationsPaths,
   ...modelsPaths,
   ...modelProviderCredentialsPaths,
   ...modelProvidersOAuthPaths,
@@ -79,6 +81,7 @@ const corePaths = {
   ...adminStorageDeletionPaths,
   ...credentialProxyPaths,
   ...llmProxyPaths,
+  ...runLlmProxyPaths,
   ...libraryPaths,
 };
 

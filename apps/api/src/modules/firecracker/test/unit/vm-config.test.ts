@@ -141,53 +141,30 @@ describe("buildVmConfig", () => {
 
 describe("vmSizing", () => {
   it("adds the sidecar + system envelope to the agent budget", () => {
-    const sizing = vmSizing({ memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 }, true);
+    const sizing = vmSizing({ memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 });
     expect(sizing).toEqual({ vcpuCount: 3, memSizeMib: 1536 + 256 + 256 });
   });
 
-  it("drops the sidecar envelope (RAM + extra vCPU) for skipSidecar runs", () => {
-    const sizing = vmSizing({ memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 }, false);
-    expect(sizing).toEqual({ vcpuCount: 2, memSizeMib: 1536 + 256 });
-  });
-
   it("clamps vcpus to a sane range", () => {
-    expect(vmSizing({ memoryBytes: 1, nanoCpus: 100 }, true).vcpuCount).toBe(2);
-    expect(vmSizing({ memoryBytes: 1, nanoCpus: 100 }, false).vcpuCount).toBe(2);
-    expect(vmSizing({ memoryBytes: 1, nanoCpus: 64_000_000_000 }, true).vcpuCount).toBe(8);
-    expect(vmSizing({ memoryBytes: 1, nanoCpus: 64_000_000_000 }, false).vcpuCount).toBe(8);
+    expect(vmSizing({ memoryBytes: 1, nanoCpus: 100 }).vcpuCount).toBe(2);
+    expect(vmSizing({ memoryBytes: 1, nanoCpus: 64_000_000_000 }).vcpuCount).toBe(8);
   });
 });
 
 describe("buildGuestConfig", () => {
-  it("marks the sidecar disabled when no env is provided (skipSidecar)", () => {
-    const cfg = buildGuestConfig({
-      runId: "run_1",
-      exitMarkerNonce: "abc123",
-      platformIp: "10.231.255.1",
-      platformPort: 3000,
-      agentEnv: { A: "1" },
-      agentUnrestrictedEgress: true,
-      credentialSource: "inline",
-    });
-    expect(cfg.sidecar).toEqual({ enabled: false, env: {} });
-    expect(cfg.agent.unrestricted_egress).toBe(true);
-    expect(cfg.agent.argv).toBeUndefined();
-    expect(cfg.exit_marker_nonce).toBe("abc123");
-  });
-
-  it("carries sidecar env + restricted agent egress for sidecar-backed runs", () => {
+  it("carries the sidecar and agent env", () => {
     const cfg = buildGuestConfig({
       runId: "run_1",
       exitMarkerNonce: "abc123",
       platformIp: "10.231.255.1",
       platformPort: 3000,
       sidecarEnv: { RUN_TOKEN: "t" },
-      agentEnv: {},
-      agentUnrestrictedEgress: false,
+      agentEnv: { A: "1" },
       credentialSource: "inline",
     });
-    expect(cfg.sidecar).toEqual({ enabled: true, env: { RUN_TOKEN: "t" } });
-    expect(cfg.agent.unrestricted_egress).toBe(false);
+    expect(cfg.sidecar).toEqual({ env: { RUN_TOKEN: "t" } });
+    expect(cfg.agent).toEqual({ env: { A: "1" } });
+    expect(cfg.exit_marker_nonce).toBe("abc123");
     expect(cfg.network).toEqual({ platform_ip: "10.231.255.1", platform_port: 3000 });
   });
 
@@ -197,8 +174,8 @@ describe("buildGuestConfig", () => {
       exitMarkerNonce: "abc123",
       platformIp: "10.231.255.1",
       platformPort: 3000,
+      sidecarEnv: {},
       agentEnv: {},
-      agentUnrestrictedEgress: false,
     } as const;
     expect(buildGuestConfig({ ...base, credentialSource: "mmds" }).credentials).toEqual({
       source: "mmds",

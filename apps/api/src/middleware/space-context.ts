@@ -7,6 +7,7 @@ import { assertSpaceId } from "../lib/ids.ts";
 import {
   defaultSpaceForOrg,
   validateSpaceInOrg,
+  type SpaceAccessSnapshot,
   type SpaceContextRow,
 } from "../lib/space-lookup.ts";
 import { isInternalDispatch } from "../lib/internal-dispatch.ts";
@@ -15,6 +16,7 @@ import {
   callerOrgRole,
   callerPersonalOwnerId,
   callerSpaceAccess,
+  callerSpaceAccessById,
   effectiveInSpace,
 } from "../lib/view-as.ts";
 import { resolveSpaceRole } from "../lib/space-role.ts";
@@ -67,7 +69,7 @@ export function isSpaceScopedPath(path: string): boolean {
  * fixed allowlist (§7.2); under API-key impersonation it carries the creator's
  * role and resolves like the key.
  *
- * Owns `c.set("space")`: the row judged with the caller's membership (§4.4),
+ * Sets `c.set("space")`: the row judged with the caller's membership (§4.4),
  * not the lookup that found the space.
  *
  * @throws ApiError 403 `not_a_space_member` for `open`/`closed`, 404 for
@@ -81,11 +83,40 @@ export async function applySpacePermissions(
   c.set("space", space);
 }
 
-async function admitSpace(c: Context<AppEnv>, space: SpaceContextRow): Promise<SpaceContextRow> {
+/**
+ * Enter a space by id: one read. A caller with an org role gets the lookup and its
+ * membership as one snapshot (`callerSpaceAccessById`); an end-user token reads the row alone.
+ */
+export async function enterSpaceById(
+  c: Context<AppEnv>,
+  spaceId: string,
+  orgId: string,
+): Promise<void> {
+  if (!c.get("orgRole")) {
+    const space = await validateSpaceInOrg(spaceId, orgId);
+    if (!space) throw spaceNotFound(spaceId);
+    await applySpacePermissions(c, space);
+    return;
+  }
+  const access = await callerSpaceAccessById(c, spaceId, orgId);
+  if (!access) throw spaceNotFound(spaceId);
+  c.set("space", await admitSpace(c, access.space, access));
+}
+
+/** Missing, another org's, private: one answer, so a 404 never confirms an id exists. */
+function spaceNotFound(spaceId: string): ApiError {
+  return notFound(`Space '${spaceId}' not found in this organization`);
+}
+
+async function admitSpace(
+  c: Context<AppEnv>,
+  space: SpaceContextRow,
+  preloaded?: Pick<SpaceAccessSnapshot, "space" | "member">,
+): Promise<SpaceContextRow> {
   // An end-user belongs to a space, never to a person (RBAC spec §3.6): a
   // personal space is a 404 for it whatever else it carries.
   if (c.get("principalKind") === "end_user" && space.ownerUserId !== null) {
-    throw notFound(`Space '${space.id}' not found in this organization`);
+    throw spaceNotFound(space.id);
   }
   if (!c.get("orgRole")) {
     // Only an end-user token resolves without an org role — its strategy's
@@ -103,8 +134,8 @@ async function admitSpace(c: Context<AppEnv>, space: SpaceContextRow): Promise<S
   // `callerPersonalOwnerId` answers `null` under a preview — a persona owns no
   // personal space — so a previewed request reaches none (RBAC spec §3.6), and
   // `visibility = 'private'` means the refusal below is a 404.
-  const access = await callerSpaceAccess(c, space);
-  if (!access) throw notFound(`Space '${space.id}' not found in this organization`);
+  const access = preloaded ?? (await callerSpaceAccess(c, space));
+  if (!access) throw spaceNotFound(space.id);
   const ref = resolveSpaceRole(
     callerOrgRole(c, space.orgId),
     access.space,
@@ -112,9 +143,7 @@ async function admitSpace(c: Context<AppEnv>, space: SpaceContextRow): Promise<S
     callerPersonalOwnerId(c, space.orgId),
   );
   if (!ref) {
-    if (access.space.visibility === "private") {
-      throw notFound(`Space '${space.id}' not found in this organization`);
-    }
+    if (access.space.visibility === "private") throw spaceNotFound(space.id);
     throw new ApiError({
       status: 403,
       code: "not_a_space_member",
@@ -153,7 +182,7 @@ async function admitSpace(c: Context<AppEnv>, space: SpaceContextRow): Promise<S
  * silent fallback to the default space (which would weaken space isolation and is
  * exactly the contract `org-isolation` asserts).
  * Validates that the space belongs to the current org. Sets
- * c.set("spaceId"), and `applySpacePermissions` sets c.set("space"), on success.
+ * c.set("spaceId"), and the admission sets c.set("space"), on success.
  */
 export function requireSpaceContext() {
   return async (c: Context<AppEnv>, next: Next) => {
@@ -168,12 +197,8 @@ export function requireSpaceContext() {
     const explicitSpace = pinned ?? headerSpace;
 
     if (explicitSpace) {
-      const space = await validateSpaceInOrg(explicitSpace, orgId);
-      if (!space) {
-        throw notFound(`Space '${explicitSpace}' not found in this organization`);
-      }
+      await enterSpaceById(c, explicitSpace, orgId);
       c.set("spaceId", explicitSpace);
-      await applySpacePermissions(c, space);
       return next();
     }
 
@@ -220,17 +245,13 @@ setSpaceContextApplier(async (c, spaceId) => {
       "X-Space-Id",
     );
   }
-  const space = explicit
-    ? await validateSpaceInOrg(explicit, orgId)
-    : await defaultSpaceForOrg(orgId);
-  if (!space) {
-    throw notFound(`Space '${explicit ?? "(default)"}' not found in this organization`);
-  }
-  // The default-space fallback reads the id off the row: same guard as the other two.
-  if (!explicit) assertSpaceId(space.id);
   // Deliberately does NOT write `spaceId`: that key is the CREDENTIAL's space
   // for an API key and a module must not be able to rewrite it (the webhooks
   // module compares the two to refuse a key reaching a sibling space).
-  // `applySpacePermissions` writes `space` itself.
+  if (explicit) return enterSpaceById(ctx, explicit, orgId);
+  const space = await defaultSpaceForOrg(orgId);
+  if (!space) throw spaceNotFound("(default)");
+  // The default-space fallback reads the id off the row: same guard as the other two.
+  assertSpaceId(space.id);
   await applySpacePermissions(ctx, space);
 });

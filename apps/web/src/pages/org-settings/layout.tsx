@@ -18,32 +18,30 @@ import {
 import { SettingsLayout, type SettingsSection } from "../../components/settings-layout";
 import { SpaceSettingsSwitcher } from "../../components/space-settings-switcher";
 import type { BreadcrumbEntry } from "../../components/page-header";
-import { usePermissions } from "../../hooks/use-permissions";
-import { useAppConfig } from "../../hooks/use-app-config";
+import { useCanReach } from "../../hooks/use-can-reach";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useSpace } from "../../hooks/use-spaces";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 
 export function OrgSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
-  const { can } = usePermissions();
-  const { features } = useAppConfig();
+  const canReach = useCanReach();
   const spaceId = useCurrentSpaceId();
   const { data: space } = useSpace(spaceId ?? "");
   const location = useLocation();
 
-  const oidcEnabled = !!features.oidc;
   const { data: orgSettings } = useOrgSettings();
   const dashboardSsoEnabled = !!orgSettings?.dashboard_sso_enabled;
 
-  // Every tab is gated on the permission its own routes check, so a tab is
-  // there exactly when the page behind it can load something.
+  // Every tab is there exactly when its route's declaration (`lib/route-access.ts`,
+  // also the route gate) opens the page behind it; `show` adds only what is not
+  // a permission or a module — the state of this space or this org.
   const spaceItems = [
     {
       to: "/org-settings/space/general",
       icon: Settings,
       label: t("spaceSettings.tabGeneral"),
-      show: can("space-settings:write"),
+      show: canReach("/org-settings/space/general"),
     },
     {
       to: "/org-settings/space/members",
@@ -52,25 +50,25 @@ export function OrgSettingsLayout() {
       // A personal space takes no members at all (RBAC spec §3.6): the write
       // routes answer 409 and the list would only ever hold its owner, so the
       // tab is not there rather than there and empty.
-      show: !space?.personal && (can("space-members:read") || can("space-members:invite")),
+      show: !space?.personal && canReach("/org-settings/space/members"),
     },
     {
       to: "/org-settings/space/api-keys",
       icon: KeyRound,
       label: t("orgSettings.tabApiKeys"),
-      show: can("api-keys:read"),
+      show: canReach("/org-settings/space/api-keys"),
     },
     {
       to: "/org-settings/space/auth",
       icon: Shield,
       label: t("spaceSettings.tabAuth"),
-      show: oidcEnabled && can("space-settings:write"),
+      show: canReach("/org-settings/space/auth"),
     },
     {
       to: "/org-settings/space/oauth",
       icon: KeyRound,
       label: t("spaceSettings.tabOauth"),
-      show: oidcEnabled && can("oauth-clients:read"),
+      show: canReach("/org-settings/space/oauth"),
     },
   ];
 
@@ -82,58 +80,56 @@ export function OrgSettingsLayout() {
           to: "/org-settings/general",
           icon: Building,
           label: t("orgSettings.tabGeneral"),
-          show: can("org:read"),
+          show: canReach("/org-settings/general"),
         },
         {
           to: "/org-settings/members",
           icon: Users,
           label: t("orgSettings.tabMembers", { count: 0 }),
-          show: can("members:read"),
+          show: canReach("/org-settings/members"),
         },
         {
           to: "/org-settings/roles",
           icon: ShieldCheck,
           label: t("roles.tabTitle"),
-          show: can("roles:read"),
+          show: canReach("/org-settings/roles"),
         },
         {
           to: "/org-settings/spaces",
           icon: LayoutGrid,
           label: t("spaces.pageTitle"),
-          show: can("spaces:read"),
+          show: canReach("/org-settings/spaces"),
         },
         {
           to: "/org-settings/models",
           icon: BrainCircuit,
           label: t("models.tabTitle"),
-          show: can("models:read"),
+          show: canReach("/org-settings/models"),
         },
         {
           to: "/org-settings/proxies",
           icon: Globe,
           label: t("proxies.tabTitle"),
-          show: can("proxies:read"),
+          show: canReach("/org-settings/proxies"),
         },
         {
           to: "/org-settings/oauth",
           icon: KeyRound,
           label: t("orgSettings.tabOauth"),
-          show: can("oauth-clients:read") && oidcEnabled && dashboardSsoEnabled,
+          show: canReach("/org-settings/oauth") && dashboardSsoEnabled,
         },
-        // CLI sessions oversight (issue #251 Phase 3) — gated on the OIDC
-        // module being loaded (the backing endpoints live in
-        // `apps/api/src/modules/oidc/routes.ts`).
+        // CLI sessions oversight (issue #251 Phase 3).
         {
           to: "/org-settings/cli-sessions",
           icon: Laptop,
           label: t("orgSettings.tabCliSessions"),
-          show: can("cli-sessions:read") && oidcEnabled,
+          show: canReach("/org-settings/cli-sessions"),
         },
         {
           to: "/org-settings/billing",
           icon: CreditCard,
           label: t("billing.tabTitle"),
-          show: can("billing:read"),
+          show: canReach("/org-settings/billing"),
         },
       ],
     },

@@ -23,7 +23,8 @@ import { describe, it, expect } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { packageKeys } from "../../lib/query-keys.ts";
-import { initialInputValues, type AgentInputSettings } from "../../lib/agent-input.ts";
+import type { AgentInputSettings } from "@appstrate/core/input-resolution";
+import { initialInputValues } from "../../lib/agent-input.ts";
 import { render } from "../../test/render.tsx";
 import { useScheduleFormDeps } from "../use-schedules.ts";
 

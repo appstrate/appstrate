@@ -28,6 +28,10 @@ const TRACKED = [
   "EGRESS_ALLOW_INTERNAL_HOSTS",
   "MODULES",
   "RUN_ADAPTER",
+  "MODEL_RETRY_ENABLED",
+  "MODEL_COMPACTION_ENABLED",
+  "TOOL_RESULT_BYTE_LIMIT",
+  "AFPS_SIGNATURE_POLICY",
 ] as const;
 
 type Snap = Record<(typeof TRACKED)[number], string | undefined>;
@@ -627,5 +631,48 @@ describe("APP_VERSION / PI_IMAGE / SIDECAR_IMAGE are a version contract", () => 
     expect(() => getEnv()).toThrow(
       /PI_IMAGE tag latest.*Out of step: PI_IMAGE and SIDECAR_IMAGE, which disagree with each other/s,
     );
+  });
+});
+
+describe("agent-container knobs and signature policy defaults", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    for (const k of [
+      "MODEL_RETRY_ENABLED",
+      "MODEL_COMPACTION_ENABLED",
+      "TOOL_RESULT_BYTE_LIMIT",
+      "AFPS_SIGNATURE_POLICY",
+    ])
+      delete process.env[k];
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  it("defaults: Pi loops on, no tool-result cap override, signature policy warn", () => {
+    const env = getEnv();
+    expect(env.MODEL_RETRY_ENABLED).toBe(true);
+    expect(env.MODEL_COMPACTION_ENABLED).toBe(true);
+    expect(env.TOOL_RESULT_BYTE_LIMIT).toBeUndefined();
+    expect(env.AFPS_SIGNATURE_POLICY).toBe("warn");
+  });
+
+  it("parses the operator's values", () => {
+    process.env.MODEL_RETRY_ENABLED = "false";
+    process.env.TOOL_RESULT_BYTE_LIMIT = "16384";
+    const env = getEnv();
+    expect(env.MODEL_RETRY_ENABLED).toBe(false);
+    expect(env.TOOL_RESULT_BYTE_LIMIT).toBe(16_384);
+  });
+
+  it("fails boot on an invalid TOOL_RESULT_BYTE_LIMIT", () => {
+    process.env.TOOL_RESULT_BYTE_LIMIT = "12.5";
+    expect(() => getEnv()).toThrow(/TOOL_RESULT_BYTE_LIMIT/);
   });
 });

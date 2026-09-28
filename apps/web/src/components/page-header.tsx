@@ -10,6 +10,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@appstrate/ui/components/breadcrumb";
+import { useCanReach } from "../hooks/use-can-reach";
 
 export interface BreadcrumbEntry {
   label: string;
@@ -35,6 +36,7 @@ export function PageHeader({
   actions,
   children,
 }: PageHeaderProps) {
+  const canReach = useCanReach();
   return (
     <div className="mb-4">
       {breadcrumbs && breadcrumbs.length > 0 && (
@@ -45,12 +47,14 @@ export function PageHeader({
                 {i > 0 && <BreadcrumbSeparator />}
                 {crumb.node ? (
                   crumb.node
-                ) : crumb.href ? (
+                ) : !crumb.href ? (
+                  <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                ) : canReach(crumb.href) ? (
                   <BreadcrumbLink asChild>
                     <Link to={crumb.href}>{crumb.label}</Link>
                   </BreadcrumbLink>
                 ) : (
-                  <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                  <span>{crumb.label}</span>
                 )}
               </BreadcrumbItem>
             ))}

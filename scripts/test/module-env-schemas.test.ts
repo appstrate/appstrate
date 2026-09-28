@@ -19,13 +19,13 @@ describe("moduleEnvSchemas over this repository", () => {
     expect(ee!.exportName).toContain("eeEnvSchema");
   });
 
-  it("lists a module whose env.ts exports no Zod object as unstructured", () => {
-    // `module-observability` reads `process.env` by hand: no derivable names, so hand-documented.
-    expect(discovered.unstructured.map((m) => m.id)).toContain("observability");
-    expect(discovered.unstructured.find((m) => m.id === "observability")!.file).toBe(
-      "packages/module-observability/src/env.ts",
-    );
-    expect(discovered.schemas.map((s) => s.id)).not.toContain("observability");
+  it("finds every module env.ts structured — none reads process.env by hand", () => {
+    expect(discovered.schemas.map((s) => s.id)).toEqual(["chat", "ee", "observability"]);
+    expect(Object.keys(discovered.schemas.find((s) => s.id === "chat")!.shape)).toEqual([
+      "CHAT_PI_MAX_CONCURRENCY",
+      "CHAT_SELF_ORIGIN",
+    ]);
+    expect(discovered.unstructured).toEqual([]);
   });
 
   it("returns both halves in id order", () => {

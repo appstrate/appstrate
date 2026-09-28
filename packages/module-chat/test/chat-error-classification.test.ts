@@ -58,6 +58,13 @@ describe("classifyClientTurnError", () => {
     ).toMatchObject({ category: "rate_limited" });
   });
 
+  it("reads a plain object's `message`, not only an Error's", () => {
+    expect(classifyClientTurnError({ message: "Upstream model error (status 429)" })).toEqual({
+      category: "rate_limited",
+      retryable: true,
+    });
+  });
+
   it("round-trips only the stable category through transient stream markers", () => {
     const classified = classifyClientTurnError("private opaque backend details");
     const marker = clientTurnErrorMarker(classified);
@@ -91,7 +98,7 @@ describe("refusalCode", () => {
   });
 
   it("reads the same file off a bare string error", () => {
-    expect(refusalCode(problem({ status: 401, code: "needs_reconnection" }))).toBe(
+    expect(refusalCode(problem({ status: 409, code: "needs_reconnection" }))).toBe(
       "needs_reconnection",
     );
   });

@@ -107,3 +107,23 @@ describe("chatStreamSchema role validation", () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe("chatStreamSchema body fields", () => {
+  const messages = [{ role: "user", parts: [{ type: "text", text: "salut" }] }];
+
+  it("accepts modelId and the snake_case reasoning_level", () => {
+    const result = chatStreamSchema.safeParse({
+      messages,
+      modelId: "preset_1",
+      generation: { reasoning_level: "high" },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects model_id and reasoningLevel instead of dropping them", () => {
+    expect(chatStreamSchema.safeParse({ messages, model_id: "preset_1" }).success).toBe(false);
+    expect(
+      chatStreamSchema.safeParse({ messages, generation: { reasoningLevel: "high" } }).success,
+    ).toBe(false);
+  });
+});

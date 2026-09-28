@@ -190,13 +190,18 @@ describe("resolveIntegrationToolCatalog", () => {
       integration,
       mcpServerTools: [
         { name: "api_call", description: "native collision" },
-        { name: "api-call", description: "normalised native collision" },
+        { name: "api.call", description: "normalised native collision" },
         { name: "api_upload", description: "native collision" },
-        { name: "drive__api.upload", description: "namespaced native collision" },
+        { name: "api.upload", description: "normalised native collision" },
+        // Distinct exposed names at runtime (`-` and inner `__` survive), so kept.
+        { name: "api-call" },
+        { name: "drive__api_upload" },
         { name: "kv_get" },
       ],
     });
     expect(out).toEqual([
+      { name: "api-call" },
+      { name: "drive__api_upload" },
       { name: "kv_get" },
       { name: API_CALL_TOOL_NAME },
       { name: API_UPLOAD_TOOL_NAME },

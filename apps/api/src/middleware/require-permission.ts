@@ -19,7 +19,7 @@
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §4.3
  */
 
-import type { Context, MiddlewareHandler, Next } from "hono";
+import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
   makePermissionGuard,
@@ -27,8 +27,8 @@ import {
   reportPermissionDenial,
 } from "@appstrate/core/permissions";
 import { forbidden } from "../lib/errors.ts";
-import type { Resource, Action } from "../lib/permissions.ts";
-import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
+import { ceilingAllows, type Resource, type Action, type Permission } from "../lib/permissions.ts";
+import { hasHandlerMarker, markHandler, readHandlerMarker } from "./handler-marker.ts";
 
 /** Stamped by every route-level permission guard (core's `makePermissionGuard`
  *  stamps it too). */
@@ -51,22 +51,6 @@ export function markSpaceRescope<T extends object>(handler: T): T {
 
 export function isSpaceRescope(handler: unknown): boolean {
   return hasHandlerMarker(handler, SPACE_RESCOPE);
-}
-
-const ROW_AUTHORITY = Symbol.for("appstrate.rowAuthority");
-
-/** Mark a middleware whose verdict comes from the row it loads, not a static permission. */
-export function markRowAuthority<T extends object>(handler: T): T {
-  return markHandler(handler, ROW_AUTHORITY);
-}
-
-/** A passthrough declaring that the handler after it decides on the row it loads. */
-export function rowAuthority(): MiddlewareHandler<AppEnv> {
-  return markRowAuthority(async (_c: Context<AppEnv>, next: Next) => next());
-}
-
-export function isRowAuthority(handler: unknown): boolean {
-  return hasHandlerMarker(handler, ROW_AUTHORITY);
 }
 
 /**
@@ -118,4 +102,52 @@ export function requireAnyPermission(permissions: readonly string[]) {
     return next();
   }, PERMISSION_GUARD);
   return markHandler(guard, PERMISSION_REQUIREMENT_MARKER, required);
+}
+
+const CEILING_REQUIREMENT = Symbol.for("appstrate.ceilingRequirement");
+
+/**
+ * Middleware factory: cap an act authorized by OWNERSHIP with the credential's
+ * scope ceiling. Not a role grant — a caller without the permission still acts
+ * on what it owns, so `permissions` is not consulted; only a delegated
+ * credential (API key, OIDC token) whose ceiling omits it is refused, with the
+ * same audit hook and 403 as {@link requirePermission} (RBAC spec §7.1).
+ * A cookie session carries no ceiling and always passes.
+ */
+export function requireCeiling<R extends Resource>(resource: R, action: Action<R>) {
+  const required = `${resource as string}:${action as string}`;
+  const guard = async (c: Context<AppEnv>, next: Next) => {
+    if (!ceilingAllows(c, required as Permission)) {
+      reportPermissionDenial(c, required);
+      throw forbidden(`Insufficient permissions: ${required} required`);
+    }
+    return next();
+  };
+  return markHandler(guard, CEILING_REQUIREMENT, required);
+}
+
+/**
+ * {@link requireCeiling} over a disjunction: the ceiling must include ANY ONE
+ * of `permissions`. Recorded as the alternatives joined with `|`, as
+ * {@link requireAnyPermission} records its own. An empty list throws.
+ */
+export function requireAnyCeiling(permissions: readonly Permission[]) {
+  if (permissions.length === 0) {
+    throw new Error("requireAnyCeiling() needs at least one permission");
+  }
+  const required = permissions.join("|");
+  const guard = async (c: Context<AppEnv>, next: Next) => {
+    if (!permissions.some((permission) => ceilingAllows(c, permission))) {
+      reportPermissionDenial(c, required);
+      throw forbidden(`Insufficient permissions: ${required} required`);
+    }
+    return next();
+  };
+  return markHandler(guard, CEILING_REQUIREMENT, required);
+}
+
+/** What a ceiling guard caps with (`a|b` for a disjunction), or `null` for any other handler. */
+export function ceilingRequirementOf(handler: unknown): string | null {
+  const required = readHandlerMarker(handler, CEILING_REQUIREMENT);
+  return typeof required === "string" ? required : null;
 }

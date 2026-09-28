@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
@@ -28,6 +28,7 @@ import {
   oauthRefreshToken,
   oauthConsent,
   spaces,
+  auditEvents,
 } from "@appstrate/db/schema";
 
 const app = getTestApp({ modules: [oidcModule] });
@@ -183,7 +184,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
       body: JSON.stringify({
         allowSignup: true,
         signupRole: "guest",
-        signupSpaceAssignments: [{ space_id: ctx.defaultSpaceId, preset_role: "viewer" }],
+        signupSpaceAssignments: [{ spaceId: ctx.defaultSpaceId, preset_role: "viewer" }],
       }),
     });
     expect(patchRes.status).toBe(200);
@@ -195,8 +196,26 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(updated.allowSignup).toBe(true);
     expect(updated.signupRole).toBe("guest");
     expect(updated.signupSpaceAssignments).toEqual([
-      { space_id: ctx.defaultSpaceId, preset_role: "viewer" },
+      { spaceId: ctx.defaultSpaceId, preset_role: "viewer" },
     ]);
+
+    // The audit trail names the assignment with camelCase keys (carve-out 4m), not the body's.
+    const [audit] = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.resourceId, created.clientId),
+          eq(auditEvents.action, "oauth_client.updated"),
+        ),
+      );
+    expect(audit!.after).toEqual({
+      allowSignup: true,
+      signupRole: "guest",
+      signupSpaceAssignments: [
+        { spaceId: ctx.defaultSpaceId, presetRole: "viewer", customRoleId: null },
+      ],
+    });
   });
 
   it("POST defaults allowSignup=false on space-level create (secure-by-default)", async () => {
@@ -471,6 +490,15 @@ describe("OAuth clients admin routes (polymorphic)", () => {
   it("GET /api/oauth/clients/:id returns 404 for unknown id", async () => {
     const res = await app.request("/api/oauth/clients/oauth_nope", { headers: authHeaders(ctx) });
     expect(res.status).toBe(404);
+  });
+
+  it("GET /api/oauth/scopes answers the list envelope", async () => {
+    const res = await app.request("/api/oauth/scopes", { headers: authHeaders(ctx) });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { object: string; data: string[]; hasMore: boolean };
+    expect(body.object).toBe("list");
+    expect(body.hasMore).toBe(false);
+    expect(body.data).toContain("openid");
   });
 
   it("PATCH updates scopes", async () => {

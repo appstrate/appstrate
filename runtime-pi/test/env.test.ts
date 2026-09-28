@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { parseRuntimeEnv, RuntimeEnvError, scrubSinkEnv } from "../env.ts";
+import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/runner-pi/pi-model";
+import { buildPiModelFromEnv, parseRuntimeEnv, RuntimeEnvError } from "../env.ts";
 
 const VALID = {
   AGENT_RUN_ID: "run_test123",
@@ -11,6 +13,10 @@ const VALID = {
   MODEL_API: "openai-completions",
   MODEL_ID: "gpt-4o-mini",
   AGENT_PROMPT: "You are a helpful agent.",
+  SIDECAR_URL: "http://sidecar:8080",
+  SIDECAR_AUTH_TOKEN: "sidecar-auth-token",
+  MODEL_BASE_URL: "http://sidecar:8080/llm",
+  MODEL_API_KEY: "sk-placeholder",
 };
 
 describe("parseRuntimeEnv — happy path", () => {
@@ -28,15 +34,21 @@ describe("parseRuntimeEnv — happy path", () => {
     // Absent, not zero — the run reports no cost of its own (see the warnings
     // block below), and the platform prices its ledger row server-side.
     expect(env.modelCost).toBeUndefined();
-    expect(env.modelContextWindow).toBe(128_000);
-    expect(env.modelMaxTokens).toBe(16_384);
-    expect(env.modelReasoning).toBe(false);
+    // Absent: `buildPiModel` sizes them (see the model built below).
+    expect(env.modelContextWindow).toBeUndefined();
+    expect(env.modelMaxTokens).toBeUndefined();
+    expect(buildPiModelFromEnv(env)).toMatchObject({
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+      maxTokens: DEFAULT_MAX_TOKENS,
+    });
+    expect(env.modelReasoning).toBeUndefined();
     expect(env.modelTemperature).toBeUndefined();
     expect(env.modelReasoningLevel).toBeUndefined();
-    expect(env.modelReasoningLevelMap).toBeUndefined();
     expect(env.agentInput).toEqual({});
-    expect(env.sidecarUrl).toBeUndefined();
-    expect(env.modelApiKey).toBeUndefined();
+    expect(env.sidecarUrl).toBe("http://sidecar:8080");
+    expect(env.sidecarAuthToken).toBe("sidecar-auth-token");
+    expect(env.modelBaseUrl).toBe("http://sidecar:8080/llm");
+    expect(env.modelApiKey).toBe("sk-placeholder");
     expect(env.timeoutSeconds).toBeUndefined();
     expect(env.mcpToolTimeoutMs).toBeUndefined();
   });
@@ -60,16 +72,12 @@ describe("parseRuntimeEnv — happy path", () => {
       MODEL_REASONING: "true",
       MODEL_TEMPERATURE: "0",
       MODEL_REASONING_LEVEL: "xhigh",
-      MODEL_REASONING_LEVEL_MAP: '{"xhigh":"max"}',
       MODEL_PROVIDER: "deepseek",
       MODEL_INPUT: '["text","image"]',
       MODEL_COST: '{"input":1.5,"output":2.5,"cacheRead":0.5,"cacheWrite":0.7}',
       MODEL_CONTEXT_WINDOW: "200000",
       MODEL_MAX_TOKENS: "32768",
       AGENT_INPUT: '{"foo":"bar","n":1}',
-      SIDECAR_URL: "http://sidecar:8080",
-      SIDECAR_AUTH_TOKEN: "sidecar-auth-token",
-      OUTPUT_SCHEMA: '{"type":"object"}',
     });
     expect(env.workspaceDir).toBe("/agent");
     expect(env.modelBaseUrl).toBe("https://proxy.example.com/v1");
@@ -80,7 +88,6 @@ describe("parseRuntimeEnv — happy path", () => {
     // On a proxied run this is the only thing left for Pi to recognise the
     // provider by — MODEL_BASE_URL points at the sidecar.
     expect(env.modelProvider).toBe("deepseek");
-    expect(env.modelReasoningLevelMap).toEqual({ xhigh: "max" });
     expect(env.modelInput).toEqual(["text", "image"]);
     expect(env.modelCost).toEqual({ input: 1.5, output: 2.5, cacheRead: 0.5, cacheWrite: 0.7 });
     expect(env.modelContextWindow).toBe(200_000);
@@ -90,19 +97,13 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.sidecarAuthToken).toBe("sidecar-auth-token");
   });
 
-  it("refuses a SIDECAR_URL with no SIDECAR_AUTH_TOKEN", () => {
-    // The sidecar denies by default, so a container handed only the URL would
-    // boot and then 401 on every LLM and tool call. Fatal at parse instead.
-    expect(() => parseRuntimeEnv({ ...VALID, SIDECAR_URL: "http://sidecar:8080" })).toThrow(
-      /SIDECAR_AUTH_TOKEN: required/,
-    );
-    // Control: the same environment WITH the token parses, and the same
-    // environment with NEITHER parses too (a no-sidecar run owes no token).
-    expect(
-      parseRuntimeEnv({ ...VALID, SIDECAR_URL: "http://sidecar:8080", SIDECAR_AUTH_TOKEN: "t" })
-        .sidecarAuthToken,
-    ).toBe("t");
-    expect(parseRuntimeEnv({ ...VALID }).sidecarAuthToken).toBeUndefined();
+  it("refuses an environment without SIDECAR_URL or SIDECAR_AUTH_TOKEN", () => {
+    // Every run has a sidecar, and the sidecar denies by default: a container
+    // missing either half would boot and then fail every LLM and tool call.
+    const { SIDECAR_URL: _url, ...noUrl } = VALID;
+    expect(() => parseRuntimeEnv(noUrl)).toThrow(/SIDECAR_URL: required/);
+    const { SIDECAR_AUTH_TOKEN: _token, ...noToken } = VALID;
+    expect(() => parseRuntimeEnv(noToken)).toThrow(/SIDECAR_AUTH_TOKEN: required/);
   });
 
   it("forwards a TRACEPARENT env var through to env.traceparent", () => {
@@ -150,6 +151,23 @@ describe("parseRuntimeEnv — non-fatal warnings", () => {
     expect(env.warnings).toEqual([]);
   });
 
+  it("drops MODEL_COST price tiers, like the server's runner row (RUN_COST.md)", () => {
+    const base = { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 0 };
+    const tiers = [
+      { inputTokensAbove: 272000, input: 5, output: 22.5, cacheRead: 0.5, cacheWrite: 0 },
+    ];
+    const env = parseRuntimeEnv({
+      ...VALID,
+      MODEL_API: "openai-responses",
+      MODEL_PROVIDER: "openai",
+      // Pi's record of this model carries the same tier: the base rate still wins.
+      MODEL_ID: "gpt-5.5",
+      MODEL_COST: JSON.stringify({ ...base, tiers }),
+    });
+    expect(env.modelCost).toEqual(base);
+    expect(buildPiModelFromEnv(env).cost).toEqual(base);
+  });
+
   it("keeps a malformed MODEL_COST FATAL — a present-but-broken value is a contract violation", () => {
     expect(() => parseRuntimeEnv({ ...VALID, MODEL_COST: "{bad}" })).toThrow(RuntimeEnvError);
   });
@@ -163,9 +181,21 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
     expect(() => parseRuntimeEnv({ ...VALID, MODEL_REASONING_LEVEL: "maximum" })).toThrow(
       /MODEL_REASONING_LEVEL/,
     );
+  });
+
+  it("refuses a MODEL_PROVIDER that is no Pi provider key", () => {
+    // `codex` is the Appstrate provider id, not Pi's `openai-codex`: Pi drops
+    // its credential and the first turn dies on `Unknown provider: codex`.
     expect(() =>
-      parseRuntimeEnv({ ...VALID, MODEL_REASONING_LEVEL_MAP: '{"xhigh":"maximum"}' }),
-    ).toThrow(/MODEL_REASONING_LEVEL_MAP/);
+      parseRuntimeEnv({ ...VALID, MODEL_API: "openai-codex-responses", MODEL_PROVIDER: "codex" }),
+    ).toThrow(/MODEL_PROVIDER: "codex" is not a Pi provider key/);
+    expect(
+      parseRuntimeEnv({
+        ...VALID,
+        MODEL_API: "openai-codex-responses",
+        MODEL_PROVIDER: "openai-codex",
+      }).modelProvider,
+    ).toBe("openai-codex");
   });
 
   it("collects every missing required field in one shot", () => {
@@ -243,6 +273,13 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
     );
   });
 
+  it("accepts exactly the modalities the platform API accepts", () => {
+    // The API validates `org_models.input` against the same core tuple, so a
+    // model it saves can never be refused here at container boot.
+    const env = parseRuntimeEnv({ ...VALID, MODEL_INPUT: JSON.stringify(MODEL_INPUT_MODALITIES) });
+    expect(env.modelInput).toEqual([...MODEL_INPUT_MODALITIES]);
+  });
+
   it("rejects non-positive MODEL_CONTEXT_WINDOW", () => {
     expect(() => parseRuntimeEnv({ ...VALID, MODEL_CONTEXT_WINDOW: "0" })).toThrow(
       /MODEL_CONTEXT_WINDOW: must be a positive integer/,
@@ -282,63 +319,17 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
   });
 });
 
-describe("parseRuntimeEnv — backward-compat with empty strings", () => {
-  it("treats empty SIDECAR_URL as unset", () => {
-    const env = parseRuntimeEnv({ ...VALID, SIDECAR_URL: "" });
-    expect(env.sidecarUrl).toBeUndefined();
-  });
-
-  it("treats empty MODEL_BASE_URL as unset", () => {
-    const env = parseRuntimeEnv({ ...VALID, MODEL_BASE_URL: "" });
-    expect(env.modelBaseUrl).toBeUndefined();
-  });
-
-  it("treats empty MODEL_API_KEY as unset", () => {
-    const env = parseRuntimeEnv({ ...VALID, MODEL_API_KEY: "" });
-    expect(env.modelApiKey).toBeUndefined();
+describe("parseRuntimeEnv — empty strings count as missing", () => {
+  it.each(["SIDECAR_URL", "MODEL_BASE_URL", "MODEL_API_KEY"])("refuses an empty %s", (key) => {
+    expect(() => parseRuntimeEnv({ ...VALID, [key]: "" })).toThrow(`${key}: required`);
   });
 });
 
-describe("scrubSinkEnv", () => {
-  it("removes the sink credentials the parser has already captured", () => {
-    const source: NodeJS.ProcessEnv = { ...VALID };
-    const env = parseRuntimeEnv(source);
-
-    scrubSinkEnv(source);
-
-    // The captured struct still has everything the sink and the file
-    // uploader need.
-    expect(env.sink.secret).toBe(VALID.APPSTRATE_SINK_SECRET);
-    expect(env.sink.url).toBe(VALID.APPSTRATE_SINK_URL);
-    expect(env.sink.finalizeUrl).toBe(VALID.APPSTRATE_SINK_FINALIZE_URL);
-    // The environment no longer does. An agent driven by a prompt injection
-    // (an email body, a fetched page, an input file) that runs
-    // `env | grep SINK` gets nothing: without the run HMAC key it cannot forge
-    // a `status: "success"` finalize, nor POST files straight to
-    // `/api/runs/:id/files` past the `runtime_tools` gate.
-    expect(source.APPSTRATE_SINK_SECRET).toBeUndefined();
-    expect(source.APPSTRATE_SINK_URL).toBeUndefined();
-    expect(source.APPSTRATE_SINK_FINALIZE_URL).toBeUndefined();
-    expect(Object.keys(source).some((k) => k.includes("SINK"))).toBe(false);
-  });
-
-  it("leaves every other variable alone", () => {
-    const source: NodeJS.ProcessEnv = { ...VALID, MODEL_BASE_URL: "https://proxy.local" };
-    scrubSinkEnv(source);
-    expect(source.AGENT_RUN_ID).toBe(VALID.AGENT_RUN_ID);
-    expect(source.AGENT_PROMPT).toBe(VALID.AGENT_PROMPT);
-    expect(source.MODEL_BASE_URL).toBe("https://proxy.local");
-  });
-
-  it("defaults to process.env", () => {
-    process.env.APPSTRATE_SINK_SECRET = VALID.APPSTRATE_SINK_SECRET;
-    process.env.APPSTRATE_SINK_URL = VALID.APPSTRATE_SINK_URL;
-    process.env.APPSTRATE_SINK_FINALIZE_URL = VALID.APPSTRATE_SINK_FINALIZE_URL;
-
-    scrubSinkEnv();
-
-    expect(process.env.APPSTRATE_SINK_SECRET).toBeUndefined();
-    expect(process.env.APPSTRATE_SINK_URL).toBeUndefined();
-    expect(process.env.APPSTRATE_SINK_FINALIZE_URL).toBeUndefined();
+// The knob grammar is tested in packages/runner-pi/test/loop-env.test.ts.
+describe("parseRuntimeEnv — Pi loop knobs", () => {
+  it("fails boot with a RuntimeEnvError naming a malformed knob", () => {
+    const parse = () => parseRuntimeEnv({ ...VALID, TOOL_RESULT_BYTE_LIMIT: "12.5" });
+    expect(parse).toThrow(RuntimeEnvError);
+    expect(parse).toThrow(/TOOL_RESULT_BYTE_LIMIT/);
   });
 });

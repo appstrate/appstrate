@@ -41,6 +41,7 @@ import {
   SelectConversationProvider,
 } from "./runtime-context.ts";
 import type {
+  ChatCan,
   ChatHost,
   ChatTranslate,
   DownloadFile,
@@ -59,11 +60,13 @@ import {
   loadHistory,
   markSessionRead,
   mintSessionId,
+  patchSessionsCache,
   sessionQueryKey,
   sessionsQueryKey,
   spaceIdFromHeaders,
   SESSIONS_QUERY_KEY,
   stopSession,
+  type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
@@ -80,6 +83,10 @@ import {
 import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
+import { SkillsPicker } from "./skills-picker.tsx";
+import { EnforcedSkillsIndicator } from "./enforced-skills.tsx";
+import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
+import { canAuthorAgents, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -147,8 +154,8 @@ export interface ChatPageProps {
   useFileImageSrc: UseFileImageSrc;
   uploadFile: UploadFile;
   t: ChatTranslate;
-  /** Whether the caller may create agents, resolved by the shell: the module resolves no RBAC. */
-  canAuthorAgents: boolean;
+  /** The caller's grants (see `ChatCan`). Pass a stable function. */
+  can: ChatCan;
 }
 
 export function ChatPage({
@@ -163,7 +170,7 @@ export function ChatPage({
   useFileImageSrc,
   uploadFile,
   t,
-  canAuthorAgents,
+  can,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -234,15 +241,19 @@ export function ChatPage({
   // failed PUT self-heals on the next signal/refetch; a duplicate PUT from a
   // refetch landing mid-flight is idempotent (monotonic marker) server-side.
   // External-system sync in an effect (no setState) — React Compiler-safe.
+  const canWrite = can("chat:write");
   useEffect(() => {
-    if (!visible) return;
+    // Marking read is a write (`chat:write`); a read-only caller keeps the dot.
+    if (!visible || !canWrite) return;
     const active = sessions.data?.find((s) => s.id === activeId);
     if (!active?.unread) return;
-    queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(pageSpaceId), (prev) =>
-      prev?.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
+    queryClient.setQueryData<SessionsCache>(sessionsQueryKey(pageSpaceId), (prev) =>
+      patchSessionsCache(prev, (rows) =>
+        rows.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
+      ),
     );
     void markSessionRead(getHeaders, activeId).catch(() => {});
-  }, [sessions.data, activeId, getHeaders, pageSpaceId, queryClient, visible]);
+  }, [sessions.data, activeId, getHeaders, pageSpaceId, queryClient, visible, canWrite]);
 
   const unreadIds = useMemo(() => {
     const list = sessions.data ?? [];
@@ -258,8 +269,9 @@ export function ChatPage({
       downloadFile,
       useFileImageSrc,
       t,
+      can,
     }),
-    [onOpenFile, downloadFile, useFileImageSrc, t],
+    [onOpenFile, downloadFile, useFileImageSrc, t, can],
   );
 
   // File attachments: the composer stages picked files through the HOST uploader
@@ -278,10 +290,11 @@ export function ChatPage({
   // `Conversation` a new prop each time and defeat its `memo` below. The
   // setters are stable module functions, so the deps are exactly the values
   // the picker displays.
+  const authorsAgents = canAuthorAgents(can);
   const composerSlot = useMemo(
     () => (
       <div className="flex items-center gap-2">
-        {canAuthorAgents ? <AgentAuthoringToggle /> : null}
+        {authorsAgents ? <AgentAuthoringToggle /> : null}
         <ModelSelect
           models={models}
           selectedId={selectedModel}
@@ -292,7 +305,7 @@ export function ChatPage({
         {composerActions}
       </div>
     ),
-    [canAuthorAgents, models, selectedModel, generation, composerActions],
+    [authorsAgents, models, selectedModel, generation, composerActions],
   );
 
   // The server's view of the ACTIVE conversation, reduced to two primitives so
@@ -361,6 +374,8 @@ export function ChatPage({
                   onConversationChange={onConversationChange}
                   attachments={attachments}
                   composerSlot={composerSlot}
+                  canPinSkills={canPinSkills(can)}
+                  canWrite={canWrite}
                   serverGenerating={serverGenerating}
                   serverUpdatedAt={serverUpdatedAt}
                 />
@@ -381,6 +396,9 @@ interface ConversationProps {
   /** Composer attachment adapter, built once by `ChatPage` from the host props. */
   attachments: AttachmentAdapter;
   composerSlot?: React.ReactNode;
+  canPinSkills: boolean;
+  /** `chat:write`: without the picker, the space's enforced skills are still named. */
+  canWrite: boolean;
   /** Server session row `generating`, from the shared list; `undefined` = no row. */
   serverGenerating: boolean | undefined;
   /** Server session row `updatedAt`, from the shared list; `undefined` = no row. */
@@ -406,6 +424,9 @@ const Conversation = memo(function Conversation({
   id,
   getHeaders,
   isPersisted,
+  composerSlot,
+  canPinSkills,
+  canWrite,
   ...rest
 }: ConversationProps) {
   // Freeze persistence at mount. The runtime key (`id`) is stable across the
@@ -428,7 +449,35 @@ const Conversation = memo(function Conversation({
   });
 
   // Stable identity: `ConversationInner` keys its store-attach effect on it.
-  const initialMessages = useMemo(() => history.data ?? [], [history.data]);
+  const initialMessages = useMemo(() => history.data?.messages ?? [], [history.data?.messages]);
+
+  // No picker on a failed read: it would show the defaults, and a change would
+  // send them over the stored choice.
+  const showPicker = canPinSkills && !history.isError;
+  // What the user changed, sent with every turn (which writes it); nothing
+  // changed = nothing sent, and the stored selection stands. The ref is the
+  // transport's request-time read of the same value.
+  const [chosenSkills, setChosenSkills] = useState<ChatSkillSelection>();
+  const chosenSkillsRef = useRef<ChatSkillSelection>(undefined);
+  const chooseSkills = useCallback((selection: ChatSkillSelection) => {
+    chosenSkillsRef.current = selection;
+    setChosenSkills(selection);
+  }, []);
+  const getChosenSkills = useCallback(() => chosenSkillsRef.current, []);
+  const skills = chosenSkills ?? history.data?.skills ?? DEFAULT_SKILL_SELECTION;
+  const slot = useMemo(
+    () => (
+      <div className="flex items-center gap-2">
+        {showPicker ? (
+          <SkillsPicker getHeaders={getHeaders} selection={skills} onChange={chooseSkills} />
+        ) : (
+          canWrite && <EnforcedSkillsIndicator getHeaders={getHeaders} />
+        )}
+        {composerSlot}
+      </div>
+    ),
+    [getHeaders, skills, chooseSkills, showPicker, canWrite, composerSlot],
+  );
 
   if (persistedAtMount && history.isPending) {
     return (
@@ -443,6 +492,8 @@ const Conversation = memo(function Conversation({
       getHeaders={getHeaders}
       isPersisted={persistedAtMount}
       initialMessages={initialMessages}
+      composerSlot={slot}
+      getChosenSkills={getChosenSkills}
       {...rest}
     />
   );
@@ -458,7 +509,11 @@ function ConversationInner({
   composerSlot,
   serverGenerating,
   serverUpdatedAt,
-}: ConversationProps & { initialMessages: UIMessage[] }) {
+  getChosenSkills,
+}: Omit<ConversationProps, "canPinSkills" | "canWrite"> & {
+  initialMessages: UIMessage[];
+  getChosenSkills: () => ChatSkillSelection | undefined;
+}) {
   const queryClient = useQueryClient();
   const spaceId = spaceIdFromHeaders(getHeaders);
 
@@ -491,23 +546,30 @@ function ConversationInner({
         api: "/api/chat",
         credentials: "include",
         headers: buildHeaders,
-        prepareSendMessagesRequest: ({ id: chatId, messages, body }) => ({
-          body: {
-            ...body,
-            id: chatId,
-            messages,
-            generation: getCompatibleGenerationSettings(),
-            // Read at request time, like the model above, for the same reason.
-            agent_authoring: getAgentAuthoringEnabled(),
-          },
-        }),
+        prepareSendMessagesRequest: ({ id: chatId, messages, body }) => {
+          const skills = getChosenSkills();
+          return {
+            body: {
+              ...body,
+              id: chatId,
+              messages,
+              generation: getCompatibleGenerationSettings(),
+              // Read at request time, like the model above, for the same reason.
+              agent_authoring: getAgentAuthoringEnabled(),
+              ...(skills && {
+                skill_mode: skills.skillMode,
+                pinned_skills: skills.pinnedSkills,
+              }),
+            },
+          };
+        },
         // Native resume targets our per-session stream endpoint (the chat id is
         // the conversation id = the URL).
         prepareReconnectToStreamRequest: ({ id: chatId }) => ({
           api: `/api/chat/sessions/${chatId}/stream`,
         }),
       }),
-    [buildHeaders],
+    [buildHeaders, getChosenSkills],
   );
 
   const chat = useChat({
@@ -574,8 +636,8 @@ function ConversationInner({
         staleTime: 0,
       })
       .then((fetched) => {
-        if (cancelled || fetched.length <= chatMessages.length) return;
-        setMessages(fetched);
+        if (cancelled || fetched.messages.length <= chatMessages.length) return;
+        setMessages(fetched.messages);
       })
       .catch(() => {
         // Best-effort: the next server change re-arms the rule.
@@ -613,19 +675,24 @@ function ConversationInner({
   const wasGenerating = useRef(false);
   useEffect(() => {
     if (generating) {
-      queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(spaceId), (prev) => {
-        const list = prev ?? [];
-        const existing = list.find((s) => s.id === id);
+      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(spaceId), (prev) => {
+        const existing = prev?.pages.flatMap((p) => p.data).find((s) => s.id === id);
         const row: SessionSummary = {
           ...(existing ?? { id, title: null, unread: false }),
           generating: true,
           updatedAt: new Date().toISOString(),
         };
-        return [row, ...list.filter((s) => s.id !== id)];
+        return patchSessionsCache(
+          prev,
+          (rows, first) => [...(first ? [row] : []), ...rows.filter((s) => s.id !== id)],
+          row,
+        );
       });
     } else if (wasGenerating.current) {
-      queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(spaceId), (prev) =>
-        prev?.map((s) => (s.id === id ? { ...s, generating: false } : s)),
+      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(spaceId), (prev) =>
+        patchSessionsCache(prev, (rows) =>
+          rows.map((s) => (s.id === id ? { ...s, generating: false } : s)),
+        ),
       );
       void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
     }

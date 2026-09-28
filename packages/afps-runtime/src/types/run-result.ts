@@ -2,6 +2,7 @@
 // Copyright 2026 Appstrate
 
 import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
+import type { TerminalRunStatus } from "@appstrate/core/run-status";
 
 /**
  * Severity levels carried by `log.written` run events. Mirrored on the
@@ -38,24 +39,16 @@ export interface RunResult {
   logs: LogEntry[];
   error?: RunError;
   /**
-   * Terminal status hint. Optional — the reducer does not populate it (events
-   * alone cannot distinguish "success" from "cancelled by signal"). Runners
-   * that surface a specific terminal cause (timeout, cancellation) set this
-   * before calling {@link EventSink.finalize} so downstream ingestion can
-   * persist the exact `runs.status` without inferring from `error` text.
-   *
-   * When absent, consumers default to `"failed"` if `error` is set, else
-   * `"success"`.
+   * Terminal status, stamped by the runner (events alone cannot tell "success"
+   * from "cancelled by signal"). See {@link TerminalRunResult}.
    */
-  status?: "success" | "failed" | "timeout" | "cancelled";
+  status?: RunTerminalStatus;
   /** Elapsed wall-clock time in milliseconds. Runners populate this. */
   durationMs?: number;
   /**
-   * Authoritative token usage for the run. When present, downstream
-   * consumers MUST treat this as the source of truth — the field exists
-   * so finalize is self-contained and does not race with the side-channel
-   * `appstrate.metric` event whose POST may not have landed yet. Runners
-   * that produce no LLM traffic (CLI replay, tests) leave this absent.
+   * Authoritative token usage for the run — finalize is self-contained and
+   * does not race the side-channel `appstrate.metric` event. Required on a
+   * `"success"` finalize; zero input and output tokens fails the run.
    */
   usage?: TokenUsage;
   /**
@@ -77,6 +70,14 @@ export interface RunResult {
    * run's terminal success/failure — a successful run can still lose an artifact.
    */
   artifacts?: RunArtifactsSummary;
+}
+
+/** Terminal outcome of a run — the `runs.status` values a runner can report. */
+export type RunTerminalStatus = TerminalRunStatus;
+
+/** A {@link RunResult} with its terminal `status` stamped — what {@link EventSink.finalize} accepts. */
+export interface TerminalRunResult extends RunResult {
+  status: RunTerminalStatus;
 }
 
 /**

@@ -24,6 +24,7 @@ import {
   writeSecretEnvFile,
 } from "../integration-runtime-adapter-docker.ts";
 import { selectIntegrationRuntimeAdapter } from "../integration-runtime-adapter.ts";
+import { runnerKeyOf } from "../runner-peers.ts";
 
 const CONN_A = { id: "conn-a", label: "work", accountId: null };
 
@@ -74,7 +75,11 @@ function parseUstar(
   return out;
 }
 
-async function withFakeDocker<T>(body: (calls: DockerCall[]) => Promise<T>): Promise<T> {
+async function withFakeDocker<T>(
+  body: (calls: DockerCall[]) => Promise<T>,
+  /** Stdout for a call other than `create` (default: empty). */
+  respond: (args: string[]) => string = () => "",
+): Promise<T> {
   const calls: DockerCall[] = [];
   const globalBun = globalThis as unknown as { Bun: { spawn: unknown } };
   const original = globalBun.Bun.spawn;
@@ -93,7 +98,7 @@ async function withFakeDocker<T>(body: (calls: DockerCall[]) => Promise<T>): Pro
       call.envFileBody = readFileSync(args[envFileIdx + 1]!, "utf8");
     }
     calls.push(call);
-    const stdout = args[0] === "create" ? FAKE_CONTAINER_ID : "";
+    const stdout = args[0] === "create" ? FAKE_CONTAINER_ID : respond(args);
     return {
       stdout: new Response(stdout).body!,
       stderr: new Response("").body!,
@@ -453,5 +458,75 @@ describe("docker adapter spawn — delivery.files copy", () => {
       }
       await adapter.shutdown();
     });
+  });
+});
+
+describe("docker adapter — runner peer attribution (#1458)", () => {
+  /** A peer at `address`; the docker attribution ignores everything else. */
+  const at = (address: string) => ({
+    address,
+    port: 40000,
+    listener: { address: "172.18.0.10", port: 8080 },
+  });
+
+  async function withRunId<T>(runId: string | undefined, body: () => Promise<T>): Promise<T> {
+    const previous = process.env.RUN_ID;
+    if (runId === undefined) delete process.env.RUN_ID;
+    else process.env.RUN_ID = runId;
+    try {
+      return await body();
+    } finally {
+      if (previous === undefined) delete process.env.RUN_ID;
+      else process.env.RUN_ID = previous;
+    }
+  }
+
+  it("attributes a spawned runner's address on the run network to its connection", async () => {
+    let members: Record<string, { Name: string; IPv4Address: string }> = {};
+    const respond = (args: string[]) =>
+      args[0] === "network" ? JSON.stringify([{ Containers: members }]) : "";
+    await withRunId("run-peers-1", () =>
+      withFakeDocker(async (calls) => {
+        const adapter = dockerAdapter();
+        await adapter.prepare("run-peers-1");
+        await adapter.spawn({
+          runId: "run-peers-1",
+          spec: spec(),
+          bundleRoot: "/tmp/bundle-does-not-need-to-exist",
+          egress: null,
+          workspaceHandle: null,
+          onStderrLine: () => {},
+        });
+        const create = calls.find((c) => c.args[0] === "create")!;
+        const name = create.args[create.args.indexOf("--name") + 1]!;
+        members = {
+          a: { Name: name, IPv4Address: "172.18.0.3/16" },
+          b: { Name: "appstrate-agent", IPv4Address: "172.18.0.2/16" },
+        };
+
+        const attribute = adapter.peerAttribution();
+        expect(await attribute(at("172.18.0.3"))).toBe(runnerKeyOf(spec()));
+        expect(await attribute(at("172.18.0.3"))).not.toBe("@tractr/gmail");
+        expect(await attribute(at("172.18.0.2"))).toBeNull();
+        expect(await attribute(at("172.18.0.9"))).toBeNull();
+        expect(calls.find((c) => c.args[0] === "network")!.args).toEqual([
+          "network",
+          "inspect",
+          "appstrate-exec-run-peers-1",
+        ]);
+        await adapter.shutdown();
+      }, respond),
+    );
+  });
+
+  it("attributes no peer to a runner without a per-run network, and inspects nothing", async () => {
+    await withRunId(undefined, () =>
+      withFakeDocker(async (calls) => {
+        const adapter = dockerAdapter();
+        await adapter.prepare("run-peers-2");
+        expect(await adapter.peerAttribution()(at("127.0.0.1"))).toBeNull();
+        expect(calls.some((c) => c.args[0] === "network")).toBe(false);
+      }),
+    );
   });
 });

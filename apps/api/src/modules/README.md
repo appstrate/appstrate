@@ -179,7 +179,7 @@ where the resource's rows live. Listing the same resource twice with different
 `actions` is how per-action granularity is expressed, and both entries must
 declare the same level.
 
-**At boot, the platform validates each contribution** (resource name format, no collision with a core resource or another module, action format, one level per resource, role/preset validity) and aggregates them into:
+**At boot, the platform validates each contribution** (resource name format, no collision with a core resource or another module, action format, one level per resource, role/preset validity, read coherence: a preset granted an action on a resource that has a `read` action must be granted that `read` too, RBAC spec §3.5) and aggregates them into:
 
 - `orgPermissions(role)` / `presetPermissions(preset)` — module entries reach the org role or the space preset they listed.
 - `getApiKeyAllowedScopes()` — entries with `apiKeyGrantable: true` become grantable through API keys (filtered against the creator's role at issuance).
@@ -317,8 +317,8 @@ Modules contribute model providers (the LLM backends Appstrate knows how to auth
 Provider hooks (`ModelProviderHooks`):
 
 - **`extractTokenIdentity(accessToken) → ModelProviderIdentity | null`** — runs once at credential import + after every refresh. Maps the provider's claim vocabulary (e.g. a JWT payload) into the platform's well-known abstract slots: `{ accountId?, email? }`. The platform persists the result and never re-decodes.
-- **`buildApiKeyPlaceholder(accessToken) → string | null`** — builds the `MODEL_API_KEY` value the agent container sees, when the in-container LLM client expects a structurally meaningful shape (e.g. a JWT it will decode). Return `null` to fall back to the platform's generic dash-stripped placeholder. The real upstream credential never leaves the platform/sidecar boundary.
-- **`validateCredential(ctx) → CredentialValidationResult`** — validates a credential **offline** (no network), used by the connection test (`POST /api/models/test`). Offline validation is inferred from the **presence of this hook** — there is no flag on the provider definition to set. When it is present the platform runs this local check instead of issuing any API call (subscription providers decode the token to confirm it is well-formed + unexpired). Return `{ ok: true }` for a valid credential or `{ ok: false, error, message }` otherwise. API-key providers omit it and fall back to the generic `GET ${baseUrl}/models` probe. (Model _discovery_ without live probing is the separate, orthogonal `modelDiscovery: { mode: "static" }` field.)
+- **`buildApiKeyPlaceholder(accessToken) → string | null`** — builds the `MODEL_API_KEY` value an OAuth-subscription run's agent container sees, when the in-container LLM client expects a structurally meaningful shape (e.g. a JWT it will decode). Return `null` to fall back to the platform's generic dash-stripped placeholder; a value equal to the token fails the launch. An API-key run's container gets a constant instead. The real upstream credential never leaves the platform/sidecar boundary.
+- **`validateCredential(ctx) → CredentialValidationResult`** — validates a credential **offline** (no network), used by the connection test (`POST /api/models/test`). Offline validation is inferred from the **presence of this hook** — there is no flag on the provider definition to set. When it is present the platform runs this local check instead of issuing any API call (subscription providers decode the token to confirm it is well-formed + unexpired). Return `{ ok: true }` for a valid credential or `{ ok: false, error, message }` otherwise. API-key providers omit it and fall back to the generic `GET ${baseUrl}/models` probe — or, when the definition declares `publicModelListing` (a listing that answers any key), one minimal chat completion. (Model _discovery_ without live probing is the separate, orthogonal `modelDiscovery: { mode: "static" }` field.)
 
 Declarative gate: `requiredIdentityClaims: readonly (keyof ModelProviderIdentity)[]` on the provider definition makes the platform refuse to import a credential whose mandatory slots can't be resolved — fail-loud at import time instead of silently persisting a dead credential.
 
@@ -374,9 +374,9 @@ to accept only their own half, so the wrong-mode call does not compile.
   free-tier policy and OIDC's per-client org policy are independent), so
   dispatching them first-match-wins would silently disable all but the first.
 - **Events** (`emitEvent`, broadcast-to-all): `onRunStatusChange`,
-  `onRunConnectionMissing`, `onOrgCreate`, `onOrgDelete`. Handlers run for side
-  effects only; errors in one handler are **isolated** and do not block others —
-  that isolation is the difference from a broadcast hook.
+  `onRunConnectionMissing`, `onOrgCreate`, `onOrgDelete`, `onOrgMemberRemove`.
+  Handlers run for side effects only; errors in one handler are **isolated** and
+  do not block others — that isolation is the difference from a broadcast hook.
 
 `onOrgDelete` must be **idempotent**. The platform reserves the deletion
 (`organizations.deleting_at`) before it emits, so the organization cannot be
@@ -384,6 +384,17 @@ saved by a concurrent run and the operator can simply repeat the DELETE when a
 later step fails — which emits the event again for the same org id. Tear down
 what is still there, and treat what is already gone as success; never make the
 second call throw, and never make it charge, refund or cancel anything twice.
+
+`onOrgMemberRemove(orgId, userId)` is emitted by the platform's member service
+after a member left the org or was removed from it, once the exit has committed
+(the membership row is gone). Best-effort, like every event: a failing handler
+is logged, not retried. The platform revokes only its own grants on that exit
+(space roles, API keys, the refresh and opaque access tokens bound to the
+org — RBAC spec §3.6);
+anything a module keyed on the `(orgId, userId)` pair must be dropped here, or
+it comes back when the same user is invited again — `@appstrate/module-ee`
+deletes the billing-manager row. It must be **idempotent**: a no-op when there
+is nothing left to drop.
 
 Names are defined in `packages/core/src/module.ts` (`FirstMatchHooks` /
 `BroadcastHooks` / `ModuleHooks`, `ModuleEvents`). To add a new hook or event,
@@ -404,7 +415,7 @@ The hook is dispatched for **every** run and **every** chat turn, not for a subs
 
 An operation the organization supplies entirely by itself — `credentialSource !== "system"` **and** `executionPlane !== "platform"`, i.e. a remote BYOK run — should be short-circuited with `null` before the handler reads any of its own state (no DB round-trip, no account lookup): there is nothing for the platform to account for.
 
-Three seams dispatch it: run preflight (once per run launch), the chat surface (once per turn, subscription turns included), and `/api/llm-proxy` (once per raw proxy call that carries a validated run context — BYOK calls included, carrying `credentialSource: "org"`). The one call that dispatches nothing is a raw BYOK proxy call with **no** run or chat context: `BeforeUsageParams` has no context-less shape to report, and requiring a context there would break headless BYOK API keys. A platform-supplied call with no context is refused outright (400 `usage_context_required`).
+Three seams dispatch it: run preflight (once per run launch), the chat surface (once per turn, subscription turns included), and `/api/llm-proxy` (once per raw proxy call that carries a validated run context — BYOK calls included, carrying `credentialSource: "org"`). Two proxy calls dispatch nothing because the unit they belong to was already admitted: a chat turn's own calls, and a platform run's own inference on `/internal/llm-proxy` (context `run_inference`, admitted once at the run's preflight). The one call that dispatches nothing for want of a shape is a raw BYOK proxy call with **no** run or chat context: `BeforeUsageParams` has no context-less shape to report, and requiring a context there would break headless BYOK API keys. A platform-supplied call with no context is refused outright (400 `usage_context_required`).
 
 ## Auth strategies
 
@@ -463,7 +474,7 @@ const myModule: AppstrateModule = {
 };
 ```
 
-**Strategy discipline — critically important.** Each strategy MUST return `null` as early as possible when the request is not for it. A strategy that claims every request would shadow core API key auth (`Bearer ask_…`) and the session cookie fallback. The framework does not enforce this — it is the strategy author's responsibility to write a fast-path check on the header shape (JWT strategies check `Bearer ey…`, mTLS checks client cert presence, etc.).
+**Strategy discipline — critically important.** Each strategy MUST return `null` as early as possible when the request is not for it. A strategy that claims every request would shadow core API key auth (`Bearer apst_…`) and the session cookie fallback. The framework does not enforce this — it is the strategy author's responsibility to write a fast-path check on the header shape (JWT strategies check `Bearer ey…`, mTLS checks client cert presence, etc.).
 
 **Ordering.** Strategies are tried in module load order (topological sort by `manifest.dependencies`). First non-null resolution wins. Core auth (API key + cookie) runs only when every strategy has returned `null`.
 

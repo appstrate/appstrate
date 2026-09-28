@@ -259,7 +259,7 @@
     // whose contents had changed. Scoped to `apps/*/src` rather than
     // `**/*.json` on purpose: a repo-wide JSON glob would put every
     // `package.json`, every fixture and every generated artefact in the lint
-    // cache key. 27 files today (17 api, 10 web).
+    // cache key. 11 files today (1 api, 10 web).
     //
     // ─── The backend type-aware block (eslint.config.mjs) ────────────────
     //

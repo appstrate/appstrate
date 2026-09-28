@@ -139,7 +139,7 @@ export const profilePaths = {
                 detail:
                   "A password is already set for this account. Use the change password form instead.",
                 code: "password_already_set",
-                requestId: "req_abc123",
+                request_id: "req_abc123",
               },
             },
           },

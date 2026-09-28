@@ -21,7 +21,7 @@ All value templates use the Arazzo runtime-expression grammar `{$credential.<fie
 ```jsonc
 {
   "$schema": "https://schemas.afps.dev/v0/integration.schema.json",
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "type": "integration",
   // …
 }
@@ -200,7 +200,7 @@ a fully-manual configuration MUST be supported.
       { "value": "write", "label": "Write access" },
       { "value": "admin", "label": "Admin access", "implies": ["read", "write"] }
     ],
-    "identity_claims": { "email": "email", "user_id": "sub" },
+    "identity_claims": { "email": "$.email", "user_id": "$.sub" },
     "required_identity_claims": ["email"],
     "callback_url_hint": "Set the authorized redirect URI to: {{callback_url}}",
     "authorized_uris": ["https://api.example.com/**"],
@@ -231,23 +231,27 @@ platform reads it to derive an **account key**, which is both the connection's
 display label and the value that distinguishes two accounts of the same
 provider. Resolution, in order:
 
-1. the `accountId` (or `account_id`) key of your `identity_claims` map;
+1. the `account_id` key of your `identity_claims` map (keys are snake_case:
+   creating, saving, publishing or importing a manifest that declares any
+   other key — `accountId`, `avatarUrl` — is refused);
 2. a top-level `email`, `account_email` or `sub` in the payload;
 3. the literal `"default"`.
 
 Landing on `"default"` is not an error and nothing is logged: the connection is
 simply labelled `Connexion 1`, `Connexion 2`, … and every connection on that
 provider shares one account key, so a member holding two accounts cannot tell
-them apart. **Declare `accountId` explicitly.** Choose the most human-readable
+them apart. **Declare `account_id` explicitly.** Choose the most human-readable
 value that is _unique per account_ — email, else a unique handle, else an opaque
 id. A display name that two accounts can share is the wrong choice even though
 it reads better.
 
-Accessors are `$.`-prefixed dotted paths (`$.data.email`,
-`$.identity.email_address`). A numeric segment indexes an array, which is how a
-provider that answers with a single-element list is read: `$.data.0.primaryEmail`.
-A path that matches nothing yields `""` and falls through to the chain above —
-so a typo degrades silently. `apps/api/test/unit/services/system-package-identity-claims.test.ts`
+Accessors are JSONPaths in the single-value RFC 9535 subset the login engine's
+selectors use too (`@appstrate/afps-shared/jsonpath`): `$`, `.name`,
+`['name']` / `["name"]`, and array indices `[0]` / `[-1]` — a provider that
+answers with a single-element list is read as `$.data[0].primaryEmail`.
+Filters, slices, wildcards, recursive descent, a `.name` starting with a digit
+and a bare name without the `$` are refused when the manifest is imported. A valid path that matches nothing leaves that claim out and falls
+through to the chain above — so a typo degrades silently. `apps/api/test/unit/services/system-package-identity-claims.test.ts`
 pins every shipped mapping against a payload taken from the provider's docs for
 exactly that reason.
 
@@ -669,7 +673,33 @@ open-redirect chains MUST NOT cross the allowlist (§8.6).
 
 The runtime layer (sidecar MITM) enforces this on the wire, including across redirect
 hops (per-hop allowlist check, per-hop SSRF blocklist, hybrid credential-strip on
-cross-host hops).
+cross-host hops). For a `source.kind: "local"` integration run in Docker, the same list is also the
+runner's whole network egress: a destination it does not grant is refused, and an
+auth that declares neither `authorized_uris` nor `allow_all_uris` gives its runner no
+way out at all. Only patterns with a `scheme://` count for raw TCP traffic: a pattern
+without a port grants only the scheme's default port (443 for https/wss, 80 for
+http/ws, 22 for ssh/sftp, none for any other scheme), and a bare `scheme://**` grants
+any host on any port.
+
+A `uv` server builds its venv at startup (`uv run` fetches the dependencies from the
+package index) through that same egress, and the platform makes no exception for it:
+either list the index in `authorized_uris` (`https://pypi.org/**` and
+`https://files.pythonhosted.org/**`, or your private index), or vendor the
+dependencies in the bundle.
+
+When the target depends on what the user enters (a self-hosted server), reference a
+connection field with `{$credential.<field>}`:
+
+```jsonc
+"authorized_uris": ["ssh://{$credential.host}:{$credential.port}"]
+```
+
+The field must be declared and listed in `credentials.schema.required`, and the entry
+must start with `scheme://` with its placeholders in the host and port only (never in
+the path or query). Templates are refused on an `oauth2` auth, on an auth that declares
+`connect`, and on one exposing `api_call`. At run time a value containing anything but
+letters, digits, `.` and `-`, or made only of dots, drops the pattern, so a user cannot
+add a wildcard, a separator or another host.
 
 ---
 

@@ -10,9 +10,9 @@ import { runs } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber, REALTIME_CHANNELS } from "../services/realtime.ts";
 import type { RealtimeEvent, RealtimeChannel } from "../services/realtime.ts";
 import { ApiError, forbidden, notFound, unauthorized } from "../lib/errors.ts";
-import { validateApiKey } from "../services/api-keys.ts";
+import { API_KEY_PREFIX, validateApiKey } from "../services/api-keys.ts";
 import { getOrgMember } from "../services/organizations.ts";
-import { effectivePermissions } from "../lib/permissions.ts";
+import { ceilingAllows, effectivePermissions, type Permission } from "../lib/permissions.ts";
 import { resolveSpaceRole, type SpaceMemberRow } from "../lib/space-role.ts";
 import { loadSpaceAccess, type SpaceContextRow } from "../lib/space-lookup.ts";
 import {
@@ -25,7 +25,6 @@ import {
 } from "../lib/view-as.ts";
 import { principalGrants } from "../lib/principal-permissions.ts";
 import { canReadEveryRun, ownsRun } from "../lib/run-visibility.ts";
-import { rowAuthority } from "../middleware/require-permission.ts";
 import {
   canReadRuns,
   reportPermissionDenial,
@@ -68,15 +67,14 @@ function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
 /**
  * Parse the optional `?channels=` subscription filter.
  *
- * Contract (deliberately fail-open):
- *   • parameter absent            → `undefined` = subscribe to every channel.
- *     This is what every pre-existing client (CLI, SDKs, integrators) sends,
- *     so their stream is byte-identical to before.
+ * Contract (deliberately fail-open). `undefined` means "no filter": the
+ * stream carries every channel the caller may receive (`subscribedChannels`).
+ *   • parameter absent            → `undefined`.
  *   • parameter present           → the intersection with the known channel
  *     names. Unknown tokens are ignored rather than rejected so adding a
  *     channel later can't 400 an older client that hardcoded a list.
- *   • nothing recognised          → `undefined` (every channel) rather than an
- *     empty subscription. A typo must degrade to "too much data", never to a
+ *   • nothing recognised          → `undefined` rather than an empty
+ *     subscription. A typo must degrade to "too much data", never to a
  *     silently dead stream.
  */
 function parseChannels(raw: string | undefined): ReadonlySet<RealtimeChannel> | undefined {
@@ -90,19 +88,55 @@ function parseChannels(raw: string | undefined): ReadonlySet<RealtimeChannel> | 
   return requested.size > 0 ? requested : undefined;
 }
 
+interface ChannelCaller {
+  /** In the caller's effective set in the streamed space (a key: ceiling ∩ creator). */
+  holds: (permission: string) => boolean;
+  ceilingAllows: (permission: Permission) => boolean;
+}
+
+const readsRuns = (caller: ChannelCaller) => canReadRuns(caller.holds);
+
+/**
+ * Who may receive each channel: who may read its rows over HTTP — a run read
+ * (RBAC spec §3.4), the `chat:read` grant of `/api/chat/*`, the ceiling alone of
+ * `GET /api/me/connections` (§7.1). Total, so no channel ships without a rule.
+ */
+const CHANNEL_REQUIREMENTS: Record<RealtimeChannel, (caller: ChannelCaller) => boolean> = {
+  run_update: readsRuns,
+  run_log: readsRuns,
+  run_metric: readsRuns,
+  connection_update: (caller) => caller.ceilingAllows("integrations:read"),
+  chat_session_update: (caller) => caller.holds("chat:read"),
+};
+
+/** The requested channels — every channel when none is requested — this caller may receive. */
+function subscribedChannels(
+  c: Context<AppEnv>,
+  requested: ReadonlySet<RealtimeChannel> | undefined,
+  permissions: ReadonlySet<string>,
+): ReadonlySet<RealtimeChannel> {
+  const caller: ChannelCaller = {
+    holds: (permission) => permissions.has(permission),
+    ceilingAllows: (permission) => ceilingAllows(c, permission),
+  };
+  return new Set(
+    [...(requested ?? REALTIME_CHANNELS)].filter((channel) =>
+      CHANNEL_REQUIREMENTS[channel](caller),
+    ),
+  );
+}
+
 interface SSEAuthResult {
   userId: string;
   orgId: string;
+  /** Effective permissions in the streamed space; each channel and route asks it. */
+  permissions: ReadonlySet<string>;
   /**
    * Gates debug-level `run_log` events only (services/realtime.ts). Read from
-   * `runs:delete`: `runs:read` opens the stream for everyone, so it cannot discriminate.
+   * `runs:delete`: every run-channel reader holds a run read, which cannot discriminate.
    */
   canReadDebugLogs: boolean;
-  /**
-   * `runs:read-all` in the streamed space. Either run-read permission opens the
-   * stream, and `runs:read` alone means "the runs I launched"; this is what
-   * widens the three run channels to the whole space (RBAC spec §3.4).
-   */
+  /** `runs:read-all`: widens the run channels from the caller's runs to the space's (§3.4). */
   canReadEveryRun: boolean;
   spaceId: string;
 }
@@ -143,16 +177,14 @@ async function resolveSpaceGrants(
  * Validate auth for SSE endpoints.
  *
  * Supports two auth methods:
- *  1. API key via `?token=ask_...` query param (EventSource can't send headers)
+ *  1. API key via `?token=apst_...` query param (EventSource can't send headers)
  *  2. Cookie session (existing behavior)
  *
  * Org context: `?orgId=` query param (cookie auth only — API key already resolves org).
  *
  * Both branches resolve permissions as the HTTP pipeline does (key: scopes ∩
- * creator's live authority in the key's space; session: org ∪ space) and both
- * must carry a run-read permission — `runs:read` or the wider `runs:read-all`,
- * the same disjunction `requireRunsRead` applies on the HTTP routes; 403
- * otherwise, never inherited admin.
+ * creator's live authority in the key's space; session: org ∪ space), never
+ * inherited admin, and return that set. What it opens is each route's call.
  *
  * ROLE PREVIEW arrives as `?view_as=` (same grammar and validation as
  * `X-View-As`): an `EventSource` cannot send a header, and the header guard
@@ -173,7 +205,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
 
   // 1. Try API key auth via ?token= query param
   const token = c.req.query("token");
-  if (token?.startsWith("ask_")) {
+  if (token?.startsWith(API_KEY_PREFIX)) {
     if (viewAsRaw !== undefined) {
       // Same refusal as the HTTP transport guard: a key has no session to narrow.
       throw new ApiError({
@@ -208,19 +240,16 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     if (!grants) {
       throw forbidden("The key's creator is not a member of the key's space");
     }
-    const permissions = effectivePermissions({
-      orgPermissions: grants,
-      scopeCeiling: new Set(keyInfo.scopes),
-    });
-    if (!canReadRuns((p) => permissions.has(p))) {
-      throw forbidden("API key does not have the 'runs:read' scope");
-    }
+    // On the context too, so ceiling-capped reads below answer as on HTTP.
+    const scopeCeiling = new Set<string>(keyInfo.scopes);
+    c.set("scopeCeiling", scopeCeiling);
+    const permissions = effectivePermissions({ orgPermissions: grants, scopeCeiling });
 
     return {
       userId: keyInfo.userId,
       orgId: keyInfo.orgId,
-      // From the ceilinged set, not `grants`: the key's scopes bound debug-log
-      // visibility and the span of runs the stream carries.
+      // The ceilinged set, not `grants`: the key's scopes bound every channel.
+      permissions,
       canReadDebugLogs: permissions.has("runs:delete"),
       canReadEveryRun: canReadEveryRun(permissions),
       spaceId: keyInfo.spaceId,
@@ -300,18 +329,24 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
       detail: `You are not a member of space '${space.id}'`,
     });
   }
-  // Same floor as the key branch; a session has no ceiling, so its effective set IS `grants`.
-  if (!canReadRuns((p) => grants.has(p))) {
-    throw forbidden("Caller does not have the 'runs:read' permission in this space");
-  }
-
+  // A session has no ceiling, so its effective set IS `grants`.
   return {
     userId: session.user.id,
     orgId,
+    permissions: grants,
     canReadDebugLogs: grants.has("runs:delete"),
     canReadEveryRun: canReadEveryRun(grants),
     spaceId,
   };
+}
+
+/** The single-run and per-agent streams carry runs alone: no run read, no stream. */
+function requireRunRead(validated: SSEAuthResult): void {
+  if (!canReadRuns((p) => validated.permissions.has(p))) {
+    throw forbidden(
+      "Caller does not have the 'runs:read' or 'runs:read-all' permission in this space",
+    );
+  }
 }
 
 /** Open an SSE stream with a subscriber filter, verbose toggle, and ping keep-alive. */
@@ -596,16 +631,15 @@ async function sendInitialRunSnapshot(
 export function createRealtimeRouter() {
   const router = new Hono<AppEnv>();
 
-  // `rowAuthority()` on all three: these streams are pipeline-exempt and mount
-  // no guard at all — `validateSSEAuth` resolves the principal, its grants in
-  // the space and the run-read disjunction from inside the handler. Without the
-  // marker the route table reads them as unguarded, i.e. granted to anyone who
-  // reached the transport.
+  // These streams are pipeline-exempt and mount no guard at all —
+  // `validateSSEAuth` resolves the principal and its grants in the space from
+  // inside the handler; each route asks them what it opens.
 
   // GET /api/realtime/runs/:id — stream run status + log changes
-  router.get("/runs/:id", rowAuthority(), async (c) => {
+  router.get("/runs/:id", async (c) => {
     const validated = await validateSSEAuth(c);
     if (!validated) throw unauthorized("Invalid session or org");
+    requireRunRead(validated);
 
     const runId = c.req.param("id")!;
     const subId = `run-${runId}-${crypto.randomUUID().slice(0, 8)}`;
@@ -639,7 +673,11 @@ export function createRealtimeRouter() {
         isAdmin: validated.canReadDebugLogs,
         readAll: validated.canReadEveryRun,
         userId: validated.userId,
-        channels: parseChannels(c.req.query("channels")),
+        channels: subscribedChannels(
+          c,
+          parseChannels(c.req.query("channels")),
+          validated.permissions,
+        ),
       },
       verbose,
       (send) =>
@@ -648,9 +686,10 @@ export function createRealtimeRouter() {
   });
 
   // GET /api/realtime/agents/:packageId/runs — stream run changes for an agent
-  router.get("/agents/:packageId/runs", rowAuthority(), async (c) => {
+  router.get("/agents/:packageId/runs", async (c) => {
     const validated = await validateSSEAuth(c);
     if (!validated) throw unauthorized("Invalid session or org");
+    requireRunRead(validated);
 
     const packageId = c.req.param("packageId");
     const subId = `agent-${packageId}-${crypto.randomUUID().slice(0, 8)}`;
@@ -666,19 +705,32 @@ export function createRealtimeRouter() {
         isAdmin: validated.canReadDebugLogs,
         readAll: validated.canReadEveryRun,
         userId: validated.userId,
-        channels: parseChannels(c.req.query("channels")),
+        channels: subscribedChannels(
+          c,
+          parseChannels(c.req.query("channels")),
+          validated.permissions,
+        ),
       },
       verbose,
     );
   });
 
   // GET /api/realtime/runs — stream all run changes (for agent list)
-  router.get("/runs", rowAuthority(), async (c) => {
+  router.get("/runs", async (c) => {
     const validated = await validateSSEAuth(c);
     if (!validated) throw unauthorized("Invalid session or org");
 
     const subId = `all-run-${crypto.randomUUID().slice(0, 8)}`;
     const verbose = c.req.query("verbose") === "true";
+    // A multiplex, not a run stream: refused only when no requested channel is left.
+    const channels = subscribedChannels(
+      c,
+      parseChannels(c.req.query("channels")),
+      validated.permissions,
+    );
+    if (channels.size === 0) {
+      throw forbidden("Caller may receive none of the requested channels in this space");
+    }
 
     return openRealtimeStream(
       c,
@@ -689,7 +741,7 @@ export function createRealtimeRouter() {
         isAdmin: validated.canReadDebugLogs,
         readAll: validated.canReadEveryRun,
         userId: validated.userId,
-        channels: parseChannels(c.req.query("channels")),
+        channels,
       },
       verbose,
     );

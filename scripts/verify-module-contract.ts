@@ -289,6 +289,7 @@ const EVENT_LEDGER: Record<EventMember, NamedLedgerEntry> = {
   onRunConnectionMissing: { owners: ["webhooks"] },
   onOrgCreate: { owners: ["mcp", "module-ee"] },
   onOrgDelete: { owners: ["mcp", "module-ee"] },
+  onOrgMemberRemove: { owners: ["module-ee"] },
 };
 
 /**
@@ -306,9 +307,12 @@ const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   resolveChatModel: { owners: ["module-chat"] },
   recordChatUsage: { owners: ["module-chat"] },
   resolveChatAttachment: { owners: ["module-chat"] },
+  loadEnforcedChatSkills: { owners: ["module-chat"] },
+  listEnforcedChatSkills: { owners: ["module-chat"] },
   cleanupSessionFiles: { owners: ["module-chat"] },
   checkUsageAllowed: { owners: ["module-chat"] },
   setFileStorageLimit: { owners: ["module-ee"] },
+  audit: { owners: ["module-ee"] },
 };
 
 /**

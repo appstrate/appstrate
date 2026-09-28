@@ -5,9 +5,9 @@
  *
  * `runs.model_credential_id` is emitted by the run DTO (`services/state/runs.ts`)
  * to every dashboard user who can read the run. On an ALIASED model that id is
- * a cross-reference: `GET /api/model-provider-credentials` serves
- * `available_model_ids` per credential, so the id de-anonymises the alias and
- * names the backing vendor and model — exactly what the alias exists to hide
+ * a cross-reference: `GET /api/model-provider-credentials` serves each
+ * credential's provider and endpoint, so the id de-anonymises the alias and
+ * names the backing vendor — exactly what the alias exists to hide
  * (issue #727, Threat A).
  *
  * The masking is a WRITE-time null (`services/run-pipeline.ts`) with no

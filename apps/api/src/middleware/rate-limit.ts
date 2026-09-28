@@ -3,6 +3,7 @@
 import type { RateLimiterAbstract } from "rate-limiter-flexible";
 import type { Context, Next } from "hono";
 import { parseBearer } from "@appstrate/core/bearer";
+import { parseSignedToken } from "../lib/run-token.ts";
 import type { AppEnv } from "../types/index.ts";
 import { getRateLimiterFactory } from "../infra/index.ts";
 import { ApiError } from "../lib/errors.ts";
@@ -189,12 +190,17 @@ export const rateLimitMcp = createRateLimitMiddleware({
   emitHeaders: true,
 });
 
-/** Bearer token-based rate limiter for internal container routes. */
+/**
+ * Bearer token-based rate limiter for internal container routes, keyed on the
+ * HMAC-verified run id: a token that does not verify shares one `invalid`
+ * bucket, so a forged token naming a run cannot spend that run's budget.
+ */
 export const rateLimitByBearer = createRateLimitMiddleware({
   category: "bearer",
   extractKey: (c) => {
-    const token = parseBearer(c.req.header("Authorization"))?.split(".")[0] ?? "unknown";
-    return `internal:${limiterPath(c)}:${token}`;
+    const raw = parseBearer(c.req.header("Authorization"));
+    const runId = (raw ? parseSignedToken(raw) : null) ?? "invalid";
+    return `internal:${limiterPath(c)}:${runId}`;
   },
   emitHeaders: false,
 });

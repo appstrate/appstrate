@@ -27,8 +27,10 @@ const proxySharedDescription =
   "Optional `Appstrate-User` header scopes the call to an end-user's connection " +
   "(API-key auth only).\n\n" +
   "URL and headers can contain `{{credential_field}}` placeholders substituted " +
-  "against the integration's credential schema. Set `X-Substitute-Body: true` to run " +
-  "the same substitution on the request body (verbs that carry one).";
+  "against the integration's credential schema. Set `X-Substitute-Body: 1` to run " +
+  "the same substitution on the request body (verbs that carry one).\n\n" +
+  "Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) " +
+  "take `1` or `0`; any other value is a 400.";
 
 const proxyParameters = [
   {
@@ -68,9 +70,9 @@ const proxyParameters = [
     in: "header",
     required: false,
     description:
-      "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders " +
+      "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders " +
       "are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
-    schema: { type: "string", enum: ["true", "false"] },
+    schema: { type: "string", enum: ["0", "1"] },
   },
   {
     name: "Appstrate-User",

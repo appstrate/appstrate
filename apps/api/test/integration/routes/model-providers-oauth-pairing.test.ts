@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { expectRejectedField } from "../../helpers/body-validation.ts";
 
 const app = getTestApp();
 
@@ -38,7 +39,7 @@ describe("POST /api/model-providers-oauth/pairing", () => {
     };
     expect(body.id).toMatch(/^pair_[A-Za-z0-9_-]+$/);
     expect(body.token).toMatch(/^appp_/);
-    expect(body.command).toBe(`npx @appstrate/connect-helper@latest ${body.token}`);
+    expect(body.command).toBe(`npx @appstrate/connect-helper@0.3.x ${body.token}`);
     // Date string must parse to a future timestamp.
     expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
   });
@@ -50,6 +51,23 @@ describe("POST /api/model-providers-oauth/pairing", () => {
       body: JSON.stringify({ providerId: "test-oauth" }),
     });
     expect(res.status).toBe(401);
+  });
+
+  it("keeps the carve-out names `providerId` / `credentialId`: `provider_id` and `credential_id` are 400", async () => {
+    for (const [field, body] of [
+      ["provider_id", { provider_id: "test-oauth" }],
+      [
+        "credential_id",
+        { providerId: "test-oauth", credential_id: "00000000-0000-4000-8000-000000000000" },
+      ],
+    ] as const) {
+      const res = await app.request("/api/model-providers-oauth/pairing", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+      });
+      await expectRejectedField(res, field);
+    }
   });
 
   it("returns 400 when providerId fails the regex", async () => {
@@ -96,9 +114,9 @@ describe("GET /api/model-providers-oauth/pairing/:id", () => {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { status: string; consumedAt: string | null };
+    const body = (await res.json()) as { status: string; consumed_at: string | null };
     expect(body.status).toBe("pending");
-    expect(body.consumedAt).toBeNull();
+    expect(body.consumed_at).toBeNull();
   });
 
   it("returns 404 when the pairing belongs to a different org (no enumeration)", async () => {

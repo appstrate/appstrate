@@ -260,7 +260,7 @@ function checkSchemaVersion(
         code: "SCHEMA_VERSION_MISSING",
         identity,
         path: "manifest.schema_version",
-        message: 'agent manifest must declare a schema_version (e.g. "0.1")',
+        message: "agent manifest must declare a schema_version",
         severity: "error",
       });
     }

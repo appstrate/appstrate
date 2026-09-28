@@ -46,19 +46,20 @@ export function FileExplorer({ packageId, type, version }: FileExplorerProps) {
     { enabled: scope.enabled },
   );
 
-  const entries: PackageFileEntry[] = useMemo(() => data?.entries ?? [], [data]);
+  const entries: PackageFileEntry[] = useMemo(() => data?.data ?? [], [data]);
   const activeEntry = useMemo(
     () => pickActiveEntry(entries, selectedPath, primaryDisplayFile(type).name),
     [entries, selectedPath, type],
   );
 
-  // A 404 here is not a network blip and must not read like one: the realistic
-  // trigger is opening a historical version whose object was pruned from
-  // storage, which the API answers `404 "Artifact not found in storage"`. Only
-  // that status means "this version's files are gone" — anything else is a
-  // transient failure the user can retry.
+  // A version whose stored archive is gone or unreadable is not a network blip
+  // and must not read like one: the API answers `422 version_artifact_unavailable`
+  // (a 404 means the package or version itself does not resolve). Only that
+  // code means "this version's files are gone" — anything else gets the
+  // generic, retryable message.
   if (loadError) {
-    const missing = loadError instanceof ApiError && loadError.status === 404;
+    const missing =
+      loadError instanceof ApiError && loadError.code === "version_artifact_unavailable";
     return <ErrorState message={t(missing ? "files.errorMissingArtifact" : "files.errorLoad")} />;
   }
   // Covers the disabled-query window too: with no org/app yet the query never

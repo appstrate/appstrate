@@ -57,6 +57,7 @@ import {
   seedPackageVersion,
   seedSpace,
   seedSpaceMember,
+  seedSpaceRole,
 } from "../../helpers/seed.ts";
 import {
   createFakeOrchestrator,
@@ -163,7 +164,7 @@ const shareWithUser = (headers: Headers, packageId: string, userId: string) =>
   app.request(`/api/packages/${packageId}/shares`, {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ target: { kind: "user", user_id: userId } }),
+    body: JSON.stringify({ target: { kind: "user", userId: userId } }),
   });
 
 /** `POST …/shares` with a `space` target. */
@@ -171,7 +172,7 @@ const shareWithSpace = (headers: Headers, packageId: string, spaceId: string) =>
   app.request(`/api/packages/${packageId}/shares`, {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ target: { kind: "space", space_id: spaceId } }),
+    body: JSON.stringify({ target: { kind: "space", spaceId } }),
   });
 
 const listShares = (headers: Headers, packageId: string) =>
@@ -359,7 +360,7 @@ describe("authority — `<type>:share` in the home space", () => {
     const res = await app.request(`/api/packages/${AGENT}/shares`, {
       method: "POST",
       headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ target: { kind: "space", space_id: teamId } }),
+      body: JSON.stringify({ target: { kind: "space", spaceId: teamId } }),
     });
     await expectProblem(res, 403);
 
@@ -371,13 +372,13 @@ describe("authority — `<type>:share` in the home space", () => {
     await expectProblem(minted, 400, { code: "invalid_request" });
   });
 
-  it("refuses a malformed `space_id` with 400, not the 404 an unreachable space gets", async () => {
+  it("refuses a malformed `spaceId` with 400, not the 404 an unreachable space gets", async () => {
     // A retired `app_` spelling resolves to no space. Without the shape check
     // the route reports it as "space not found", which reads as a permission
     // problem and sends the caller looking in the wrong place.
     await expectRejectedField(
       await shareWithSpace(author.headers(homeId), AGENT, "app_legacy"),
-      "target.space_id",
+      "target.spaceId",
     );
     await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
   });
@@ -397,7 +398,7 @@ describe("authority — `<type>:share` in the home space", () => {
       await app.request(`/api/packages/${AGENT}/shares`, {
         method: "POST",
         headers: { ...author.headers(homeId), "Content-Type": "application/json" },
-        body: JSON.stringify({ target: { kind: "user", user_id: recipient.userId }, note: "hi" }),
+        body: JSON.stringify({ target: { kind: "user", userId: recipient.userId }, note: "hi" }),
       }),
       "note",
     );
@@ -493,8 +494,8 @@ describe("authority — `<type>:share` in the home space", () => {
     expect(body.data).toHaveLength(1);
     const [entry] = body.data;
     expect(entry!.target.kind).toBe("user");
-    expect(entry!.target.user_id).toBe(recipient.userId);
-    expect(entry!.target.space_id).toBeUndefined();
+    expect(entry!.target.userId).toBe(recipient.userId);
+    expect(entry!.target.spaceId).toBeUndefined();
     expect(JSON.stringify(entry)).not.toContain(recipient.personalSpaceId);
     expect(entry!.shared_by?.user_id).toBe(author.userId);
   });
@@ -526,7 +527,7 @@ describe("authority — `<type>:share` in the home space", () => {
     // The offer still stands, and its target is still named — only the sharer
     // is withheld.
     expect(anonymous.data).toHaveLength(1);
-    expect(anonymous.data[0]!.target.user_id).toBe(recipient.userId);
+    expect(anonymous.data[0]!.target.userId).toBe(recipient.userId);
     expect(anonymous.data[0]!.shared_by).toBeNull();
   });
 
@@ -592,7 +593,7 @@ describe("authority — `<type>:share` in the home space", () => {
     // The bell renders "<sharer> vous a partagé <package>" from this payload
     // alone — it has no query that would resolve a user id.
     expect(rows[0]!.payload).toEqual({
-      package_id: AGENT,
+      packageId: AGENT,
       package_type: "agent",
       shared_by_name: author.name,
     });
@@ -1073,7 +1074,7 @@ describe("offered is not activated", () => {
     // field of this body at all — sending it is a 400 from `.strict()`.
     const patch = (body: Record<string, unknown>) =>
       app.request(`/api/spaces/${guest.personalSpaceId}/packages/${AGENT}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...guest.headers(), "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
@@ -1580,7 +1581,7 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
     expect((await download(viewer, AGENT, homeId)).status).not.toBe(403);
   });
 
-  it("on: a SKILL of the organization is exempt — the CLI's skills sync copies by design", async () => {
+  it("on: a SKILL of the organization is exempt — the CLI's `code sync` copies by design", async () => {
     // The org's own skill, not the system one: a system package is exempt for a
     // reason of its own, so asserting the skill exemption on one would pass
     // whatever the type rule did.
@@ -1590,6 +1591,34 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
     await expectProblem(await download(viewer, AGENT, homeId), 403, {
       code: "package_copy_restricted",
     });
+  });
+
+  it("on: an author without `agents:share` still fetches their own DRAFT, not a version", async () => {
+    // A custom role that writes agents without sharing them: the draft is the
+    // author's working copy, which they already edit byte for byte through the
+    // file routes — fetching it whole is editing, not copying it out.
+    const user = await createTestUser();
+    await addOrgMember(ctx.orgId, user.id, "member");
+    const role = await seedSpaceRole({
+      orgId: ctx.orgId,
+      permissions: ["agents:read", "agents:write"],
+    });
+    await seedSpaceMember({
+      spaceId: homeId,
+      userId: user.id,
+      presetRole: null,
+      customRoleId: role.id,
+    });
+    const headers = { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": homeId };
+    await setRestrictCopy(true);
+
+    const draft = await app.request(`/api/packages/${AGENT}/draft/download`, { headers });
+    expect(draft.status, await draft.clone().text()).toBe(200);
+    await expectProblem(
+      await app.request(`/api/packages/${AGENT}/0.1.0/download`, { headers }),
+      403,
+      { code: "package_copy_restricted" },
+    );
   });
 
   it("off: `/bundle` hands the agent to any reader of the space it is installed in", async () => {
@@ -1842,9 +1871,12 @@ describe("the table has no other reader", () => {
     // same LEFT JOIN. Resolving it on `org_id` alone was the one reader that
     // answered for a package no route will show — and since an unresolved
     // skill is a blocking readiness error, that answer is what let a private
-    // skill's bytes into a run's bundle (§6.9).
+    // skill's bytes into a run's bundle (§6.9). `chat-enforced-skills.ts` joins
+    // it for `activePackagesFilter` (`activeHereSql`) alone: a skill the space
+    // enforces in its chat only when it is placed and active here.
     expect(files).toEqual([
       "apps/api/src/lib/package-access.ts",
+      "apps/api/src/services/chat-enforced-skills.ts",
       "apps/api/src/services/integration-connection-resolver.ts",
       "apps/api/src/services/integration-connections.ts",
       "apps/api/src/services/integration-pins-service.ts",

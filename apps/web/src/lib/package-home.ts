@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PackageType } from "@appstrate/core/validation";
-import { PACKAGE_PERMISSIONS } from "./package-permissions";
+import { packagePermission } from "@appstrate/core/permissions";
 
 /** One row of `GET /api/spaces`, narrowed to what a move destination has to carry. */
 type SpaceOption = { id: string; name: string; permissions: string[]; personal?: boolean };
@@ -27,7 +27,7 @@ export function writableDestinations<T extends SpaceOption>(
   type: PackageType,
   homeSpaceId: string | null | undefined,
 ): T[] {
-  const required = `${PACKAGE_PERMISSIONS[type].resource}:write`;
+  const required = packagePermission(type, "write");
   return (spaces ?? []).filter(
     (space) => space.id !== homeSpaceId && !space.personal && space.permissions.includes(required),
   );

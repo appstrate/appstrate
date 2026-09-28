@@ -14,6 +14,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { derivePiCompactionSettings } from "../src/pi-runner.ts";
+import { DEFAULT_CONTEXT_WINDOW } from "../src/pi-model.ts";
 
 describe("derivePiCompactionSettings — reserveTokens", () => {
   it("uses model.maxTokens when populated", () => {
@@ -78,48 +79,44 @@ describe("derivePiCompactionSettings — keepRecentTokens", () => {
     expect(result.compaction.keepRecentTokens).toBe(20_000);
   });
 
-  it("null contextWindow → defaults to 200k path (keepRecentTokens=20000)", () => {
+  it("null contextWindow → defaults to the shared window (keepRecentTokens=20000)", () => {
     const result = derivePiCompactionSettings({ contextWindow: null, maxTokens: 16_384 }, {});
     if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
     expect(result.compaction.keepRecentTokens).toBe(20_000);
   });
 
-  it("undefined contextWindow → defaults to 200k path (keepRecentTokens=20000)", () => {
+  it("undefined contextWindow → defaults to the shared window (keepRecentTokens=20000)", () => {
     const result = derivePiCompactionSettings({ maxTokens: 16_384 }, {});
     if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
     expect(result.compaction.keepRecentTokens).toBe(20_000);
   });
 });
 
-describe("derivePiCompactionSettings — MODEL_COMPACTION_ENABLED opt-out", () => {
-  it("returns { enabled: false } when MODEL_COMPACTION_ENABLED=false", () => {
-    // Mirrors the existing MODEL_RETRY_ENABLED escape hatch — operators
-    // stacking external compaction middleware can disable Pi's pass.
+describe("derivePiCompactionSettings — compaction opt-out", () => {
+  it("returns { enabled: false } when the caller turns compaction off", () => {
+    // Operators stacking external compaction middleware disable Pi's pass
+    // (`MODEL_COMPACTION_ENABLED=false`, parsed by the embedding process).
     const result = derivePiCompactionSettings(
       { contextWindow: 200_000, maxTokens: 64_000 },
-      { MODEL_COMPACTION_ENABLED: "false" },
+      { enabled: false },
     );
     // The window survives the opt-out — it is what the session runs against
     // either way, and it is the gauge's denominator.
     expect(result).toEqual({ compaction: { enabled: false }, contextWindow: 200_000 });
   });
 
-  it("ignores other values of MODEL_COMPACTION_ENABLED (only 'false' opts out)", () => {
-    // Strict string match — anything but exactly "false" keeps compaction
-    // on. Matches the retry flag's behaviour.
-    const result = derivePiCompactionSettings(
-      { contextWindow: 200_000, maxTokens: 16_384 },
-      { MODEL_COMPACTION_ENABLED: "true" },
-    );
-    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.compaction.reserveTokens).toBe(16_384);
-  });
-
-  it("defaults to enabled when MODEL_COMPACTION_ENABLED is undefined", () => {
-    const result = derivePiCompactionSettings({ contextWindow: 200_000, maxTokens: 16_384 }, {});
-    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.compaction.reserveTokens).toBe(16_384);
-    expect(result.compaction.keepRecentTokens).toBe(20_000);
+  it("defaults to enabled, and reads no process env", () => {
+    const previous = process.env.MODEL_COMPACTION_ENABLED;
+    process.env.MODEL_COMPACTION_ENABLED = "false";
+    try {
+      const result = derivePiCompactionSettings({ contextWindow: 200_000, maxTokens: 16_384 });
+      if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
+      expect(result.compaction.reserveTokens).toBe(16_384);
+      expect(result.compaction.keepRecentTokens).toBe(20_000);
+    } finally {
+      if (previous === undefined) delete process.env.MODEL_COMPACTION_ENABLED;
+      else process.env.MODEL_COMPACTION_ENABLED = previous;
+    }
   });
 });
 
@@ -153,9 +150,7 @@ describe("derivePiCompactionSettings — full result shape", () => {
 
     const off = derivePiCompactionSettings(
       { contextWindow: 128_000 },
-      {
-        MODEL_COMPACTION_ENABLED: "false",
-      },
+      { enabled: false },
     ).compaction;
     expect(Object.keys(off)).toEqual(["enabled"]);
   });
@@ -172,17 +167,19 @@ describe("derivePiCompactionSettings — context budget reported to the breadcru
     // fallback, so it is the only layer that can state the window the session
     // really ran against — anything derived one layer up is a guess about a
     // run that did not happen.
-    expect(derivePiCompactionSettings({ maxTokens: 16_384 }, {}).contextWindow).toBe(200_000);
+    expect(derivePiCompactionSettings({ maxTokens: 16_384 }, {}).contextWindow).toBe(
+      DEFAULT_CONTEXT_WINDOW,
+    );
     expect(
       derivePiCompactionSettings({ contextWindow: null, maxTokens: 16_384 }, {}).contextWindow,
-    ).toBe(200_000);
+    ).toBe(DEFAULT_CONTEXT_WINDOW);
   });
 
   it("keeps the window on the opt-out path too, fallback included", () => {
-    const result = derivePiCompactionSettings(
-      { contextWindow: null },
-      { MODEL_COMPACTION_ENABLED: "false" },
-    );
-    expect(result).toEqual({ compaction: { enabled: false }, contextWindow: 200_000 });
+    const result = derivePiCompactionSettings({ contextWindow: null }, { enabled: false });
+    expect(result).toEqual({
+      compaction: { enabled: false },
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+    });
   });
 });

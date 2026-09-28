@@ -19,9 +19,9 @@
  *
  * ─── Why this is NOT in `bun run check` ──────────────────────────────
  *
- * `bun run check` is the `pre-push` hook. `bun audit` posts the lockfile's
+ * `bun run check` must stay runnable offline. `bun audit` posts the lockfile's
  * package set to the npm bulk-advisory endpoint, so wiring it into `check`
- * would make every push require the network and fail on a plane. It runs as a
+ * would make the local gate require the network and fail on a plane. It runs as a
  * CI job instead (`.github/workflows/security.yml`), and `bun run audit:deps`
  * runs the identical check locally.
  *
@@ -136,14 +136,13 @@ const REASONS = {
   /**
    * `@google/genai` is an optional peer of `@earendil-works/pi-ai` and is
    * imported by pi-ai only on the Google provider path. Nothing in this repo
-   * imports it (grepped 2026-09-07), but Google IS a selectable model provider
-   * (`apps/api/src/data/pricing/google-ai.json`, `featured-models.json`), so
-   * the code loads whenever a run picks a Gemini model. Conditionally
-   * reachable, therefore treated as product code.
+   * imports it, and no api shape the platform maps (`MODEL_API_SHAPES`,
+   * `@appstrate/core/sidecar-types`) selects that path. It still ships in the
+   * product tree, so it is treated as product code.
    */
   googleGenai:
-    "Product tree via @google/genai ← @earendil-works/pi-ai. Loaded only when a run selects a " +
-    "Google model; no in-repo import of @google/genai.",
+    "Product tree via @google/genai ← @earendil-works/pi-ai. Loaded only on pi-ai's Google " +
+    "provider path, which no platform api shape selects; no in-repo import of @google/genai.",
 } as const;
 
 /**

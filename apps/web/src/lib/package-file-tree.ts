@@ -26,7 +26,7 @@ import type { components } from "../api/schema";
 /** One real file in the artifact, as returned by `GET .../files`. */
 export type PackageFileEntry = components["schemas"]["PackageFileEntry"];
 
-/** One staged file edit carried by the package PUT's `operations` field. */
+/** One staged file edit carried by the package PATCH's `operations` field. */
 export type PackageFileWriteOperation = components["schemas"]["PackageFileWriteOperation"];
 
 /**

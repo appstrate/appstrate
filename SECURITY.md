@@ -153,17 +153,17 @@ Each run creates an isolated, ephemeral environment with two containers and a de
     ║  │ - NO RUN_TOKEN        │ ← no host access ║
     ║  │ - NO PLATFORM_API_URL │ ← no ExtraHosts  ║
     ║  │ - NO credentials      │                  ║
-    ║  │ - NO SIDECAR_URL      │ ← deleted from   ║
-    ║  │ - NO SIDECAR_AUTH_    │   env after boot ║
+    ║  │ - NO SIDECAR_URL      │ ← not in the     ║
+    ║  │ - NO SIDECAR_AUTH_    │   agent's env    ║
     ║  │      TOKEN            │                  ║
     ║  │ - Runs LLM agent code │                  ║
     ║  └───────────────────────┘                  ║
     ╚═════════════════════════════════════════════╝
 ```
 
-**What the agent can reach:** The sidecar container. The sidecar URL is injected into the container env at boot, read by `runtime-pi/entrypoint.ts` to (a) build the typed Pi tools (`{ns}__api_call`, `run_history`, `recall_memory` — see [How the agent makes authenticated API calls](#how-the-agent-makes-authenticated-api-calls) for the naming), and (b) configure the Pi SDK's chat-completion endpoint (`MODEL_BASE_URL=${SIDECAR_URL}/llm`). After both wirings complete, `SIDECAR_URL` **and** `SIDECAR_AUTH_TOKEN` are `delete`d from `process.env` — the LLM-facing bash extension never sees either. Deleting the URL removes only the convenience (`NO_PROXY` still names the sidecar host); deleting the per-run bearer is what removes the capability. Full design: `docs/architecture/SIDECAR.md`. Authenticated provider traffic flows exclusively through the typed MCP tools; the SDK's own completion traffic flows through the placeholder-substituting `/llm/*` proxy. The agent never holds a real LLM or provider key.
+**What the agent can reach:** The sidecar container. The sidecar URL is handed to `runtime-pi/entrypoint.ts` at boot to (a) build the typed Pi tools (`{ns}__api_call`, `run_history`, `recall_memory` — see [How the agent makes authenticated API calls](#how-the-agent-makes-authenticated-api-calls) for the naming), and (b) configure the Pi SDK's chat-completion endpoint (`MODEL_BASE_URL=${SIDECAR_URL}/llm`). `SIDECAR_URL` **and** `SIDECAR_AUTH_TOKEN` (like the run's sink credentials) are never in the environment of the process running the agent: the container's first process, `runtime-pi/launcher.ts`, starts the entrypoint without them and hands them over on its stdin, and both processes are non-dumpable, so no process of the agent uid can read them from its environment or through `/proc/<pid>/{environ,mem,fd}`. Withholding the URL removes only the convenience (`NO_PROXY` still names the sidecar host); withholding the per-run bearer is what removes the capability. Full design: `docs/architecture/SIDECAR.md`. Authenticated provider traffic flows exclusively through the typed MCP tools; the SDK's own completion traffic flows through the sidecar's `/llm/*` proxy, which forwards an API-key model's calls to the platform LLM proxy with the run token (the key never leaves the API process) and swaps an OAuth subscription's placeholder bearer for the real token. The agent never holds a real LLM or provider key.
 
-**What the agent cannot reach:** The platform API, the host machine, other run networks, the internet (except through the sidecar proxy), environment variables containing tokens, **or the sidecar URL itself** (deleted from env after runtime bootstrap).
+**What the agent cannot reach:** The platform API, the host machine, other run networks, the internet (except through the sidecar proxy), environment variables containing tokens, **or the sidecar URL itself** (never in the agent's environment).
 
 ---
 
@@ -200,7 +200,7 @@ Credentials are **never** passed to the agent container — not as environment v
 
 ### How the agent makes authenticated API calls
 
-The agent talks to the sidecar exclusively over the **Model Context Protocol** (Streamable HTTP, stateless JSON-RPC) at `POST /mcp`. The tool surface is registered as Pi tools at container boot (`runtime-pi/mcp/direct.ts`). The agent has no bash-level visibility into the sidecar URL — `SIDECAR_URL` is deleted from `process.env` immediately after the MCP client connects.
+The agent talks to the sidecar exclusively over the **Model Context Protocol** (Streamable HTTP, stateless JSON-RPC) at `POST /mcp`. The tool surface is registered as Pi tools at container boot (`runtime-pi/mcp/direct.ts`). The agent has no bash-level visibility into the sidecar URL — `SIDECAR_URL` is never in the environment of the process that runs the agent (the launcher hands it and the other run-scoped secrets to the entrypoint over stdin; see the isolation section above).
 
 The outbound-call tool is **namespaced per integration**: an integration with namespace `gmail` exposes `gmail__api_call` (and `gmail__api_upload` when its auth declares `upload_protocols`). There is no global call tool — the namespace is what binds a call to one integration's credentials and one authorization allowlist. (The pre-AFPS `provider_call` tool was removed; two prompt tests assert the name never reappears in an agent prompt.) Alongside them the sidecar registers the first-party `run_history` and `recall_memory` tools.
 
@@ -231,7 +231,7 @@ Inside the sidecar, the MCP `tools/call` handler delegates to the pure `executeA
 | Auth header | (not supplied — injected server-side)                                | `Bearer ya29.a0AfH6SM...` (real token) |
 | Response    | MCP `CallToolResult` — text body or `resource_link` for binary/large | —                                      |
 | Credentials | Never                                                                | Substituted by sidecar                 |
-| Sidecar URL | Never (deleted from env after bootstrap)                             | —                                      |
+| Sidecar URL | Never (not in the agent's environment)                               | —                                      |
 
 ### Credential access is scoped and audited
 
@@ -522,7 +522,11 @@ Four properties matter for the threat model:
   an authz denial can never be converted into a 500 that masks the 403.
 - **A credential can never exceed its ceiling.** Both halves of the union are
   intersected with `scopeCeiling` on the way into `permissions`, including an
-  empty OIDC scope claim.
+  empty OIDC scope claim. An act authorized by ownership rather than a role
+  grant (a user's own connections and pins under `/api/me`, notifications,
+  staged uploads, a file's creator lifecycle) reads `scopeCeiling` directly
+  through `requireCeiling` / `requireAnyCeiling` / `ceilingAllows` (RBAC spec
+  §7.1).
 - **Modules cannot widen core.** A module gates on core resources through
   `requireCorePermission` (typechecked against the core catalog) and on its own
   through `requireModulePermission`; the role→permission policy lives in

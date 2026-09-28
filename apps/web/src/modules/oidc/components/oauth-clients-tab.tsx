@@ -5,8 +5,8 @@
  * Lists registered clients and lets admins register, edit, rotate secrets
  * for, disable, and delete them.
  *
- * Feature-gated by `features.oidc` at the parent tab level — this component
- * should never render when the OIDC module is absent.
+ * Mounted only on routes declared `feature: "oidc"` (`lib/route-access.ts`),
+ * so the OIDC module is always loaded here.
  */
 
 import { useState } from "react";

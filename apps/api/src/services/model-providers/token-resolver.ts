@@ -22,16 +22,17 @@ import {
   findMissingIdentityClaims,
   loadCredentialRow,
   markCredentialNeedsReconnection,
-  pickOAuthTokenResponse,
+  pickOAuthToken,
   recordModelCredentialRefreshFailure,
   updateOAuthCredentialTokens,
   type OAuthBlob,
+  type OAuthToken,
 } from "./credentials.ts";
 import { getEnv } from "@appstrate/env";
 import { gone, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { dedupedRefresh } from "../../lib/deduped-refresh.ts";
-import { OAUTH_REFRESH_LEAD_MS, type OAuthTokenResponse } from "@appstrate/core/sidecar-types";
+import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 
 /** Credential row + decrypted blob + registry overlay. Internal helper return shape. */
 interface CredentialState {
@@ -76,7 +77,7 @@ async function loadCredentialState(
   };
 }
 
-function buildResolvedToken(state: CredentialState): OAuthTokenResponse {
+function buildResolvedToken(state: CredentialState): OAuthToken {
   // Trust the stored identity claims — they were populated by
   // `extractTokenIdentity` at import time and re-populated on every
   // refresh in `doRefresh`. Re-decoding the JWT on every sidecar poll
@@ -92,7 +93,7 @@ function buildResolvedToken(state: CredentialState): OAuthTokenResponse {
       missing,
     });
   }
-  return pickOAuthTokenResponse(state.blob);
+  return pickOAuthToken(state.blob);
 }
 
 /**
@@ -108,7 +109,7 @@ function buildResolvedToken(state: CredentialState): OAuthTokenResponse {
 export async function resolveOAuthTokenForSidecar(
   credentialId: string,
   expectedOrgId?: string,
-): Promise<OAuthTokenResponse> {
+): Promise<OAuthToken> {
   const state = await loadCredentialState(credentialId, expectedOrgId);
   if (state.blob.needsReconnection) {
     throw gone(
@@ -166,12 +167,12 @@ export async function forceRefreshOAuthModelProviderToken(
   credentialId: string,
   expectedOrgId?: string,
   options: { force?: boolean } = {},
-): Promise<OAuthTokenResponse> {
+): Promise<OAuthToken> {
   // Two dedup layers (in-process singleflight + cross-process Redis lock +
   // post-acquire re-read), owned by `dedupedRefresh`. The lock-winner may have
   // written a fresh token while we were waiting — the re-read short-circuit
   // returns it without burning the (potentially just-rotated) refresh_token.
-  return dedupedRefresh<OAuthTokenResponse>(credentialId, {
+  return dedupedRefresh<OAuthToken>(credentialId, {
     lockKey: `oauth-refresh:${credentialId}`,
     lockLabel: "oauth-refresh",
     force: options.force ?? true,
@@ -195,10 +196,7 @@ export async function forceRefreshOAuthModelProviderToken(
   });
 }
 
-async function doRefresh(
-  credentialId: string,
-  expectedOrgId?: string,
-): Promise<OAuthTokenResponse> {
+async function doRefresh(credentialId: string, expectedOrgId?: string): Promise<OAuthToken> {
   const state = await loadCredentialState(credentialId, expectedOrgId);
   if (state.blob.needsReconnection) {
     throw gone(
@@ -292,7 +290,7 @@ async function doRefresh(
     ...(accountId ? { accountId } : {}),
   });
 
-  return pickOAuthTokenResponse({
+  return pickOAuthToken({
     accessToken: parsed.accessToken,
     expiresAt: expiresAtMs,
     accountId,

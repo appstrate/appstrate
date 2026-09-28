@@ -1107,7 +1107,8 @@ describe("Agents API", () => {
         { headers: authHeaders(ctx) },
       );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { memories: Array<{ runId: string }> };
+      const body = (await res.json()) as { object: string; memories: Array<{ runId: string }> };
+      expect(body.object).toBe("agent_persistence");
       expect(body.memories).toHaveLength(2);
       expect(body.memories.every((m) => m.runId === r1.id)).toBe(true);
     });
@@ -1233,7 +1234,7 @@ describe("Agents API", () => {
     });
   });
 
-  describe("PUT /api/agents/:scope/:name/model", () => {
+  describe("PATCH /api/agents/:scope/:name/model", () => {
     const SYSTEM_PRESET = "system-agent-model-test";
 
     beforeAll(() => {
@@ -1263,9 +1264,9 @@ describe("Agents API", () => {
       });
     }
 
-    function putModel(modelId: string | null, headers = authHeaders(ctx)) {
+    function patchModel(modelId: string | null, headers = authHeaders(ctx)) {
       return app.request("/api/agents/@myorg/model-agent/model", {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({ modelId }),
       });
@@ -1276,7 +1277,7 @@ describe("Agents API", () => {
       const key = await seedOrgModelProviderKey({ orgId: ctx.orgId });
       const model = await seedOrgModel({ orgId: ctx.orgId, credentialId: key.id });
 
-      const res = await putModel(model.id);
+      const res = await patchModel(model.id);
       expect(res.status).toBe(200);
       const body = (await res.json()) as { modelId: string | null } & Record<string, unknown>;
       // Bare model-setting resource — no `success` scrap (#657).
@@ -1284,7 +1285,7 @@ describe("Agents API", () => {
       expect("success" in body).toBe(false);
 
       // Reverting to org default returns the null resource, not a stub.
-      const revert = await putModel(null);
+      const revert = await patchModel(null);
       expect(revert.status).toBe(200);
       const revertBody = (await revert.json()) as { modelId: string | null };
       expect(revertBody.modelId).toBeNull();
@@ -1293,7 +1294,7 @@ describe("Agents API", () => {
     it("accepts a system model preset id", async () => {
       await seedModelAgent();
 
-      const res = await putModel(SYSTEM_PRESET);
+      const res = await patchModel(SYSTEM_PRESET);
       expect(res.status).toBe(200);
       const body = (await res.json()) as { modelId: string | null };
       expect(body.modelId).toBe(SYSTEM_PRESET);
@@ -1302,7 +1303,7 @@ describe("Agents API", () => {
     it("rejects an unknown model id with 404 and does not persist it (#960)", async () => {
       await seedModelAgent();
 
-      const res = await putModel("raw-upstream-model-name");
+      const res = await patchModel("raw-upstream-model-name");
       expect(res.status).toBe(404);
 
       const get = await app.request("/api/agents/@myorg/model-agent/model", {
@@ -1325,7 +1326,7 @@ describe("Agents API", () => {
       });
 
       const res = await app.request("/api/agents/@myorg/model-agent/model", {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ modelId: model.id, generation: { temperature: 0.4 } }),
       });
@@ -1352,7 +1353,7 @@ describe("Agents API", () => {
       await seedModelAgent();
 
       const res = await app.request("/api/agents/@myorg/model-agent/model", {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ modelId: null, generation: { temperature: 0.4 } }),
       });
@@ -1382,7 +1383,7 @@ describe("Agents API", () => {
         modelId: "gpt-5.6-luna",
       });
 
-      const res = await putModel(model.id);
+      const res = await patchModel(model.id);
 
       expect(res.status).toBe(200);
       expect(await res.json()).toMatchObject({ modelId: model.id, generation: {} });
@@ -1397,7 +1398,7 @@ describe("Agents API", () => {
         credentialId: otherKey.id,
       });
 
-      const res = await putModel(otherModel.id);
+      const res = await patchModel(otherModel.id);
       expect(res.status).toBe(404);
 
       const get = await app.request("/api/agents/@myorg/model-agent/model", {

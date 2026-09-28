@@ -471,8 +471,8 @@ describe("token-aware spill — env-var configuration via createApp", () => {
   it("boots (does not throw) when modelMaxTokens == modelContextWindow — the run_b6e99890 regression", () => {
     // Exercises the EXACT crash site (`buildSidecarRuntimeDeps`), not just
     // the TokenBudget constructor: the launcher forwards a resolved model's
-    // `(contextWindow, maxTokens)` verbatim, and Devstral 2512 carries the
-    // impossible `256000 / 256000` from the LiteLLM catalog. Pre-fix this
+    // `(contextWindow, maxTokens)` verbatim, and Devstral 2512 carried the
+    // impossible `256000 / 256000` in the catalog of the time. Pre-fix this
     // threw → sidecar exited code 1 → no heartbeat → run failed after 60s.
     const appDeps = makeDeps({
       config: {

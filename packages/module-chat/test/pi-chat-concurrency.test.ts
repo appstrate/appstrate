@@ -3,7 +3,7 @@
 /**
  * Bounded concurrency for the in-process Pi chat engine: the
  * counting gate (cap via CHAT_PI_MAX_CONCURRENCY, default 6), the 429 capacity
- * response, and the slot-release stream wrapper. The wrapper is the leak guard
+ * error, and the slot-release stream wrapper. The wrapper is the leak guard
  * — it must fire exactly once on every terminal path: normal completion,
  * downstream cancellation (client disconnected while the persistence drain
  * also stopped), and source error.
@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   acquirePiChatSlot,
-  chatCapacityResponse,
+  chatCapacityError,
   piChatConcurrencyStats,
   piChatMaxConcurrency,
   warnIfDefaultChatConcurrency,
@@ -20,8 +20,16 @@ import {
   resetPiChatConcurrencyStats,
   type PiChatSlot,
 } from "../src/pi-chat/concurrency.ts";
+import { _resetChatEnvForTests } from "../src/env.ts";
 
 const ENV_VAR = "CHAT_PI_MAX_CONCURRENCY";
+
+/** Set (or clear) the cap; the module env is parsed once, so drop its cache. */
+function setCap(value: string | undefined): void {
+  if (value === undefined) delete process.env[ENV_VAR];
+  else process.env[ENV_VAR] = value;
+  _resetChatEnvForTests();
+}
 
 /** Acquire every remaining slot so the gate is saturated; return them for release. */
 function drainAllSlots(): PiChatSlot[] {
@@ -35,34 +43,39 @@ function drainAllSlots(): PiChatSlot[] {
 
 describe("piChatMaxConcurrency", () => {
   afterEach(() => {
-    delete process.env[ENV_VAR];
+    setCap(undefined);
   });
 
   it("defaults to 6 while cloud capacity remains unvalidated", () => {
-    delete process.env[ENV_VAR];
+    setCap(undefined);
     expect(piChatMaxConcurrency()).toBe(6);
   });
 
   it("reads a positive integer from the env var", () => {
-    process.env[ENV_VAR] = "2";
+    setCap("2");
     expect(piChatMaxConcurrency()).toBe(2);
   });
 
-  for (const invalid of ["0", "-3", "abc", ""]) {
-    it(`falls back to the default on invalid input ${JSON.stringify(invalid)}`, () => {
-      process.env[ENV_VAR] = invalid;
-      expect(piChatMaxConcurrency()).toBe(6);
+  it("treats an empty value as unset", () => {
+    setCap("");
+    expect(piChatMaxConcurrency()).toBe(6);
+  });
+
+  for (const invalid of ["0", "-3", "abc", "2.5"]) {
+    it(`fails on invalid input ${JSON.stringify(invalid)} instead of falling back`, () => {
+      setCap(invalid);
+      expect(() => piChatMaxConcurrency()).toThrow(/CHAT_PI_MAX_CONCURRENCY/);
     });
   }
 });
 
 describe("acquirePiChatSlot", () => {
   afterEach(() => {
-    delete process.env[ENV_VAR];
+    setCap(undefined);
   });
 
   it("returns null once the cap is reached, and frees on release", () => {
-    process.env[ENV_VAR] = "1";
+    setCap("1");
     const slots = drainAllSlots();
     expect(slots.length).toBeGreaterThanOrEqual(1);
     expect(acquirePiChatSlot()).toBeNull();
@@ -75,7 +88,7 @@ describe("acquirePiChatSlot", () => {
   });
 
   it("release is idempotent — double release never over-frees the gate", () => {
-    process.env[ENV_VAR] = "1";
+    setCap("1");
     const slots = drainAllSlots();
     const slot = slots[0]!;
     slot.release();
@@ -89,15 +102,13 @@ describe("acquirePiChatSlot", () => {
   });
 });
 
-describe("chatCapacityResponse", () => {
-  it("returns an RFC 9457 429 with retry-after", async () => {
-    const res = chatCapacityResponse();
-    expect(res.status).toBe(429);
-    expect(res.headers.get("content-type")).toBe("application/problem+json");
-    expect(res.headers.get("retry-after")).toBe("5");
-    const body = (await res.json()) as { code: string; retry_after: number };
-    expect(body.code).toBe("chat_capacity");
-    expect(body.retry_after).toBe(5);
+describe("chatCapacityError", () => {
+  it("is an RFC 9457 429 carrying retry_after", () => {
+    const err = chatCapacityError();
+    expect(err.status).toBe(429);
+    expect(err.code).toBe("chat_capacity");
+    expect(err.retryAfter).toBe(5);
+    expect(err.toProblemDetail("req_x")).toMatchObject({ retry_after: 5, request_id: "req_x" });
   });
 });
 
@@ -163,12 +174,12 @@ describe("releaseOnClose", () => {
 
 describe("capacity signal for sizing the cap", () => {
   afterEach(() => {
-    delete process.env[ENV_VAR];
+    setCap(undefined);
     resetPiChatConcurrencyStats();
   });
 
   it("records the high-water mark, so a quiet process reads differently from a pinned one", () => {
-    process.env[ENV_VAR] = "3";
+    setCap("3");
     resetPiChatConcurrencyStats();
     const a = acquirePiChatSlot()!;
     const b = acquirePiChatSlot()!;
@@ -183,7 +194,7 @@ describe("capacity signal for sizing the cap", () => {
   });
 
   it("counts every refusal", () => {
-    process.env[ENV_VAR] = "1";
+    setCap("1");
     resetPiChatConcurrencyStats();
     const held = acquirePiChatSlot()!;
     expect(acquirePiChatSlot()).toBeNull();
@@ -192,33 +203,13 @@ describe("capacity signal for sizing the cap", () => {
     held.release();
   });
 
-  it("falls back to the default on absent or invalid input, and honours a valid cap", () => {
-    delete process.env[ENV_VAR];
-    expect(piChatMaxConcurrency()).toBe(6);
-    process.env[ENV_VAR] = "nope";
-    expect(piChatMaxConcurrency()).toBe(6);
-    process.env[ENV_VAR] = "0";
-    expect(piChatMaxConcurrency()).toBe(6);
-    process.env[ENV_VAR] = "32";
-    expect(piChatMaxConcurrency()).toBe(32);
-  });
-
-  it("treats an invalid cap as NOT an operator decision, so a typo still warns", () => {
-    // Separate from the cap assertions above on purpose: `piChatMaxConcurrency`
-    // surfaces only `max`, so it cannot distinguish "fell back to 6" from
-    // "operator chose 6". `warnIfDefaultChatConcurrency` is the only thing that
-    // reads `fromEnv`, and its return is that decision. Without this, a
-    // regression treating `"nope"` as deliberate would silence the boot warning
-    // with every other test still green.
-    delete process.env[ENV_VAR];
+  it("warns only when the operator set no cap — the default value, chosen, is a decision", () => {
+    setCap(undefined);
     expect(warnIfDefaultChatConcurrency()).toBe(true);
-    process.env[ENV_VAR] = "nope";
-    expect(warnIfDefaultChatConcurrency()).toBe(true);
-    process.env[ENV_VAR] = "0";
-    expect(warnIfDefaultChatConcurrency()).toBe(true);
-    process.env[ENV_VAR] = "6"; // the default value, but chosen — not a fallback
+    setCap("6");
     expect(warnIfDefaultChatConcurrency()).toBe(false);
-    process.env[ENV_VAR] = "32";
+    setCap("32");
+    expect(piChatMaxConcurrency()).toBe(32);
     expect(warnIfDefaultChatConcurrency()).toBe(false);
   });
 });

@@ -386,9 +386,16 @@ describe("resolveAppstratePort (non-interactive preflight)", () => {
   });
 
   it("returns the requested port when it is free", async () => {
-    const port = await pickEphemeralPort();
-    const out = await resolveAppstratePort(String(port), /* nonInteractive */ true);
-    expect(out).toBe(port);
+    const out = await resolveAppstratePort(
+      "4000",
+      /* nonInteractive */ true,
+      "fresh",
+      undefined,
+      undefined,
+      undefined,
+      { isPortAvailable: portIsFree },
+    );
+    expect(out).toBe(4000);
   });
 
   it("throws a helpful error when the port is taken (non-interactive)", async () => {
@@ -411,10 +418,19 @@ describe("resolveAppstratePort (non-interactive preflight)", () => {
   });
 
   it("honors APPSTRATE_PORT when --port is absent", async () => {
-    const port = await pickEphemeralPort();
-    process.env.APPSTRATE_PORT = String(port);
-    const out = await resolveAppstratePort(undefined, true);
-    expect(out).toBe(port);
+    process.env.APPSTRATE_PORT = "4000";
+    const out = await resolveAppstratePort(
+      undefined,
+      true,
+      "fresh",
+      undefined,
+      undefined,
+      undefined,
+      {
+        isPortAvailable: portIsFree,
+      },
+    );
+    expect(out).toBe(4000);
   });
 });
 
@@ -460,17 +476,11 @@ describe("resolveAppstratePort auto-pick (--yes path)", () => {
     // Auto-pick must be a conflict-only fallback, never a silent drift
     // when the user's chosen port works. A regression here would break
     // users who pass `--yes --port 4000` with :4000 free.
-    const port = await pickEphemeralPort();
-    const out = await resolveAppstratePort(
-      String(port),
-      true,
-      "fresh",
-      undefined,
-      undefined,
-      undefined,
-      { autoPick: true },
-    );
-    expect(out).toBe(port);
+    const out = await resolveAppstratePort("4000", true, "fresh", undefined, undefined, undefined, {
+      autoPick: true,
+      isPortAvailable: portIsFree,
+    });
+    expect(out).toBe(4000);
   });
 
   it("scans past two contiguous held ports (the common stale-dev-server shape)", async () => {
@@ -516,8 +526,7 @@ describe("resolveAppstratePort auto-pick (--yes path)", () => {
     // The env var defines the USER's intent. Auto-pick only kicks in if
     // THAT port is busy. If the user set APPSTRATE_PORT=<free port>,
     // they must get that exact port — no drift, no log noise.
-    const port = await pickEphemeralPort();
-    process.env.APPSTRATE_PORT = String(port);
+    process.env.APPSTRATE_PORT = "4000";
     const out = await resolveAppstratePort(
       undefined,
       true,
@@ -525,9 +534,9 @@ describe("resolveAppstratePort auto-pick (--yes path)", () => {
       undefined,
       undefined,
       undefined,
-      { autoPick: true },
+      { autoPick: true, isPortAvailable: portIsFree },
     );
-    expect(out).toBe(port);
+    expect(out).toBe(4000);
   });
 
   it("does not trigger in interactive mode (autoPick is non-interactive only)", async () => {
@@ -779,19 +788,9 @@ describe("resolveAppstratePort upgrade cross-check (findRunningComposeProject)",
   });
 });
 
-async function pickEphemeralPort(): Promise<number> {
-  const srv = createServer();
-  srv.unref();
-  const port = await new Promise<number>((resolve, reject) => {
-    srv.once("error", reject);
-    srv.listen(0, "0.0.0.0", () => {
-      const addr = srv.address();
-      if (addr && typeof addr === "object") resolve(addr.port);
-      else reject(new Error("no port"));
-    });
-  });
-  await new Promise<void>((r) => srv.close(() => r()));
-  return port;
+/** A held port reads as busy and a released one races the ephemeral pool (#1563). */
+async function portIsFree(): Promise<boolean> {
+  return true;
 }
 
 async function holdEphemeralPort(holders: Server[]): Promise<number> {

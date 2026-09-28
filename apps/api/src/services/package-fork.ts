@@ -12,9 +12,17 @@ import { zipArtifact } from "@appstrate/core/zip";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import { getPackageById, createOrgItem } from "./package-items/crud.ts";
 import { uploadPackageFiles } from "./package-items/storage.ts";
-import { CONFIG_BY_TYPE, type PackageTypeConfig } from "./package-items/config.ts";
+import {
+  CONFIG_BY_TYPE,
+  assertManifestConforms,
+  type PackageTypeConfig,
+} from "./package-items/config.ts";
 
-import { getLatestVersionId, createVersionAndUpload } from "./package-versions.ts";
+import {
+  getLatestVersionId,
+  createVersionAndUpload,
+  versionArtifactUnavailable,
+} from "./package-versions.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { unzipPackageArchive } from "./package-archive.ts";
 import { db } from "@appstrate/db/client";
@@ -99,7 +107,7 @@ async function forkWithConfig(
 
   // Download the source version ZIP
   const sourceZip = await downloadVersionZip(sourcePackageId, versionRow.version);
-  if (!sourceZip) return { code: "NO_PUBLISHED_VERSION" };
+  if (!sourceZip) throw versionArtifactUnavailable(sourcePackageId, versionRow.version);
 
   const zipEntries = unzipPackageArchive(sourceZip);
 
@@ -184,6 +192,12 @@ async function forkWithConfig(
     });
     updatedManifest.type = cfg.type;
   }
+
+  // Unlike the schema check above, the type's write-path manifest policy DOES
+  // reject: the fork mints a draft that every connect reads, and a camelCase
+  // identity claim key there would key its new connections on the fallback in
+  // silence. The source's owner fixes it by publishing a conforming version.
+  assertManifestConforms(cfg.type, updatedManifest, `Source version ${versionRow.version}: `);
 
   // `packages.draft_content` of the fork, read from the SAME declaration every
   // other writer of that column reads (`PACKAGE_CONTENT_ENTRY`) rather than

@@ -45,8 +45,8 @@ export const EXEC_NETWORK_PREFIX = "appstrate-exec-";
 export const WORKSPACE_VOLUME_PREFIX = "appstrate-ws-";
 
 /**
- * Name of the shared egress network sidecars (and `skipSidecar` agents)
- * attach to for DNS + internet access. Durable infrastructure: it is
+ * Name of the shared egress network sidecars attach to for DNS + internet
+ * access. Durable infrastructure: it is
  * resolved **by name at use time** (`ensureNetwork`), never removed by
  * `shutdown()` nor by the boot orphan sweep — several API processes may
  * share one Docker daemon (dev server + integration test app, blue/green
@@ -208,12 +208,15 @@ export async function ensureImage(image: string): Promise<void> {
  */
 export const IMAGE_PIN_PREFIX = "appstrate-imagepin-";
 
-/** Label carrying the image reference a pin container currently holds. */
+/** Image a pin holds — informational (`docker ps --filter`); the spec label decides drift. */
 const IMAGE_PIN_IMAGE_LABEL = "appstrate.pin.image";
+
+/** Label carrying the fingerprint of the container config a pin was created from. */
+const IMAGE_PIN_SPEC_LABEL = "appstrate.pin.spec";
 
 interface PinInspectResult {
   id: string;
-  image: string;
+  spec: string;
   running: boolean;
 }
 
@@ -228,10 +231,10 @@ async function inspectPinContainer(name: string): Promise<PinInspectResult | nul
   };
   return {
     id: data.Id,
-    // Read the pin's own label, not `Config.Image`: Docker rewrites the
-    // latter to a digest in some versions, which would make every reconcile
-    // pass think the pin drifted and recreate it forever.
-    image: data.Config?.Labels?.[IMAGE_PIN_IMAGE_LABEL] ?? "",
+    // Read the pin's own label, not the inspected config: Docker rewrites
+    // `Config.Image` to a digest in some versions, which would make every
+    // reconcile pass think the pin drifted and recreate it forever.
+    spec: data.Config?.Labels?.[IMAGE_PIN_SPEC_LABEL] ?? "",
     running: data.State?.Running === true,
   };
 }
@@ -239,29 +242,20 @@ async function inspectPinContainer(name: string): Promise<PinInspectResult | nul
 /**
  * Reconcile one pin container for `image` under the stable slot name
  * `${IMAGE_PIN_PREFIX}${slot}`. Idempotent and convergent: a pin already
- * holding this exact reference and running is left alone; one holding a stale
- * reference (the usual case — a release bumped the image tag) is replaced, so
- * pins can never drift behind the images the platform actually launches.
+ * created from this exact spec and running is left alone; one whose spec drifted
+ * (image tag or pin config) is replaced, so pins never lag behind what the
+ * platform launches.
  *
- * Returns what the pass did, for the caller's log line.
+ * Returns `"unchanged"` (live pin matches), `"created"` (no live pin held the
+ * image: absent or stopped) or `"replaced"` (a live pin's spec drifted).
  */
 export async function ensureImagePin(
   image: string,
   slot: string,
 ): Promise<"unchanged" | "created" | "replaced"> {
   const name = `${IMAGE_PIN_PREFIX}${slot}`;
-  const existing = await inspectPinContainer(name);
 
-  if (existing && existing.image === image && existing.running) return "unchanged";
-
-  if (existing) {
-    // Wrong image, or right image but not running. Not-running still pins the
-    // image against `image prune`, but NOT against `container prune`, which
-    // reaps stopped containers wholesale — so converge on "running" either way.
-    await removeContainer(existing.id).catch(() => {});
-  }
-
-  const body = {
+  const config = {
     Image: image,
     // Override whatever the image declares — a pin must never run the real
     // runtime. `sleep infinity` is available in every runtime image we ship
@@ -269,6 +263,9 @@ export async function ensureImagePin(
     // reference, so a missing `sleep` degrades rather than breaks.
     Entrypoint: ["sleep"],
     Cmd: ["infinity"],
+    // A pin runs `sleep`, so the image's HEALTHCHECK would probe a process
+    // that isn't there (#1521).
+    Healthcheck: { Test: ["NONE"] },
     HostConfig: {
       // No network, no privileges, minimal resources: this process must be
       // incapable of doing anything except existing.
@@ -282,10 +279,28 @@ export async function ensureImagePin(
       // exactly when a nightly janitor would strike.
       RestartPolicy: { Name: "unless-stopped" },
     },
+  };
+  // Fingerprint the whole config, image included, so any change converges.
+  const spec = new Bun.CryptoHasher("sha256").update(JSON.stringify(config)).digest("hex");
+
+  const existing = await inspectPinContainer(name);
+
+  if (existing && existing.spec === spec && existing.running) return "unchanged";
+
+  if (existing) {
+    // Stale spec, or right spec but not running. Not-running still pins the
+    // image against `image prune`, but NOT against `container prune`, which
+    // reaps stopped containers wholesale — so converge on "running" either way.
+    await removeContainer(existing.id).catch(() => {});
+  }
+
+  const body = {
+    ...config,
     Labels: {
       "appstrate.role": "image-pin",
       "appstrate.pin.slot": slot,
       [IMAGE_PIN_IMAGE_LABEL]: image,
+      [IMAGE_PIN_SPEC_LABEL]: spec,
     },
   };
 
@@ -303,7 +318,8 @@ export async function ensureImagePin(
   const created = (await res.json()) as { Id: string };
   await startContainer(created.Id);
 
-  return existing ? "replaced" : "created";
+  // A running pin reaching here necessarily had a drifted spec.
+  return existing?.running ? "replaced" : "created";
 }
 
 interface CreateContainerOptions {
@@ -1055,7 +1071,10 @@ let platformNetworkCache: { networkId: string; hostname: string } | null | undef
  * Uses os.hostname() (Docker sets hostname = container ID prefix) to inspect
  * ourselves and find the first non-default-bridge network.
  * Returns null when running outside Docker (local dev).
- * Result is cached after the first call.
+ * A 5xx, a transport error or an unreadable body throws uncached,
+ * so an outage at boot is retried rather than falling back to `PLATFORM_API_URL`
+ * / host-gateway for the process lifetime (#1129). Any other status is
+ * definitive (404 = not a container, 401/403 = proxy ACL): null is cached.
  */
 export async function detectPlatformNetwork(): Promise<{
   networkId: string;
@@ -1063,53 +1082,55 @@ export async function detectPlatformNetwork(): Promise<{
 } | null> {
   if (platformNetworkCache !== undefined) return platformNetworkCache;
 
-  try {
-    const containerName = hostname();
-    const res = await dockerFetch(`/containers/${containerName}/json`);
+  const containerName = hostname();
+  const res = await dockerFetch(`/containers/${containerName}/json`);
 
-    if (!res.ok) {
-      // 404 = not running in Docker (local dev)
-      platformNetworkCache = null;
-      return null;
+  if (res.status >= 500) {
+    throw new Error(`Docker inspect of the platform container failed: HTTP ${res.status}`);
+  }
+  if (!res.ok) {
+    if (res.status !== 404) {
+      logger.warn(
+        "Could not inspect the platform container — falling back to PLATFORM_API_URL / host-gateway",
+        { status: res.status },
+      );
     }
-
-    const data = (await res.json()) as {
-      Config?: { Hostname?: string };
-      NetworkSettings?: {
-        Networks?: Record<
-          string,
-          { NetworkID?: string; Aliases?: string[] | null; IPAddress?: string; Gateway?: string }
-        >;
-      };
-    };
-
-    const networks = data.NetworkSettings?.Networks;
-    if (!networks) {
-      platformNetworkCache = null;
-      return null;
-    }
-
-    // Find the first non-default network (skip "bridge" and "host")
-    const DEFAULT_NETWORKS = new Set(["bridge", "host", "none"]);
-    for (const [name, info] of Object.entries(networks)) {
-      if (DEFAULT_NETWORKS.has(name) || !info.NetworkID) continue;
-
-      // Use the first alias or fall back to the container hostname
-      const dnsName = info.Aliases?.[0] ?? data.Config?.Hostname ?? containerName;
-
-      platformNetworkCache = { networkId: info.NetworkID, hostname: dnsName };
-      logger.info("Detected platform Docker network", {
-        network: name,
-        networkId: info.NetworkID,
-        hostname: dnsName,
-      });
-      return platformNetworkCache;
-    }
-
-    platformNetworkCache = null;
-    return null;
-  } catch {
     platformNetworkCache = null;
     return null;
   }
+
+  const data = (await res.json()) as {
+    Config?: { Hostname?: string };
+    NetworkSettings?: {
+      Networks?: Record<
+        string,
+        { NetworkID?: string; Aliases?: string[] | null; IPAddress?: string; Gateway?: string }
+      >;
+    };
+  };
+
+  // Find the first non-default network (skip "bridge" and "host")
+  const DEFAULT_NETWORKS = new Set(["bridge", "host", "none"]);
+  for (const [name, info] of Object.entries(data.NetworkSettings?.Networks ?? {})) {
+    if (DEFAULT_NETWORKS.has(name) || !info.NetworkID) continue;
+
+    // Use the first alias or fall back to the container hostname
+    const dnsName = info.Aliases?.[0] ?? data.Config?.Hostname ?? containerName;
+
+    platformNetworkCache = { networkId: info.NetworkID, hostname: dnsName };
+    logger.info("Detected platform Docker network", {
+      network: name,
+      networkId: info.NetworkID,
+      hostname: dnsName,
+    });
+    return platformNetworkCache;
+  }
+
+  platformNetworkCache = null;
+  return null;
+}
+
+/** Test-only: forget the cached detection result. */
+export function _resetPlatformNetworkCacheForTesting(): void {
+  platformNetworkCache = undefined;
 }

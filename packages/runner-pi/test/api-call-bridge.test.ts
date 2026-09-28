@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `{ns}__api_call` Pi bridge (the no-sidecar / CLI path): a tool-level
+ * `{ns}__api_call` Pi bridge (the CLI path): a tool-level
  * `isError` result is a Pi tool error reported as `api_call.completed`, while
  * an execution throw is reported as `api_call.failed`.
  */

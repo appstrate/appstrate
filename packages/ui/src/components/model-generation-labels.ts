@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { mapModelReasoningLevels } from "@appstrate/core/model-generation";
+import {
+  DEFAULT_MODEL_REASONING_LEVEL,
+  mapModelReasoningLevels,
+} from "@appstrate/core/model-generation";
 import type { ModelGenerationControlLabels } from "./model-generation-controls.tsx";
 
 /**
@@ -14,14 +17,18 @@ import type { ModelGenerationControlLabels } from "./model-generation-controls.t
  * `t` must already be bound to a namespace that resolves `models.generation.*`
  * (`settings`, which is a boot namespace and therefore loaded on every route).
  */
-export function buildGenerationLabels(t: (key: string) => string): ModelGenerationControlLabels {
+export function buildGenerationLabels(
+  t: (key: string, options?: { level: string }) => string,
+): ModelGenerationControlLabels {
+  const defaultLevel = { level: t(`models.generation.levels.${DEFAULT_MODEL_REASONING_LEVEL}`) };
   return {
     temperature: t("models.generation.temperature"),
     temperatureHint: t("models.generation.temperatureHint"),
     reasoning: t("models.generation.reasoning"),
-    reasoningHint: t("models.generation.reasoningHint"),
+    reasoningHint: t("models.generation.reasoningHint", defaultLevel),
     inherit: t("models.generation.inherit"),
     inheritShort: t("models.generation.inheritShort"),
+    reasoningInherit: t("models.generation.reasoningInherit", defaultLevel),
     unsupported: t("models.generation.unsupported"),
     unsupportedShort: t("models.generation.unsupportedShort"),
     levels: mapModelReasoningLevels((level) => t(`models.generation.levels.${level}`)),

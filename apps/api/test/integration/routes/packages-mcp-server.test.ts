@@ -25,6 +25,7 @@
  *   6. UPDATE (`PUT`) — the author/stored direction asymmetry that gate rests on.
  */
 
+import { ifMatch } from "../../helpers/etag.ts";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { zipSync } from "fflate";
 import { getTestApp } from "../../helpers/app.ts";
@@ -255,9 +256,12 @@ describe("mcp-server package routes", () => {
         entryPoint: "missing.js",
       });
       const update = await app.request(`/api/packages/mcp-servers/${SERVER_ID}`, {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ manifest, lock_version: row!.lockVersion }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(row!.lockVersion),
+        }),
+        body: JSON.stringify({ manifest }),
       });
       expect(update.status).toBe(200);
 
@@ -531,7 +535,7 @@ describe("mcp-server package routes", () => {
   // and un-publishable).
   // ═══════════════════════════════════════════════
 
-  describe("PUT /api/packages/mcp-servers/:scope/:name — author vs stored direction", () => {
+  describe("PATCH /api/packages/mcp-servers/:scope/:name — author vs stored direction", () => {
     const PUT_ID = "@pkgorg/put-server";
 
     async function currentLockVersion(packageId: string): Promise<number> {
@@ -554,8 +558,11 @@ describe("mcp-server package routes", () => {
 
     async function put(packageId: string, body: Record<string, unknown>): Promise<Response> {
       return await app.request(`/api/packages/mcp-servers/${packageId}`, {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(await currentLockVersion(packageId)),
+        }),
         body: JSON.stringify(body),
       });
     }
@@ -585,7 +592,6 @@ describe("mcp-server package routes", () => {
 
       const res = await put(PUT_ID, {
         manifest: skillManifestFor(PUT_ID),
-        lock_version: await currentLockVersion(PUT_ID),
       });
 
       expect(res.status).toBe(400);
@@ -608,7 +614,6 @@ describe("mcp-server package routes", () => {
 
       const res = await put(PUT_ID, {
         content: '{"edited":true}',
-        lock_version: await currentLockVersion(PUT_ID),
       });
 
       expect(res.status).toBe(200);
@@ -635,13 +640,11 @@ describe("mcp-server package routes", () => {
 
       const contentOnly = await put(PUT_ID, {
         content: '{"edited":true}',
-        lock_version: await currentLockVersion(PUT_ID),
       });
       expect(contentOnly.status).toBe(200);
 
       const authored = await put(PUT_ID, {
         manifest: skillManifestFor(PUT_ID),
-        lock_version: await currentLockVersion(PUT_ID),
       });
       expect(authored.status).toBe(400);
       const body = (await authored.json()) as { errors?: { field: string }[] };

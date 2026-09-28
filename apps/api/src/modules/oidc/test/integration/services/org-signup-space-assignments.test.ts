@@ -43,19 +43,19 @@ describe("OIDC signup space assignments", () => {
     await expect(
       orgClient({
         signupRole: "admin",
-        signupSpaceAssignments: [{ space_id: owner.defaultSpaceId, preset_role: "viewer" }],
+        signupSpaceAssignments: [{ spaceId: owner.defaultSpaceId, preset_role: "viewer" }],
       }),
     ).rejects.toThrow("must be empty");
     expect((await orgClient({ signupRole: "member" })).signupSpaceAssignments).toEqual([]);
   });
 
   it("persists and updates the policy, including the cached token-mint path", async () => {
-    const first = [{ space_id: owner.defaultSpaceId, preset_role: "viewer" as const }];
+    const first = [{ spaceId: owner.defaultSpaceId, preset_role: "viewer" as const }];
     const client = await orgClient({ signupRole: "guest", signupSpaceAssignments: first });
     expect(client.signupSpaceAssignments).toEqual(first);
     expect((await loadClientSignupPolicy(client.clientId))?.signupSpaceAssignments).toEqual(first);
     const other = await seedSpace({ orgId: owner.orgId, visibility: "private" });
-    const second = [{ space_id: other.id, preset_role: "operator" as const }];
+    const second = [{ spaceId: other.id, preset_role: "operator" as const }];
     expect(
       (await updateClient(client.clientId, { signupSpaceAssignments: second }))
         ?.signupSpaceAssignments,
@@ -82,16 +82,14 @@ describe("OIDC signup space assignments", () => {
     await expect(
       orgClient({
         signupRole: "guest",
-        signupSpaceAssignments: [{ space_id: foreign.defaultSpaceId, preset_role: "viewer" }],
+        signupSpaceAssignments: [{ spaceId: foreign.defaultSpaceId, preset_role: "viewer" }],
       }),
     ).rejects.toThrow("not found in this organization");
     const foreignRole = await seedSpaceRole({ orgId: foreign.orgId });
     await expect(
       orgClient({
         signupRole: "guest",
-        signupSpaceAssignments: [
-          { space_id: owner.defaultSpaceId, custom_role_id: foreignRole.id },
-        ],
+        signupSpaceAssignments: [{ spaceId: owner.defaultSpaceId, custom_role_id: foreignRole.id }],
       }),
     ).rejects.toThrow("not found in this organization");
     const spaceClient = await createClient({
@@ -113,8 +111,8 @@ describe("OIDC signup space assignments", () => {
       allowSignup: true,
       signupRole: "guest" as const,
       signupSpaceAssignments: [
-        { space_id: owner.defaultSpaceId, preset_role: "viewer" as const },
-        { space_id: other.id, custom_role_id: custom.id },
+        { spaceId: owner.defaultSpaceId, preset_role: "viewer" as const },
+        { spaceId: other.id, custom_role_id: custom.id },
       ],
     };
     expect((await resolveOrCreateOrgMembership(target, owner.orgId, policy)).role).toBe("guest");
@@ -136,8 +134,8 @@ describe("OIDC signup space assignments", () => {
       allowSignup: true,
       signupRole: "guest" as const,
       signupSpaceAssignments: [
-        { space_id: owner.defaultSpaceId, preset_role: "viewer" as const },
-        { space_id: deleted.id, preset_role: "viewer" as const },
+        { spaceId: owner.defaultSpaceId, preset_role: "viewer" as const },
+        { spaceId: deleted.id, preset_role: "viewer" as const },
       ],
     };
     await db.delete(spaces).where(eq(spaces.id, deleted.id));

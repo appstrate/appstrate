@@ -7,7 +7,9 @@
  * subprocess's env when both the spec opts in (`workspaceMount`) AND
  * the launching orchestrator supplies a directory handle. Mismatches
  * are surfaced as a warning, not a hard failure — the integration
- * still spawns, just without workspace access.
+ * still spawns, just without workspace access. Exactly when it sets the
+ * variable, it passes `--workspace` to the exec wrapper, whose `workspace`
+ * group is what opens the directory to the runner's uid in the guest.
  *
  * The docker adapter test path is exercised end-to-end in
  * `apps/api/test/integration/services/docker-api.test.ts`
@@ -22,10 +24,14 @@ import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createProcessIntegrationRuntimeAdapter } from "../integration-runtime-adapter-process.ts";
 import { WORKSPACE_ENV_VAR } from "../integration-runtime-adapter.ts";
 import type { IntegrationSpawnSpec } from "../integrations-boot.ts";
-import { installPassthroughRunnerExec, type PassthroughRunnerExec } from "./helpers/runner-exec.ts";
+import { createHermeticProcessAdapter } from "./helpers/hermetic-process-adapter.ts";
+import {
+  FIXTURE_WORKSPACE_ENV,
+  installPassthroughRunnerExec,
+  type PassthroughRunnerExec,
+} from "./helpers/runner-exec.ts";
 
 const CONN_A = { id: "conn-a", label: "work", accountId: null };
 
@@ -87,7 +93,7 @@ describe("process adapter — workspace env propagation", () => {
   });
 
   it("sets APPSTRATE_WORKSPACE when spec.workspaceMount + directory handle are both present", async () => {
-    const adapter = createProcessIntegrationRuntimeAdapter();
+    const adapter = createHermeticProcessAdapter();
     await adapter.prepare("run-1");
 
     // Capture the env the subprocess would see. We can't easily
@@ -118,6 +124,8 @@ describe("process adapter — workspace env propagation", () => {
     await spawned.transport.start();
     const dump = await readEnvDump(envFile);
     expect(dump[WORKSPACE_ENV_VAR]).toBe(workspacePath);
+    // The wrapper was asked for the `workspace` group that opens /workspace.
+    expect(dump[FIXTURE_WORKSPACE_ENV]).toBe("1");
 
     await spawned.transport.close().catch(() => {});
     await adapter.shutdown();
@@ -126,7 +134,7 @@ describe("process adapter — workspace env propagation", () => {
   });
 
   it("omits APPSTRATE_WORKSPACE when spec opts in but orchestrator handle is null", async () => {
-    const adapter = createProcessIntegrationRuntimeAdapter();
+    const adapter = createHermeticProcessAdapter();
     await adapter.prepare("run-2");
 
     const envFile = join(bundleRoot, "env.dump");
@@ -148,6 +156,7 @@ describe("process adapter — workspace env propagation", () => {
     await spawned.transport.start();
     const dump = await readEnvDump(envFile);
     expect(dump[WORKSPACE_ENV_VAR]).toBeUndefined();
+    expect(dump[FIXTURE_WORKSPACE_ENV]).toBeUndefined();
 
     await spawned.transport.close().catch(() => {});
     await adapter.shutdown();
@@ -156,7 +165,7 @@ describe("process adapter — workspace env propagation", () => {
   });
 
   it("omits APPSTRATE_WORKSPACE when spec didn't opt in (no workspaceMount)", async () => {
-    const adapter = createProcessIntegrationRuntimeAdapter();
+    const adapter = createHermeticProcessAdapter();
     await adapter.prepare("run-3");
 
     const envFile = join(bundleRoot, "env.dump");
@@ -176,6 +185,7 @@ describe("process adapter — workspace env propagation", () => {
     await spawned.transport.start();
     const dump = await readEnvDump(envFile);
     expect(dump[WORKSPACE_ENV_VAR]).toBeUndefined();
+    expect(dump[FIXTURE_WORKSPACE_ENV]).toBeUndefined();
 
     await spawned.transport.close().catch(() => {});
     await adapter.shutdown();

@@ -5,7 +5,7 @@ import type { IntegrationAgentResolution } from "@appstrate/shared-types";
 /**
  * Whether a connection verdict (`IntegrationAgentResolution`) represents a
  * "not usable" connection state — no connection, ambiguous pick, stale, or
- * insufficient scopes. Used for the management views (Connexions tab cards, 412
+ * insufficient scopes. Used for the management views (Connexions tab cards, 409
  * recovery modal) to render per-connection status.
  *
  * NOTE: this is NOT the run-blocking authority. Whether an integration blocks

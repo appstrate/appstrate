@@ -7,6 +7,7 @@ import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import type { Dispatch, McpToolContext } from "../../../../src/modules/mcp/tools.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { instructionsFor, toolsFor } from "./helpers.ts";
 
@@ -39,8 +40,8 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const defaultInlineManifest = (overrides: Record<string, unknown>) => ({
-  $schema: "https://schemas.afps.dev/v0/agent.schema.json",
-  schema_version: "0.2",
+  $schema: AFPS_SCHEMA_URLS.agent,
+  schema_version: AFPS_SCHEMA_VERSION,
   type: "agent",
   version: "1.0.0",
   dependencies: {},
@@ -53,7 +54,7 @@ function makeRunAndWait(opts: {
   permissions?: string[];
   launch?: () => Response;
   getRun?: Response[];
-  /** Rows the stubbed `GET /api/files?run_id=…` returns (published docs). */
+  /** Rows the stubbed `GET /api/files?runId=…` returns (published docs). */
   files?: Array<Record<string, unknown>>;
 }): {
   tool: ReturnType<typeof toolsFor>[number];
@@ -116,11 +117,14 @@ function makeRunAndWait(opts: {
     // caller missing it. `agents:write` + `agents:run` make the default
     // descriptor the full one; the agent-only descriptor has its own block below.
     permissions: new Set(opts.permissions ?? [...LAUNCHES, ...COMPOSER]),
+    ceiling: undefined,
     dispatch,
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", spaceId: "spc_1" },
     authorizeBundle: async () => {},
     mayShareRoot: async () => false,
+    readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
+    requestId: "req_test",
   };
   const tools = toolsFor(ctx);
   const tool = tools.find((t) => t.descriptor.name === "run_and_wait");
@@ -173,13 +177,15 @@ describe("run_and_wait", () => {
   it("refuses an undeclared argument instead of silently dropping it", async () => {
     const { tool, calls } = makeRunAndWait({});
 
-    const res = await tool.handler(
+    const call = tool.handler(
       { kind: "agent", scope: "@acme", name: "writer", contextFiles: ["appfile://file_1"] },
       noExtra,
     );
 
-    expect(res.isError).toBe(true);
-    expect(parseResult(res).error).toContain("contextFiles");
+    await expect(call).rejects.toMatchObject({
+      code: ErrorCode.InvalidParams,
+      message: expect.stringContaining("Unknown argument(s): contextFiles"),
+    } satisfies Partial<McpError>);
     // The whole point: no launch happened. A silent drop would have 201'd.
     expect(calls.find((c) => c.method === "POST")).toBeUndefined();
   });
@@ -187,13 +193,21 @@ describe("run_and_wait", () => {
   it("names the replacement for a retired argument", async () => {
     const { tool } = makeRunAndWait({});
 
-    const res = await tool.handler(
-      { kind: "inline", manifest: { display_name: "x" }, prompt: "p", context_documents: [] },
-      noExtra,
-    );
+    await expect(
+      tool.handler(
+        { kind: "inline", manifest: { display_name: "x" }, prompt: "p", context_documents: [] },
+        noExtra,
+      ),
+    ).rejects.toThrow(/Unknown argument\(s\): context_documents\. Accepted: .*context_files/);
+  });
 
-    expect(res.isError).toBe(true);
-    expect(parseResult(res).error).toContain("`context_files`");
+  it("refuses an inline-only argument the caller's descriptor does not declare", async () => {
+    const { tool, calls } = makeRunAndWait({ permissions: [...LAUNCHES, "agents:run"] });
+
+    await expect(
+      tool.handler({ kind: "agent", scope: "@acme", name: "writer", prompt: "p" }, noExtra),
+    ).rejects.toThrow("Unknown argument(s): prompt");
+    expect(calls).toHaveLength(0);
   });
 
   it("accepts every argument the descriptor declares", async () => {
@@ -348,8 +362,8 @@ describe("run_and_wait", () => {
   });
 
   it("opts the launch into connect offers, and only the launch", async () => {
-    // The MCP client is a human's own client, so a 412 may carry the link that
-    // human opens. The poll has no 412 to enrich, so it must stay opt-out.
+    // The MCP client is a human's own client, so a 409 may carry the link that
+    // human opens. The poll has no 409 to enrich, so it must stay opt-out.
     const { tool, calls } = makeRunAndWait({
       getRun: [jsonResponse({ id: "run_1", status: "success" })],
     });
@@ -404,7 +418,7 @@ describe("run_and_wait", () => {
     });
   });
 
-  // `connection_overrides` is the ONLY remedy for a `412 must_choose_connection`
+  // `connection_overrides` is the ONLY remedy for a `409 must_choose_connection`
   // launch AND the only way to bind several connections of one integration, and
   // the model can only use an argument the tool DECLARES. The
   // forwarding itself is unit-tested on `launchRunAndWait` (core); what is
@@ -425,7 +439,7 @@ describe("run_and_wait", () => {
         minItems: 1,
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
       });
-      // Not required: the argument only exists for the retry after the 412, so
+      // Not required: the argument only exists for the retry after the 409, so
       // demanding it would break every ordinary launch. Pinned as an exact set
       // rather than a `not.toContain` — `kind` is the ONE required argument,
       // and a negative assertion on a single name can never fail.
@@ -522,7 +536,7 @@ describe("run_and_wait", () => {
           name: "report.html",
           mime: "text/html",
           size: 120,
-          run_id: "run_7",
+          runId: "run_7",
           // `fetchRunFiles` filters every returned row through
           // `isFileProducedByRun`, which needs BOTH halves — the run's file
           // container also holds the files mounted as its INPUT. The real

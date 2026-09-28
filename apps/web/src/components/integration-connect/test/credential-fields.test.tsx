@@ -30,11 +30,6 @@ const SSH_AUTH = {
       },
     },
   },
-  _meta: {
-    "dev.appstrate/provisioning": {
-      kind: "ssh_keypair",
-    },
-  },
 } as unknown as IntegrationManifestAuth;
 
 const noop = () => {};

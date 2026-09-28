@@ -101,8 +101,7 @@ describe("run-events helpers", () => {
 
     expect(extractRunPackageId({ body: { packageId: "@acme/writer" } })).toBe("@acme/writer");
     expect(extractRunPackageId({ packageId: "@acme/writer" })).toBe("@acme/writer");
-    expect(extractRunPackageId({ body: { package_id: "@acme/snake" } })).toBe("@acme/snake");
-    expect(extractRunPackageId({ package_id: "@acme/top-snake" })).toBe("@acme/top-snake");
+    expect(extractRunPackageId({ body: { package_id: "@acme/snake" } })).toBeUndefined();
     expect(buildRunPageHref("@acme/writer", "run_42")).toBe("/agents/@acme/writer/runs/run_42");
     expect(buildRunPageHref(undefined, "run_42")).toBeUndefined();
   });
@@ -132,23 +131,25 @@ describe("run-events helpers", () => {
     // A running run's resource carries extra fields (agent_scope, cost, …) that
     // the lifecycle subset drops. This is what seeds the badge on a mid-run
     // reload so it reads the live status, not the persisted "pending".
+    // Spelled as `runRowToWireDto` emits it: snake_case timestamps.
     const run = parseRunResource({
       id: "run_1",
-      status: "running",
+      status: "success",
       packageId: "@inline/run",
-      startedAt: "2026-06-30T00:00:00Z",
-      completedAt: null,
-      duration: null,
-      // Retired field a not-yet-deployed server may still send (#1177): dropped
-      // like any other extra, never a parse failure.
-      primary_document_id: "file_primary",
-      agentScope: "@inline",
+      started_at: "2026-06-30T00:00:00Z",
+      completed_at: "2026-06-30T00:00:42Z",
+      duration: 42_000,
+      agent_scope: "@inline",
       cost: 0,
     });
-    expect(run?.status).toBe("running");
-    expect(run?.packageId).toBe("@inline/run");
-    expect(run?.startedAt).toBe("2026-06-30T00:00:00Z");
-    expect(run).not.toHaveProperty("primary_document_id");
+    expect(run).toEqual({
+      id: "run_1",
+      status: "success",
+      packageId: "@inline/run",
+      startedAt: "2026-06-30T00:00:00Z",
+      completedAt: "2026-06-30T00:00:42Z",
+      duration: 42_000,
+    });
     // Malformed body (no status) → undefined, so the seed is skipped.
     expect(parseRunResource({ id: "run_1" })).toBeUndefined();
     expect(parseRunResource(null)).toBeUndefined();
@@ -445,7 +446,7 @@ describe("autoPresentFile", () => {
 /**
  * The authoritative produced-file source (issue #1177 follow-up). The log
  * window is capped and ascending, so the end-of-run publication frames of a
- * chatty run fall outside it; `GET /api/files?run_id=…` is the source that
+ * chatty run fall outside it; `GET /api/files?runId=…` is the source that
  * cannot be truncated away, and it is what the run page reads too.
  */
 describe("producedFilesFromFileList", () => {
@@ -455,7 +456,7 @@ describe("producedFilesFromFileList", () => {
     mime: "text/markdown",
     size: 3,
     purpose: "agent_output",
-    run_id: "run_1",
+    runId: "run_1",
     ...over,
   });
 
@@ -479,14 +480,14 @@ describe("producedFilesFromFileList", () => {
   });
 
   it("drops a file the run only CONSUMED, even though it is `agent_output`", () => {
-    // `GET /api/files?run_id=X` answers the run's whole container: a file
+    // `GET /api/files?runId=X` answers the run's whole container: a file
     // chained in from an earlier run via `appfile://` is listed here and still
     // carries `purpose: "agent_output"` — it was produced by that earlier run.
     // Counting it would make a one-file run look like a two-file run and
     // silently switch the auto-present rule off.
     const payload = {
       data: [
-        row({ id: "file_in", run_id: "run_0" }),
+        row({ id: "file_in", runId: "run_0" }),
         row({ id: "file_out" }),
         row({ id: "file_upload", purpose: "user_upload" }),
       ],
@@ -651,13 +652,13 @@ describe("useRunLogStream source guards", () => {
     // longer spells the URL out — it and `fetchRunFiles` share one builder — so
     // the invariant itself is asserted directly on that builder, and only the
     // fact that the hook REACHES it stays a grep: without a DOM harness nothing
-    // can observe the call. Dropping `purpose` (or the `run_id` this list is
+    // can observe the call. Dropping `purpose` (or the `runId` this list is
     // keyed on) would list files the run merely CONSUMED and silently switch
     // the auto-present rule off.
     expect(hook).toContain("runProducedFilesPath(runId)");
     const path = runProducedFilesPath("run_abc");
     expect(path).toContain("purpose=agent_output");
-    expect(path).toContain("run_id=run_abc");
+    expect(path).toContain("runId=run_abc");
   });
 });
 

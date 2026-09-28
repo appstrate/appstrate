@@ -594,7 +594,8 @@ export default tseslint.config(
     // Supply-chain guard: the single-vendor Pi SDK (the whole
     // `@earendil-works/pi-*` family: pi-ai, pi-coding-agent, and siblings
     // pi-agent-core / pi-tui) may only be imported through each package's
-    // `pi-sdk.ts` barrel, so swapping or forking it is a one-file change.
+    // `pi-sdk.ts` barrel (and runner-pi's `pi-model.ts`), so swapping or
+    // forking it touches a short, known list of files.
     // Barrels are exempt via `ignores`. `packages/afps-runtime/src` is
     // SDK-agnostic and imports zero pi-* symbols today, so it has no barrel —
     // the guard simply keeps it that way. Rationale: docs/architecture/SUPPLY_CHAIN.md
@@ -607,13 +608,14 @@ export default tseslint.config(
     ],
     ignores: [
       "packages/runner-pi/src/pi-sdk.ts",
+      // Imports Pi's registry (`providers/all`, ~14 ms to import) and the root
+      // pi-ai `calculateCost` / `getSupportedThinkingLevels` off the barrel.
+      "packages/runner-pi/src/pi-model.ts",
       "apps/cli/src/lib/pi-sdk.ts",
       "runtime-pi/pi-sdk.ts",
-      // Tests may reach the vendor directly. The guard protects the PRODUCTION
-      // import graph — routing a test probe through a barrel instead put the
-      // vendor's 2.1 MB provider catalog on the container's boot path (see the
-      // note in `packages/runner-pi/src/pi-sdk.ts`). `packages/*/test/**` was
-      // never in `files`; only runtime-pi's own tests needed exempting.
+      // Tests may reach the vendor directly: the guard protects the PRODUCTION
+      // import graph. `packages/*/test/**` was never in `files`; only
+      // runtime-pi's own tests needed exempting.
       "runtime-pi/**/test/**/*.ts",
       // The sidecar image is built from `runtime-pi/sidecar/*.ts` alone, so it
       // cannot reach the agent's barrel one directory up — it needs its own.

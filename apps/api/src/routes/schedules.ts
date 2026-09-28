@@ -23,9 +23,10 @@ import {
 } from "../services/scheduler.ts";
 import { computeNextRun, isValidCron } from "../lib/cron.ts";
 import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
-import { requirePermission, rowAuthority } from "../middleware/require-permission.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { ApiError, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
+import type { AuditPayload } from "@appstrate/core/module";
 import { parseListPagination } from "../lib/list-query.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
@@ -244,22 +245,22 @@ async function loadScheduleOr404(c: Context<AppEnv>, id: string, scope: SpaceSco
 }
 
 // #738: schedule execution identity, chosen by an admin from the form.
-// XOR — exactly one of user_id / end_user_id. Omitted at create → defaults to
+// XOR — exactly one of userId / endUserId. Omitted at create → defaults to
 // the caller (`getActor`). Omitted at update → actor left untouched. The actor
 // can never be cleared (preserves #735: a schedule always has an identity).
 // `strictObject` BEFORE `.refine()` — `.refine()` returns a ZodPipe on which
 // `.strict()` is no longer chainable, and the enclosing bodies' own `.strict()`
-// only closes their ROOT. Without it, `{ actor: { user_id, end_user_ids } }`
+// only closes their ROOT. Without it, `{ actor: { userId, endUserIds } }`
 // strips the typo, the XOR below counts exactly one key and the schedule is
 // frozen onto the WRONG identity with a 201 as the only receipt — the very
 // failure {@link createScheduleSchema}'s docstring closes the root against.
 const actorSchema = z
   .strictObject({
-    user_id: z.string().min(1).optional(),
-    end_user_id: z.string().min(1).optional(),
+    userId: z.string().min(1).optional(),
+    endUserId: z.string().min(1).optional(),
   })
-  .refine((a) => (a.user_id ? 1 : 0) + (a.end_user_id ? 1 : 0) === 1, {
-    message: "provide exactly one of user_id or end_user_id",
+  .refine((a) => (a.userId ? 1 : 0) + (a.endUserId ? 1 : 0) === 1, {
+    message: "provide exactly one of userId or endUserId",
   });
 
 /**
@@ -270,37 +271,34 @@ const actorSchema = z
  */
 async function resolveScheduleActor(
   scope: SpaceScope,
-  selected: { user_id?: string; end_user_id?: string } | undefined,
+  selected: { userId?: string; endUserId?: string } | undefined,
   fallback?: Actor,
 ): Promise<Actor> {
-  if (!selected || (!selected.user_id && !selected.end_user_id)) {
+  if (!selected || (!selected.userId && !selected.endUserId)) {
     if (fallback) return fallback;
-    throw invalidRequest("actor.user_id or actor.end_user_id is required", "actor");
+    throw invalidRequest("actor.userId or actor.endUserId is required", "actor");
   }
-  if (selected.user_id && selected.end_user_id) {
-    throw invalidRequest("actor.user_id and actor.end_user_id are mutually exclusive", "actor");
+  if (selected.userId && selected.endUserId) {
+    throw invalidRequest("actor.userId and actor.endUserId are mutually exclusive", "actor");
   }
-  if (selected.user_id) {
-    const member = await getOrgMember(scope.orgId, selected.user_id);
+  if (selected.userId) {
+    const member = await getOrgMember(scope.orgId, selected.userId);
     if (!member) {
-      throw invalidRequest("actor.user_id is not a member of this organization", "actor.user_id");
+      throw invalidRequest("actor.userId is not a member of this organization", "actor.userId");
     }
-    return { type: "user", id: selected.user_id };
+    return { type: "user", id: selected.userId };
   }
-  // end_user_id present. Translate getEndUser's 404 into a 400 so both actor
+  // endUserId present. Translate getEndUser's 404 into a 400 so both actor
   // branches report an invalid selection consistently as a bad request.
   try {
-    await getEndUser(scope, selected.end_user_id!);
+    await getEndUser(scope, selected.endUserId!);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
-      throw invalidRequest(
-        "actor.end_user_id is not an end-user of this space",
-        "actor.end_user_id",
-      );
+      throw invalidRequest("actor.endUserId is not an end-user of this space", "actor.endUserId");
     }
     throw err;
   }
-  return { type: "end_user", id: selected.end_user_id! };
+  return { type: "end_user", id: selected.endUserId! };
 }
 
 /**
@@ -377,14 +375,13 @@ export function createSchedulesRouter() {
   );
 
   // POST /api/agents/:scope/:name/schedules — create a schedule
-  // `rowAuthority()`: a schedule pinned to `draft` — or carrying a draft
+  // A schedule pinned to `draft` — or carrying a draft
   // dependency override — is an author's act, judged in the handler against the
   // package's home space (`403 draft_not_writable`).
   router.post(
     `/agents/${SCOPED_PACKAGE_ROUTE}/schedules`,
     rateLimit(10),
     requirePermission("schedules", "write"),
-    rowAuthority(),
     requireAgent(),
     // Arming a schedule is an execution decision, so it asks the execution
     // question now rather than leaving the first tick to discover it. LISTING
@@ -482,264 +479,257 @@ export function createSchedulesRouter() {
     return c.json(schedule);
   });
 
-  // PUT /api/schedules/:id — update a schedule
-  // `rowAuthority()`: same draft authority as the create route, asked of the
-  // package the stored schedule points at.
-  router.put(
-    "/schedules/:id",
-    requirePermission("schedules", "write"),
-    rowAuthority(),
-    async (c) => {
-      const id = c.req.param("id")!;
-      const scope = getSpaceScope(c);
-      const existing = await loadScheduleOr404(c, id, scope);
+  // PATCH /api/schedules/:id — merge-update a schedule (RFC 7396)
+  // Same draft authority as the create route, asked of the package the stored
+  // schedule points at.
+  router.patch("/schedules/:id", requirePermission("schedules", "write"), async (c) => {
+    const id = c.req.param("id")!;
+    const scope = getSpaceScope(c);
+    const existing = await loadScheduleOr404(c, id, scope);
 
-      const data = await readJsonBody(c, updateScheduleSchema);
+    const data = await readJsonBody(c, updateScheduleSchema);
 
-      // Only when this patch touches either half: an unrelated patch (say
-      // `{enabled:false}`) on a row written before this gate existed must stay
-      // applicable. `updateSchedule` recomputes `next_run_at` from the EFFECTIVE
-      // pair, so that is the pair checked here — same `??` fallbacks, same
-      // "UTC" default.
-      if (data.cron_expression !== undefined || data.timezone !== undefined) {
-        assertFirable(
-          data.cron_expression ?? existing.cron_expression,
-          data.timezone ?? existing.timezone ?? "UTC",
+    // Only when this patch touches either half: an unrelated patch (say
+    // `{enabled:false}`) on a row written before this gate existed must stay
+    // applicable. `updateSchedule` recomputes `next_run_at` from the EFFECTIVE
+    // pair, so that is the pair checked here — same `??` fallbacks, same
+    // "UTC" default.
+    if (data.cron_expression !== undefined || data.timezone !== undefined) {
+      assertFirable(
+        data.cron_expression ?? existing.cron_expression,
+        data.timezone ?? existing.timezone ?? "UTC",
+      );
+    }
+
+    // The agent's per-space settings — read once and shared by the
+    // locked-field refusal and the generation-config reconciliation below,
+    // which can both run on the same request.
+    const packageSettings = await getSpacePackageSettings(scope, existing.packageId);
+
+    // The selector this row will replay after the patch: `null` clears the
+    // override, i.e. back to the unified default; omitted leaves whatever the
+    // row already holds. Every judgement below is made against THIS value.
+    const nextVersionOverride =
+      (data.version_override !== undefined ? data.version_override : existing.version_override) ??
+      undefined;
+    /** Set by the input gate below when it runs; reused by the dependency gate. */
+    let effectiveAgent: LoadedPackage | null = null;
+
+    // A `version_override` this patch MOVES is an act and proves itself; one it
+    // merely echoes back was judged at the write that chose it. Outside the
+    // input gate on purpose: that gate asks "does the manifest decision move",
+    // and a selector that moves always does, while a patch that only re-sends
+    // it must reach the input validation without being refused.
+    if (draftSelectorMoved(data.version_override, existing.version_override)) {
+      await assertDraftSelectorAllowed(c, existing.packageId, data.version_override);
+    }
+
+    // Same resolve-and-validate the create route runs, for the same stated
+    // reason: refuse at THIS write rather than silently at every tick. A PATCH
+    // replacing `input` with a wrong-typed or incomplete value used to answer
+    // 200 and then die on every subsequent fire, visible only in the
+    // schedule's failure record.
+    //
+    // Gated on the patch actually MOVING the manifest decision, which is
+    // exactly `input` and `version_override` — the only two request fields
+    // `assertScheduleTargetValid` reads (its other two arguments, the agent
+    // and the space-level `packageSettings`, are not patchable from here). Run
+    // unconditionally, it also judged patches that cannot invalidate anything,
+    // and its resolve step 404s `no_published_version` on an agent that has
+    // never been published. Schedules on such agents exist — POST accepted
+    // them before this gate — so `{"enabled": false}` on one answered 404 and
+    // an operator could no longer disable a misfiring legacy schedule, only
+    // delete it. A patch that merely REDUCES what the row does must always be
+    // applicable; one that changes what it fires is what has to prove itself.
+    //
+    // `data.input ?? existing.input` because a patch that moves only
+    // `version_override` must still be checked against the input the row will
+    // keep replaying (and vice versa) — the pair is validated together, the
+    // gate only decides whether to look at all.
+    if (data.input !== undefined || data.version_override !== undefined) {
+      const agentForInput = await getPackage(existing.packageId, scope.orgId);
+      // `package_schedules.package_id` is `ON DELETE CASCADE` and `getPackage`
+      // admits system packages, so this is unreachable in practice — it exists
+      // so the impossible case is a typed 404 rather than a schedule validated
+      // against nothing.
+      if (!agentForInput) throw notFound(`Agent '${existing.packageId}' not found`);
+      effectiveAgent = await assertScheduleTargetValid({
+        c,
+        scope,
+        agent: agentForInput,
+        // `null` clears the override, i.e. back to the unified default; omitted
+        // leaves whatever the row already replays.
+        versionOverride: nextVersionOverride,
+        packageSettings,
+        input: data.input ?? existing.input ?? undefined,
+      });
+    }
+
+    // `dependency_overrides` is judged in two halves, and they do NOT share a
+    // trigger.
+    //
+    // FORM — "does this key name a dependency the manifest declares?" — is a
+    // property of the (map, effective manifest) PAIR, and `version_override`
+    // moves the manifest. A patch sending `{version_override:"draft"}` alone
+    // re-points the row at a definition that may no longer declare the skill
+    // the stored map pins, so the map has to be re-judged against the new
+    // target even though not one of its entries moved. Gated on `movedDeps`
+    // it was not: the row answered 200 and then 400-ed in
+    // `freezeRunSpawnDependencies` at every tick, forever, exactly the silent
+    // permanent failure `assertScheduleTargetValid` exists to prevent. So the
+    // form half runs whenever EITHER half of the pair moves, over the WHOLE
+    // effective map — the one the row will replay, not the patch's delta.
+    //
+    // AUTHORITY — "may I pin `draft` on that package?" — stays on the moving
+    // entries only, judged package by package by `movedDependencyOverrides`:
+    // re-sending a stored selector is not asking for it again, and a key this
+    // patch DROPS takes a draft away.
+    const effectiveDependencyOverrides =
+      data.dependency_overrides !== undefined
+        ? data.dependency_overrides
+        : existing.dependency_overrides;
+    const movedDeps = movedDependencyOverrides(
+      data.dependency_overrides,
+      existing.dependency_overrides,
+    );
+    if (
+      (data.version_override !== undefined || data.dependency_overrides !== undefined) &&
+      effectiveDependencyOverrides &&
+      Object.keys(effectiveDependencyOverrides).length > 0
+    ) {
+      // The manifest the keys are judged against is the one this row will
+      // FIRE, so a patch that only moves the dependency map still resolves it —
+      // adding an override changes what the schedule executes, and that is the
+      // half of a patch that has to prove itself. Already resolved above
+      // whenever `version_override` is part of the patch (same condition gates
+      // the input pair), so this second lookup only happens for a patch that
+      // touches the map alone.
+      let target = effectiveAgent;
+      if (!target) {
+        const agentForDeps = await getPackage(existing.packageId, scope.orgId);
+        // Unreachable in practice for the same reason the input gate's twin is:
+        // `package_schedules.package_id` cascades. Typed, not assumed.
+        if (!agentForDeps) throw notFound(`Agent '${existing.packageId}' not found`);
+        target = (await resolveAgentRunVersion(agentForDeps, nextVersionOverride)).agent;
+      }
+      const targetManifest = target.manifest as unknown as Record<string, unknown>;
+      assertDependencyOverrideKeysDeclared(targetManifest, effectiveDependencyOverrides);
+      if (movedDeps && Object.keys(movedDeps).length > 0) {
+        // Re-runs the key gate over the moving subset — a subset of the map
+        // just cleared, so it can only pass. Kept whole rather than reaching
+        // for `assertDraftSelectorAllowed` directly: the form-before-authority
+        // ordering is stated inside that helper and no caller should be able
+        // to order the two wrong.
+        await assertDependencyDraftOverridesAllowed(c, movedDeps, targetManifest);
+      }
+    }
+
+    // Reject a `model_id_override` that references no real model (no-op when
+    // the field isn't part of this patch).
+    const explicitModel = await assertExplicitModelExists(scope.orgId, data.model_id_override);
+    let generationConfigOverride = data.generation_config_override;
+    if (
+      (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) ||
+      (generationConfigOverride === undefined &&
+        data.model_id_override !== undefined &&
+        existing.generation_config_override)
+    ) {
+      const effectiveModelOverride =
+        data.model_id_override !== undefined ? data.model_id_override : existing.model_id_override;
+      const selectedModel =
+        explicitModel ??
+        (await resolveModel(
+          scope.orgId,
+          existing.packageId,
+          effectiveModelOverride ?? packageSettings.modelId,
+        ));
+
+      if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
+        generationConfigOverride = validateGenerationOverride(
+          generationConfigOverride,
+          selectedModel,
+          "generation_config_override",
+        );
+      } else if (existing.generation_config_override) {
+        generationConfigOverride = reconcileModelGenerationSettings(
+          existing.generation_config_override,
+          selectedModel?.generation,
         );
       }
+    }
 
-      // The agent's per-space settings — read once and shared by the
-      // locked-field refusal and the generation-config reconciliation below,
-      // which can both run on the same request.
-      const packageSettings = await getSpacePackageSettings(scope, existing.packageId);
+    // #738: re-point the actor when the caller selected one (validated against
+    // this org/space scope). `undefined` leaves the existing actor untouched.
+    const actor = data.actor ? await resolveScheduleActor(scope, data.actor) : undefined;
 
-      // The selector this row will replay after the patch: `null` clears the
-      // override, i.e. back to the unified default; omitted leaves whatever the
-      // row already holds. Every judgement below is made against THIS value.
-      const nextVersionOverride =
-        (data.version_override !== undefined ? data.version_override : existing.version_override) ??
-        undefined;
-      /** Set by the input gate below when it runs; reused by the dependency gate. */
-      let effectiveAgent: LoadedPackage | null = null;
+    // Only a *real* identity change invalidates frozen connection picks. Picking
+    // the same actor (or omitting it) leaves overrides untouched.
+    const existingActor = actorFromIds(existing.userId, existing.endUserId);
+    const actorChanged =
+      !!actor &&
+      (!existingActor || actor.type !== existingActor.type || actor.id !== existingActor.id);
 
-      // A `version_override` this patch MOVES is an act and proves itself; one it
-      // merely echoes back was judged at the write that chose it. Outside the
-      // input gate on purpose: that gate asks "does the manifest decision move",
-      // and a selector that moves always does, while a patch that only re-sends
-      // it must reach the input validation without being refused.
-      if (draftSelectorMoved(data.version_override, existing.version_override)) {
-        await assertDraftSelectorAllowed(c, existing.packageId, data.version_override);
-      }
+    // On a real change, frozen `connection_overrides` reference the previous
+    // identity's connections — reset them unless this patch supplies fresh
+    // picks, forcing a re-pick under the new identity.
+    const connectionOverrides =
+      actorChanged && data.connection_overrides === undefined ? null : data.connection_overrides;
 
-      // Same resolve-and-validate the create route runs, for the same stated
-      // reason: refuse at THIS write rather than silently at every tick. A PUT
-      // replacing `input` with a wrong-typed or incomplete value used to answer
-      // 200 and then die on every subsequent fire, visible only in the
-      // schedule's failure record.
-      //
-      // Gated on the patch actually MOVING the manifest decision, which is
-      // exactly `input` and `version_override` — the only two request fields
-      // `assertScheduleTargetValid` reads (its other two arguments, the agent
-      // and the space-level `packageSettings`, are not patchable from here). Run
-      // unconditionally, it also judged patches that cannot invalidate anything,
-      // and its resolve step 404s `no_published_version` on an agent that has
-      // never been published. Schedules on such agents exist — POST accepted
-      // them before this gate — so `{"enabled": false}` on one answered 404 and
-      // an operator could no longer disable a misfiring legacy schedule, only
-      // delete it. A patch that merely REDUCES what the row does must always be
-      // applicable; one that changes what it fires is what has to prove itself.
-      //
-      // `data.input ?? existing.input` because a patch that moves only
-      // `version_override` must still be checked against the input the row will
-      // keep replaying (and vice versa) — the pair is validated together, the
-      // gate only decides whether to look at all.
-      if (data.input !== undefined || data.version_override !== undefined) {
-        const agentForInput = await getPackage(existing.packageId, scope.orgId);
-        // `package_schedules.package_id` is `ON DELETE CASCADE` and `getPackage`
-        // admits system packages, so this is unreachable in practice — it exists
-        // so the impossible case is a typed 404 rather than a schedule validated
-        // against nothing.
-        if (!agentForInput) throw notFound(`Agent '${existing.packageId}' not found`);
-        effectiveAgent = await assertScheduleTargetValid({
-          c,
-          scope,
-          agent: agentForInput,
-          // `null` clears the override, i.e. back to the unified default; omitted
-          // leaves whatever the row already replays.
-          versionOverride: nextVersionOverride,
-          packageSettings,
-          input: data.input ?? existing.input ?? undefined,
-        });
-      }
-
-      // `dependency_overrides` is judged in two halves, and they do NOT share a
-      // trigger.
-      //
-      // FORM — "does this key name a dependency the manifest declares?" — is a
-      // property of the (map, effective manifest) PAIR, and `version_override`
-      // moves the manifest. A patch sending `{version_override:"draft"}` alone
-      // re-points the row at a definition that may no longer declare the skill
-      // the stored map pins, so the map has to be re-judged against the new
-      // target even though not one of its entries moved. Gated on `movedDeps`
-      // it was not: the row answered 200 and then 400-ed in
-      // `freezeRunSpawnDependencies` at every tick, forever, exactly the silent
-      // permanent failure `assertScheduleTargetValid` exists to prevent. So the
-      // form half runs whenever EITHER half of the pair moves, over the WHOLE
-      // effective map — the one the row will replay, not the patch's delta.
-      //
-      // AUTHORITY — "may I pin `draft` on that package?" — stays on the moving
-      // entries only, judged package by package by `movedDependencyOverrides`:
-      // re-sending a stored selector is not asking for it again, and a key this
-      // patch DROPS takes a draft away.
-      const effectiveDependencyOverrides =
-        data.dependency_overrides !== undefined
-          ? data.dependency_overrides
-          : existing.dependency_overrides;
-      const movedDeps = movedDependencyOverrides(
-        data.dependency_overrides,
-        existing.dependency_overrides,
-      );
-      if (
-        (data.version_override !== undefined || data.dependency_overrides !== undefined) &&
-        effectiveDependencyOverrides &&
-        Object.keys(effectiveDependencyOverrides).length > 0
-      ) {
-        // The manifest the keys are judged against is the one this row will
-        // FIRE, so a patch that only moves the dependency map still resolves it —
-        // adding an override changes what the schedule executes, and that is the
-        // half of a patch that has to prove itself. Already resolved above
-        // whenever `version_override` is part of the patch (same condition gates
-        // the input pair), so this second lookup only happens for a patch that
-        // touches the map alone.
-        let target = effectiveAgent;
-        if (!target) {
-          const agentForDeps = await getPackage(existing.packageId, scope.orgId);
-          // Unreachable in practice for the same reason the input gate's twin is:
-          // `package_schedules.package_id` cascades. Typed, not assumed.
-          if (!agentForDeps) throw notFound(`Agent '${existing.packageId}' not found`);
-          target = (await resolveAgentRunVersion(agentForDeps, nextVersionOverride)).agent;
-        }
-        const targetManifest = target.manifest as unknown as Record<string, unknown>;
-        assertDependencyOverrideKeysDeclared(targetManifest, effectiveDependencyOverrides);
-        if (movedDeps && Object.keys(movedDeps).length > 0) {
-          // Re-runs the key gate over the moving subset — a subset of the map
-          // just cleared, so it can only pass. Kept whole rather than reaching
-          // for `assertDraftSelectorAllowed` directly: the form-before-authority
-          // ordering is stated inside that helper and no caller should be able
-          // to order the two wrong.
-          await assertDependencyDraftOverridesAllowed(c, movedDeps, targetManifest);
-        }
-      }
-
-      // Reject a `model_id_override` that references no real model (no-op when
-      // the field isn't part of this patch).
-      const explicitModel = await assertExplicitModelExists(scope.orgId, data.model_id_override);
-      let generationConfigOverride = data.generation_config_override;
-      if (
-        (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) ||
-        (generationConfigOverride === undefined &&
-          data.model_id_override !== undefined &&
-          existing.generation_config_override)
-      ) {
-        const effectiveModelOverride =
-          data.model_id_override !== undefined
-            ? data.model_id_override
-            : existing.model_id_override;
-        const selectedModel =
-          explicitModel ??
-          (await resolveModel(
-            scope.orgId,
-            existing.packageId,
-            effectiveModelOverride ?? packageSettings.modelId,
-          ));
-
-        if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
-          generationConfigOverride = validateGenerationOverride(
-            generationConfigOverride,
-            selectedModel,
-            "generation_config_override",
-          );
-        } else if (existing.generation_config_override) {
-          generationConfigOverride = reconcileModelGenerationSettings(
-            existing.generation_config_override,
-            selectedModel?.generation,
-          );
-        }
-      }
-
-      // #738: re-point the actor when the caller selected one (validated against
-      // this org/space scope). `undefined` leaves the existing actor untouched.
-      const actor = data.actor ? await resolveScheduleActor(scope, data.actor) : undefined;
-
-      // Only a *real* identity change invalidates frozen connection picks. Picking
-      // the same actor (or omitting it) leaves overrides untouched.
-      const existingActor = actorFromIds(existing.userId, existing.endUserId);
-      const actorChanged =
-        !!actor &&
-        (!existingActor || actor.type !== existingActor.type || actor.id !== existingActor.id);
-
-      // On a real change, frozen `connection_overrides` reference the previous
-      // identity's connections — reset them unless this patch supplies fresh
-      // picks, forcing a re-pick under the new identity.
-      const connectionOverrides =
-        actorChanged && data.connection_overrides === undefined ? null : data.connection_overrides;
-
-      // Translate snake_case wire fields to internal camelCase for the service.
-      const schedule = await updateSchedule(
-        scope,
-        id,
-        {
-          name: data.name,
-          cronExpression: data.cron_expression,
-          timezone: data.timezone,
-          input: data.input,
-          enabled: data.enabled,
-          modelIdOverride: data.model_id_override,
-          generationConfigOverride,
-          proxyIdOverride: data.proxy_id_override,
-          versionOverride: data.version_override,
-          connectionOverrides,
-          dependencyOverrides: data.dependency_overrides,
-          actor,
-        },
-        // `actor` above is the schedule's (possibly re-pointed) execution
-        // identity; the run counters in the response belong to whoever is
-        // looking at it.
-        getActor(c),
-        runVisibilityFilter(c),
-      );
-      // Mirror schedule.created: explicit camelCase keys (dominant audit
-      // convention — see api-keys.ts, modules/webhooks/routes.ts). Only
-      // include keys the caller actually sent so the audit reflects the
-      // patch, not a snapshot of the whole row.
-      const auditAfter: Record<string, unknown> = {};
-      if (data.name !== undefined) auditAfter.name = data.name;
-      if (data.cron_expression !== undefined) auditAfter.cronExpression = data.cron_expression;
-      if (data.timezone !== undefined) auditAfter.timezone = data.timezone;
-      if (data.input !== undefined) auditAfter.input = data.input;
-      if (data.enabled !== undefined) auditAfter.enabled = data.enabled;
-      if (data.model_id_override !== undefined) auditAfter.modelIdOverride = data.model_id_override;
-      if (generationConfigOverride !== undefined)
-        auditAfter.generationConfigOverride = generationConfigOverride;
-      if (data.proxy_id_override !== undefined) auditAfter.proxyIdOverride = data.proxy_id_override;
-      if (data.version_override !== undefined) auditAfter.versionOverride = data.version_override;
-      if (data.connection_overrides !== undefined)
-        auditAfter.connectionOverrides = data.connection_overrides;
-      if (data.dependency_overrides !== undefined)
-        auditAfter.dependencyOverrides = data.dependency_overrides;
-      if (actor) {
-        auditAfter.actorType = actor.type;
-        auditAfter.actorId = actor.id;
-      }
-      await recordAuditFromContext(c, {
-        action: "schedule.updated",
-        resourceType: "schedule",
-        resourceId: id,
-        after: auditAfter,
-      });
-      return c.json(schedule);
-    },
-  );
+    // Translate snake_case wire fields to internal camelCase for the service.
+    const schedule = await updateSchedule(
+      scope,
+      id,
+      {
+        name: data.name,
+        cronExpression: data.cron_expression,
+        timezone: data.timezone,
+        input: data.input,
+        enabled: data.enabled,
+        modelIdOverride: data.model_id_override,
+        generationConfigOverride,
+        proxyIdOverride: data.proxy_id_override,
+        versionOverride: data.version_override,
+        connectionOverrides,
+        dependencyOverrides: data.dependency_overrides,
+        actor,
+      },
+      // `actor` above is the schedule's (possibly re-pointed) execution
+      // identity; the run counters in the response belong to whoever is
+      // looking at it.
+      getActor(c),
+      runVisibilityFilter(c),
+    );
+    // Mirror schedule.created: explicit camelCase keys (dominant audit
+    // convention — see api-keys.ts, modules/webhooks/routes.ts). Only
+    // include keys the caller actually sent so the audit reflects the
+    // patch, not a snapshot of the whole row.
+    const auditAfter: AuditPayload = {};
+    if (data.name !== undefined) auditAfter.name = data.name;
+    if (data.cron_expression !== undefined) auditAfter.cronExpression = data.cron_expression;
+    if (data.timezone !== undefined) auditAfter.timezone = data.timezone;
+    if (data.input !== undefined) auditAfter.input = data.input;
+    if (data.enabled !== undefined) auditAfter.enabled = data.enabled;
+    if (data.model_id_override !== undefined) auditAfter.modelIdOverride = data.model_id_override;
+    if (generationConfigOverride !== undefined)
+      auditAfter.generationConfigOverride = generationConfigOverride;
+    if (data.proxy_id_override !== undefined) auditAfter.proxyIdOverride = data.proxy_id_override;
+    if (data.version_override !== undefined) auditAfter.versionOverride = data.version_override;
+    if (data.connection_overrides !== undefined)
+      auditAfter.connectionOverrides = data.connection_overrides;
+    if (data.dependency_overrides !== undefined)
+      auditAfter.dependencyOverrides = data.dependency_overrides;
+    if (actor) {
+      auditAfter.actorType = actor.type;
+      auditAfter.actorId = actor.id;
+    }
+    await recordAuditFromContext(c, {
+      action: "schedule.updated",
+      resourceType: "schedule",
+      resourceId: id,
+      after: auditAfter,
+    });
+    return c.json(schedule);
+  });
 
   // DELETE /api/schedules/:id — delete a schedule
   router.delete("/schedules/:id", requirePermission("schedules", "delete"), async (c) => {

@@ -490,7 +490,7 @@ export async function validateAgentIntegrationSelections(
       // Deliberately NO `continue`: `{ tools: [], scopes: ["bogus"] }` still
       // has a checkable scope, and both errors must land in one pass.
     }
-    // Freeze points only: at a run kickoff the resolver answers it as a 412 on
+    // Freeze points only: at a run kickoff the resolver answers it as a 409 on
     // `integrations.<id>`, and reporting it here too would double it.
     const pinnedMisfit =
       requireCallableTools && pinnedManifest

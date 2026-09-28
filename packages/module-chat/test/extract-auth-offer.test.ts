@@ -16,9 +16,11 @@ describe("extractAuthOffers", () => {
     expect(extractAuthOffers({ content: [], connectOffers: [{ ...OFFER, state: "st" }] })).toEqual([
       { authUrl: OFFER.connect_url, state: "st" },
     ]);
-    // initiateIntegrationConnect returns { connect_url, expires_at } — no state.
+    // initiateIntegrationConnect returns { connect_url, expiresAt } — no state.
     expect(
-      extractAuthOffers({ output: { connectOffers: [{ ...OFFER, expires_at: 1784142529000 }] } }),
+      extractAuthOffers({
+        output: { connectOffers: [{ ...OFFER, expiresAt: "2026-07-15T19:08:49.000Z" }] },
+      }),
     ).toEqual([{ authUrl: OFFER.connect_url }]);
   });
 
@@ -35,14 +37,14 @@ describe("extractAuthOffers", () => {
     ).toEqual([{ authUrl: "https://app/c/1", state: "st-1" }, { authUrl: "https://app/c/2" }]);
   });
 
-  // Issue #1207 phase 5: a run-kickoff 412 item names the integration it
+  // Issue #1207 phase 5: a run-kickoff 409 item names the integration it
   // connects, and the card needs that to show the right icon and name and to
   // claim the resume append.
-  it("surfaces the offer's package_id as packageId", () => {
+  it("surfaces the offer's packageId", () => {
     expect(
       extractAuthOffers({
         connectOffers: [
-          { ...OFFER, package_id: "@appstrate/gmail", expires_at: 1_900_000_000_000 },
+          { ...OFFER, packageId: "@appstrate/gmail", expiresAt: "2026-07-15T19:08:49.000Z" },
         ],
       }),
     ).toEqual([{ authUrl: OFFER.connect_url, packageId: "@appstrate/gmail" }]);

@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { HttpSink } from "../../src/sinks/http-sink.ts";
 import { verify } from "../../src/events/signing.ts";
 import type { RunEvent } from "@afps-spec/types";
-import type { RunResult } from "../../src/types/run-result.ts";
+import type { TerminalRunResult } from "../../src/types/run-result.ts";
 
 interface CapturedRequest {
   url: string;
@@ -67,10 +67,12 @@ const SAMPLE_EVENT: RunEvent = {
   runId: "run_http_test",
   content: "sent via http sink",
 };
-const SAMPLE_RESULT: RunResult = {
+const SAMPLE_RESULT: TerminalRunResult = {
   memories: [{ content: "sent via http sink" }],
   output: null,
   logs: [],
+  status: "success",
+  usage: { input_tokens: 3, output_tokens: 2 },
 };
 
 describe("HttpSink", () => {

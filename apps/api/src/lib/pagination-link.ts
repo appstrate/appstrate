@@ -9,11 +9,13 @@
  * the consumer follows the URL until the header disappears, no matter
  * what the body shape is.
  *
- * Two flavours covered here:
- *   - `cursorLinkHeader`  — Stripe-style `startingAfter` / `endingBefore`
- *                            (e.g. `/api/end-users`)
- *   - `offsetLinkHeader`  — `limit` + `offset`
- *                            (e.g. `/api/runs`, `/api/notifications`)
+ * Three flavours covered here:
+ *   - `setCursorLinkHeader` — Stripe-style `startingAfter` / `endingBefore`
+ *                             (e.g. `/api/end-users`)
+ *   - `setSinceLinkHeader`  — `since` sequence (e.g. `/api/runs/{id}/logs`)
+ *   - `setOffsetLinkHeader` — `limit` + `offset` (e.g. `/api/runs`)
+ * The two cursor flavours wrap `@appstrate/core/pagination-link` (shared
+ * with module routers) and root the link on `APP_URL`.
  *
  * The helpers write directly into the response via `c.header(...)`
  * and silently no-op when there is no next/prev — RFC 5988 allows a
@@ -21,82 +23,30 @@
  */
 
 import type { Context } from "hono";
-import { toPublicAppUrl } from "./public-url.ts";
+import {
+  setCursorLinkHeader as setCoreCursorLinkHeader,
+  setSinceLinkHeader as setCoreSinceLinkHeader,
+} from "@appstrate/core/pagination-link";
+import { getPublicAppOrigin, toPublicAppUrl } from "./public-url.ts";
 
-interface CursorLinkArgs {
-  /** Hono context — the request URL is read from `c.req.url`. */
-  c: Context;
-  /** True when the current page is followed by another. */
-  hasMore: boolean;
-  /** ID of the last row on this page; required when `hasMore`. */
-  lastId?: string | undefined;
-  /** ID of the first row on this page; required when `hasPrev`. */
-  firstId?: string | undefined;
-  /** Whether a `prev` page exists (caller knows because it received an `endingBefore` query). */
-  hasPrev?: boolean;
-}
+type WithoutOrigin<T extends (...args: never[]) => void> = Omit<Parameters<T>[0], "publicOrigin">;
 
-function buildUrl(c: Context, mutate: (params: URLSearchParams) => void): string {
-  // Preserve the inbound path/query, but pin scheme + host to APP_URL so the
-  // absolute Link remains dereferenceable outside the reverse proxy.
-  const url = toPublicAppUrl(c.req.url);
-  // Strip cursor query params before adding the new one — `next` and
-  // `prev` are mutually exclusive in cursor pagination, and stale
-  // values from the inbound URL would break the next round-trip.
-  url.searchParams.delete("startingAfter");
-  url.searchParams.delete("endingBefore");
-  mutate(url.searchParams);
-  return url.toString();
+/**
+ * Set RFC 5988 `Link` header for cursor-paginated responses (Stripe-style
+ * `next` → `?startingAfter=<lastId>`, `prev` → `?endingBefore=<firstId>`),
+ * rooted on `APP_URL`. The logic lives in core, shared with module routers.
+ */
+export function setCursorLinkHeader(args: WithoutOrigin<typeof setCoreCursorLinkHeader>): void {
+  setCoreCursorLinkHeader({ ...args, publicOrigin: getPublicAppOrigin() });
 }
 
 /**
- * Set RFC 5988 `Link` header for cursor-paginated responses. Mirrors
- * Stripe's pager: `next` → `?startingAfter=<lastId>`, `prev` →
- * `?endingBefore=<firstId>`.
+ * Set RFC 5988 `Link` header for `?since=<id>`-cursor responses (e.g.
+ * `/api/runs/{id}/logs`), rooted on `APP_URL`. Other query params (`level`,
+ * `limit`, …) are carried forward.
  */
-export function setCursorLinkHeader({
-  c,
-  hasMore,
-  lastId,
-  firstId,
-  hasPrev = false,
-}: CursorLinkArgs): void {
-  const links: string[] = [];
-  if (hasMore && lastId) {
-    const next = buildUrl(c, (p) => p.set("startingAfter", lastId));
-    links.push(`<${next}>; rel="next"`);
-  }
-  if (hasPrev && firstId) {
-    const prev = buildUrl(c, (p) => p.set("endingBefore", firstId));
-    links.push(`<${prev}>; rel="prev"`);
-  }
-  if (links.length > 0) {
-    c.header("Link", links.join(", "));
-  }
-}
-
-interface SinceLinkArgs {
-  c: Context;
-  /** True when the current page is followed by another. */
-  hasMore: boolean;
-  /** Monotonic id of the last row on this page; required when `hasMore`. */
-  lastId?: number | undefined;
-}
-
-/**
- * Set RFC 5988 `Link` header for `?since=<id>`-cursor responses
- * (e.g. `/api/runs/{id}/logs`). Same hypermedia contract as the
- * Stripe-style helper above, but keyed on the endpoint's existing
- * monotonic `since` cursor so the polling-tail contract and the
- * pagination contract are one and the same parameter. Other query
- * params (`level`, `limit`, …) are preserved so the `next` URL
- * carries the caller's filters forward.
- */
-export function setSinceLinkHeader({ c, hasMore, lastId }: SinceLinkArgs): void {
-  if (!hasMore || lastId === undefined) return;
-  const url = toPublicAppUrl(c.req.url);
-  url.searchParams.set("since", String(lastId));
-  c.header("Link", `<${url.toString()}>; rel="next"`);
+export function setSinceLinkHeader(args: WithoutOrigin<typeof setCoreSinceLinkHeader>): void {
+  setCoreSinceLinkHeader({ ...args, publicOrigin: getPublicAppOrigin() });
 }
 
 interface OffsetLinkArgs {

@@ -43,7 +43,12 @@
  * neither host has to re-derive the rule to keep its own error surface.
  */
 
-import { authorDefaults, type JSONSchemaObject } from "./form.ts";
+import {
+  authorDefaults,
+  getOrderedKeys,
+  type JSONSchemaObject,
+  type SchemaWrapper,
+} from "./form.ts";
 
 /**
  * Where an overlay's values came from. Quoted verbatim in the locked-field
@@ -138,4 +143,67 @@ export function withoutLockedFields(
   if (!lockedFields || lockedFields.length === 0) return values;
   const locked = new Set(lockedFields);
   return Object.fromEntries(Object.entries(values).filter(([key]) => !locked.has(key)));
+}
+
+// ─── Launch contract ─────────────────────────────────────────────────────────
+
+/**
+ * The per-space layer as it travels on the wire next to the schema
+ * (`AgentDetail.input`): the editor's stored values and the fields no caller
+ * may set at launch.
+ */
+export interface AgentInputSettings {
+  /** Values the editor stored once for this space. */
+  values: Record<string, unknown>;
+  /** Fields no caller may set at launch. */
+  locked_fields: string[];
+}
+
+/**
+ * The three launch states of an agent's input fields, as ordered key lists.
+ *
+ * - `locked` — decided by the editor; never sent (400 `locked_input_field`).
+ * - `prefilled` — has a value behind it already (author `default` or a stored
+ *   value); a launch may omit it.
+ * - `prompted` — nothing decides it yet; the caller has to supply it.
+ */
+export interface InputFieldPartition {
+  locked: string[];
+  prefilled: string[];
+  prompted: string[];
+}
+
+/**
+ * The value each field resolves to before the caller says anything: the
+ * author's `default` overlaid by the editor's stored value — layers 1 and 2 of
+ * {@link resolveEffectiveInput}. A field neither layer supplies stays absent
+ * rather than becoming `null`.
+ */
+export function resolvedInputDefaults(
+  wrapper: SchemaWrapper | undefined,
+  settings: AgentInputSettings,
+): Record<string, unknown> {
+  return { ...authorDefaults(wrapper?.schema), ...settings.values };
+}
+
+/**
+ * Split the schema's top-level fields into the three launch states, in
+ * presentation order (`property_order`, then the rest).
+ */
+export function partitionInputFields(
+  wrapper: SchemaWrapper | undefined,
+  settings: AgentInputSettings,
+): InputFieldPartition {
+  const locked = new Set(settings.locked_fields);
+  const decided = resolvedInputDefaults(wrapper, settings);
+  const partition: InputFieldPartition = { locked: [], prefilled: [], prompted: [] };
+  const keys = wrapper?.schema?.properties
+    ? getOrderedKeys(wrapper.schema, wrapper.property_order)
+    : [];
+  for (const key of keys) {
+    if (locked.has(key)) partition.locked.push(key);
+    else if (decided[key] !== undefined) partition.prefilled.push(key);
+    else partition.prompted.push(key);
+  }
+  return partition;
 }

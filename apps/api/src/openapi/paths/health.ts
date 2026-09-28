@@ -38,7 +38,8 @@ export const healthPaths = {
                       },
                       agents: {
                         type: "object",
-                        description: "Agent runtime readiness established during platform boot.",
+                        description:
+                          "Agent runtime readiness: `degraded` until the run orchestrator has initialized. A failed boot handshake is retried in the background, so this recovers without a restart.",
                         properties: {
                           status: { type: "string", enum: ["healthy", "degraded"] },
                         },

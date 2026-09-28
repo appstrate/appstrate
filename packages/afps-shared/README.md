@@ -35,6 +35,7 @@ import each module by subpath.
 | `./file-field`                       | File-field parsing helpers.                                                                                                                                 |
 | `./token-usage`                      | Token-usage accounting shapes.                                                                                                                              |
 | `./backoff`                          | Retry backoff computation.                                                                                                                                  |
+| `./jsonpath`                         | The single-value RFC 9535 JSONPath subset every integration-manifest path field is read with (`identity_claims`, login-engine selectors).                   |
 
 ```ts
 import { guardedFetch } from "@appstrate/afps-shared/guarded-fetch";

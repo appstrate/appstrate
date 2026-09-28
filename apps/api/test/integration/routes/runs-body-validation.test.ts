@@ -96,6 +96,15 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
     expect(((await res.json()) as { code: string }).code).toBe("invalid_request");
   });
 
+  it("rejects the snake_case model_id, proxy_id and camelCase reasoningLevel with 400", async () => {
+    await expectRejectedField(await post({ input: {}, model_id: "claude-sonnet-4" }), "model_id");
+    await expectRejectedField(await post({ input: {}, proxy_id: "none" }), "proxy_id");
+    await expectRejectedField(
+      await post({ input: {}, generation: { reasoningLevel: "high" } }),
+      "generation.reasoningLevel",
+    );
+  });
+
   it("rejects a wrong-typed input with 400", async () => {
     const res = await post({ input: "not-an-object" });
     await expectRejectedField(res, "input");
@@ -123,7 +132,7 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
 
   it("rejects a repeated connection id in a set, in either case", async () => {
     // The same connection twice is a set whose labels cannot be distinct, so
-    // it would 412 `duplicate_connection_label` at the gate instead of 400ing
+    // it would 409 `duplicate_connection_label` at the gate instead of 400ing
     // here. `z.uuid()` accepts either case and Postgres folds, so the guard
     // has to fold too.
     await expectRejectedField(
@@ -184,7 +193,7 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
     const res = await post({
       input: { topic: "ops" },
       modelId: "claude-sonnet-4",
-      generation: { temperature: 0.2 },
+      generation: { temperature: 0.2, reasoning_level: "high" },
       proxyId: "none",
       connection_overrides: { "@acme/gmail": ["conn_1", "conn_2"] },
       dependency_overrides: { "@acme/skill": "draft" },
@@ -242,6 +251,13 @@ describe("POST /api/runs/inline/validate — body validation", () => {
       dependency_overrides: { "@acme/skill": "draft" },
     });
     await expectRejectedField(res, "dependency_overrides");
+  });
+
+  it("rejects the snake_case model_id and proxy_id, accepts modelId and proxyId", async () => {
+    const base = { manifest: validManifest(), prompt: "do" };
+    await expectRejectedField(await post({ ...base, model_id: null }), "model_id");
+    await expectRejectedField(await post({ ...base, proxy_id: null }), "proxy_id");
+    expect((await post({ ...base, modelId: null, proxyId: null })).status).toBe(200);
   });
 
   it("accepts `generation` — honoured on this surface, now documented too", async () => {

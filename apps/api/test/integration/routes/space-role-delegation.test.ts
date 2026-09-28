@@ -117,9 +117,13 @@ describe("space role delegation", () => {
   it("change-role cannot promote itself or assign a stronger custom bundle", async () => {
     const actor = await delegated(owner.defaultSpaceId, [
       ...presetPermissions("viewer"),
+      "space-members:read",
       "space-members:change-role",
     ]);
-    const custom = await seedSpaceRole({ orgId: owner.orgId, permissions: ["agents:write"] });
+    const custom = await seedSpaceRole({
+      orgId: owner.orgId,
+      permissions: ["agents:read", "agents:write"],
+    });
     const path = `/api/spaces/${owner.defaultSpaceId}/members/${actor.user.id}`;
     expect((await request(actor, path, "PATCH", { preset_role: "admin" })).status).toBe(403);
     expect((await request(actor, path, "PATCH", { custom_role_id: custom.id })).status).toBe(403);
@@ -128,7 +132,10 @@ describe("space role delegation", () => {
   });
 
   it("removing an explicit restriction cannot reveal a stronger open-space default", async () => {
-    const actor = await delegated(owner.defaultSpaceId, ["space-members:remove"]);
+    const actor = await delegated(owner.defaultSpaceId, [
+      "space-members:read",
+      "space-members:remove",
+    ]);
     const target = await member();
     await seedSpaceMember({
       spaceId: owner.defaultSpaceId,
@@ -147,6 +154,7 @@ describe("space role delegation", () => {
     const space = await seedSpace({ orgId: owner.orgId, visibility: "closed" });
     const actor = await delegated(space.id, [
       ...presetPermissions("viewer"),
+      "space-members:read",
       "space-members:remove",
     ]);
     const target = await member();
@@ -169,6 +177,7 @@ describe("space role delegation", () => {
     // check and only the target's own preset `admin` can be the refusal.
     const changer = await delegated(space.id, [
       ...presetPermissions("viewer"),
+      "space-members:read",
       "space-members:change-role",
     ]);
     const target = await member();

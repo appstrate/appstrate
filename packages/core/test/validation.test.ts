@@ -7,6 +7,8 @@ import {
   extractSkillMeta,
   agentManifestSchema,
   SUPPORTED_SCHEMA_VERSION_MAJOR,
+  SCHEMA_VERSION_REGEX,
+  AFPS_SCHEMA_VERSION,
 } from "../src/validation.ts";
 import { agentManifestSchema as afpsAgentManifestSchema } from "@afps-spec/schema";
 
@@ -992,6 +994,16 @@ describe("validateManifest — v2 common fields (§3.1)", () => {
   it("schema_version — SUPPORTED_SCHEMA_VERSION_MAJOR is 0", () => {
     // Constant pinning so a future bump becomes a deliberate code edit.
     expect(SUPPORTED_SCHEMA_VERSION_MAJOR).toBe(0);
+  });
+
+  it("schema_version — AFPS_SCHEMA_VERSION is a well-formed version of the supported MAJOR", () => {
+    // Pinned so a spec bump is a deliberate edit; and it must be one this build reads back.
+    expect(AFPS_SCHEMA_VERSION).toBe("0.3");
+    expect(AFPS_SCHEMA_VERSION).toMatch(SCHEMA_VERSION_REGEX);
+    expect(Number(AFPS_SCHEMA_VERSION.split(".")[0])).toBe(SUPPORTED_SCHEMA_VERSION_MAJOR);
+    expect(
+      validateManifest(validAgentManifest({ schema_version: AFPS_SCHEMA_VERSION })).valid,
+    ).toBe(true);
   });
 
   // ── _meta strict-reject malformed namespace keys (AFPS 0.1, §2 + §10.1) ──

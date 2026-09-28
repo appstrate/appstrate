@@ -15,13 +15,11 @@ import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { useUploadClient } from "../hooks/use-upload";
 import {
-  formatInputValue,
-  hasInputFields,
   partitionInputFields,
   resolvedInputDefaults,
-  subsetWrapper,
   type AgentInputSettings,
-} from "../lib/agent-input";
+} from "@appstrate/core/input-resolution";
+import { formatInputValue, hasInputFields, subsetWrapper } from "../lib/agent-input";
 
 /** Imperative surface for a caller whose submit button lives outside the form. */
 export interface AgentInputFormHandle {

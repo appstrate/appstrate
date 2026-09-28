@@ -24,6 +24,7 @@ import type { Bundle, BundlePackage } from "@appstrate/afps-runtime/bundle";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { initRunLimits } from "../../../src/services/run-limits.ts";
 import {
+  bundleImportAuditRecords,
   detectBundleConflicts,
   handleImportBundle,
   importBundle,
@@ -114,6 +115,28 @@ describe("reconstructPackageZip", () => {
     // derived file, recomputed at read time.
     const haystack = Buffer.from(out).toString("binary");
     expect(haystack.includes("RECORD")).toBe(false);
+  });
+});
+
+describe("bundleImportAuditRecords", () => {
+  it("names the source file with a camelCase `fileId` key (carve-out 4m)", () => {
+    const [record] = bundleImportAuditRecords(
+      {
+        imported: [
+          { identity: "@acme/a@1.0.0", status: "inserted", version_id: 1, type: "agent" },
+          { identity: "@acme/b@1.0.0", status: "reused", version_id: null },
+        ],
+        root_active: true,
+        root_package_id: "@acme/a",
+        root_version: "1.0.0",
+        warnings: [],
+      },
+      { via: "import:file", fileId: "fil_123" },
+    );
+    expect(record).toEqual({
+      resourceId: "@acme/a",
+      after: { type: "agent", version: "1.0.0", via: "import:file", root: true, fileId: "fil_123" },
+    });
   });
 });
 

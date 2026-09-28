@@ -27,7 +27,7 @@ import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { AgentManifest } from "../types/index.ts";
 import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
-import { requirePermission, rowAuthority } from "../middleware/require-permission.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { parseScopedName } from "@appstrate/core/naming";
@@ -354,7 +354,7 @@ export function createAgentsRouter() {
   // connection readiness for the agent: run-blocking CONNECTION verdict + the
   // per-integration management DTO.
   //
-  // Same resolver, same pinned manifests as the run-kickoff 412 — but not the
+  // Same resolver, same pinned manifests as the run-kickoff 409 — but not the
   // whole kickoff gate: readiness also refuses an integration that is not
   // active in the space and excludes those ids from the resolver
   // (`skipIntegrationIds`). This endpoint runs no activation gate, so such
@@ -363,12 +363,11 @@ export function createAgentsRouter() {
   // still refuses it); closing the gap means giving this DTO the activation
   // verdict too — a wire change to the Connexions tab. The kickoff remains the
   // authority; this is what the badge renders.
-  // `rowAuthority()`: reporting on `?version=draft` is the author's view, gated
-  // in the handler by the package's home space (`assertDraftSelectorAllowed`).
+  // Reporting on `?version=draft` is the author's view, gated in the handler by
+  // the package's home space (`assertDraftSelectorAllowed`).
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/connection-readiness`,
     requirePermission("integrations", "read"),
-    rowAuthority(),
     requireAgent(),
     async (c) => {
       const agent = c.get("package");
@@ -381,8 +380,9 @@ export function createAgentsRouter() {
           scope: getSpaceScope(c),
           agentPackageId: agent.id,
           actor: getActor(c),
-          // Drives `can_add_connection`: the same exemption the connect route
-          // applies, so the badge cannot promise what the mutation refuses.
+          // Drive `can_add_connection` with the connect routes' own guard and
+          // exemption, so the badge cannot promise what the mutation refuses.
+          canConnect: c.get("permissions")?.has("integrations:connect") ?? false,
           canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
           // The ROUTER decides which definition readiness judges, and it is
           // EXACTLY the one the detail page rendered: an explicit selector (a
@@ -432,8 +432,8 @@ export function createAgentsRouter() {
     return c.json({ modelId, generation: generationConfig });
   });
 
-  // PUT /api/agents/:scope/:name/model — set agent model override (admin-only)
-  router.put(
+  // PATCH /api/agents/:scope/:name/model — merge-update the agent model override (admin-only)
+  router.patch(
     `/${SCOPED_PACKAGE_ROUTE}/model`,
     requirePermission("agents", "configure"),
     requireAgent(),
@@ -531,7 +531,10 @@ export function createAgentsRouter() {
         wantsMemory ? listMemories(agent.id, spaceId, scope, runIdParam) : Promise.resolve([]),
       ]);
 
+      // One resource, not a list: a snapshot of both halves under the SAME
+      // actor-scope resolution, never paginated; `kind` narrows it.
       return c.json({
+        object: "agent_persistence",
         pinned: wantsPinned
           ? pinned.map((slot) => ({
               id: slot.id,
@@ -679,7 +682,7 @@ export function createAgentsRouter() {
   // distinction the CLI's run-by-id flow needs to prompt for an activation
   // rather than suggest a typo — and it lives there, once, so the three doors
   // answer this agent the same way.
-  // `rowAuthority()`: past `agents:read` the handler refuses on the package
+  // Past `agents:read` the handler refuses on the package
   // itself — the org's copy restriction (`assertPackageCopyAllowed`), draft
   // ownership (`assertDraftSelectorAllowed`) and a per-type read scope for
   // every dependency the assembled bundle carries.
@@ -687,7 +690,6 @@ export function createAgentsRouter() {
     `/${SCOPED_PACKAGE_ROUTE}/bundle`,
     rateLimit(30),
     requirePermission("agents", "read"),
-    rowAuthority(),
     requireAgent(),
     requireActiveAgent(),
     async (c) => {

@@ -17,6 +17,7 @@ import { useOrgStorage } from "../hooks/use-org-storage";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useFiles, type FileDto } from "../hooks/use-files";
 import { PageHeader } from "../components/page-header";
+import { useCanReach } from "../hooks/use-can-reach";
 import { FileListPanel, type PurposeFilter } from "../components/file-list-panel";
 
 /**
@@ -60,6 +61,7 @@ export function FilesPage() {
 
 function FilesPageContent() {
   const { t } = useTranslation(["files", "common"]);
+  const canReach = useCanReach();
 
   const [purpose, setPurpose] = useState<PurposeFilter>("all");
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -113,7 +115,7 @@ function FilesPageContent() {
         error={error}
         filter={{ axis: "purpose", value: purpose, onChange: resetPaging }}
         empty={{ message: t("page.empty"), hint: t("page.emptyHint") }}
-        showRunLink
+        showRunLink={canReach("/agents/:scope/:name/runs/:runId")}
         onDeleted={(id) => setLoadedPages((prev) => prev.filter((d) => d.id !== id))}
         onKept={(id) =>
           setLoadedPages((prev) => prev.map((d) => (d.id === id ? { ...d, expiresAt: null } : d)))

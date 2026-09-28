@@ -2,13 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  allocateMcpToolName,
   allocateMcpToolNamespace,
+  isValidMcpToolName,
   MCP_TOOL_NAME_MAX_LENGTH,
   normaliseMcpToolBody,
   normaliseMcpToolNamespace,
 } from "@appstrate/afps-shared/mcp-naming";
 
-export { allocateMcpToolNamespace, normaliseMcpToolBody, normaliseMcpToolNamespace };
+export {
+  allocateMcpToolName,
+  allocateMcpToolNamespace,
+  isValidMcpToolName as isValidToolName,
+  normaliseMcpToolBody,
+  normaliseMcpToolNamespace,
+};
 
 /** Regex pattern string for a valid slug: lowercase alphanumeric with optional hyphens. */
 export const SLUG_PATTERN = "[a-z0-9]([a-z0-9-]*[a-z0-9])?";
@@ -343,26 +351,9 @@ function encodeExtValue(name: string): string {
 }
 
 /**
- * MCP tool name validation.
- *
- * Format: `{namespace_snake}__{tool_snake}` — two snake_case tokens
- * joined by a double underscore. Hard length ceiling 56 chars leaves
- * headroom under the 64-char OpenAI/Anthropic limit for downstream
- * host re-prefixing (e.g. some CLI hosts add their own
- * `mcp__plugin_<plugin>_<server>__<tool>` super-prefix).
+ * MCP tool name ceiling (grammar: `isValidToolName`, re-exported above).
  */
 export const TOOL_NAME_MAX_LEN = MCP_TOOL_NAME_MAX_LENGTH;
-// The namespace token derives from a package id whose scope may start with a
-// digit (`SLUG_PATTERN` and the AFPS name pattern both allow `@1password/…`),
-// so it admits a leading digit. The tool token keeps the stricter
-// letter-leading alphabet of {@link CREDENTIAL_KEY_RE}.
-const TOOL_NAME_PATTERN = /^[a-z0-9][a-z0-9_]*__[a-z][a-z0-9_]*$/;
-
-export function isValidToolName(name: string): boolean {
-  if (typeof name !== "string") return false;
-  if (name.length === 0 || name.length > TOOL_NAME_MAX_LEN) return false;
-  return TOOL_NAME_PATTERN.test(name);
-}
 
 /**
  * Deliverable filenames a model reaches for by reflex and that mean nothing

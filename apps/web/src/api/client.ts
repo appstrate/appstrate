@@ -106,7 +106,7 @@ export async function toApiError(response: Response): Promise<Error> {
       // code-specific object), so consumers narrow per `code`. The cast
       // bridges the spec's array type to that open shape.
       body.errors as unknown as Record<string, unknown> | undefined,
-      body.requestId,
+      body.request_id,
       body.param,
     );
   }

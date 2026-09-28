@@ -126,9 +126,18 @@ async function callTool(name: string, args: Record<string, unknown>, deps: Deps)
     { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } },
     deps,
   );
-  const result = res?.result as { isError?: boolean; content: Array<{ text: string }> };
+  const result = res?.result as {
+    isError?: boolean;
+    content: Array<{ text: string }>;
+    _meta?: Record<string, unknown>;
+  };
   const text = result.content[0]!.text;
-  return { isError: result.isError, text, payload: JSON.parse(text) as Record<string, unknown> };
+  return {
+    isError: result.isError,
+    text,
+    meta: result._meta,
+    payload: JSON.parse(text) as Record<string, unknown>,
+  };
 }
 
 /**
@@ -504,6 +513,39 @@ describe("ssh_exec via injected runner", () => {
     expect(res.isError).toBe(true);
     expect(res.text).toContain("ssh failed (exit 255)");
     expect(res.text).toMatch(/pinned host key does not match/);
+    expect(res.meta).toEqual({
+      "dev.appstrate/credential": { status: "rejected", reason: "host_key_mismatch" },
+    });
+  });
+
+  // The sidecar reports a rejected credential to the platform off this
+  // `_meta` signal, so it must never appear on a failure a reconnect would
+  // not fix.
+  it("signals a rejected key over sftp too, never a network failure", async () => {
+    restoreEnv = withEnv(ENV);
+    const rejected = stubRunner([
+      { stderr: "user@h: Permission denied (publickey).\n", code: 255 },
+    ]);
+    const res = await callTool(
+      "ssh_read",
+      { path: "f" },
+      { run: rejected.run, knownHostsPath: join(scratch, "kh") },
+    );
+    expect(res.isError).toBe(true);
+    expect(res.meta).toEqual({
+      "dev.appstrate/credential": { status: "rejected", reason: "publickey_rejected" },
+    });
+
+    const down = stubRunner([
+      { stderr: "ssh: connect to host h port 22: Connection refused\n", code: 255 },
+    ]);
+    const net = await callTool(
+      "ssh_exec",
+      { command: "true" },
+      { run: down.run, knownHostsPath: join(scratch, "kh") },
+    );
+    expect(net.isError).toBe(true);
+    expect(net.meta).toBeUndefined();
   });
 
   it("kills after 120 s by default and after `timeout_seconds` when given", async () => {

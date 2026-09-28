@@ -15,7 +15,7 @@
  *
  *  - a `connection_overrides` entry that the resolver would silently skip — an
  *    empty id inside the set, or an empty set — so each fire falls through to
- *    actor-fallback or dies with a 412 `must_choose_connection`;
+ *    actor-fallback or dies with a 409 `must_choose_connection`;
  *  - an unknown field — stripped without a trace where the other launch bodies
  *    are `.strict()`;
  *  - a `dependency_overrides` value the resolver rejects (`"latest"`) — the
@@ -235,7 +235,7 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
   });
 });
 
-describe("PUT /api/schedules/:id — body validation", () => {
+describe("PATCH /api/schedules/:id — body validation", () => {
   let ctx: TestContext;
   let scheduleId: string;
 
@@ -262,7 +262,7 @@ describe("PUT /api/schedules/:id — body validation", () => {
 
   async function put(body: Record<string, unknown>) {
     return app.request(`/api/schedules/${scheduleId}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
@@ -399,7 +399,7 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
 
   const put = (headers: Record<string, string>, id: string, body: Record<string, unknown>) =>
     app.request(`/api/schedules/${id}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
@@ -442,7 +442,7 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
     expect(row?.dependencyOverrides).toEqual({ [SKILL]: "draft" });
   });
 
-  it("refuses a PUT that ADDS the `draft` override to a schedule that did not hold it", async () => {
+  it("refuses a PATCH that ADDS the `draft` override to a schedule that did not hold it", async () => {
     const id = await armedSchedule();
     const res = await put(await scheduleWriter(), id, {
       dependency_overrides: { [SKILL]: "draft" },
@@ -455,7 +455,7 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
     expect(row?.dependencyOverrides ?? null).toBeNull();
   });
 
-  it("accepts a PUT that echoes the stored `draft` override back unchanged", async () => {
+  it("accepts a PATCH that echoes the stored `draft` override back unchanged", async () => {
     // Without this the refusal above would be a hole, not a gate: the edit form
     // reads the row and posts every field back, so a cron change arrives
     // carrying the override its author already proved. A stored value is not an
@@ -485,7 +485,7 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
     expect(row?.dependencyOverrides).toEqual({ [SKILL]: "draft" });
   });
 
-  it("accepts a PUT that DROPS the `draft` override", async () => {
+  it("accepts a PATCH that DROPS the `draft` override", async () => {
     // Taking a working copy away needs no authority at all — and an operator
     // who cannot undo a draft override is an operator who has to delete the
     // schedule to stop it.
@@ -498,7 +498,7 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
 });
 
 /**
- * The FORM half of `dependency_overrides` on `PUT /api/schedules/:id`, when the
+ * The FORM half of `dependency_overrides` on `PATCH /api/schedules/:id`, when the
  * thing that moves is not the map but the MANIFEST under it.
  *
  * "A key means something" is decided against the EFFECTIVE manifest — the
@@ -514,7 +514,7 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
  * The AUTHORITY half is deliberately not exercised here: no value below is
  * `draft`, so the only rule any of these bodies can trip is the key gate.
  */
-describe("PUT /api/schedules/:id — `dependency_overrides` keys vs. a MOVED manifest", () => {
+describe("PATCH /api/schedules/:id — `dependency_overrides` keys vs. a MOVED manifest", () => {
   let ctx: TestContext;
 
   /** Published declares the skill; the author then dropped it from the DRAFT. */
@@ -566,7 +566,7 @@ describe("PUT /api/schedules/:id — `dependency_overrides` keys vs. a MOVED man
   /**
    * A schedule armed against the PUBLISHED definition, pinning the skill that
    * definition declares. `version_override` is left unset on purpose: that is
-   * the published selector, and it is what the PUT below moves.
+   * the published selector, and it is what the PATCH below moves.
    */
   async function armSchedule(agentRef: string): Promise<string> {
     const res = await app.request(`/api/agents/${agentRef}/schedules`, {
@@ -583,12 +583,12 @@ describe("PUT /api/schedules/:id — `dependency_overrides` keys vs. a MOVED man
 
   const put = (id: string, body: Record<string, unknown>) =>
     app.request(`/api/schedules/${id}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
 
-  it("refuses a PUT that moves only `version_override` onto a definition the stored keys no longer fit", async () => {
+  it("refuses a PATCH that moves only `version_override` onto a definition the stored keys no longer fit", async () => {
     const id = await armSchedule(DRIFTED);
     // Not one entry of the map moves — the patch never mentions it. What moves
     // is the manifest the map is judged against, and under the DRAFT the
@@ -620,7 +620,7 @@ describe("PUT /api/schedules/:id — `dependency_overrides` keys vs. a MOVED man
     expect(((await res.json()) as { detail?: string }).detail).toContain(SKILL);
   });
 
-  it("accepts the identical PUT when the target definition still declares the key (control)", async () => {
+  it("accepts the identical PATCH when the target definition still declares the key (control)", async () => {
     // Same body, same caller, same stored map — only the DRAFT manifest
     // differs. Without this the refusals above would be satisfied by a route
     // that simply rejects `version_override: "draft"`.

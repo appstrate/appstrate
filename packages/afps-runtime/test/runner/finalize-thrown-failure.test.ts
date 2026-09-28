@@ -138,7 +138,7 @@ describe("finalizeThrownFailure", () => {
     expect(h.finalized?.status).toBe("failed");
   });
 
-  it("stamps cost / durationMs via the stamp hook and honours setFailedStatus:false", async () => {
+  it("stamps cost / durationMs via the stamp hook, after the failed status", async () => {
     const h = harness();
     await finalizeThrownFailure({
       events: [],
@@ -150,14 +150,13 @@ describe("finalizeThrownFailure", () => {
       drainAndEmit: h.drainAndEmit,
       eventSink: h.eventSink,
       usage: USAGE,
-      setFailedStatus: false,
       stamp: (result) => {
         result.cost = 1.23;
         result.durationMs = 50;
       },
     });
 
-    expect(h.finalized?.status).toBeUndefined();
+    expect(h.finalized?.status).toBe("failed");
     expect(h.finalized?.cost).toBe(1.23);
     expect(h.finalized?.durationMs).toBe(50);
     expect(h.finalized?.usage).toEqual(USAGE);
@@ -191,24 +190,6 @@ describe("finalizeThrownFailure", () => {
     });
   });
 
-  it("ignores `terminalStatus` when setFailedStatus:false (status stays unset)", async () => {
-    const h = harness();
-    await finalizeThrownFailure({
-      events: [],
-      err: new Error("e"),
-      signal: undefined,
-      runId: "run_ts_off",
-      now: () => 1,
-      emit: h.emit,
-      drainAndEmit: h.drainAndEmit,
-      eventSink: h.eventSink,
-      usage: USAGE,
-      setFailedStatus: false,
-      terminalStatus: "timeout",
-    });
-    expect(h.finalized?.status).toBeUndefined();
-  });
-
   it("defaults the terminal status to failed when terminalStatus is omitted", async () => {
     const h = harness();
     await finalizeThrownFailure({
@@ -237,7 +218,6 @@ describe("finalizeThrownFailure", () => {
       drainAndEmit: h.drainAndEmit,
       eventSink: h.eventSink,
       usage: { input_tokens: 0, output_tokens: 0 },
-      setFailedStatus: false,
     });
     expect(h.finalized).toBeDefined();
     expect(h.finalized?.usage).toEqual({ input_tokens: 0, output_tokens: 0 });

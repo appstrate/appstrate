@@ -112,7 +112,7 @@ describe("telemetry façade — no provider (module absent)", () => {
     expect(currentTraceparent()).toBeUndefined();
     expect(() => recordRunDuration(5, { status: "success" })).not.toThrow();
     expect(() => recordRunTerminal({ status: "failed", errorCode: "timeout" })).not.toThrow();
-    expect(() => recordContainerSpawn(10, { sidecar: true })).not.toThrow();
+    expect(() => recordContainerSpawn(10)).not.toThrow();
     expect(() => recordLlmLatency(5, { api_shape: "openai", status: 200 })).not.toThrow();
     expect(() => recordProcessAnomaly({ kind: "uncaughtException" })).not.toThrow();
     expect(() => recordFileCreated({ purpose: "agent_output" })).not.toThrow();

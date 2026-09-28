@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery } from "@tanstack/react-query";
+import { canReadRuns } from "@appstrate/core/permissions";
 import { client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
+import { usePermissions } from "./use-permissions";
 import { runsKeys, runKeys } from "../lib/query-keys";
 import type { EnrichedRun } from "@appstrate/shared-types";
 
@@ -14,9 +16,16 @@ import type { EnrichedRun } from "@appstrate/shared-types";
  */
 type RunLogEntry = components["schemas"]["RunLog"];
 
+/** Every run read below guards on `requireRunsRead`. */
+function useCanReadRuns(): boolean {
+  const { can } = usePermissions();
+  return canReadRuns(can);
+}
+
 export function useRuns(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const canRead = useCanReadRuns();
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync patches this cache
     // in place (setQueryData) on SSE run_update events.
@@ -28,13 +37,14 @@ export function useRuns(packageId: string | undefined) {
       });
       return data?.data ?? [];
     },
-    enabled: !!packageId && !!spaceId,
+    enabled: canRead && !!packageId && !!spaceId,
   });
 }
 
 export function useRun(runId: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const canRead = useCanReadRuns();
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync and run-detail patch
     // this cache in place (setQueryData) on SSE events.
@@ -46,13 +56,14 @@ export function useRun(runId: string | undefined) {
       // Non-2xx throws via the client middleware, so `data` is defined here.
       return data!;
     },
-    enabled: !!runId && !!spaceId,
+    enabled: canRead && !!runId && !!spaceId,
   });
 }
 
 export function useRunLogs(runId: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const canRead = useCanReadRuns();
   return useQuery({
     // Key pinned to the legacy shape: run-detail appends live SSE log frames
     // into this cache (setQueryData).
@@ -77,6 +88,6 @@ export function useRunLogs(runId: string | undefined) {
       }
       return logs;
     },
-    enabled: !!runId && !!spaceId,
+    enabled: canRead && !!runId && !!spaceId,
   });
 }

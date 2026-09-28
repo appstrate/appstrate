@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { createOrgItem } from "./package-items/crud.ts";
 import { CONFIG_BY_TYPE } from "./package-items/config.ts";
 import { activatePackage } from "./space-packages.ts";
@@ -8,7 +9,7 @@ import { logger } from "../lib/logger.ts";
 const HELLO_WORLD_MANIFEST = {
   version: "1.0.0",
   type: "agent",
-  schema_version: "0.1",
+  schema_version: AFPS_SCHEMA_VERSION,
   display_name: "Hello World",
   author: "Appstrate",
   description: "Un agent de démonstration pour découvrir les capacités de la plateforme Appstrate.",

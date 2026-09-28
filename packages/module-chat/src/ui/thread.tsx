@@ -17,11 +17,14 @@ import {
   ActionBarPrimitive,
   AuiIf,
   useAuiState,
+  type ReasoningGroupComponent,
+  type ReasoningMessagePartComponent,
 } from "@assistant-ui/react";
 import {
   AlertTriangleIcon,
   ArrowDownIcon,
   CheckIcon,
+  ChevronRightIcon,
   CopyIcon,
   FileIcon,
   PaperclipIcon,
@@ -33,6 +36,11 @@ import {
 import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
 import { formatBytes } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
 import { MarkdownText } from "./markdown-text.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
@@ -48,11 +56,7 @@ import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel } from "./turn-model.ts";
-import {
-  FileAttachment,
-  ATTACHMENT_CHIP_CLASS,
-  ATTACHMENT_IMAGE_CLASS,
-} from "./file-attachment.tsx";
+import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
 import { isImageMime } from "@appstrate/core/mime";
 
 export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
@@ -76,8 +80,12 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
       <AuiIf condition={(s) => !s.thread.isEmpty}>
         {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
             instant — smoothing turns every content append into a visible glide
-            and amplifies any residual layout shift. */}
-        <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
+            and amplifies any residual layout shift. `relative` makes the
+            viewport the containing block of its absolutely positioned
+            descendants (the `sr-only` labels): placed against an ancestor
+            outside this scroller, they overflow the page into a second
+            scrollbar. */}
+        <ThreadPrimitive.Viewport className="relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
           <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
           <div className="min-h-6 flex-grow" />
@@ -103,6 +111,7 @@ const WELCOME_SUGGESTIONS = [
 ];
 
 function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
+  const canWrite = useChatHost().can("chat:write");
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4">
       <div className="flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
@@ -113,18 +122,20 @@ function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
           </p>
         </div>
         <Composer slot={composerSlot} />
-        <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-          {WELCOME_SUGGESTIONS.map((s) => (
-            <ThreadPrimitive.Suggestion key={s} prompt={s} method="replace" autoSend asChild>
-              <button
-                type="button"
-                className="hover:bg-accent rounded-lg border px-3 py-2 text-left text-sm transition-colors"
-              >
-                {s}
-              </button>
-            </ThreadPrimitive.Suggestion>
-          ))}
-        </div>
+        {canWrite && (
+          <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+            {WELCOME_SUGGESTIONS.map((s) => (
+              <ThreadPrimitive.Suggestion key={s} prompt={s} method="replace" autoSend asChild>
+                <button
+                  type="button"
+                  className="hover:bg-accent rounded-lg border px-3 py-2 text-left text-sm transition-colors"
+                >
+                  {s}
+                </button>
+              </ThreadPrimitive.Suggestion>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -198,16 +209,6 @@ function FileAttachmentPart(props: { filename?: string }) {
 // (it stays correct for assistant file parts). We render sent attachments from
 // the attachments channel instead (`MessagePrimitive.Attachments`).
 
-/** Inert chip: file icon + truncated name, no download (same look as FileAttachmentPart). */
-function InertAttachmentChip({ name }: { name: string }) {
-  return (
-    <div className={ATTACHMENT_CHIP_CLASS}>
-      <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="truncate font-medium">{name || UNNAMED_FILE}</span>
-    </div>
-  );
-}
-
 /**
  * One sent attachment on a user message. An `appfile://` (server-persisted, or a
  * reloaded conversation) is interactive: image mime → thumbnail, else a
@@ -241,6 +242,15 @@ function SentAttachmentChip() {
 }
 
 function Composer({ slot }: { slot?: React.ReactNode }) {
+  const { can, t } = useChatHost();
+  // Sending, stopping and attaching all guard on `chat:write`.
+  if (!can("chat:write")) {
+    return (
+      <p className="text-muted-foreground bg-card w-full rounded-xl border px-3 py-3 text-center text-sm">
+        {t("composer.readOnly")}
+      </p>
+    );
+  }
   // No focus ring on the box: the app's global `textarea:focus` ring is too
   // intense here. min-h-9 + px-0 override the global `textarea { min-h-80px }`
   // base rule (utilities beat the base layer) for a compact, Codex-like field.
@@ -367,24 +377,63 @@ function UserMessage() {
 // branches that aren't persisted — corrupting history on reload — so they're
 // intentionally absent.
 
-/**
- * Shown while the model hasn't produced anything visible yet. Height is pinned
- * to h-6 (24px) — exactly one prose-sm text line — so the dots→first-text swap
- * is a 0px layout change. Gated on the message actually running: a DEAD message
- * with no visible parts (e.g. a turn that errored before producing content)
- * must not animate "thinking" forever — that reads as a hung chat.
- */
-function ThinkingIndicator() {
-  const running = useAuiState((s) => s.message.status?.type === "running");
-  if (!running) return null;
+/** The turn's one status region. h-6 = one prose-sm line: whatever replaces it shifts 0px. */
+function ThinkingStatus() {
+  const { t } = useChatHost();
   return (
-    <div className="flex h-6 items-center gap-1" role="status" aria-label="L'assistant réfléchit…">
+    <div
+      className="flex h-6 items-center gap-1"
+      role="status"
+      aria-label={t("thinking.status")}
+      data-testid="chat-thinking-status"
+    >
       <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.3s]" />
       <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.15s]" />
       <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full" />
     </div>
   );
 }
+
+/** Gated on running: a dead message with no visible parts must not animate "thinking" forever. */
+function ThinkingIndicator() {
+  const running = useAuiState((s) => s.message.status?.type === "running");
+  return running ? <ThinkingStatus /> : null;
+}
+
+/**
+ * Takes over from the dots (assistant-ui hides `Empty` once the last part is reasoning).
+ * Running = message running ∧ this group is its tail, so the dots stop once a text or
+ * tool part follows. Collapsed, the parts are not mounted: a delta costs one selector.
+ */
+const ReasoningGroup: ReasoningGroupComponent = ({ endIndex, children }) => {
+  const { t } = useChatHost();
+  const running = useAuiState(
+    (s) => s.message.status?.type === "running" && endIndex === s.message.parts.length - 1,
+  );
+  return (
+    <Collapsible>
+      <div className="flex h-6 items-center gap-2">
+        <CollapsibleTrigger className="group/reasoning text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex items-center gap-1 rounded-sm text-xs transition-colors outline-none focus-visible:ring-1">
+          <ChevronRightIcon
+            aria-hidden="true"
+            className="size-3.5 shrink-0 transition-transform group-data-[state=open]/reasoning:rotate-90"
+          />
+          {running ? t("reasoning.running") : t("reasoning.done")}
+        </CollapsibleTrigger>
+        {/* A sibling of the trigger, not a child: a button's content is
+            presentational, so a live region inside it is not exposed. */}
+        {running ? <ThinkingStatus /> : null}
+      </div>
+      <CollapsibleContent className="text-muted-foreground mt-1 mb-2 ml-1.5 space-y-2 border-l-2 pl-3 text-xs leading-relaxed">
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+};
+
+const ReasoningText: ReasoningMessagePartComponent = ({ text }) => (
+  <p className="break-words whitespace-pre-wrap">{text}</p>
+);
 
 /** Always shown, not on hover, so a mid-conversation model switch is visible. */
 function TurnModelBadge() {
@@ -423,12 +472,16 @@ function TurnLimitNotice() {
  * survives reload; the transient assistant-ui marker covers failures that have
  * not reached a finish chunk yet.
  */
-function MessageError() {
-  const { t } = useChatHost();
+export function MessageError() {
+  const { t, can } = useChatHost();
   // Select a plain field, never a derived object: this selector IS
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
   const message = useAuiState((s) => s.message);
-  const errorState = React.useMemo(() => turnErrorState(message, t), [message, t]);
+  const canManageBilling = can("billing:manage");
+  const errorState = React.useMemo(
+    () => turnErrorState(message, t, canManageBilling),
+    [message, t, canManageBilling],
+  );
   if (!errorState) return null;
   return (
     <div
@@ -443,6 +496,11 @@ function MessageError() {
           </span>
         ) : null}
       </span>
+      {errorState.action ? (
+        <Button asChild variant="outline" size="sm" className="shrink-0">
+          <a href={errorState.action.href}>{errorState.action.label}</a>
+        </Button>
+      ) : null}
       {errorState.retryable ? (
         <ThreadPrimitive.If running={false}>
           <ThreadPrimitive.Suggestion
@@ -462,21 +520,20 @@ function MessageError() {
   );
 }
 
+/** Module-level: assistant-ui memoizes each part on these members' identity. */
+const ASSISTANT_PART_COMPONENTS = {
+  Text: MarkdownText,
+  Reasoning: ReasoningText,
+  ReasoningGroup,
+  tools: { Fallback: ToolFallback },
+  Empty: ThinkingIndicator,
+} satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
+
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className="text-foreground text-sm leading-relaxed">
-        {/* Each tool call renders as its own card (no coalescing). Registered
-            tool UIs resolve first; unregistered tools fall back to ToolFallback.
-            Empty renders the thinking indicator while the model is still
-            working and the last part isn't text. */}
-        <MessagePrimitive.Parts
-          components={{
-            Text: MarkdownText,
-            tools: { Fallback: ToolFallback },
-            Empty: ThinkingIndicator,
-          }}
-        />
+        <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
         <TurnLimitNotice />
         <MessageError />
       </div>

@@ -24,12 +24,20 @@
 
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, TERMINAL_RUN_EVENT_TYPES, type RunResultPayload } from "@appstrate/db/schema";
+import { runs, type RunResultPayload } from "@appstrate/db/schema";
+import { TERMINAL_RUN_EVENT_TYPES } from "@appstrate/db/run-status";
 import { type CloudEventEnvelope } from "@appstrate/afps-runtime/events";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
+import {
+  emptyRunResult,
+  type RunResult,
+  type TerminalRunResult,
+} from "@appstrate/afps-runtime/runner";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { TerminalRunStatus } from "@appstrate/core/run-status";
 import { logger } from "../lib/logger.ts";
+import { toPgSafe } from "@appstrate/db/pg-safe";
+import { rowValueErrorCode, type Tx } from "../lib/db-helpers.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import type { EventBuffer } from "../infra/event-buffer/interface.ts";
 import { getEnv } from "@appstrate/env";
@@ -97,7 +105,7 @@ interface IngestRunEventInput {
 
 interface FinalizeRunInput {
   run: RunSinkContext;
-  result: RunResult;
+  result: TerminalRunResult;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +154,7 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
       startedAt: runs.startedAt,
       versionRef: runs.versionRef,
       modelSource: runs.modelSource,
+      inferenceRoute: runs.inferenceRoute,
       modelCost: runs.modelCost,
     })
     .from(runs)
@@ -288,13 +297,12 @@ async function ingestInner(
  *
  *   1. Drain buffered events (accepting gaps — last chance).
  *   2. Load the package manifest (for output-schema validation).
- *   3. Derive the authoritative terminal status:
- *        a. Explicit `result.status` from the runner wins.
- *        b. `result.error` → failed.
- *        c. If status is still "success": validate output against manifest
- *           schema (if declared) — failure overrides to "failed".
- *        d. If status is still "success": apply the "zero tokens" heuristic
- *           (no LLM roundtrip ever happened) — overrides to "failed".
+ *   3. Derive the authoritative terminal status, starting from the
+ *      runner's required `result.status`:
+ *        a. If "success": validate output against manifest schema (if
+ *           declared) — failure overrides to "failed".
+ *        b. If still "success": apply the "zero tokens" rule (no LLM
+ *           roundtrip ever happened) — overrides to "failed".
  *   4. Build the result payload (`{ output }`) mirroring the legacy
  *      platform shape; consumers of `runs.result` get the same structure
  *      whether the run executed in-process or came from a remote runner.
@@ -334,7 +342,9 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
 }
 
 async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
-  const { run, result } = input;
+  const { run } = input;
+  // Single choke point for the runner's finalize body and every synthesised one.
+  const result = toPgSafe(input.result);
   const scope = { orgId: run.orgId, spaceId: run.spaceId };
 
   // 1. Flush any buffered events before we close the sink.
@@ -350,7 +360,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // 3. Derive final status + error message. Pure computation — no DB writes
   //    before the CAS so concurrent synthesis + container-posted finalize
   //    don't duplicate log rows or memories.
-  let status = mapTerminalStatus(result);
+  let status = result.status;
   let errorMessage: string | null = result.error?.message ?? null;
   let outputValidationErrors: string[] | null = null;
 
@@ -407,8 +417,8 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // `status: "failed"` + `error` when the agent loop ended on an errored
   // final turn (see the bridge's `getTerminalError()` in runner-pi); a
   // transient mid-loop error the
-  // agent recovered from leaves `status: "success"`. `mapTerminalStatus`
-  // honours that authoritative status above. The platform deliberately
+  // agent recovered from leaves `status: "success"`, and finalize starts
+  // from that authoritative status above. The platform deliberately
   // does NOT second-guess it by scanning the `run_logs` adapter-error
   // trail — that post-hoc archaeology produced false positives, failing
   // runs whose agent recovered and delivered via `report`/`log` (which
@@ -416,14 +426,11 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // below remains as a distinct backstop for the "LLM never reachable,
   // zero tokens, no terminal error surfaced" shape.
 
-  // Zod boundary on the runner-supplied terminal usage (tolerant: known
-  // numeric fields kept, unknown keys stripped). The fallback semantics
-  // split on the terminal status:
+  // Terminal usage — required on a success by the route, which 400s without
+  // it. The fallback semantics for an absent/invalid value split on the status:
   //
-  //   - SUCCESS: the finalize body is the single source of truth — an
-  //     absent/invalid shape becomes explicit zero usage so the zero-token
-  //     liveness heuristic below cannot be defeated by a late side-channel
-  //     metric event.
+  //   - SUCCESS (only via `synthesiseFinalize` with no snapshot): explicit zero
+  //     usage, so a late metric event cannot defeat the zero-token rule.
   //   - NON-SUCCESS (watchdog kill, container crash, runner-declared
   //     failure without a billing block): the run died before it could
   //     post terminal usage. Coercing to zeros here would ERASE the
@@ -451,7 +458,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // The other half is ordering, and is unchanged: the CAS on `sink_closed_at`
   // guarantees a terminal usage arriving after this finalize can never re-open
   // the run.
-  let validatedUsage = validateFinalizeUsage(result.usage, run.id);
+  let validatedUsage: TokenUsage | null = result.usage ?? null;
   // Non-success without runner-posted usage: the run-row column must keep
   // whatever cumulative snapshot the `appstrate.metric` side-channel last
   // wrote. The COLUMN preservation happens atomically in the CAS below
@@ -526,6 +533,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
         cost: terminalCost,
         usage: validatedUsage,
         modelSource: run.modelSource,
+        inferenceRoute: run.inferenceRoute,
         // Same kickoff snapshot the metric path uses, so the terminal write
         // classifies identically to every snapshot before it.
         modelCost: run.modelCost,
@@ -860,7 +868,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
 export async function synthesiseFinalize(
   runId: string,
   terminal: {
-    status: "success" | "failed" | "timeout" | "cancelled";
+    status: TerminalRunStatus;
     error?: { message: string; stack?: string };
     durationMs?: number;
   },
@@ -871,8 +879,7 @@ export async function synthesiseFinalize(
     return;
   }
 
-  const result: RunResult = emptyRunResult();
-  result.status = terminal.status;
+  const result: TerminalRunResult = { ...emptyRunResult(), status: terminal.status };
   if (terminal.error) result.error = terminal.error;
   if (terminal.durationMs !== undefined) result.durationMs = terminal.durationMs;
 
@@ -926,7 +933,7 @@ export async function synthesiseFinalize(
  *
  * PAYLOAD ONLY: the caller's terminal status is untouched. A cancelled run
  * stays `cancelled`, a timeout stays `timeout`; recovering an output never
- * feeds `mapTerminalStatus`. It does legitimately change the outcome of the
+ * touches `result.status`. It does legitimately change the outcome of the
  * output-schema validation `finalizeRunImpl` runs on a synthesised
  * `success` — a run that really did emit a valid payload now stays
  * `success` instead of being failed for "finished without calling the
@@ -969,31 +976,10 @@ function tokenUsageIsNonZero(usage: TokenUsage): boolean {
 }
 
 /**
- * Tolerant Zod boundary on the runner-supplied finalize `usage`: known numeric
- * fields validated, unknown keys stripped. Absent/invalid shapes return `null`
- * (+ warn log for the malformed case) so the caller decides the fallback —
- * zero usage on a success terminal, last-known snapshot on a non-success one.
- * A malformed billing field can never leave an already-completed run
- * unfinalized.
- */
-function validateFinalizeUsage(usage: unknown, runId: string): TokenUsage | null {
-  if (usage === null || usage === undefined) return null;
-  const parsed = tokenUsageSchema.safeParse(usage);
-  if (!parsed.success) {
-    logger.warn("finalize: malformed result.usage; ignoring terminal usage field", {
-      runId,
-      reason: parsed.error.issues[0]?.message ?? "validation failed",
-    });
-    return null;
-  }
-  return parsed.data;
-}
-
-/**
  * Last-known cumulative usage snapshot for a run — the value the
  * `appstrate.metric` side-channel wrote onto `runs.tokenUsage` during the
- * run. Parsed through the same tolerant Zod boundary as the finalize body so
- * a corrupt JSONB value degrades to `null`, never a throw. Used by finalize
+ * run. Parsed through the token-usage schema so a corrupt JSONB value
+ * degrades to `null`, never a throw. Used by finalize
  * to avoid erasing real usage when a run dies without posting a terminal
  * `result.usage`, and by {@link synthesiseFinalize} to reconstruct the
  * terminal usage for platform-synthesised closures.
@@ -1072,36 +1058,63 @@ async function persistEventAndAdvance(
   // event's CAS would tolerate without retrying the dropped one.
   const scope = { orgId: run.orgId, spaceId: run.spaceId };
   const firstEvent = run.lastEventSequence === 0;
-  const claimed = await db.transaction(async (tx) => {
-    const rows = await tx
-      .update(runs)
-      // `isNull(sinkClosedAt)` is load-bearing (CRIT-12): the middleware's
-      // `assertSinkOpen` runs on a SNAPSHOT, so a concurrent finalize can
-      // close the sink between that read and this commit. Putting the
-      // closure check inside the CAS WHERE makes a lost race a no-op —
-      // a closed run can never gain new events or be flipped back to
-      // `running` by the firstEvent branch below.
-      .set({ lastEventSequence: sequence, lastHeartbeatAt: new Date() })
-      .where(and(eq(runs.id, run.id), isNull(runs.sinkClosedAt), predicate))
-      .returning({ id: runs.id });
-    if (rows.length === 0) return false;
+  const claim = (write: (tx: Tx) => Promise<unknown>) =>
+    db.transaction(async (tx) => {
+      const rows = await tx
+        .update(runs)
+        // `isNull(sinkClosedAt)` is load-bearing (CRIT-12): the middleware's
+        // `assertSinkOpen` runs on a SNAPSHOT, so a concurrent finalize can
+        // close the sink between that read and this commit. Putting the
+        // closure check inside the CAS WHERE makes a lost race a no-op —
+        // a closed run can never gain new events or be flipped back to
+        // `running` by the firstEvent branch below.
+        .set({ lastEventSequence: sequence, lastHeartbeatAt: new Date() })
+        .where(and(eq(runs.id, run.id), isNull(runs.sinkClosedAt), predicate))
+        .returning({ id: runs.id });
+      if (rows.length === 0) return false;
 
-    await persistRunEvent(tx, scope, run.id, event, {
-      writeLedger: true,
-      modelSource: run.modelSource,
-      modelCost: run.modelCost,
+      await write(tx);
+
+      // No runner emits `run.started`, so flip status → running on the
+      // first ingested sequence regardless of type. Terminal status is
+      // owned by finalizeRun. (`updateRun` additionally enforces the
+      // monotone status invariant — a terminal run can never re-enter
+      // `running` even from paths that bypass this CAS.)
+      if (firstEvent) {
+        await updateRun(scope, run.id, { status: "running" }, tx);
+      }
+      return true;
     });
 
-    // No runner emits `run.started`, so flip status → running on the
-    // first ingested sequence regardless of type. Terminal status is
-    // owned by finalizeRun. (`updateRun` additionally enforces the
-    // monotone status invariant — a terminal run can never re-enter
-    // `running` even from paths that bypass this CAS.)
-    if (firstEvent) {
-      await updateRun(scope, run.id, { status: "running" }, tx);
+  let claimed: boolean;
+  try {
+    claimed = await claim((tx) =>
+      persistRunEvent(tx, scope, run.id, event, {
+        writeLedger: true,
+        modelSource: run.modelSource,
+        inferenceRoute: run.inferenceRoute,
+        modelCost: run.modelCost,
+      }),
+    );
+  } catch (err) {
+    // A row-value failure (22xxx/23514) replays identically and would wedge the stream
+    // (#1501): claim the sequence with a placeholder. After sanitisation only a platform
+    // bug lands here, hence error level — logged only if we claimed (a lost race drops nothing).
+    const sqlState = rowValueErrorCode(err);
+    if (sqlState === null) throw err;
+    const message = `Event "${event.type}" #${sequence} could not be stored (SQLSTATE ${sqlState}) and was dropped`;
+    claimed = await claim((tx) =>
+      appendRunLog(scope, run.id, "system", "event_dropped", message, null, "warn", tx),
+    );
+    if (claimed) {
+      logger.error("run event could not be stored and was dropped", {
+        runId: run.id,
+        sequence,
+        eventType: event.type,
+        sqlState,
+      });
     }
-    return true;
-  });
+  }
 
   if (!claimed) {
     // Zero rows matched — distinguish WHY in one re-read: the sink closed
@@ -1243,11 +1256,4 @@ async function drainBufferedEvents(
     if (await refreshSequence(run)) continue;
     return;
   }
-}
-
-function mapTerminalStatus(result: RunResult): "success" | "failed" | "timeout" | "cancelled" {
-  // Explicit status wins — runner-provided terminal cause (timeout,
-  // cancellation) is authoritative over inference from `error`.
-  if (result.status) return result.status;
-  return result.error ? "failed" : "success";
 }

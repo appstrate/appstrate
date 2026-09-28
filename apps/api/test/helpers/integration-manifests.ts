@@ -108,6 +108,8 @@ interface AuthSpec {
   identityClaims?: Record<string, string>;
   // credentials schema (api_key/basic/custom)
   credentialFields?: string[];
+  /** `credentials.schema.required` — needed by fields an `authorized_uris` template references. */
+  requiredCredentialFields?: string[];
   // delivery
   delivery?: Record<string, unknown>;
   // connect (custom)
@@ -147,6 +149,7 @@ function buildAuth(spec: AuthSpec): Record<string, unknown> {
         properties: Object.fromEntries(
           (spec.credentialFields ?? ["api_key"]).map((f) => [f, { type: "string" }]),
         ),
+        ...(spec.requiredCredentialFields ? { required: spec.requiredCredentialFields } : {}),
       },
     };
     // `default_scopes` is OPTIONAL on non-oauth2 auths (the field is purely

@@ -7,7 +7,10 @@ import {
   type SpaceLevelPermission,
 } from "@appstrate/core/permissions";
 import { describe, it, expect } from "bun:test";
+import type { Context } from "hono";
+import type { AppEnv } from "../../src/types/index.ts";
 import {
+  ceilingAllows,
   effectivePermissions,
   orgPermissions,
   presetPermissions,
@@ -41,6 +44,7 @@ describe("effective permissions in an open space", () => {
     expect(perms.has("org:delete")).toBe(true);
     expect(perms.has("members:change-role")).toBe(true);
     expect(perms.has("agents:write")).toBe(true);
+    expect(perms.has("org-integrations:configure")).toBe(true);
   });
 
   it("admin manages members and settings but never the org's identity", () => {
@@ -52,6 +56,7 @@ describe("effective permissions in an open space", () => {
     expect(perms.has("members:change-role")).toBe(true);
     expect(perms.has("agents:write")).toBe(true);
     expect(perms.has("members:invite")).toBe(true);
+    expect(perms.has("org-integrations:configure")).toBe(true);
   });
 
   it("member can read + run agents + manage own connections", () => {
@@ -95,6 +100,8 @@ describe("effective permissions in an open space", () => {
     // Model-provider-keys and webhooks stay admin-only
     expect(perms.has("model-provider-credentials:read")).toBe(false);
     expect(perms.has("webhooks:read")).toBe(false);
+    // Org-wide OAuth clients are admin work.
+    expect(perms.has("org-integrations:configure")).toBe(false);
   });
 
   it("guest reaches nothing in a space it was not added to", () => {
@@ -109,6 +116,7 @@ describe("effective permissions in an open space", () => {
     // collaborator, and roles are the org's own vocabulary.
     expect(perms.has("members:read")).toBe(false);
     expect(perms.has("roles:read")).toBe(false);
+    expect(perms.has("org-integrations:configure")).toBe(false);
     // No space slice whatsoever.
     expect(perms.has("agents:read")).toBe(false);
     expect(perms.has("runs:read")).toBe(false);
@@ -459,6 +467,9 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "model-provider-credentials:read",
       "model-provider-credentials:write",
       "model-provider-credentials:delete",
+      // Decides which OAuth app every space mints with — session-only like `integrations:configure`.
+      "integrations:configure",
+      "org-integrations:configure",
     ];
     for (const perm of excluded) {
       expect(API_KEY_ALLOWED_SCOPES.has(perm as never)).toBe(false);
@@ -512,5 +523,26 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
     for (const perm of moduleOwned) {
       expect(API_KEY_ALLOWED_SCOPES.has(perm as never)).toBe(false);
     }
+  });
+});
+
+describe("ceilingAllows", () => {
+  function withCeiling(ceiling: string[] | undefined): Context<AppEnv> {
+    const scopeCeiling = ceiling && new Set(ceiling);
+    return { get: (key: string) => (key === "scopeCeiling" ? scopeCeiling : undefined) } as never;
+  }
+
+  it("allows everything when the request carries no ceiling (cookie session)", () => {
+    expect(ceilingAllows(withCeiling(undefined), "files:delete")).toBe(true);
+  });
+
+  it("allows exactly what the ceiling lists", () => {
+    const c = withCeiling(["files:read", "files:delete"]);
+    expect(ceilingAllows(c, "files:delete")).toBe(true);
+    expect(ceilingAllows(c, "integrations:disconnect")).toBe(false);
+  });
+
+  it("allows nothing under an empty ceiling", () => {
+    expect(ceilingAllows(withCeiling([]), "files:read")).toBe(false);
   });
 });

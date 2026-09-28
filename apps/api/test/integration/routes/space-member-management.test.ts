@@ -130,7 +130,11 @@ describe("delegated space membership management", () => {
 
   it("filters the catalog using the path space's effective grants", async () => {
     const targetSpace = await seedSpace({ orgId: owner.orgId, visibility: "private" });
-    const permissions = [...presetPermissions("viewer"), "space-members:change-role"];
+    const permissions = [
+      ...presetPermissions("viewer"),
+      "space-members:read",
+      "space-members:change-role",
+    ];
     const delegatedRole = await seedSpaceRole({ orgId: owner.orgId, permissions });
     const smallRole = await seedSpaceRole({
       orgId: owner.orgId,
@@ -140,7 +144,7 @@ describe("delegated space membership management", () => {
     const forbiddenRole = await seedSpaceRole({
       orgId: owner.orgId,
       key: "writer",
-      permissions: ["agents:write"],
+      permissions: ["agents:read", "agents:write"],
     });
     await seedSpaceMember({
       spaceId: targetSpace.id,
@@ -212,18 +216,18 @@ describe("delegated space membership management", () => {
         ),
       );
     expect(events).toHaveLength(1);
-    const revoked = (events[0]!.before as { revoked_space_assignments: unknown[] })
-      .revoked_space_assignments;
+    const revoked = (events[0]!.before as { revokedSpaceAssignments: unknown[] })
+      .revokedSpaceAssignments;
     expect(revoked).toHaveLength(2);
     expect(revoked).toContainEqual({
-      space_id: owner.defaultSpaceId,
-      preset_role: "builder",
-      custom_role_id: null,
+      spaceId: owner.defaultSpaceId,
+      presetRole: "builder",
+      customRoleId: null,
     });
     expect(revoked).toContainEqual({
-      space_id: second.id,
-      preset_role: null,
-      custom_role_id: role.id,
+      spaceId: second.id,
+      presetRole: null,
+      customRoleId: role.id,
     });
 
     const demoted = await request(owner, `/api/orgs/${owner.orgId}/members/${target.id}`, "PUT", {

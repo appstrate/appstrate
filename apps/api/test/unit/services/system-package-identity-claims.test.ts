@@ -6,7 +6,7 @@
  * Every `identity_claims` entry in a manifest is a hand-written accessor into
  * a third-party JSON payload — `$.data.email`, `$.team_user.user_id`,
  * `$.identity.email_address`. A typo in one of those paths does not throw and
- * does not warn: `readPath` returns `""`, `extractIdentity` falls back to
+ * does not warn: the path selects nothing, `extractIdentity` falls back to
  * `"default"`, and the connection is silently labelled "Connexion N" with an
  * account key that collides with every other connection on that provider. The
  * defect is invisible until someone connects two accounts and cannot tell them
@@ -381,9 +381,9 @@ const CASES: Record<string, Case> = {
     accountId: "bruce@wayne.com",
     source_doc: "typeform.com/developers — GET https://api.typeform.com/me",
   },
-  // Wrike answers with a single-element array. `readPath` walks the numeric
-  // index because a JS array is an object keyed by its indices — pinned here
-  // so that property is never refactored away silently.
+  // Wrike answers with a single-element array, read as `$.data[0]`: an index
+  // segment of the shared evaluator selects only from an array — pinned here so
+  // the manifest and the evaluator keep agreeing on that shape.
   "@appstrate/wrike": {
     authKey: "primary",
     source: {

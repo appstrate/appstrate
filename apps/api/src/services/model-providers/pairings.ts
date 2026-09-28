@@ -32,7 +32,7 @@ import {
 import { gone } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 
-/** Generated id prefix — mirrors `ask_` (api keys) and `appp_` (pairing token). */
+/** Generated id prefix — mirrors `apst_` (api keys) and `appp_` (pairing token). */
 const PAIRING_ID_PREFIX = "pair_";
 
 /** Random secret length in bytes — 32B = 256 bits, base64url-encoded → 43 chars. */

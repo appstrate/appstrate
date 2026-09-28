@@ -15,6 +15,7 @@ import {
 import { getOrgById, provisionMember } from "../services/organizations.ts";
 import { applySpaceAssignments } from "../services/space-assignments.ts";
 import { recordAudit } from "../services/audit.ts";
+import { auditSpaceAssignments } from "../lib/space-role-assignment.ts";
 import { getClientIpFromRequest } from "../lib/client-ip.ts";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { listedOrgPermissions } from "../lib/permissions.ts";
@@ -179,7 +180,7 @@ router.post("/:token/accept", async (c) => {
     after: {
       email: invitation.email,
       role: claimed.invitation.role,
-      space_assignments: claimed.assignments,
+      spaceAssignments: auditSpaceAssignments(claimed.assignments),
     },
     ip: getClientIpFromRequest(c.req.raw),
     userAgent: c.req.header("user-agent") ?? null,

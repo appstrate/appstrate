@@ -32,7 +32,12 @@ import {
   setPrincipalPermissionsProviders,
   type RegisteredPrincipalPermissions,
 } from "@appstrate/core/principal-permissions";
-import { getApiKeyAllowedScopes, presetsStrictlyStrongerThan } from "../permissions.ts";
+import {
+  describeMissingRead,
+  getApiKeyAllowedScopes,
+  missingReadGrants,
+  presetsStrictlyStrongerThan,
+} from "../permissions.ts";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
 import type { AppEnv } from "../../types/index.ts";
@@ -75,6 +80,20 @@ function getBuiltinModules(): Map<string, string> {
 }
 
 /**
+ * The `MODULES` specifiers to load at boot (default: the `@appstrate/env` schema).
+ * Every listed module must load and init, or boot fails. `MODULES=none` boots
+ * zero modules; `MODULES=""` means the default set (the env getter reads `""` as unset).
+ */
+export function getModuleRegistry(): string[] {
+  const value = getEnv().MODULES;
+  if (value.trim() === "none") return [];
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
  * Resolve a module specifier. If a built-in module with that id exists under
  * `apps/api/src/modules/<specifier>/index.ts`, it's loaded from that path;
  * otherwise the specifier is treated as an npm package name and loaded via
@@ -98,7 +117,7 @@ async function resolveSpecifier(specifier: string): Promise<{ default?: Appstrat
  * exported thing is malformed. Collapsing them sends an author with a
  * wrong-shaped export to inspect a manifest that is fine.
  */
-async function importModule(specifier: string): Promise<AppstrateModule> {
+export async function importModule(specifier: string): Promise<AppstrateModule> {
   try {
     const raw = await resolveSpecifier(specifier);
     const mod = raw.default;
@@ -396,6 +415,7 @@ const MODULE_RBAC_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
  *   - one `level` per resource across all of a module's entries
  *   - `grantTo` / `presets` name a known org role / space preset
  *   - `presets` is upward-closed (see {@link assertPresetsUpwardClosed})
+ *   - a preset acting on a resource reads it (see {@link assertPresetsReadWhatTheyAct})
  *   - an empty `grantTo`/`presets` is legal: declares without granting
  *
  * Returns the snapshot in `ModulePermissionsSnapshot` shape — Sets keyed
@@ -425,6 +445,7 @@ export function collectModulePermissions(
   for (const mod of modules) {
     const contributions = mod.permissionsContribution?.();
     if (!contributions) continue;
+    const spaceCatalog = new Set<string>();
     for (const entry of contributions) {
       validateContribution(entry, mod.manifest.id, ownerByResource, levelByResource);
       for (const action of entry.actions) {
@@ -432,12 +453,14 @@ export function collectModulePermissions(
         if (entry.level === "org") {
           for (const role of entry.grantTo) byRole[role].add(perm);
         } else {
+          spaceCatalog.add(perm);
           for (const preset of entry.presets) byPreset[preset].add(perm);
         }
         if (entry.apiKeyGrantable) apiKeyAllowed.add(perm);
         if (entry.endUserGrantable) endUserAllowed.add(perm);
       }
     }
+    assertPresetsReadWhatTheyAct(mod.manifest.id, spaceCatalog, byPreset);
   }
 
   return { byRole, byPreset, apiKeyAllowed, endUserAllowed };
@@ -629,6 +652,28 @@ function assertPresetsUpwardClosed(
   );
 }
 
+/**
+ * A preset acting on a module resource must read it, as a custom role must
+ * (`missingReadGrants`). Judged on `catalog`, the module's own space strings,
+ * granted or not: neither core nor another module can name its resources.
+ */
+function assertPresetsReadWhatTheyAct(
+  moduleId: string,
+  catalog: ReadonlySet<string>,
+  byPreset: Readonly<Record<SpaceRolePreset, ReadonlySet<string>>>,
+): void {
+  for (const preset of SPACE_ROLE_PRESETS) {
+    const [missing] = missingReadGrants(byPreset[preset], catalog);
+    if (!missing) continue;
+    throw new Error(
+      `Module "${moduleId}" grants preset ${JSON.stringify(preset)} what it cannot read: ` +
+        `${describeMissingRead(missing)}. ` +
+        `A role that acts on a resource must read it, or every edit surface it opens ` +
+        `fails to load what it edits.`,
+    );
+  }
+}
+
 function assertGrantList(
   values: unknown,
   field: "grantTo" | "presets",
@@ -766,7 +811,7 @@ export function getModuleOpenApiTags(): Array<{ name: string; description?: stri
 /**
  * Collect auth strategies contributed by all loaded modules.
  *
- * Strategies run in module load order, BEFORE core auth (Bearer ask_ API key
+ * Strategies run in module load order, BEFORE core auth (Bearer apst_ API key
  * → session cookie). First-match-wins: the first strategy returning a
  * non-null resolution claims the request.
  *

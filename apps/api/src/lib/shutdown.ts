@@ -17,6 +17,7 @@ import { shutdownOAuthModelRefreshWorker } from "../services/model-providers/ref
 import { shutdownPairingCleanupWorker } from "../services/model-providers/pairing-cleanup-worker.ts";
 import { shutdownLlmUsageRetryWorker } from "../services/llm-usage-retry.ts";
 import { drainAudits } from "../services/audit.ts";
+import { drainProxyMetering } from "../services/llm-proxy/metering.ts";
 import { stopRunWatchdog } from "../services/run-watchdog.ts";
 import { stopRuntimeImageWarmer } from "../services/orchestrator/runtime-image-warmer.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
@@ -78,6 +79,10 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     // stale cancel messages during shutdown
     await stopCancelSubscriber();
 
+    // In-flight LLM proxy streams keep flowing (and get metered) while the
+    // runs drain; the shutdown gate already refuses new calls.
+    const proxyDrain = drainProxyMetering(SHUTDOWN_TIMEOUT_MS);
+
     const inFlight = getInFlightCount();
     if (inFlight > 0) {
       logger.info("Waiting for in-flight runs", {
@@ -90,6 +95,13 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
           remaining: getInFlightCount(),
         });
       }
+    }
+
+    const proxy = await proxyDrain;
+    if (!proxy.drained) {
+      logger.warn("Shutdown timeout reached with LLM proxy streams still open", {
+        pending: proxy.pending,
+      });
     }
 
     logger.info("Stopping run watchdog...");

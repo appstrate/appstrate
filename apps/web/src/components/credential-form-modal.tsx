@@ -158,7 +158,7 @@ function CredentialFormBody({
     defaultValues: {
       label: credential?.label ?? "",
       apiKey: "",
-      baseUrlOverride: credential?.baseUrl ?? "",
+      baseUrlOverride: credential?.base_url ?? "",
     },
   });
 
@@ -169,28 +169,22 @@ function CredentialFormBody({
 
   const testMutation = useTestModelProviderCredentialInline();
   const [testResult, setTestResult] = useState<TestResult | null>(null);
-  // Inline-test endpoint still takes (apiShape, baseUrl) — these are
-  // computed from the chosen provider's registry entry (+ override).
-  const testApiShape = selectedProvider?.apiShape ?? "";
   const testBaseUrl = needsBaseUrlOverride
     ? baseUrlOverride.trim()
     : (selectedProvider?.defaultBaseUrl ?? "");
   const canTest =
-    !!selectedProvider &&
-    !isOAuthSelected &&
-    !!testApiShape &&
-    !!testBaseUrl &&
-    (!!apiKey.trim() || !!credential);
+    !!selectedProvider && !isOAuthSelected && !!testBaseUrl && (!!apiKey.trim() || !!credential);
 
   const handleTest = () => {
+    if (!selectedProvider) return;
     setTestResult(null);
     testMutation.mutate(
       {
         body: {
-          apiShape: testApiShape,
-          baseUrl: testBaseUrl,
-          ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-          ...(credential ? { existingKeyId: credential.id } : {}),
+          providerId: selectedProvider.providerId,
+          base_url: testBaseUrl,
+          ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+          ...(credential ? { credentialId: credential.id } : {}),
         },
       },
       {

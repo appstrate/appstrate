@@ -1,1 +1,3 @@
-bun run check
+# Fast local gate: typecheck + lint only (turbo-cached). The full `bun run check`
+# and every test tier run in CI, as required status checks on `main`.
+bunx turbo typecheck lint

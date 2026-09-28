@@ -18,11 +18,12 @@ import {
   useIntegrationAgentResolution,
   useUpdateIntegrationConnection,
 } from "../hooks/use-integrations";
+import { usePermissions } from "../hooks/use-permissions";
 
 /**
- * Recovery surface for the run-kickoff 412 emitted by
+ * Recovery surface for the run-kickoff 409 emitted by
  * `validateAgentReadiness` when integration connections are missing. The
- * 412 ships every failing `(integration, auth)` pair on `errors[]`;
+ * 409 ships every failing `(integration, auth)` pair on `errors[]`;
  * this modal renders one row per entry.
  *
  * Each actionable row embeds the SAME `IntegrationConnectionPicker` the
@@ -36,10 +37,7 @@ import {
  *
  * Reusing the picker keeps this modal in lockstep with the dropdown — same
  * candidate list, scope/lock verdicts and connect orchestration — instead of
- * re-deriving an affordance from the static 412 payload (the previous code
- * filtered must_choose candidates down to the 412's `candidate_connections`,
- * which dropped connections needing reconnection and so disagreed with the tab
- * dropdown). Only structural failures — the integration is not active here, or
+ * re-deriving an affordance from the static 409 payload. Only structural failures — the integration is not active here, or
  * its package is missing, mistyped or unloadable — keep a plain message: no
  * connection pick can fix them.
  */
@@ -103,7 +101,7 @@ interface MissingConnectionsModalProps {
   onClose: () => void;
   errors: MissingIntegrationFieldError[];
   /**
-   * The agent whose run 412'd. Keys the bulk server resolution
+   * The agent whose run 409'd. Keys the bulk server resolution
    * (`GET /api/agents/:scope/:name/connection-readiness`) each picker consumes
    * so its status + CTA stay in lockstep with the Connexions tab. Omitted only
    * by callers without the agent in context (none today).
@@ -139,7 +137,7 @@ export function MissingConnectionsModal({
   // must_choose rows have N>1 candidates and no auto-pick, so a re-run can't
   // proceed until the user picks one. Other actionable rows (connect / renew /
   // upgrade) resolve through the picker's own flow and re-run freely — a fresh
-  // 412 just reopens the modal with the updated error list.
+  // 409 just reopens the modal with the updated error list.
   const mustChooseIds = integrationErrors
     .filter((e) => e.code === "must_choose_connection")
     .map((e) => parseField(e.field));
@@ -225,6 +223,7 @@ function MissingRow({
   const { t } = useTranslation(["agents"]);
   const packageId = parseField(err.field);
   const { data: detail } = useIntegrationDetail(packageId);
+  const readsIntegrations = usePermissions().can("integrations:read");
   // Structural failures can't be fixed by connecting — an admin must activate
   // the integration, or the agent's dependency or configuration must change. No picker.
   const isStructural = isStructuralCode(err.code);
@@ -246,8 +245,11 @@ function MissingRow({
   const resolved = !!resolution && !resolutionBlocksRun(resolution);
   // The picker needs the manifest + first verdict to render fully wired; hold
   // a spinner until both land (non-structural rows with the agent in context).
-  const canRenderPicker = !isStructural && !!agentPackageId && !!detail && !!resolution;
-  const loadingVerdict = !isStructural && !!agentPackageId && (!detail || !resolution);
+  // Both reads gate on `integrations:read`: without it neither lands, so the
+  // row names the integration and waits for nothing.
+  const pickable = !isStructural && !!agentPackageId && readsIntegrations;
+  const canRenderPicker = pickable && !!detail && !!resolution;
+  const loadingVerdict = pickable && (!detail || !resolution);
 
   const displayName = detail?.manifest.display_name ?? packageId;
   const Icon = resolved ? Check : isStructural ? XCircle : AlertTriangle;
@@ -326,7 +328,7 @@ function DuplicateLabelFix({
   const { t } = useTranslation(["agents"]);
   const rename = useUpdateIntegrationConnection();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  // Without this the field snaps back to the stale 412 payload and lets the
+  // Without this the field snaps back to the stale 409 payload and lets the
   // same PATCH be sent again.
   const [renamed, setRenamed] = useState<Record<string, string>>({});
 

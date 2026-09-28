@@ -17,10 +17,16 @@ import { Trash2 } from "lucide-react";
 interface VersionHistoryProps {
   packageId: string;
   type: PackageType;
-  isOwned: boolean;
+  /**
+   * Restoring writes the draft, deleting removes a version: both are judged in
+   * the package's HOME space (`home_writable` / `home_deletable`), never in the
+   * space being browsed.
+   */
+  canRestore: boolean;
+  canDelete: boolean;
 }
 
-export function VersionHistory({ packageId, type, isOwned }: VersionHistoryProps) {
+export function VersionHistory({ packageId, type, canRestore, canDelete }: VersionHistoryProps) {
   const { t } = useTranslation("agents");
   const { data: versions } = usePackageVersions(type, packageId);
   const restoreVersion = useRestoreVersion(type, packageId);
@@ -44,26 +50,26 @@ export function VersionHistory({ packageId, type, isOwned }: VersionHistoryProps
               {v.createdAt ? formatDateField(v.createdAt) : ""}
             </span>
             {v.yanked && <Badge variant="warning">{t("version.yanked")}</Badge>}
-            {isOwned && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setConfirmState({ type: "restore", version: v.version })}
-                  disabled={restoreVersion.isPending || deleteVersion.isPending}
-                >
-                  {restoreVersion.isPending && <Spinner />} {t("version.restore")}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                  onClick={() => setConfirmState({ type: "delete", version: v.version })}
-                  disabled={deleteVersion.isPending || restoreVersion.isPending}
-                >
-                  {deleteVersion.isPending ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />}
-                </Button>
-              </>
+            {canRestore && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmState({ type: "restore", version: v.version })}
+                disabled={restoreVersion.isPending || deleteVersion.isPending}
+              >
+                {restoreVersion.isPending && <Spinner />} {t("version.restore")}
+              </Button>
+            )}
+            {canDelete && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                onClick={() => setConfirmState({ type: "delete", version: v.version })}
+                disabled={deleteVersion.isPending || restoreVersion.isPending}
+              >
+                {deleteVersion.isPending ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />}
+              </Button>
             )}
           </div>
         ))}

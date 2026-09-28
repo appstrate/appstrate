@@ -19,7 +19,6 @@ import {
   registerModelProviders,
   resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
-import { resolveFeaturedModels } from "../../../src/services/model-providers/model-selection.ts";
 import { buildModelTestRequest } from "../../../src/services/org-models.ts";
 import coreProvidersModule from "../../../src/modules/core-providers/index.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
@@ -42,7 +41,6 @@ const CORE_PROVIDER_IDS = [
   "cerebras",
   "deepseek",
   "fireworks-ai",
-  "google-ai",
   "groq",
   "mistral",
   "moonshot",
@@ -74,7 +72,7 @@ describe("runtime registry composition", () => {
       expect(cfg.displayName.length).toBeGreaterThan(0);
       expect(cfg.iconUrl.length).toBeGreaterThan(0);
       expect(cfg.apiShape).toMatch(
-        /^(anthropic-messages|openai-completions|openai-responses|openai-codex-responses|mistral-conversations|google-generative-ai|google-vertex|azure-openai-responses|bedrock-converse-stream)$/,
+        /^(anthropic-messages|openai-completions|openai-responses|openai-codex-responses|mistral-conversations)$/,
       );
       expect(cfg.defaultBaseUrl.length).toBeGreaterThan(0);
       expect(typeof cfg.baseUrlOverridable).toBe("boolean");
@@ -113,7 +111,7 @@ describe("runtime registry composition", () => {
 
   it("model ids are unique within each provider", () => {
     for (const cfg of listModelProviders()) {
-      const ids = resolveFeaturedModels(cfg);
+      const ids = cfg.featuredModels;
       expect(new Set(ids).size).toBe(ids.length);
     }
   });

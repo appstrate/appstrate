@@ -86,7 +86,7 @@ const webhooksModule: AppstrateModule = {
         description: "Create webhook",
       },
       {
-        method: "PUT",
+        method: "PATCH",
         path: "/api/webhooks/{id}",
         jsonSchema: z.toJSONSchema(updateWebhookSchema) as Record<string, unknown>,
         description: "Update webhook",

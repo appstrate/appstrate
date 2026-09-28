@@ -505,7 +505,7 @@ describe("POST /api/agents/:scope/:name/run — who may run the draft", () => {
 
     const patch = (headers: Record<string, string>, id: string, body: Record<string, unknown>) =>
       app.request(`/api/schedules/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...headers, "X-Space-Id": teamId, "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });

@@ -18,7 +18,7 @@
 
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { ifNoneMatchSatisfied } from "../lib/if-none-match.ts";
+import { ifNoneMatchSatisfied } from "../lib/conditional-request.ts";
 
 /**
  * @param getSpec - Returns the spec registered at boot (`getPlatformOperations().spec`).

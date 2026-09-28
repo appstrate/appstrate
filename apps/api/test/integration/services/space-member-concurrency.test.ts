@@ -67,7 +67,7 @@ describeRequiresPostgres("space grants serialize with org membership changes", (
                   orgId: ctx.orgId,
                   userId: member.id,
                   addedBy: ctx.user.id,
-                  assignments: [{ space_id: ctx.defaultSpaceId, preset_role: "builder" }],
+                  assignments: [{ spaceId: ctx.defaultSpaceId, preset_role: "builder" }],
                   onMissing: "skip",
                 }),
               );

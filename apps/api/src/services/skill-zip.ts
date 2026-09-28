@@ -2,7 +2,11 @@
 
 import { unzipArtifact, stripWrapperPrefix, type ParsedPackageZip } from "@appstrate/core/zip";
 import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
-import { extractSkillMeta, validateManifest } from "@appstrate/core/validation";
+import {
+  AFPS_SCHEMA_VERSION,
+  extractSkillMeta,
+  validateManifest,
+} from "@appstrate/core/validation";
 import { bumpPatch } from "@appstrate/core/semver";
 import { getPackageById } from "./package-items/crud.ts";
 import { assertContentConforms } from "./package-items/config.ts";
@@ -57,7 +61,7 @@ export async function tryParseSkillOnlyZip(
     name: packageId,
     version,
     type: "skill" as const,
-    schema_version: "0.1",
+    schema_version: AFPS_SCHEMA_VERSION,
     description: meta.description || undefined,
     display_name: meta.name,
   });

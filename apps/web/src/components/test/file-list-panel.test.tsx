@@ -5,7 +5,7 @@
  * must read the SAME rule.
  *
  * They did not. The badge was an inline fourth copy of the predicate keyed on
- * `run_id` alone (`file.run_id === runId ? "output" : "input"`), so an upload
+ * `runId` alone (`file.runId === runId ? "output" : "input"`), so an upload
  * made FOR the run — committed with that run's id — was badged as something the
  * run had produced. The Fichiers tab filtered on `purpose` alone, the mirror
  * half, so a file chained in from an EARLIER run (that run's `agent_output`)
@@ -34,15 +34,15 @@ const OUTPUT_BADGE = "Produit en sortie";
 const INPUT_BADGE = "Utilisé en entrée";
 
 function file(overrides: Partial<FileDto> & { name: string }): FileDto {
-  return fileFixture({ run_id: RUN, ...overrides });
+  return fileFixture({ runId: RUN, ...overrides });
 }
 
 /** Produced by this run — the only true output. */
 const PRODUCED = file({ name: "rapport.md" });
 /** Uploaded AS THIS RUN'S INPUT: `user_upload`, anchored to this very run. */
-const UPLOADED_FOR_RUN = file({ name: "brief.pdf", purpose: "user_upload", run_id: RUN });
+const UPLOADED_FOR_RUN = file({ name: "brief.pdf", purpose: "user_upload", runId: RUN });
 /** Chained in with `appfile://`: an earlier run's `agent_output`, our input. */
-const CHAINED_IN = file({ name: "source.csv", run_id: EARLIER });
+const CHAINED_IN = file({ name: "source.csv", runId: EARLIER });
 
 const ALL = [UPLOADED_FOR_RUN, CHAINED_IN, PRODUCED];
 
@@ -72,7 +72,7 @@ describe("run file direction badge", () => {
   it("badges only what the run produced as an output", () => {
     // One assertion over the whole fixture, because the counts pin BOTH
     // observed bugs at once and no single-row case adds to them:
-    //   - keyed on `run_id` alone, `UPLOADED_FOR_RUN` (`user_upload` + this
+    //   - keyed on `runId` alone, `UPLOADED_FOR_RUN` (`user_upload` + this
     //     run's id) badges as produced → 2 outputs / 1 input;
     //   - keyed on `purpose` alone, `CHAINED_IN` (an earlier run's
     //     `agent_output`) badges as produced → 2 outputs / 1 input.

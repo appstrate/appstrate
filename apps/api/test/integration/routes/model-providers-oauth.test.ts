@@ -43,8 +43,8 @@ describe("POST /api/model-providers-oauth/pair/redeem", () => {
       body: JSON.stringify({
         providerId: "@unknown/provider",
         label: "x",
-        accessToken: "at",
-        refreshToken: "rt",
+        access_token: "at",
+        refresh_token: "rt",
       }),
     });
     expect(res.status).toBe(400);
@@ -57,8 +57,8 @@ describe("POST /api/model-providers-oauth/pair/redeem", () => {
       body: JSON.stringify({
         providerId: "test-oauth",
         label: "x",
-        accessToken: "at",
-        refreshToken: "rt",
+        access_token: "at",
+        refresh_token: "rt",
       }),
     });
     expect(res.status).toBe(401);
@@ -73,8 +73,8 @@ describe("POST /api/model-providers-oauth/pair/redeem", () => {
       body: JSON.stringify({
         providerId: "test-oauth",
         label: "x",
-        accessToken: "at",
-        refreshToken: "rt",
+        access_token: "at",
+        refresh_token: "rt",
       }),
     });
     expect(res.status).toBe(401);

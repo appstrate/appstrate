@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { usePackageDetail } from "../hooks/use-packages";
+import { usePackageDetail, type Versioned } from "../hooks/use-packages";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { PackageType } from "@appstrate/core/validation";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
+import { usePermissions } from "../hooks/use-permissions";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 import { primaryDisplayFile } from "../lib/package-files";
 import { skillFrontmatterError, translateSkillFrontmatterError } from "../lib/skill-frontmatter";
@@ -26,7 +27,7 @@ import { SourceSection } from "../components/integration-editor/source-section";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
 import { Spinner } from "../components/spinner";
-import { NoAccessState } from "../components/require-permission";
+import { NoAccessState } from "../components/route-gate";
 import { EditorShell } from "../components/editor-shell";
 
 import { newPackageContent } from "../lib/package-file-drafts";
@@ -605,7 +606,10 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   });
   const pkgQuery = usePackageDetail(type, type !== "agent" && isEdit ? packageId : undefined);
 
-  const isLoading = type === "agent" ? agentQuery.isLoading : pkgQuery.isLoading;
+  // The detail read gates itself on the permission set, and a disabled query is
+  // not loading: without `ready` a hard reload would redirect before it lands.
+  const { ready } = usePermissions();
+  const isLoading = !ready || (type === "agent" ? agentQuery.isLoading : pkgQuery.isLoading);
   const detail = type === "agent" ? agentQuery.data : pkgQuery.data;
 
   if (isEdit && isLoading) {
@@ -617,7 +621,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   }
 
   if (isEdit && !detail) {
-    return <Navigate to="/agents" replace />;
+    return <Navigate to={packageListPath(type)} replace />;
   }
 
   // Write authority is the package's HOME space, not the space this request
@@ -644,7 +648,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
       isEdit && agentDetail
         ? {
             manifest: withNormalizedManifest(agentDetail.manifest ?? {}),
-            lock_version: agentDetail.lock_version,
+            etag: agentDetail.etag,
           }
         : defaultEditorState(currentOrg?.slug, user?.email);
 
@@ -662,12 +666,12 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
 
   // Integration editor with structured configuration and the shared file tree.
   if (type === "integration") {
-    const intDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
+    const intDetail = pkgQuery.data as Versioned<OrgPackageItemDetail> | undefined;
     const initialState: EditorState =
       isEdit && intDetail
         ? {
             manifest: intDetail.manifest ?? {},
-            lock_version: intDetail.lock_version,
+            etag: intDetail.etag,
           }
         : { manifest: defaultIntegrationManifest(currentOrg?.slug, user?.email) };
 
@@ -682,13 +686,13 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   }
 
   // Skill editor (agent/integration returned early above — pkgQuery is always OrgPackageItemDetail here)
-  const pkgDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
+  const pkgDetail = pkgQuery.data as Versioned<OrgPackageItemDetail> | undefined;
 
   const initialState: EditorState =
     isEdit && pkgDetail
       ? {
           manifest: pkgDetail.manifest ?? {},
-          lock_version: pkgDetail.lock_version,
+          etag: pkgDetail.etag,
         }
       : {
           manifest: defaultSkillManifest(currentOrg?.slug, user?.email),

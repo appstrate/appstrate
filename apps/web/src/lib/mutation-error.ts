@@ -33,10 +33,9 @@ function refusalMessage(err: ApiError): string | null {
 }
 
 export function onMutationError(err: Error) {
-  // Skip the generic toast for missing_integration_connection (412) —
-  // the RunAgentButton renders MissingConnectionsModal off `runAgent.error`
-  // for that case. Showing both a toast AND the modal is noisy and the
-  // toast carries strictly less info than the modal.
+  // Skip the generic toast for missing_integration_connection (409): only a
+  // run launch raises it, and `useRunLauncher` — the one way to launch —
+  // answers it with the recovery modal, which says strictly more.
   if (err instanceof ApiError && err.code === "missing_integration_connection") {
     return;
   }

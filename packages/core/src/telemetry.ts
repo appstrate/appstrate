@@ -70,7 +70,7 @@ export interface TelemetryProvider {
   trustsIncomingTrace(): boolean;
   recordRunDuration(durationMs: number, attrs: { status: string }): void;
   recordRunTerminal(attrs: { status: string; errorCode?: string }): void;
-  recordContainerSpawn(durationMs: number, attrs?: { sidecar?: boolean; errorType?: string }): void;
+  recordContainerSpawn(durationMs: number, attrs?: { errorType?: string }): void;
   recordLlmLatency(durationMs: number, attrs: { api_shape?: string; status?: number }): void;
   recordProcessAnomaly(attrs: { kind: string }): void;
   recordStorageDeletionSweep(stats: StorageDeletionStats): void;
@@ -168,10 +168,7 @@ export function recordRunTerminal(attrs: { status: string; errorCode?: string })
  * `errorType` is present on failure only (`boundary` | `workload`) and
  * clamped provider-side.
  */
-export function recordContainerSpawn(
-  durationMs: number,
-  attrs?: { sidecar?: boolean; errorType?: string },
-): void {
+export function recordContainerSpawn(durationMs: number, attrs?: { errorType?: string }): void {
   provider?.recordContainerSpawn(durationMs, attrs);
 }
 

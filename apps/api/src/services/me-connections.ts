@@ -214,8 +214,8 @@ async function listAllActorIntegrationConnections(
 
     const claims = asRecord(row.identityClaims);
     const identity =
-      typeof claims.accountEmail === "string"
-        ? claims.accountEmail
+      typeof claims.account_email === "string"
+        ? claims.account_email
         : typeof claims.email === "string"
           ? claims.email
           : typeof claims.sub === "string"

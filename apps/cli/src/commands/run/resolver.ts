@@ -11,7 +11,7 @@
  *     Appstrate instance's `/api/credential-proxy/proxy` endpoint, with
  *     the integration id as the `X-Integration-Id` scope marker. Credentials
  *     stay server-side; the CLI sends only scope markers. Accepts either:
- *       * an `ask_…` API key (headless CI / GitHub Action) with the
+ *       * an `apst_…` API key (headless CI / GitHub Action) with the
  *         `credential-proxy:call` scope, or
  *       * a device-flow JWT access token from `appstrate login`
  *         (interactive CLI) whose user role grants the same permission.
@@ -39,7 +39,7 @@ export interface RemoteResolverInputs {
   instance: string;
   /**
    * Bearer token used to authenticate against the Appstrate instance.
-   * Either an `ask_…` API key (headless) or a device-flow JWT access
+   * Either an `apst_…` API key (headless) or a device-flow JWT access
    * token (interactive CLI). The afps-runtime resolver treats both
    * identically — it forwards the value as-is in the `Authorization:
    * Bearer …` header and lets the platform decide.

@@ -11,7 +11,7 @@
  *
  * Row absent → feature disabled for this space's OIDC clients. No fallback to
  * instance-level env creds. Secrets are write-only: the backend never
- * returns `pass` / `clientSecret`.
+ * returns `pass` / `client_secret`.
  */
 
 import { useState } from "react";
@@ -87,9 +87,9 @@ function SmtpSection() {
         port: Number(form.port),
         username: form.username,
         pass: form.pass,
-        fromAddress: form.fromAddress.trim(),
-        fromName: form.fromName.trim() || null,
-        secureMode: form.secureMode,
+        from_address: form.fromAddress.trim(),
+        from_name: form.fromName.trim() || null,
+        secure_mode: form.secureMode,
       },
       {
         onSuccess: () => {
@@ -176,7 +176,7 @@ function SmtpSection() {
             <Select
               value={form.secureMode}
               onValueChange={(v) =>
-                setForm({ ...form, secureMode: v as SmtpConfigView["secureMode"] })
+                setForm({ ...form, secureMode: v as SmtpConfigView["secure_mode"] })
               }
             >
               <SelectTrigger>
@@ -322,8 +322,8 @@ function SocialSection({
     e.preventDefault();
     upsert.mutate(
       {
-        clientId: form.clientId.trim(),
-        clientSecret: form.clientSecret,
+        client_id: form.clientId.trim(),
+        client_secret: form.clientSecret,
         scopes: form.scopes.trim() ? form.scopes.split(/[\s,]+/).filter(Boolean) : null,
       },
       {
@@ -486,7 +486,7 @@ function emptySmtp() {
     pass: "",
     fromAddress: "",
     fromName: "",
-    secureMode: "auto" as SmtpConfigView["secureMode"],
+    secureMode: "auto" as SmtpConfigView["secure_mode"],
   };
 }
 
@@ -496,9 +496,9 @@ function fromSmtp(c: SmtpConfigView) {
     port: String(c.port),
     username: c.username,
     pass: "",
-    fromAddress: c.fromAddress,
-    fromName: c.fromName ?? "",
-    secureMode: c.secureMode,
+    fromAddress: c.from_address,
+    fromName: c.from_name ?? "",
+    secureMode: c.secure_mode,
   };
 }
 
@@ -508,7 +508,7 @@ function emptySocial() {
 
 function fromSocial(c: SocialProviderView) {
   return {
-    clientId: c.clientId,
+    clientId: c.client_id,
     clientSecret: "",
     scopes: (c.scopes ?? []).join(" "),
   };

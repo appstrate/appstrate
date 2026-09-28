@@ -18,7 +18,8 @@ export type { HostResolver } from "@appstrate/core/ssrf";
 
 // Imported (not just re-exported) because `readPositiveByteEnv` below defaults
 // its `ceiling` parameter to it. See the re-export note further down.
-import { ABSOLUTE_BODY_CEILING } from "@appstrate/afps-runtime/resolvers";
+import { ABSOLUTE_BODY_CEILING, type EgressPolicy } from "@appstrate/afps-runtime/resolvers";
+import type { Socket } from "node:net";
 // Compiled default for the inter-chunk idle bound, shared with the platform LLM
 // gateway. Imported (not just re-exported) because the env override below falls
 // back to it.
@@ -127,7 +128,8 @@ export const LLM_STREAM_IDLE_TIMEOUT_MS = readPositiveIntEnv(
  * The abort reason NEVER reaches the agent: `fetch` rejects with this
  * DOMException, the `app.all("/llm/*")` handler's `catch` hands it to
  * `llmFetchErrorResponse` (`./app.ts`), which reads only `err.code` and answers
- * a generic `502 {"error":"LLM request failed…"}` — the message is dropped. On
+ * a generic 502 `LLM request failed…` in the provider-shaped envelope
+ * (`llmProxyErrorBody`) — the message is dropped. On
  * the aliased `pi-messages` path it is replaced by `syntheticAliasClassifierMessage`
  * for the same reason. It is worded for OUR logs.
  *
@@ -333,8 +335,8 @@ export async function readRequestBodyBounded(
 export type {
   SidecarConfig,
   LlmProxyConfig,
-  LlmProxyApiKeyConfig,
   LlmProxyOauthConfig,
+  LlmProxyPlatformConfig,
   ModelSwap,
 } from "@appstrate/core/sidecar-types";
 
@@ -352,7 +354,6 @@ export {
   substituteVars,
   findUnresolvedPlaceholders,
   HOP_BY_HOP_HEADERS,
-  filterHeaders,
   applyInjectedCredentialHeader,
   normalizeAuthSchemeTemplates,
   withIdleBound,
@@ -367,3 +368,56 @@ export {
 // `executeApiCall` redirect-follower uses, so allowlist matching can never
 // drift between the preflight here and the per-hop checks there.
 export { matchesAuthorizedUri, stripUserInfoAndFragment } from "@appstrate/afps-runtime/resolvers";
+
+/** Deadline for an egress listener's pre-splice phase; the relay's idle timeout governs after. */
+export const PREAMBLE_TIMEOUT_MS = 10_000;
+
+/** One end of a TCP connection, IPv4-mapped addresses unwrapped. */
+export interface Endpoint {
+  address: string;
+  port: number;
+}
+
+/** Who connected to a listener (its address and source port), and the listener end it reached. */
+export interface Peer extends Endpoint {
+  listener: Endpoint;
+}
+
+export type PeerCheck = (peer: Peer) => Promise<boolean>;
+
+/** TCP-level half of the egress policy — all a blind tunnel can check. */
+export type AuthorityPolicy = Pick<EgressPolicy, "allowsAuthority">;
+
+/** `address` with an IPv4-mapped `::ffff:a.b.c.d` unwrapped. */
+function unwrapIpv4Mapped(address: string | undefined): string | undefined {
+  if (!address) return undefined;
+  return /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address)?.[1] ?? address;
+}
+
+/** The socket's peer IP (IPv4-mapped unwrapped), or undefined once detached. */
+export function peerAddress(socket: Socket): string | undefined {
+  return unwrapIpv4Mapped(socket.remoteAddress);
+}
+
+/** The socket's {@link Peer}, or undefined once detached (any of the four ends unknown). */
+export function socketPeer(socket: Socket): Peer | undefined {
+  const address = peerAddress(socket);
+  const port = socket.remotePort;
+  const listenerAddress = unwrapIpv4Mapped(socket.localAddress);
+  const listenerPort = socket.localPort;
+  if (
+    address === undefined ||
+    port === undefined ||
+    listenerAddress === undefined ||
+    listenerPort === undefined
+  ) {
+    return undefined;
+  }
+  return { address, port, listener: { address: listenerAddress, port: listenerPort } };
+}
+
+/** Resolve the peer gate for `socket`; an unknown peer or a failing check refuses. */
+export async function peerAdmitted(socket: Socket, isPeerAllowed: PeerCheck): Promise<boolean> {
+  const peer = socketPeer(socket);
+  return peer !== undefined && (await isPeerAllowed(peer).catch(() => false));
+}

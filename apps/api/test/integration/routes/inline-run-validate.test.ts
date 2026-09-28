@@ -356,7 +356,7 @@ describe("POST /api/runs/inline/validate", () => {
       });
     }
 
-    it("answers an auth_key serving no selected tool once, as the resolver's 412", async () => {
+    it("answers an auth_key serving no selected tool once, as the resolver's 409", async () => {
       const API = "@inlineorg/api-svc";
       const manifest = apiIntegrationManifest({
         name: API,
@@ -379,7 +379,7 @@ describe("POST /api/runs/inline/validate", () => {
       };
 
       const launched = await launch(misfit);
-      expect(launched.status).toBe(412);
+      expect(launched.status).toBe(409);
       const launchBody = (await launched.json()) as {
         errors?: { field: string; code: string; required_auth_key?: string }[];
       };
@@ -542,10 +542,10 @@ describe("POST /api/runs/inline/validate", () => {
         expect(validated.status).toBe(400);
         expect([...(await errorCodes(validated))]).toEqual(["not_connected"]);
 
-        // Launch: reaches the 412 the caller can act on, not a hard 400 about a
+        // Launch: reaches the 409 the caller can act on, not a hard 400 about a
         // tool the version it would spawn exposes.
         const launched = await launch(agent);
-        expect(launched.status).toBe(412);
+        expect(launched.status).toBe(409);
         expect(((await launched.json()) as { code?: string }).code).toBe(
           "missing_integration_connection",
         );

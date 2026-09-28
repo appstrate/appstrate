@@ -12,7 +12,6 @@ import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
 import { formatDateField } from "../lib/format-date";
-import type { TokenUsage } from "@appstrate/core/token-usage";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 
 /**
@@ -65,7 +64,7 @@ export function RunRowDetails({ run }: { run: EnrichedRun }) {
         </DetailRow>
       )}
       <DetailRow label={t("run.usageTokensTotal")}>
-        <RunTokensReadout usage={run.token_usage as TokenUsage | null} />
+        <RunTokensReadout usage={run.token_usage} />
       </DetailRow>
     </div>
   );

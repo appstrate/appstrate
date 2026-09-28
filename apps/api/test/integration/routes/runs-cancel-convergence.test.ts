@@ -277,6 +277,7 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
       status: "success",
       output: { ok: true },
       durationMs: 100,
+      usage: { input_tokens: 10, output_tokens: 5 },
     });
     const finalizeRes = await app.request(`/api/runs/${runId}/events/finalize`, {
       method: "POST",

@@ -3,7 +3,7 @@
 /**
  * Unit tests for the launch-readiness predicates — the centralized logic that
  * keeps the run button's orange badge iso with the agent Connexions tab and the
- * run-kickoff 412 (MissingConnectionsModal). `resolutionBlocksRun` consumes the
+ * run-kickoff 409 (MissingConnectionsModal). `resolutionBlocksRun` consumes the
  * SAME `IntegrationAgentResolution` the server emits, so this is where the
  * status → blocks-run mapping is pinned.
  */

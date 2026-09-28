@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Every builder of a Pi model record either spreads `PLATFORM_MODEL_COMPAT` or
- * is listed here as exempt WITH its reason.
+ * Every builder of a Pi model record either spreads `PLATFORM_MODEL_COMPAT`,
+ * delegates to `buildPiModel` (which does), or is listed here as exempt WITH
+ * its reason.
  *
  * This gate exists because the rule it enforces was previously a convention.
  * Three sites spelled `supportsLongCacheRetention: false` by hand, each under
@@ -29,6 +30,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
+import { buildPiModel } from "@appstrate/runner-pi/pi-model";
 
 const REPO_ROOT = join(import.meta.dir, "../../../..");
 
@@ -137,15 +139,26 @@ function buildersOf(rel: string): { key: string; body: string }[] {
   return out;
 }
 
+/** A builder returning `buildPiModel(...)` constructs nothing itself. */
+function delegates(builder: { body: string }): boolean {
+  return /(?:return|=)\s*buildPiModel\(/.test(stripComments(builder.body));
+}
+
+const fileOf = (builder: { key: string }) => builder.key.split("::")[0];
+
 describe("platform model compat coverage", () => {
   const builders = SCANNED_FILES.flatMap(buildersOf);
 
   it("finds every model builder — an empty scan is a failure, not a pass", () => {
-    // The seven the tree holds today: five construction sites and the two
-    // spread-through transformers exempted above. A DROP means the regex stopped
-    // matching a shape that still exists, which would make every assertion below
-    // vacuous; a RISE means a new builder nobody has classified yet.
-    expect(builders.length).toBe(7);
+    // One construction site, and the two typed builders that delegate to it,
+    // by file. A missing file means the regex stopped matching a shape that
+    // still exists, which would make every assertion below vacuous.
+    const sites = builders.filter((b) => !(b.key in EXEMPT) && !delegates(b));
+    expect(sites.map(fileOf)).toEqual(["packages/runner-pi/src/pi-model.ts"]);
+    expect(builders.filter(delegates).map(fileOf)).toEqual([
+      "runtime-pi/env.ts",
+      "runtime-pi/sidecar/pi-messages-backend.ts",
+    ]);
   });
 
   it("the constant still refuses long cache retention", () => {
@@ -153,12 +166,34 @@ describe("platform model compat coverage", () => {
     // appears at each site. Emptying the constant satisfies all of them while
     // removing the refusal entirely, so the value has to be pinned here. Turning
     // this flag back on is a pricing change — see the constant's own doc.
-    expect(PLATFORM_MODEL_COMPAT).toEqual({ supportsLongCacheRetention: false });
+    // Strict: `toEqual` would accept a dropped `cacheControlFormat: undefined`.
+    expect(PLATFORM_MODEL_COMPAT).toStrictEqual({
+      supportsLongCacheRetention: false,
+      allowedFallbackModels: [],
+      cacheControlFormat: undefined,
+    });
   });
 
-  it("every non-exempt builder spreads PLATFORM_MODEL_COMPAT", () => {
+  it("the construction site's refusals beat Pi's record, and a caller cannot pass compat", () => {
+    // `claude-fable-5`'s record lists fallback models; the refusal must win.
+    const spec = {
+      id: "preset_fable",
+      registryModelId: "claude-fable-5",
+      apiShape: "anthropic-messages",
+      piProvider: "anthropic",
+      baseUrl: "https://appstrate.test/api/llm-proxy/anthropic-messages",
+    };
+    const model = buildPiModel(spec);
+    expect(model.compat).toMatchObject({ ...PLATFORM_MODEL_COMPAT, forceAdaptiveThinking: true });
+    // @ts-expect-error — the record owns the dialect: there is no spec field for it.
+    expect(buildPiModel({ ...spec, compat: { supportsLongCacheRetention: true } }).compat).toEqual(
+      model.compat,
+    );
+  });
+
+  it("every non-exempt builder spreads PLATFORM_MODEL_COMPAT or delegates to buildPiModel", () => {
     const missing = builders
-      .filter((b) => !(b.key in EXEMPT))
+      .filter((b) => !(b.key in EXEMPT) && !delegates(b))
       .filter((b) => !stripComments(b.body).includes("...PLATFORM_MODEL_COMPAT"))
       .map((b) => b.key);
     expect(missing).toEqual([]);

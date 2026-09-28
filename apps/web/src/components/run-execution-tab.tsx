@@ -40,7 +40,7 @@ import { RunCostReadout } from "./run-cost-readout";
 import { formatDateField } from "../lib/format-date";
 import { fractionOfWindow, formatWindowPercent, readRunContext } from "./run-context";
 import type { ExecutionEntry, RunTurnRow } from "./log-utils";
-import { ACTIVE_RUN_STATUSES, type EnrichedRun, type TokenUsage } from "@appstrate/shared-types";
+import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 
 interface RunExecutionTabProps {
   run: EnrichedRun;
@@ -187,7 +187,7 @@ function formatTimestamp(value: string | Date | null | undefined): string | null
 export function RunExecutionTab({ run, logs, turns }: RunExecutionTabProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const input = run.input as Record<string, unknown> | null;
-  const usage = run.token_usage as TokenUsage | null;
+  const usage = run.token_usage;
   const metadata = run.metadata as Record<string, unknown> | null;
   const hasUsage =
     run.cost != null || run.cost_pricing_status != null || usage != null || run.model_label != null;

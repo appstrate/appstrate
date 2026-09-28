@@ -17,6 +17,7 @@ import { and, eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import { recordAudit } from "../../../src/services/audit.ts";
+import type { AuditPayload } from "@appstrate/core/module";
 
 describe("recordAudit", () => {
   beforeEach(async () => {
@@ -78,6 +79,16 @@ describe("recordAudit", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.before).toEqual(before);
     expect(rows[0]!.after).toEqual(after);
+  });
+
+  it("types before/after so a snake_case top-level key does not compile (carve-out 4m)", () => {
+    // @ts-expect-error — a raw snake_case body key is not an audit key
+    const snake: AuditPayload = { file_id: "fil_1" };
+    // @ts-expect-error — nor is an untyped record, which could hide one
+    const loose: AuditPayload = {} as Record<string, unknown>;
+    // Values are opaque: a wire JSONB field keeps its own interior casing.
+    const camel: AuditPayload = { fileId: "fil_1", settings: { wire_key: true } };
+    expect([snake, loose, camel]).toHaveLength(3);
   });
 
   it("defaults optional fields to null when omitted", async () => {

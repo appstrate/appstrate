@@ -88,7 +88,7 @@ describe("listActivePackageHints — bounded in SQL", () => {
     await seedSpacePackage(ctx.defaultSpaceId, "@hintorg/a0-skill");
 
     const page = await listRunnableAgents(scope, { limit: 3 });
-    expect(page.agents.map((a) => a.package_id)).toEqual([
+    expect(page.agents.map((a) => a.packageId)).toEqual([
       "@zsys/system-agent",
       "@hintorg/a1",
       "@hintorg/a2",
@@ -103,7 +103,7 @@ describe("listActivePackageHints — bounded in SQL", () => {
     expect(whole.agents).toHaveLength(6);
     expect(whole.truncated).toBe(false);
     expect(whole.total).toBe(6);
-    const ids = new Set(whole.agents.map((a) => a.package_id));
+    const ids = new Set(whole.agents.map((a) => a.packageId));
     expect(ids.has("@hintorg/a0-disabled")).toBe(false);
     expect(ids.has("@hintorg/a0-uninstalled")).toBe(false);
     expect(ids.has("@hintorg/a0-skill")).toBe(false);
@@ -123,7 +123,7 @@ describe("listActivePackageHints — bounded in SQL", () => {
     await seedSpacePackage(ctx.defaultSpaceId, "@hintorg/s3", { enabled: false });
 
     const page = await listActiveSkills(scope, { limit: 1 });
-    expect(page.skills.map((s) => s.package_id)).toEqual(["@hintorg/s1"]);
+    expect(page.skills.map((s) => s.packageId)).toEqual(["@hintorg/s1"]);
     expect(page.skills[0]!.version).toBe("1.0.0");
     expect(page.truncated).toBe(true);
     expect(page.total).toBe(2);
@@ -197,7 +197,7 @@ describe("the hints and the type index render one set", () => {
 
     const expected = ["@asys/system-agent", "@twoviews/local-on"];
 
-    const hinted = (await listRunnableAgents(scope, { limit: 50 })).agents.map((a) => a.package_id);
+    const hinted = (await listRunnableAgents(scope, { limit: 50 })).agents.map((a) => a.packageId);
     const indexed = await indexIds("/api/packages/agents");
     expect(hinted.slice().sort()).toEqual(expected);
     expect(indexed.slice().sort()).toEqual(expected);

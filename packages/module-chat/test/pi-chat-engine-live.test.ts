@@ -65,6 +65,15 @@ interface Capture {
 // last in the describe.
 let mcpInitGate: Promise<void> | null = null;
 
+/** What the stub's handshake advertises (reset in `afterEach`), and how often it ran. */
+interface StubSurface {
+  instructions?: string;
+  tools: unknown[];
+}
+const EMPTY_SURFACE: StubSurface = { tools: [] };
+let mcpSurface: StubSurface = EMPTY_SURFACE;
+let mcpInitializes = 0;
+
 async function mcpResponse(req: Request): Promise<Response> {
   if (req.method === "GET") return new Response(null, { status: 405 });
   if (req.method === "DELETE") return new Response(null, { status: 202 });
@@ -76,17 +85,19 @@ async function mcpResponse(req: Request): Promise<Response> {
       headers: { "content-type": "application/json", ...extra },
     });
   if (msg.method === "initialize") {
+    mcpInitializes++;
     if (mcpInitGate) await mcpInitGate;
     return json(
       {
         protocolVersion: "2025-06-18",
         capabilities: { tools: {} },
         serverInfo: { name: "stub-platform-mcp", version: "1.0.0" },
+        ...(mcpSurface.instructions ? { instructions: mcpSurface.instructions } : {}),
       },
       { "mcp-session-id": "sess_engine_live" },
     );
   }
-  if (msg.method === "tools/list") return json({ tools: [] });
+  if (msg.method === "tools/list") return json({ tools: mcpSurface.tools });
   return json({});
 }
 
@@ -160,6 +171,7 @@ afterAll(() => server.stop(true));
 afterEach(() => {
   mcpInitGate = null;
   providerPark = null;
+  mcpSurface = EMPTY_SURFACE;
 });
 
 function orgModel(): OrgModel {
@@ -168,6 +180,7 @@ function orgModel(): OrgModel {
     modelId: "upstream-model-must-stay-behind-proxy",
     apiShape: "openai-completions",
     providerId: "openai",
+    pi_provider: "openai",
     label: "Live engine test model",
     enabled: true,
     input: ["text"],
@@ -186,8 +199,13 @@ async function runTurn(
   mintBearer: () => string,
   abortSignal?: AbortSignal,
   platformFetch?: typeof fetch,
+  turn: { model?: OrgModel; generation?: PiChatInput["generation"]; surfaceKey?: string } = {},
 ) {
-  const binding = createPiProxyModelBinding({ model: orgModel(), origin: ORIGIN, mintBearer })!;
+  const binding = createPiProxyModelBinding({
+    model: turn.model ?? orgModel(),
+    origin: ORIGIN,
+    mintBearer,
+  })!;
   const slot = acquirePiChatSlot();
   expect(slot).not.toBeNull();
 
@@ -207,11 +225,12 @@ async function runTurn(
       chatSessionId: null,
       messages: userTurn("dis bonjour"),
       system: "You are a helpful assistant.",
-      generation: {},
+      generation: turn.generation ?? {},
       platformMcp: {
         url: `${ORIGIN}/api/mcp/o/org_live?context=injected`,
         headers: {},
         ...(platformFetch ? { fetch: platformFetch } : {}),
+        ...(turn.surfaceKey ? { surfaceKey: turn.surfaceKey } : {}),
       },
       abortSignal: abortSignal ?? new AbortController().signal,
       onError: (error) => String(error),
@@ -271,6 +290,23 @@ describe("runPiChat against a stub provider", () => {
     const reacquired = acquirePiChatSlot();
     expect(reacquired).not.toBeNull();
     reacquired?.release();
+  }, 30_000);
+
+  it("sends an alias's public level as its backing's nearest", async () => {
+    // The loopback listing is unprojected: the binding carries the backing
+    // (deepseek-flash: off/low/high/max), which Pi's session clamps to.
+    capture.bodies.length = 0;
+    const alias: OrgModel = {
+      ...orgModel(),
+      modelId: "deepseek-flash",
+      providerId: "deepseek",
+      pi_provider: "deepseek",
+    };
+    await runTurn(() => "bearer", undefined, undefined, {
+      model: alias,
+      generation: { reasoning_level: "medium" },
+    });
+    expect(JSON.parse(capture.bodies[0]!)).toMatchObject({ reasoning_effort: "high" });
   }, 30_000);
 
   it("mints a NEW bearer per provider request rather than reusing one", async () => {
@@ -653,12 +689,40 @@ describe("runPiChat against a stub provider", () => {
     );
   }, 30_000);
 
+  it("sends the model byte-identical requests from a cached surface, without a handshake", async () => {
+    // The cache must be invisible to the model: the server instructions land at
+    // the same place in the system prompt and the tools are the same bytes, so
+    // the provider's prompt cache hits across the miss → hit boundary.
+    mcpSurface = {
+      instructions: "Stub platform instructions.\n\n## Operation index\n## Agents\nlistAgents",
+      tools: [
+        {
+          name: "search_operations",
+          description: "Search the stub's operations.",
+          inputSchema: { type: "object", properties: { query: { type: "string" } } },
+        },
+      ],
+    };
+    const turn = { surfaceKey: `engine-live:${crypto.randomUUID()}` };
+    capture.bodies.length = 0;
+    mcpInitializes = 0;
+
+    await runTurn(() => "bearer-miss", undefined, undefined, turn);
+    await runTurn(() => "bearer-hit", undefined, undefined, turn);
+
+    expect(mcpInitializes).toBe(1);
+    expect(capture.bodies).toHaveLength(2);
+    expect(capture.bodies[0]).toContain("Stub platform instructions.");
+    expect(capture.bodies[0]).toContain("search_operations");
+    expect(capture.bodies[1]).toBe(capture.bodies[0]!);
+  }, 30_000);
+
   it("carries the caller's fetch all the way into the MCP transport", async () => {
     // The route→engine hop is asserted in `chat-stream-handler.test.ts`, which
     // probes `input.platformMcp.fetch`. The two hops AFTER it — engine →
     // `buildPlatformMcpTools`, and that → `createMcpHttpClient` — were only
     // ever evaluated on their falsy branch, because every fixture in this file
-    // built `platformMcp` without a `fetch`. Deleting either conditional spread
+    // built `platformMcp` without a `fetch`. Dropping the fetch on either hop
     // left the whole suite green while production silently went back to opening
     // real loopback TCP connections per turn — and kept using them for every
     // `tools/call` after the handshake, since the override lives for the

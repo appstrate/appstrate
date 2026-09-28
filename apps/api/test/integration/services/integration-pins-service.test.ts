@@ -539,6 +539,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       const [client] = await db
         .insert(integrationOauthClients)
         .values({
+          orgId: scope.orgId,
           spaceId: scope.spaceId,
           integrationId: INTEGRATION,
           authKey: "google",
@@ -556,7 +557,9 @@ describe("integration-pins-service — DB access/ownership", () => {
         connectionIds: ids,
         createdBy: ctx.user.id,
       });
-      await expect(deleteIntegrationOAuthClient(scope, client!.id)).rejects.toMatchObject({
+      await expect(
+        deleteIntegrationOAuthClient(scope, INTEGRATION, client!.id),
+      ).rejects.toMatchObject({
         status: 409,
         code: "connection_pinned",
       });

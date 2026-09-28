@@ -93,6 +93,9 @@ docker run --rm \
     #  - NF_TABLES/NF_TABLES_INET: the guest supervisor uid firewall
     #    (meta skuid / ip daddr / tcp dport are nf_tables core
     #    expressions, no extra NFT_* options needed for filter rules).
+    #  - NF_CONNTRACK/NF_NAT/NFT_NAT/NFT_REDIR: the `inet` nat chain that
+    #    redirects the DNS of the runner uids to the responder of the sidecar
+    #    (NFT_REDIR selects NF_NAT_REDIRECT).
     #  - NETFILTER_XT_MATCH_OWNER: iptables-legacy `-m owner` fallback.
     ./scripts/config \
       --enable CONFIG_NETFILTER \
@@ -100,12 +103,17 @@ docker run --rm \
       --enable CONFIG_NETFILTER_NETLINK \
       --enable CONFIG_NF_TABLES \
       --enable CONFIG_NF_TABLES_INET \
+      --enable CONFIG_NF_CONNTRACK \
+      --enable CONFIG_NF_NAT \
+      --enable CONFIG_NFT_NAT \
+      --enable CONFIG_NFT_REDIR \
       --enable CONFIG_NETFILTER_XT_MATCH_OWNER
     make olddefconfig
 
     # Confirm the delta survived olddefconfig (a missing dependency would
     # silently drop an option and we would only find out at smoke time).
-    for opt in CONFIG_NF_TABLES CONFIG_NF_TABLES_INET CONFIG_NETFILTER_XT_MATCH_OWNER; do
+    for opt in CONFIG_NF_TABLES CONFIG_NF_TABLES_INET CONFIG_NF_CONNTRACK CONFIG_NF_NAT \
+      CONFIG_NFT_NAT CONFIG_NFT_REDIR CONFIG_NF_NAT_REDIRECT CONFIG_NETFILTER_XT_MATCH_OWNER; do
       grep -q "^${opt}=y" .config || { echo "FATAL: ${opt} not enabled after olddefconfig" >&2; exit 1; }
     done
 
