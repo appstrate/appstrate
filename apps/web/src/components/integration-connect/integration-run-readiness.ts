@@ -20,8 +20,7 @@ import type { IntegrationAgentResolution } from "@appstrate/shared-types";
  *   - `must_choose` .... N>1 candidates, ambiguous pick
  *   - `duplicate_label`  the bound set shares a label, so it is unaddressable
  *   - `needs_reconnection` connection flagged for re-consent
- *   - `stale` .......... pinned/override connection unusable, or the agent's
- *                        `auth_key` serves none of its selected tools
+ *   - `stale` .......... pinned/override connection unavailable
  *   - `auto` / `pinned` / `admin_locked` resolve to a connection → OK, UNLESS
  *     `resolved_missing_scopes` is non-empty (insufficient_scopes upgrade).
  */
@@ -33,16 +32,5 @@ export function resolutionBlocksRun(resolution: IntegrationAgentResolution): boo
     resolution.status === "duplicate_label" ||
     resolution.status === "needs_reconnection" ||
     resolution.status === "stale"
-  );
-}
-
-/** Codes no connection pick can fix — the package-level verdicts and the agent's own `auth_key` misfit: a message, no picker. */
-export function isStructuralCode(code: string): boolean {
-  return (
-    code === "integration_not_active" ||
-    code === "integration_not_found" ||
-    code === "integration_wrong_type" ||
-    code === "integration_invalid_manifest" ||
-    code === "pinned_auth_serves_no_selected_tool"
   );
 }

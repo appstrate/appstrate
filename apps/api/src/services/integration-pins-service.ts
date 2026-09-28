@@ -705,11 +705,8 @@ async function resolveAgentIntegrationPick(args: {
       case "needs_reconnection":
         status = "needs_reconnection";
         break;
-      // The last one is agent configuration, not a connection: never `none`, whose remedy is a
-      // connect.
       case "pinned_connection_unavailable":
       case "override_connection_unavailable":
-      case "pinned_auth_serves_no_selected_tool":
         status = "stale";
         break;
       // Only an explicit set raises it (the fallback says `not_connected`): a pick to change.

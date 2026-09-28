@@ -24,9 +24,9 @@
  *    catalog → the corresponding subset check is skipped (matches the
  *    Phase 0 schema semantics).
  *
- * `requireCallableTools` adds two freeze-point rules that are NOT subset checks —
- * `no_tools_selected` and `pinned_auth_serves_no_selected_tool` — opt-in per call
- * site (a publish/import rule, not a draft or run rule).
+ * `requireCallableTools` adds one more rule that is NOT a subset check — the
+ * declared-but-empty gate — and is opt-in per call site (a publish/import rule,
+ * not a draft rule).
  *
  * WHICH manifest every check above judges against is a SEPARATE axis: the
  * PINNED version the run will resolve whenever pins are available — the flag
@@ -61,10 +61,7 @@ import {
   resolveRunIntegrationVersions,
   type IntegrationManifestCache,
 } from "./integration-service.ts";
-import {
-  getLocalServerRef,
-  pinnedAuthServingNoSelectedTool,
-} from "./integration-manifest-helpers.ts";
+import { getLocalServerRef } from "./integration-manifest-helpers.ts";
 
 /** One version of one package carried inside an incoming bundle. */
 export interface CarriedVersion {
@@ -169,7 +166,7 @@ interface ValidateAgentIntegrationSelectionsInput {
   /**
    * Also refuse a DECLARED integration whose effective tool selection is
    * empty (AFPS §4.4) — the state `assertIntegrationExposesTools` turns into
-   * a failed run — and an `auth_key` serving none of the selected tools.
+   * a failed run.
    *
    * OFF by default, and that default is load-bearing: the agent editor's own
    * flow passes THROUGH the empty state (add the dependency, then tick a tool)
@@ -488,23 +485,6 @@ export async function validateAgentIntegrationSelections(
       });
       // Deliberately NO `continue`: `{ tools: [], scopes: ["bogus"] }` still
       // has a checkable scope, and both errors must land in one pass.
-    }
-    // Freeze points only: at run kickoff the resolver already answers it as a 409.
-    const pinnedMisfit =
-      requireCallableTools && pinnedManifest
-        ? pinnedAuthServingNoSelectedTool(
-            pinnedManifest,
-            entry.auth_key,
-            resolveEffectiveToolSelection(entry.tools, pinnedManifest),
-          )
-        : null;
-    if (pinnedMisfit) {
-      errors.push({
-        field: `integrations_configuration.${entry.id}.auth_key`,
-        code: "pinned_auth_serves_no_selected_tool",
-        title: "Pinned auth exposes no selected tool",
-        message: `integrations_configuration.${entry.id}.auth_key pins auth '${pinnedMisfit.authKey}', which exposes none of the selected tools, so no connection could run them. Pin an auth that does (${pinnedMisfit.servingAuthKeys.join(", ")}), drop auth_key, or change the tool selection.`,
-      });
     }
     if (!configuredIds.has(entry.id)) continue;
 

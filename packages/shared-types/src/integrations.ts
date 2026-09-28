@@ -239,8 +239,7 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *  - `duplicate_label` — the bound set shares a label; the remedy is renaming, not re-picking.
  *  - `none`         — no accessible connection on an auth serving the selected tools.
  *  - `stale`        — a pin or org default names a connection the run cannot use (gone, or
- *                     on an auth serving no selected tool), or the agent's own `auth_key`
- *                     serves none of them — a reconfiguration no connection clears.
+ *                     on an auth serving no selected tool).
  *  - `needs_reconnection` — the resolved connection is flagged for re-consent.
  */
 export type IntegrationPickStatus =

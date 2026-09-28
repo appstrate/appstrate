@@ -63,10 +63,7 @@ import type { Actor } from "../lib/actor.ts";
 import { actorOrSharedFilter } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
-import {
-  authKeysServingSelection,
-  pinnedAuthServingNoSelectedTool,
-} from "./integration-manifest-helpers.ts";
+import { authKeysServingSelection } from "./integration-manifest-helpers.ts";
 import {
   listOrgDefaultsForResolver,
   type OrgDefaultPick,
@@ -255,22 +252,6 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
           );
     const liveIndex = new Map<string, ConnectionRow>();
     for (const c of liveConnections) liveIndex.set(c.id, c);
-
-    // Agent config error: no connection, pin or override can make that auth serve a tool.
-    const pinnedMisfit = pinnedAuthServingNoSelectedTool(
-      req.manifest,
-      req.requiredAuthKey,
-      req.effectiveTools,
-    );
-    if (pinnedMisfit !== null) {
-      errors.push({
-        integrationId: req.integrationId,
-        code: "pinned_auth_serves_no_selected_tool",
-        requiredAuthKey: pinnedMisfit.authKey,
-        message: `The agent pins auth '${pinnedMisfit.authKey}' for ${req.integrationId}, which exposes none of its selected tools (auths that do: ${pinnedMisfit.servingAuthKeys.join(", ")}) — the agent's auth_key or its tool selection must change.`,
-      });
-      continue;
-    }
 
     // AFPS §4.1 `auth_key`: when the agent dep pins an auth method,
     // restrict the candidate connection set to rows on that auth BEFORE
@@ -497,8 +478,8 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     });
   }
 
-  // 7. Fallback — actor's accessible connections on this integration, on an
-  // auth serving the selection. The chosen connection carries its own authKey.
+  // 7. Fallback — actor's accessible connections on this integration,
+  // any auth shape. The chosen connection carries its own authKey.
   const candidates = args.accessibleConnections.filter(
     (c) => c.integrationId === args.integrationId,
   );
@@ -957,9 +938,6 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
           ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
         }
       : {}),
-    ...(e.code === "pinned_auth_serves_no_selected_tool" && e.requiredAuthKey
-      ? { required_auth_key: e.requiredAuthKey }
-      : {}),
     // AFPS §4.1 — surface the pinned `auth_key` (the agent dep's choice)
     // and which auth_keys the actor's existing connections use, so the UI
     // can guide the user to connect via the right auth method.
@@ -984,7 +962,6 @@ const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
   insufficient_scopes: "Insufficient Permissions",
   auth_key_mismatch: "Connection Auth Method Mismatch",
   auth_serves_no_selected_tool: "Connection Auth Serves No Selected Tool",
-  pinned_auth_serves_no_selected_tool: "Agent Auth Key Serves No Selected Tool",
 };
 
 async function buildRequirement(
