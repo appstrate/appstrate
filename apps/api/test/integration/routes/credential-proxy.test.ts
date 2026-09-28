@@ -15,7 +15,8 @@
  *     → 403
  *   - `ProxyCredentialError` (no connection / integration not installed) → 404
  *   - several own connections and no `X-Connection-Id` → 409 must_choose_connection
- *   - `X-Run-Id` confines the call to the run's bound connections
+ *   - `X-Run-Id` confines the call to the run's bound connections; without it
+ *     the space-level rules (org defaults, named, own) pick the connection
  *   - cookie-session rejection by the `ACCEPTED_AUTH_METHODS` gate → 403
  *
  * Auth is a Bearer API key scoped with `credential-proxy:call` — cookie
@@ -28,8 +29,12 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { flushRedis } from "../../helpers/redis.ts";
-import { seedApiKey, seedPackage, seedRun } from "../../helpers/seed.ts";
-import { spacePackages, integrationConnections } from "@appstrate/db/schema";
+import { seedApiKey, seedPackage, seedRun, seedSpace } from "../../helpers/seed.ts";
+import {
+  spacePackages,
+  integrationConnections,
+  integrationOrgDefaults,
+} from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { eq } from "drizzle-orm";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -656,7 +661,7 @@ describe("POST /api/credential-proxy/proxy — boolean control headers take 1/0"
   }
 });
 
-describe("POST /api/credential-proxy/proxy — X-Run-Id confines the call to the run's bound set", () => {
+describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, else the space-level rules apply", () => {
   const AGENT_ID = "@cporg/agent";
   let ctx: TestContext;
   let apiKey: string;
@@ -812,10 +817,95 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id confines the call to the
     expect(upstreamAuth).toEqual([]);
   });
 
+  it("refuses a run of another space as unknown (404)", async () => {
+    const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other" });
+    const run = await seedRun({
+      orgId: ctx.orgId,
+      spaceId: otherSpace.id,
+      packageId: AGENT_ID,
+      userId: ctx.user.id,
+      status: "running",
+      resolvedConnections: { [INTEGRATION_ID]: [{ connectionId: own1, source: "member_pin" }] },
+    });
+    const res = await call({ "X-Run-Id": run.id });
+    expect(res.status).toBe(404);
+    expect(upstreamAuth).toEqual([]);
+  });
+
   it("without X-Run-Id falls back to the actor's single own connection", async () => {
     await db.delete(integrationConnections).where(eq(integrationConnections.id, own2));
     const res = await call({});
     expect(res.status).toBe(200);
     expect(upstreamAuth).toEqual(["Bearer tok-own-1"]);
+  });
+
+  it("without X-Run-Id and no own connection, a colleague's shared one is a 409 candidate — never picked", async () => {
+    await db.delete(integrationConnections).where(eq(integrationConnections.userId, ctx.user.id));
+    const res = await call({});
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as {
+      code: string;
+      errors: { candidate_connections: { id: string; owned_by_actor: boolean }[] }[];
+    };
+    expect(body.code).toBe("must_choose_connection");
+    expect(body.errors[0]!.candidate_connections).toEqual([
+      expect.objectContaining({ id: shared, owned_by_actor: false }),
+    ]);
+    expect(upstreamAuth).toEqual([]);
+  });
+
+  async function orgDefault(connectionIds: string[], enforce: boolean) {
+    await db.insert(integrationOrgDefaults).values({
+      spaceId: ctx.defaultSpaceId,
+      integrationId: INTEGRATION_ID,
+      connectionIds,
+      enforce,
+    });
+  }
+
+  it("an ENFORCED org default binds a call without X-Run-Id — the caller's own connection is neither picked nor nameable", async () => {
+    await orgDefault([shared], true);
+    const res = await call({});
+    expect(res.status).toBe(200);
+    expect(upstreamAuth).toEqual(["Bearer tok-shared"]);
+
+    const named = await call({ "X-Connection-Id": own1 });
+    expect(named.status).toBe(400);
+    expect(((await named.json()) as { code: string }).code).toBe("connection_not_in_org_default");
+    expect(upstreamAuth).toEqual(["Bearer tok-shared"]);
+  });
+
+  it("an ENFORCED org default of several answers 409 over its set", async () => {
+    const shared2 = await insertConnection("shared-2", colleagueId, true);
+    await orgDefault([shared, shared2], true);
+    const res = await call({});
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as {
+      code: string;
+      errors: { candidate_connections: { id: string }[] }[];
+    };
+    expect(body.code).toBe("must_choose_connection");
+    expect(body.errors[0]!.candidate_connections.map((c) => c.id).sort()).toEqual(
+      [shared, shared2].sort(),
+    );
+    expect((await call({ "X-Connection-Id": shared2 })).status).toBe(200);
+    expect(upstreamAuth).toEqual(["Bearer tok-shared-2"]);
+  });
+
+  it("a SOFT org default is used when nothing is named; a named connection wins over it", async () => {
+    await orgDefault([shared], false);
+    expect((await call({})).status).toBe(200);
+    expect((await call({ "X-Connection-Id": own2 })).status).toBe(200);
+    expect(upstreamAuth).toEqual(["Bearer tok-shared", "Bearer tok-own-2"]);
+  });
+
+  it("an org default naming a connection the caller cannot reach fails loud (409 pinned_connection_unavailable)", async () => {
+    await orgDefault([shared, crypto.randomUUID()], false);
+    const res = await call({});
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string; errors: { code: string }[] };
+    expect(body.code).toBe("pinned_connection_unavailable");
+    expect(body.errors[0]!.code).toBe("pinned_connection_unavailable");
+    expect(upstreamAuth).toEqual([]);
   });
 });

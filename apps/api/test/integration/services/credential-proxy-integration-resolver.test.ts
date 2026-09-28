@@ -450,7 +450,7 @@ describe("credential-proxy integration-resolver", () => {
     expect(refreshed).toBeNull();
   });
 
-  describe("no X-Connection-Id — only the actor's single OWN connection is picked", () => {
+  describe("no X-Connection-Id, no org default — only the actor's single OWN connection is picked", () => {
     async function rejectionOf(p: Promise<unknown>): Promise<unknown> {
       try {
         await p;
@@ -470,7 +470,7 @@ describe("credential-proxy integration-resolver", () => {
       expect(JSON.stringify(resolved.payload)).toContain("live-mine");
     });
 
-    it("never picks a colleague's shared connection implicitly — it must be named", async () => {
+    it("never picks a colleague's shared connection implicitly — 409 naming it as a candidate", async () => {
       const colleague = await createTestUser();
       const sharedId = await seedConnection({
         userId: colleague.id,
@@ -478,9 +478,14 @@ describe("credential-proxy integration-resolver", () => {
         sharedWithOrg: true,
       });
 
-      await expect(resolveIntegrationProxyCredentials(input())).rejects.toBeInstanceOf(
-        IntegrationCredentialNotFoundError,
-      );
+      const err = (await rejectionOf(resolveIntegrationProxyCredentials(input()))) as ApiError;
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err.status).toBe(409);
+      expect(err.code).toBe("must_choose_connection");
+      const [item] = err.fieldErrors as ResolutionFieldError[];
+      expect(item!.candidate_connections!.map((c) => [c.id, c.owned_by_actor])).toEqual([
+        [sharedId, false],
+      ]);
       const named = await resolveIntegrationProxyCredentials({
         ...input(),
         connectionId: sharedId,

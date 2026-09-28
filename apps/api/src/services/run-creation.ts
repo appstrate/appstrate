@@ -218,6 +218,21 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       };
     }
     resolvedConnections = outcome.resolved;
+    const multi = multiConnectionIntegrations(resolvedConnections);
+    if (multi.length > 0) {
+      return {
+        ok: false,
+        error: {
+          code: "agent_not_ready",
+          message:
+            `Remote runs bind one connection per integration, but this run's connection choice binds ` +
+            `several to ${multi.map((id) => `'${id}'`).join(", ")} — the remote runner's api_call tool ` +
+            `cannot say which one to use. Pick one with a member pin (a set an admin pin or an enforced ` +
+            `org default imposes is narrowed by an admin), or run the agent on the platform.`,
+          status: 409,
+        },
+      };
+    }
   }
 
   // --- Mint sink credentials ---
@@ -284,4 +299,15 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   // `onRunStatusChange` for remote-origin runs at the real transition.
 
   return { ok: true, runId, sinkCredentials: credentials };
+}
+
+/**
+ * Integrations the snapshot binds to more than one connection. A remote runner
+ * cannot address a set: the afps-runtime `api_call` tool takes no connection
+ * argument, so its credential-proxy calls would answer 409 on every call.
+ */
+function multiConnectionIntegrations(resolved: ResolvedConnectionMap | null): string[] {
+  return Object.entries(resolved ?? {})
+    .filter(([, set]) => set.length > 1)
+    .map(([integrationId]) => integrationId);
 }

@@ -337,9 +337,10 @@ router.delete(
  * `DELETE /api/me/connections/:connectionId` — destructive global delete.
  *
  * Removes the underlying `integration_connections` row — *destructive*: "I never
- * want to use this credential anywhere again" — unless an admin pin or an enforced
- * org default names it (409 `connection_pinned`, `assertConnectionsUnpinned`). The
- * caller's own member pins and schedule overrides drop it in the same transaction
+ * want to use this credential anywhere again" — unless an admin pin or an org
+ * default, enforced or not, names it (409 `connection_pinned`,
+ * `assertConnectionsUnpinned`). The caller's own member pins and schedule
+ * overrides drop it in the same transaction
  * (`GET …/delete-impact` lists them beforehand); another member's keep the id.
  *
  * This is the ONLY entrypoint for that delete, and it is owner-scoped by

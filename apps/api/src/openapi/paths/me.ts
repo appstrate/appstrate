@@ -445,10 +445,10 @@ export const mePaths = {
       description:
         "Removes the `integration_connections` row globally. " +
         "Intent is destructive: 'I never want to use this credential anywhere again'. " +
-        "Refused with 409 `connection_pinned` while an admin pin or an enforced org default names the " +
-        "connection: those sets carry no foreign key, so the dead id would fail every consuming run. An " +
-        "admin removes it from the pin(s) or default first. Neither a member pin nor a soft org default " +
-        "blocks the delete (the resolver skips a soft default that no longer binds). The caller's own " +
+        "Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) " +
+        "names the connection: those sets carry no foreign key, so the dead id would fail every consuming " +
+        "run. An admin removes it from the pin(s) or default first. A member pin does not block the " +
+        "delete. The caller's own " +
         "member pins and schedule overrides drop the connection in the same transaction — a pin it " +
         "empties is removed and a schedule override it empties drops that integration, so the cascade " +
         "falls back; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. " +
@@ -472,7 +472,7 @@ export const mePaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "409": {
           description:
-            "Connection is named by an admin pin or an enforced org default (`connection_pinned`)",
+            "Connection is named by an admin pin or an org default (`connection_pinned`)",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/problem+json": {

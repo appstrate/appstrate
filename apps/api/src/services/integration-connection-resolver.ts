@@ -18,6 +18,8 @@
  *      explicitly picks via the agent-page picker; a server-side record
  *      the resolver sees on every run.
  *   5. integration_org_defaults (soft)         → org-wide default, all agents
+ *   Layers 1-5 are explicit: a set binds whole or fails loudly
+ *   (`*_connection_unavailable`), never falls through to the layer below.
  *   6. fallback: actor's accessible connections on an auth serving the
  *      selected tools = own + (shared_with_org AND space match)
  *      → none → not_connected; exactly ONE OWN → auto (dead or not);
@@ -63,7 +65,6 @@ import {
   type ResolvedConnectionMap,
 } from "@appstrate/core/integration";
 import type { ResolutionFieldError } from "../lib/errors.ts";
-import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
 import { actorOrSharedFilter } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -225,7 +226,8 @@ interface ResolveConnectionsInput {
  * Force layers (admin pin, enforce default) sit at the top; the per-agent
  * admin pin beats the org-wide enforce default (agent-specific exception).
  * The soft default sits just above the fallback so a member's explicit pin
- * still wins. Member pins only apply when matching the caller's
+ * still wins — its position is its only difference from the enforced one: it
+ * binds whole or fails loudly too. Member pins only apply when matching the caller's
  * `actorUserId` (null for end-users — they never own member pins).
  */
 export function resolveConnections(input: ResolveConnectionsInput): ConnectionResolutionResult {
@@ -269,7 +271,8 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
     // member picker offers a connection the integration page (which iterates
     // manifest auths) doesn't show. Other integrations' rows pass through
     // untouched. `null` (manifest absent / zero auths) → no constraint.
-    const liveAuthKeys = manifestAuthKeySet(req.manifest);
+    const auth = authFilterOf(req);
+    const liveAuthKeys = auth.live;
     const liveConnections =
       liveAuthKeys === null
         ? input.accessibleConnections
@@ -330,9 +333,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       connectionIndex: filteredIndex,
       actorUserId,
       actorEndUserId: input.actorEndUserId ?? null,
-      servingAuthKeys: authKeysServingSelection(req.manifest, req.effectiveTools),
-      ...(req.effectiveTools !== undefined ? { effectiveTools: req.effectiveTools } : {}),
-      ...(req.requiredAuthKey !== undefined ? { requiredAuthKey: req.requiredAuthKey } : {}),
+      auth,
     });
 
     if (result.kind === "resolved") {
@@ -373,17 +374,13 @@ interface ResolveOneArgs {
   connectionIndex: Map<string, ConnectionRow>;
   actorUserId: string | null;
   actorEndUserId: string | null;
-  /** Auths whose connection exposes a selected tool; `null` = any auth does. */
-  servingAuthKeys: ReadonlySet<string> | null;
-  /** The requirement's effective selection — what {@link servingCandidates} reads. */
-  effectiveTools?: readonly string[] | "*";
   /**
-   * AFPS §4.1 `auth_key` from the agent dep — already applied as a candidate
-   * filter by {@link resolveConnections}. Threaded in so the `not_connected`
-   * branch can name the auth the connect flow must target: with nothing
-   * connected there is no row whose `authKey` could answer that.
+   * The requirement's auth filter, computed once by {@link resolveConnections},
+   * which already applied `live` and `requiredAuthKey` to the candidates. The
+   * `not_connected` branch reads `requiredAuthKey` to name the auth a connect
+   * flow must target: with nothing connected no row's `authKey` answers that.
    */
-  requiredAuthKey?: string;
+  auth: AuthFilter;
 }
 
 type ResolveOneResult =
@@ -426,15 +423,47 @@ function bindSet(
   return { kind: "resolved", value };
 }
 
-interface ExplicitLayer {
-  ids: readonly string[] | null;
+/** An explicit layer: which source it binds as and how it fails when a member is gone. */
+interface ExplicitLayerRef {
   source: ResolvedConnection["source"];
   code: "pinned_connection_unavailable" | "override_connection_unavailable";
   noun: string;
 }
 
+interface ExplicitLayer extends ExplicitLayerRef {
+  ids: readonly string[] | null;
+}
+
+/** The org default layer — layer 2 when enforced, layer 5 when soft; both bind whole or fail. */
+export function orgDefaultLayer(enforce: boolean): ExplicitLayerRef {
+  return {
+    source: enforce ? "org_default_enforced" : "org_default",
+    code: "pinned_connection_unavailable",
+    noun: "Org default connection",
+  };
+}
+
+/** The loud failure of an explicit layer naming an id the actor cannot reach. */
+export function unavailableMemberError(
+  integrationId: string,
+  layer: ExplicitLayerRef,
+  missingId: string,
+): ConnectionResolutionError {
+  const deleted = " — it may have been deleted or unshared";
+  const hint = layer.code === "pinned_connection_unavailable" ? deleted : "";
+  return {
+    integrationId,
+    code: layer.code,
+    source: layer.source,
+    message: `${layer.noun} '${missingId}' for ${integrationId} is not accessible${hint}.`,
+  };
+}
+
 function resolveOne(args: ResolveOneArgs): ResolveOneResult {
-  // Layers 1-4: an explicit set binds whole or fails loudly — never falls through.
+  // Layers 1-5: an explicit set binds whole or fails loudly — never falls
+  // through. The two org default layers differ only by position.
+  const orgDefaultIds = nonEmpty(args.orgDefault?.connectionIds);
+  const enforced = args.orgDefault?.enforce === true;
   const explicit: ExplicitLayer[] = [
     {
       ids: args.adminPinIds,
@@ -442,12 +471,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
       code: "pinned_connection_unavailable",
       noun: "Pinned connection",
     },
-    {
-      ids: args.orgDefault?.enforce ? nonEmpty(args.orgDefault.connectionIds) : null,
-      source: "org_default_enforced",
-      code: "pinned_connection_unavailable",
-      noun: "Org default connection",
-    },
+    { ids: enforced ? orgDefaultIds : null, ...orgDefaultLayer(true) },
     ...(args.launchOverride
       ? [
           {
@@ -467,33 +491,18 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
       code: "pinned_connection_unavailable",
       noun: "Your pinned connection",
     },
+    { ids: enforced ? null : orgDefaultIds, ...orgDefaultLayer(false) },
   ];
   for (const layer of explicit) {
     if (!layer.ids) continue;
     const owned = ownedConns(args, layer.ids);
     if ("missingId" in owned) {
-      const hint =
-        layer.code === "pinned_connection_unavailable"
-          ? " — it may have been deleted or unshared"
-          : "";
-      return errorOf(args, {
-        code: layer.code,
-        source: layer.source,
-        message: `${layer.noun} '${owned.missingId}' for ${args.integrationId} is not accessible${hint}.`,
-      });
+      return {
+        kind: "error",
+        error: unavailableMemberError(args.integrationId, layer, owned.missingId),
+      };
     }
     return bindSet(args, owned.rows, layer.source);
-  }
-
-  // 5. Org default SOFT — an unreachable member falls through (logged: the admin's only signal).
-  const softIds = args.orgDefault?.enforce ? null : nonEmpty(args.orgDefault?.connectionIds);
-  if (softIds) {
-    const owned = ownedConns(args, softIds);
-    if (!("missingId" in owned)) return bindSet(args, owned.rows, "org_default");
-    logger.warn("Soft org default skipped — a member connection is not accessible", {
-      integrationId: args.integrationId,
-      missingConnectionId: owned.missingId,
-    });
   }
 
   // 6. Fallback — the only layer that binds without an explicit pick, so it
@@ -503,7 +512,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   );
 
   // A connection on an auth serving no selected tool is never a candidate.
-  const serving = servingCandidates(args, candidates, (c) => c.authKey);
+  const serving = candidates.filter((c) => servesSelection(args.auth, c.authKey));
   if (serving.length === 0) {
     // Name the auth to connect on and the scopes consent must cover, else the next resolution fails
     // `insufficient_scopes`.
@@ -553,20 +562,40 @@ export function servingCandidates<T>(
   rows: readonly T[],
   authKeyOf: (row: T) => string,
 ): T[] {
-  const live = manifestAuthKeySet(req.manifest);
-  const serving = authKeysServingSelection(req.manifest, req.effectiveTools);
-  return rows.filter((row) => {
-    const key = authKeyOf(row);
-    return (
-      (live === null || live.has(key)) &&
-      (req.requiredAuthKey === undefined || key === req.requiredAuthKey) &&
-      (serving === null || serving.has(key))
-    );
-  });
+  const auth = authFilterOf(req);
+  return rows.filter((row) => servesSelection(auth, authKeyOf(row)));
+}
+
+/** A requirement's three auth constraints; `null` sets constrain nothing. */
+interface AuthFilter {
+  /** Auths the manifest still declares (orphaned-auth guard). */
+  live: ReadonlySet<string> | null;
+  /** AFPS §4.1 `auth_key` from the agent dep. */
+  requiredAuthKey?: string;
+  /** Auths whose connection exposes a selected tool. */
+  serving: ReadonlySet<string> | null;
+}
+
+function authFilterOf(
+  req: Pick<IntegrationRequirement, "manifest" | "requiredAuthKey" | "effectiveTools">,
+): AuthFilter {
+  return {
+    live: manifestAuthKeySet(req.manifest),
+    serving: authKeysServingSelection(req.manifest, req.effectiveTools),
+    ...(req.requiredAuthKey !== undefined ? { requiredAuthKey: req.requiredAuthKey } : {}),
+  };
+}
+
+function servesSelection(auth: AuthFilter, key: string): boolean {
+  return (
+    (auth.live === null || auth.live.has(key)) &&
+    (auth.requiredAuthKey === undefined || key === auth.requiredAuthKey) &&
+    (auth.serving === null || auth.serving.has(key))
+  );
 }
 
 function servesAuth(args: ResolveOneArgs, authKey: string): boolean {
-  return args.servingAuthKeys === null || args.servingAuthKeys.has(authKey);
+  return args.auth.serving === null || args.auth.serving.has(authKey);
 }
 
 /**
@@ -580,8 +609,8 @@ function servesAuth(args: ResolveOneArgs, authKey: string): boolean {
  * {@link declaredAuthKey}.
  */
 function connectTargetAuthKey(args: ResolveOneArgs): string | null {
-  if (args.requiredAuthKey !== undefined) {
-    const key = declaredAuthKey(args.manifest, args.requiredAuthKey);
+  if (args.auth.requiredAuthKey !== undefined) {
+    const key = declaredAuthKey(args.manifest, args.auth.requiredAuthKey);
     return key !== null && servesAuth(args, key) ? key : null;
   }
   const oauthKeys = Object.entries(args.manifest.auths ?? {})
@@ -642,20 +671,42 @@ function oauthScopesForAuth(args: ResolveOneArgs, authKey: string): string[] {
  * `must_choose_connection` candidate: "my account" vs "the one the org shares"
  * is often the only thing separating two otherwise identical rows.
  */
-function isOwnedByActor(args: ResolveOneArgs, conn: ConnectionRow): boolean {
+export function isOwnedByActor(
+  actor: ActorIdentity,
+  conn: Pick<ConnectionRow, "userId" | "endUserId">,
+): boolean {
   return (
-    (args.actorUserId !== null && conn.userId === args.actorUserId) ||
-    (args.actorEndUserId !== null && conn.endUserId === args.actorEndUserId)
+    (actor.actorUserId !== null && conn.userId === actor.actorUserId) ||
+    (actor.actorEndUserId !== null && conn.endUserId === actor.actorEndUserId)
   );
 }
 
+/** Who "own" means: exactly one of the two ids is set. */
+interface ActorIdentity {
+  actorUserId: string | null;
+  actorEndUserId: string | null;
+}
+
+export function actorIdentityOf(actor: Actor): ActorIdentity {
+  return {
+    actorUserId: actor.type === "user" ? actor.id : null,
+    actorEndUserId: actor.type === "end_user" ? actor.id : null,
+  };
+}
+
 /** Project a candidate row onto the picker-facing shape carried by the 409. */
-function candidateOf(args: ResolveOneArgs, conn: ConnectionRow): ConnectionCandidate {
+export function candidateOf(
+  actor: ActorIdentity,
+  conn: Pick<
+    ConnectionRow,
+    "id" | "label" | "accountId" | "needsReconnection" | "userId" | "endUserId"
+  >,
+): ConnectionCandidate {
   return {
     id: conn.id,
     label: conn.label,
     accountId: conn.accountId,
-    ownedByActor: isOwnedByActor(args, conn),
+    ownedByActor: isOwnedByActor(actor, conn),
     needsReconnection: conn.needsReconnection,
   };
 }
@@ -673,7 +724,7 @@ function checkHealth(
 
   // Checked first: neither a reconnect nor a scope upgrade gives this auth a tool.
   if (!servesAuth(args, conn.authKey)) {
-    const serving = [...args.servingAuthKeys!].join(", ");
+    const serving = [...args.auth.serving!].join(", ");
     return errorOf(args, {
       code: "auth_serves_no_selected_tool",
       connectionId: conn.id,
@@ -811,8 +862,7 @@ export async function resolveConnectionsForRun(
   // End-users never own member pins — only dashboard users can pin via
   // /api/me/integration-pins. Passing null narrows the pin partition to
   // admin pins only, keeping the cascade tight for end-user runs.
-  const actorUserId = input.actor.type === "user" ? input.actor.id : null;
-  const actorEndUserId = input.actor.type === "end_user" ? input.actor.id : null;
+  const { actorUserId, actorEndUserId } = actorIdentityOf(input.actor);
 
   // Load accessible connections + pins + org defaults in parallel.
   const integrationIds = validReqs.map((r) => r.integrationId);

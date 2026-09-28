@@ -119,11 +119,15 @@ const proxyParameters = [
     description:
       "Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it " +
       "(`appstrate run --report`). Must name an in-flight run of the calling actor in this " +
-      "space: an unknown id is a `404`, another actor's run a `403`, a finished run a `400`. " +
-      "The call then reaches ONLY the connections the run's kickoff bound to the integration " +
-      "(admin pins, enforced defaults, member pins already applied): one bound connection is " +
-      "used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` " +
-      "when absent, `400 connection_not_in_run` when it names another); none is a `404`.",
+      "space: an unknown id or one of another space is a `404`, another actor's run a `403`, a " +
+      "finished run a `400`. It binds the call to the run's snapshot: the call reaches ONLY the " +
+      "connections the run's kickoff bound to the integration (every layer applied, agent-level " +
+      "ones included — admin pins, enforced defaults, launch overrides, member pins): one bound " +
+      "connection is used; several require `X-Connection-Id` naming one of them " +
+      "(`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names " +
+      "another); none is a `404`. Without it no agent is in play, so the admin and member pins " +
+      "(set per agent) cannot apply — only the space-level rules described under " +
+      "`X-Connection-Id` do.",
     schema: { type: "string" },
   },
   {
@@ -132,13 +136,18 @@ const proxyParameters = [
     required: false,
     description:
       "Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run " +
-      "bound (see `X-Run-Id`). Without it, the proxy uses that connection after validating it " +
-      "is one of the caller's own (user or end-user) or a connection another member shared in " +
-      "the request's space, of the requested integration. When absent (and no `X-Run-Id`), only " +
-      "the caller's own connections are considered: exactly one is used, none is a `404` (a " +
-      "shared connection is never used unless named here), several are a " +
-      "`409 must_choose_connection` listing the candidates to name. A non-uuid value is a " +
-      "`400`; mismatched or unknown ids surface as `404 — no credentials`.",
+      "bound (see `X-Run-Id`). Without it, the space-level rules apply in this order: (1) an " +
+      "ENFORCED org default of the integration binds its set — a named id must be a member " +
+      "(`400 connection_not_in_org_default` otherwise); (2) the named connection, after " +
+      "validating it is one of the caller's own (user or end-user) or a connection another " +
+      "member shared in the request's space, of the requested integration; (3) a SOFT org " +
+      "default binds its set; (4) the caller's own connections: exactly one is used, none with " +
+      "some shared by other members is a `409 must_choose_connection` (a shared connection is " +
+      "never used unless named or set as a default), none at all a `404`, several a " +
+      "`409 must_choose_connection`. A default set of one is used, several are a " +
+      "`409 must_choose_connection` over the set, and a member the caller cannot reach is a " +
+      "`409 pinned_connection_unavailable`. A non-uuid value is a `400`; mismatched or " +
+      "unknown ids surface as `404 — no credentials`.",
     schema: { type: "string", format: "uuid" },
   },
 ] as const;
@@ -162,9 +171,10 @@ const proxyResponses = {
   },
   "400": {
     description:
-      "Missing or malformed control header, a finished `X-Run-Id` run, or " +
+      "Missing or malformed control header, a finished `X-Run-Id` run, " +
       "`connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run " +
-      "did not bind.",
+      "did not bind — or `connection_not_in_org_default` — it names a connection outside the " +
+      "integration's enforced org default.",
     content: {
       "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
     },
@@ -194,17 +204,20 @@ const proxyResponses = {
   },
   "404": {
     description:
-      "No credentials or connection for the requested integration — including when the " +
-      "caller owns none and names none (even if other members shared some), when the " +
-      "`X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space.",
+      "No credentials or connection for the requested integration — including when no " +
+      "connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or " +
+      "when `X-Run-Id` names no run of this space.",
   },
   "409": {
     description:
-      "`must_choose_connection` — no `X-Connection-Id` and several candidates: the " +
-      "`X-Run-Id` run bound several connections to the integration, or (no run) the caller " +
-      "owns several. `errors[0].candidate_connections` lists what the caller may name (the " +
-      "run's bound set, else every own and shared connection), with `label`, `account_id`, " +
-      "`owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`.",
+      "`must_choose_connection` — no `X-Connection-Id` and no single candidate: the " +
+      "`X-Run-Id` run bound several connections to the integration, or (no run) the org " +
+      "default holds several, or the caller owns several or only has other members' shared " +
+      "ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound " +
+      "set, the default's set, else every own and shared connection), with `label`, " +
+      "`account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in " +
+      "`X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a " +
+      "connection the caller cannot reach (deleted or unshared); an admin must fix the default.",
     content: {
       "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
     },

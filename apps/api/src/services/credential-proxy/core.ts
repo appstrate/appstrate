@@ -81,8 +81,9 @@ interface ProxyCallInput {
    */
   connectionId?: string;
   /**
-   * The run named by `X-Run-Id`, already checked to be the actor's and in
-   * flight: confines the call to the connections that run's kickoff bound.
+   * The run named by `X-Run-Id`: confines the call to the connections that
+   * run's kickoff bound, re-checked as the actor's and in flight on every
+   * selection — the 401 refresh included.
    */
   run?: RunBoundSelection;
 

@@ -632,41 +632,29 @@ describe("integration-pins-service — DB access/ownership", () => {
       });
     });
 
-    it("an ENFORCED org default blocks delete and unshare (409 connection_pinned)", async () => {
-      const [id] = await seedSharedConnections(1);
-      await upsertOrgDefault(scope, INTEGRATION, {
-        connectionIds: [id!],
-        enforce: true,
-        createdBy: ctx.user.id,
+    for (const enforce of [true, false]) {
+      it(`an ${enforce ? "ENFORCED" : "SOFT"} org default blocks delete and unshare (409 connection_pinned)`, async () => {
+        const [toDelete, toUnshare] = await seedSharedConnections(2);
+        await upsertOrgDefault(scope, INTEGRATION, {
+          connectionIds: [toDelete!, toUnshare!],
+          enforce,
+          createdBy: ctx.user.id,
+        });
+        const owner = { type: "user" as const, id: memberId };
+        await expect(deleteIntegrationConnection(scope, toDelete!, owner)).rejects.toMatchObject({
+          status: 409,
+          code: "connection_pinned",
+        });
+        await expect(
+          updateConnectionMetadata(toUnshare!, { sharedWithOrg: false }),
+        ).rejects.toMatchObject({ status: 409, code: "connection_pinned" });
+        const left = await db
+          .select({ id: integrationConnections.id })
+          .from(integrationConnections)
+          .where(eq(integrationConnections.id, toDelete!));
+        expect(left).toHaveLength(1);
       });
-      const owner = { type: "user" as const, id: memberId };
-      await expect(deleteIntegrationConnection(scope, id!, owner)).rejects.toMatchObject({
-        status: 409,
-        code: "connection_pinned",
-      });
-      await expect(updateConnectionMetadata(id!, { sharedWithOrg: false })).rejects.toMatchObject({
-        status: 409,
-        code: "connection_pinned",
-      });
-    });
-
-    it("a SOFT org default blocks neither delete nor unshare — the resolver skips it", async () => {
-      const [toDelete, toUnshare] = await seedSharedConnections(2);
-      await upsertOrgDefault(scope, INTEGRATION, {
-        connectionIds: [toDelete!, toUnshare!],
-        enforce: false,
-        createdBy: ctx.user.id,
-      });
-      await deleteIntegrationConnection(scope, toDelete!, { type: "user", id: memberId });
-      expect(
-        (await updateConnectionMetadata(toUnshare!, { sharedWithOrg: false })).sharedWithOrg,
-      ).toBe(false);
-      const left = await db
-        .select({ id: integrationConnections.id })
-        .from(integrationConnections)
-        .where(eq(integrationConnections.id, toDelete!));
-      expect(left).toEqual([]);
-    });
+    }
 
     it("refuses to delete an OAuth client whose minted connection is pinned", async () => {
       const [client] = await db

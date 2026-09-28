@@ -14,6 +14,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { saveIntegrationConnection } from "../../../src/services/integration-connections.ts";
+import { CONNECTION_LABEL_MAX } from "../../../src/lib/connection-label.ts";
 
 const INTEGRATION = "@orga/pat";
 
@@ -90,5 +91,18 @@ describe("integration connection — label minting", () => {
     expect((await connect(ctx.user.id, "default", "sk-…abcd")).label).toBe("sk-…abcd (2)");
     // Control: case makes a second label — the sidecar's enum is case-sensitive.
     expect((await connect(ctx.user.id, "default", "SK-…abcd")).label).toBe("SK-…abcd");
+  });
+
+  it("cuts a max-length base so the suffixed label still fits the max", async () => {
+    const full = "a".repeat(CONNECTION_LABEL_MAX);
+    expect((await connect(ctx.user.id, "default", full)).label).toBe(full);
+
+    const second = (await connect(ctx.user.id, "default", full)).label;
+    expect(second).toBe(`${"a".repeat(CONNECTION_LABEL_MAX - 4)} (2)`);
+    expect(second.length).toBe(CONNECTION_LABEL_MAX);
+    // The cut base is compared too: "(2)" is taken, so the next is "(3)".
+    expect((await connect(ctx.user.id, "default", full)).label).toBe(
+      `${"a".repeat(CONNECTION_LABEL_MAX - 4)} (3)`,
+    );
   });
 });

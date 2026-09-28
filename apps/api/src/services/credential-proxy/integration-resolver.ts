@@ -15,8 +15,9 @@
  * actor (dashboard user, CLI/JWT user, or impersonated end-user) selects
  * which `integration_connections` row is decrypted. A call naming a run
  * (`X-Run-Id`) reaches only the connections that run's kickoff bound;
- * otherwise the one named by `X-Connection-Id` (own or shared), else the
- * actor's single own connection (`selectAccessibleConnection`).
+ * otherwise the space-level rules pick it — org defaults, the one named by
+ * `X-Connection-Id` (own or shared), else the actor's single own connection
+ * (`selectAccessibleConnection`).
  *
  * Both this external-runner path and the in-container sidecar path
  * (`api-call-credentials.ts`) build the payload via the shared
@@ -35,8 +36,11 @@ import {
   renderAuthAuthorizedUris,
   type AfpsManifestAuth,
 } from "../integration-manifest-helpers.ts";
+import { ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
 import type { Actor } from "../../lib/actor.ts";
+import { forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
+import { getRunAttribution } from "../state/runs.ts";
 import {
   assertIntegrationActive,
   selectAccessibleConnection,
@@ -51,6 +55,38 @@ import {
   refreshAndClassify,
 } from "../integration-token-refresh.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+
+/**
+ * The run `X-Run-Id` names, checked the way the llm-proxy checks it
+ * (`assertRunAttributable`) but bound to the ACTOR, not merely the space: the
+ * run's kickoff snapshot decides which connections the call may reach, so a
+ * caller may only borrow the snapshot of a run it launched. Unknown, foreign
+ * org and other-space ids are one 404 (no existence probe); another actor's run
+ * is 403; a finished run is 400. Checked on every selection, the 401 refresh
+ * included ({@link RunBoundSelection}).
+ */
+export function runBoundSelection(input: {
+  orgId: string;
+  spaceId: string;
+  runId: string;
+  integrationId: string;
+  actor: Actor;
+}): RunBoundSelection {
+  const { orgId, spaceId, runId, integrationId, actor } = input;
+  return {
+    id: runId,
+    boundSet: async () => {
+      const run = await getRunAttribution(orgId, runId);
+      if (!run || run.spaceId !== spaceId) throw notFound(`run ${runId} not found`);
+      const ownsRun = actor.type === "user" ? run.userId === actor.id : run.endUserId === actor.id;
+      if (!ownsRun) throw forbidden("X-Run-Id does not reference a run of the calling actor");
+      if (!ACTIVE_RUN_STATUSES.has(run.status)) {
+        throw invalidRequest(`run ${runId} is no longer active`, "X-Run-Id");
+      }
+      return run.resolvedConnections?.[integrationId] ?? [];
+    },
+  };
+}
 
 /** Errors mapped by the route to 404 (credential not found). */
 export class IntegrationCredentialNotFoundError extends Error {
@@ -82,9 +118,10 @@ interface ResolvedIntegrationProxyCredentials {
 /**
  * Resolve live credentials for the credential-proxy from an
  * integration connection. Throws {@link IntegrationCredentialNotFoundError}
- * when the integration is not active / has no usable connection, and the
- * 409 `must_choose_connection` `ApiError` when the caller names none and owns
- * several.
+ * when the integration is not active / has no usable connection, and a 409
+ * `ApiError` when the selection has no single answer (`must_choose_connection`)
+ * or an org default names a connection the actor cannot reach
+ * (`pinned_connection_unavailable`).
  */
 export async function resolveIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,

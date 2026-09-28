@@ -13,7 +13,7 @@
  *   2. integration_org_defaults (enforce)        → org-wide force
  *   3. launch override                           → the run's or the schedule's picks
  *   4. integration_pins (user_id = actor.id)     → member preference
- *   5. integration_org_defaults (soft)           → org-wide default
+ *   5. integration_org_defaults (soft)           → org-wide default (binds whole or fails, like 1-4)
  *   6. fallback: own + shared accessible
  *      → none = not_connected, exactly one OWN = auto, else must_choose
  */
@@ -978,24 +978,33 @@ describe("resolveConnections — org default", () => {
     expect(result.resolved[INTEG]![0]!.connectionId).toBe(mine.id);
   });
 
-  it("SOFT default falls through to fallback when its connection is gone (non-binding)", () => {
+  it("SOFT default with an unreachable member fails loud — it never falls through to the fallback", () => {
     const onlyOne = conn({});
+    const live = conn({ sharedWithOrg: true });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
-      accessibleConnections: [onlyOne],
+      accessibleConnections: [onlyOne, live],
       pins: [],
+      orgDefaults: SOFT(live.id, "conn_ghost"),
+      actorUserId: USER_ID,
+    });
+    expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors[0]!.code).toBe("pinned_connection_unavailable");
+    expect(result.errors[0]!.source).toBe("org_default");
+    expect(result.errors[0]!.message).toContain("conn_ghost");
+  });
+
+  it("a member pin still wins over a SOFT default whose member is gone", () => {
+    const mine = conn({});
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [mine],
+      pins: [memberPin(mine.id)],
       orgDefaults: SOFT("conn_ghost"),
       actorUserId: USER_ID,
     });
     expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]).toEqual([
-      {
-        connectionId: onlyOne.id,
-        source: "fallback_auto",
-        label: onlyOne.label,
-        accountId: "acc_x",
-      },
-    ]);
+    expect(result.resolved[INTEG]![0]!.source).toBe("member_pin");
   });
 
   it("a scope-deficient org default surfaces insufficient_scopes (checkHealth still runs)", () => {
