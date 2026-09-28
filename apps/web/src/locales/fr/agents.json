@@ -246,6 +246,7 @@
   "schedule.enable": "Activer",
   "schedule.disable": "Désactiver",
   "schedule.delete": "Supprimer",
+  "schedule.memberGoverned": "Seul un administrateur peut modifier une planification exécutée au nom d'un autre membre",
   "schedule.deleteConfirm": "Supprimer cette planification ? Cette action est irréversible.",
   "schedule.enabled": "Activé",
   "schedule.tabDetails": "Détails",

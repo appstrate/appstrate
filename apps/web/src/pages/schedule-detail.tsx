@@ -16,6 +16,12 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@appstrate/ui/components/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@appstrate/ui/components/tooltip";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { JsonView } from "../components/json-view";
@@ -26,11 +32,12 @@ import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { ActorLabel } from "../components/actor-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
+import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { toastScheduleConnectionChoice } from "../lib/mutation-error";
 import { useAgents } from "../hooks/use-packages";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { formatDateField } from "../lib/format-date";
-import { MoreHorizontal, Pencil, Trash2, Play, Pause, Clock } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, Play, Pause, Clock, Lock } from "lucide-react";
 
 type ScheduleTab = "runs" | "details";
 
@@ -43,6 +50,7 @@ export function ScheduleDetailPage() {
   const { data: schedule, isLoading, error } = useScheduleById(id);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
+  const mayWrite = useCanWriteSchedule(schedule);
 
   // A schedule's runs are runs: `schedules:read` alone does not list them.
   const readsRuns = canReadRuns(can);
@@ -74,7 +82,27 @@ export function ScheduleDetailPage() {
           actions={
             <>
               <LiveScheduleStatusBadge schedule={schedule} />
-              {can("schedules:write") && (
+              {can("schedules:write") && !mayWrite && (
+                <TooltipProvider delayDuration={300}>
+                  <Tooltip>
+                    {/* A disabled button fires no pointer events: the span carries the tooltip. */}
+                    <TooltipTrigger asChild>
+                      <span tabIndex={0}>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          disabled
+                          aria-label={t("schedule.memberGoverned")}
+                        >
+                          <Lock size={16} />
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("schedule.memberGoverned")}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              {can("schedules:write") && mayWrite && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="icon">

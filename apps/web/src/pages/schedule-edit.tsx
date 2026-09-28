@@ -8,12 +8,14 @@ import {
   useDeleteSchedule,
   useScheduleFormDeps,
 } from "../hooks/use-schedules";
+import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { ScheduleForm } from "../components/schedule-form";
 import { scheduleConnectionChoices } from "../lib/connection-choice";
 import { PageHeader } from "../components/page-header";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { NoAccessState } from "../components/route-gate";
 import { usePermissions } from "../hooks/use-permissions";
+import { Lock } from "lucide-react";
 
 export function ScheduleEditPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -25,9 +27,18 @@ export function ScheduleEditPage() {
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
   const { can } = usePermissions();
+  const mayWrite = useCanWriteSchedule(schedule);
 
   if (isLoading) return <LoadingState />;
   if (error || !schedule) return <ErrorState message={error?.message} />;
+  // Reached by URL on a schedule running as another member: every write would 403.
+  if (!mayWrite) {
+    return (
+      <div className="p-6">
+        <EmptyState message={t("schedule.memberGoverned")} icon={Lock} />
+      </div>
+    );
+  }
   // The agent detail is a SEPARATE query from the schedule: mounting the form
   // before it lands would seed the input state from empty settings, keeping a
   // since-locked field the user can no longer remove (400 `locked_input_field`

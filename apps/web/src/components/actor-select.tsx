@@ -20,6 +20,7 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { useEndUsers, useEndUser } from "../hooks/use-end-users";
 import { useAuth } from "../hooks/use-auth";
 import { usePermissions } from "../hooks/use-permissions";
+import { mayGovernMemberSchedule } from "../lib/schedule-governance";
 
 /**
  * An execution identity. Exactly one field is set; `undefined` means no
@@ -79,13 +80,12 @@ export function ActorSelect({
     { enabled: !!orgId },
   );
   const members = useMemo(() => orgData?.members ?? [], [orgData]);
-  // Naming ANOTHER member is an org owner/admin act; anyone else picks themselves, an end user, or
-  // the member the field started on — kept listed after picking someone else, so it can be put
-  // back. No permission names this rule, so the org role only shapes the list: the server
-  // decides (403).
+  // Naming ANOTHER member is an org owner/admin act (`mayGovernMemberSchedule`); anyone else picks
+  // themselves, an end user, or the member the field started on — kept listed after picking
+  // someone else, so it can be put back. The server decides (403).
   const { user } = useAuth();
   const { orgRole } = usePermissions();
-  const mayChooseOtherMembers = orgRole === "owner" || orgRole === "admin";
+  const callerId = user?.id;
   const [initialUserId] = useState(value?.userId);
 
   const { data: endUserPage } = useEndUsers({
@@ -100,7 +100,11 @@ export function ActorSelect({
   const memberOptions = useMemo<Option[]>(() => {
     const q = debouncedQuery.toLowerCase();
     return members
-      .filter((m) => mayChooseOtherMembers || m.userId === user?.id || m.userId === initialUserId)
+      .filter(
+        (m) =>
+          m.userId === initialUserId ||
+          mayGovernMemberSchedule(m.userId, { userId: callerId, orgRole }),
+      )
       .filter(
         (m) =>
           !q ||
@@ -112,7 +116,7 @@ export function ActorSelect({
         name: primaryLabel(m.displayName, m.email ?? null, m.userId),
         email: m.email ?? null,
       }));
-  }, [members, debouncedQuery, mayChooseOtherMembers, user?.id, initialUserId]);
+  }, [members, debouncedQuery, orgRole, callerId, initialUserId]);
 
   const endUserOptions = useMemo<Option[]>(
     () =>

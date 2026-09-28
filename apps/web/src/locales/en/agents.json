@@ -246,6 +246,7 @@
   "schedule.enable": "Enable",
   "schedule.disable": "Disable",
   "schedule.delete": "Delete",
+  "schedule.memberGoverned": "Only an admin can change a schedule that runs as another member",
   "schedule.deleteConfirm": "Delete this schedule? This action cannot be undone.",
   "schedule.enabled": "Enabled",
   "schedule.tabDetails": "Details",
