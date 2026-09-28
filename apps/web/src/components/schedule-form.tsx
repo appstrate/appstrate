@@ -29,7 +29,13 @@ import { changedInputValues, hasInputFields, initialInputValues } from "../lib/a
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
 import { ActorSelect, type ActorValue } from "./actor-select";
+import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { VERSION_PUBLISHED } from "../lib/version-selector";
+import { type ConnectionChoice, pendingConnectionChoices } from "../lib/connection-choice";
+import { withConnectionPick } from "../lib/connection-set";
+import { sameActor, scheduleOverridePayload } from "../lib/schedule-payload";
+import { useAuth } from "../hooks/use-auth";
+import { useScheduleFormDeps } from "../hooks/use-schedules";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 // Sentinel for the schedule's "inherit" version choice — nothing stored; the
@@ -119,12 +125,6 @@ interface ScheduleFormProps {
   homeWritable?: boolean;
   /** Package id needed by RunOverridesPanel to fetch versions. */
   packageId?: string;
-  /**
-   * Agent's declared integration deps — surfaces the connectionOverrides
-   * picker. Pass an empty array to hide. Read from
-   * `agentDetail.dependencies.integrations` at the page level.
-   */
-  agentIntegrations?: Array<{ id: string; tools?: string[] | "*" }>;
   agents?: Array<{ id: string; displayName: string }>;
   selectedAgentId?: string;
   onAgentChange?: (agentId: string) => void;
@@ -134,10 +134,16 @@ interface ScheduleFormProps {
   isPending?: boolean;
   blockedMessage?: string;
   /**
-   * Integrations the last save was refused over (`409 missing_integration_connection`,
-   * `must_choose_connection`): a scheduled fire cannot ask which connection to use.
+   * What the last save was refused over (`409 missing_integration_connection`):
+   * a scheduled fire cannot ask which connection to use.
    */
-  mustChooseIntegrationIds?: readonly string[];
+  connectionChoices?: readonly ConnectionChoice[];
+}
+
+/** What the last save was sent with — what its refusal, if any, speaks for. */
+interface SubmittedPicks {
+  runsAs: ActorValue | undefined;
+  picks: Record<string, string[]>;
 }
 
 interface FormFields {
@@ -152,7 +158,6 @@ export function ScheduleForm({
   defaultValues,
   currentActor,
   inputWrapper,
-  agentIntegrations,
   persistedModelId,
   persistedGenerationConfig,
   persistedProxyId,
@@ -166,7 +171,7 @@ export function ScheduleForm({
   onDelete,
   isPending,
   blockedMessage,
-  mustChooseIntegrationIds,
+  connectionChoices,
 }: ScheduleFormProps) {
   const { t } = useTranslation(["agents", "common"]);
   const cronPresets = getCronPresets(t);
@@ -236,23 +241,64 @@ export function ScheduleForm({
       Object.keys(defaultValues.connection_overrides).length > 0
     );
   const [overridesOpen, setOverridesOpen] = useState(initialOverridesNonEmpty);
-  // Still unanswered after the refusal: the section stays open on them until
-  // a set is picked, derived rather than synced so no effect sets state.
-  const unchosen = (mustChooseIntegrationIds ?? []).filter(
-    (id) => (overrides.connection_overrides?.[id]?.length ?? 0) === 0,
-  );
-  const overridesShown = overridesOpen || unchosen.length > 0;
 
   // #738: execution identity. `undefined` = caller (create) / unchanged (edit).
   const [actor, setActor] = useState<ActorValue | undefined>(defaultValues?.actor);
+  const { user } = useAuth();
+  // Who a fire runs as while the select holds nothing: the schedule's own actor
+  // on edit, the caller on create.
+  const baseActor: ActorValue | undefined = isEdit
+    ? currentActor
+    : user
+      ? { userId: user.id }
+      : undefined;
+  const runsAs = actor ?? baseActor;
+  // The pickers judge the VIEWER's connections; they only speak for a schedule
+  // that runs as the viewer.
+  const actorIsViewer = !!user && sameActor(runsAs, { userId: user.id });
+  const changeActor = (next: ActorValue | undefined) => {
+    const nextRunsAs = next ?? baseActor;
+    if (!sameActor(nextRunsAs, runsAs)) {
+      // The picks named the previous identity's connections. Back on the
+      // schedule's own actor, its stored picks hold again.
+      const restored =
+        isEdit && sameActor(nextRunsAs, currentActor)
+          ? (defaultValues?.connection_overrides ?? undefined)
+          : undefined;
+      setOverrides((prev) => {
+        const { connection_overrides: _stale, ...rest } = prev;
+        void _stale;
+        return restored ? { ...rest, connection_overrides: restored } : rest;
+      });
+    }
+    setActor(next);
+  };
+  const setConnectionPick = (integrationId: string, connectionIds: string[]) =>
+    setOverrides((prev) => {
+      const { connection_overrides: picks, ...rest } = prev;
+      const next = withConnectionPick(picks ?? {}, integrationId, connectionIds);
+      return Object.keys(next).length > 0 ? { ...rest, connection_overrides: next } : rest;
+    });
 
-  // True only when the selected actor differs from the schedule's current one.
-  // Exploring the picker (or re-selecting the same identity) is not a change, so
-  // it must not wipe the frozen connection picks.
-  const actorChanged =
-    !!actor &&
-    ((actor.userId ?? null) !== (currentActor?.userId ?? null) ||
-      (actor.endUserId ?? null) !== (currentActor?.endUserId ?? null));
+  // A refusal speaks for the identity and the picks it was sent with: stale
+  // once the actor moves, answered once an integration's pick moves. Derived
+  // rather than synced, so no effect sets state.
+  const [submitted, setSubmitted] = useState<SubmittedPicks | null>(null);
+  const refused = submitted && sameActor(submitted.runsAs, runsAs) ? (connectionChoices ?? []) : [];
+  const pendingIds = pendingConnectionChoices(
+    refused,
+    submitted?.picks,
+    overrides.connection_overrides,
+  ).map((c) => c.integrationId);
+  const overridesShown = overridesOpen || pendingIds.length > 0;
+
+  // The rows come from the definition every fire runs — inherit means the
+  // latest published version, never the draft this page would otherwise
+  // project for an author — the same one the pickers and the server judge.
+  const firedVersion = versionOverride ?? VERSION_PUBLISHED;
+  const firedIntegrations = useScheduleFormDeps(packageId, firedVersion).deps?.agentIntegrations;
+  const showActorChoice =
+    !actorIsViewer && ((firedIntegrations?.length ?? 0) > 0 || refused.length > 0);
 
   const {
     register,
@@ -293,51 +339,21 @@ export function ScheduleForm({
     // anyway, so the two paths agree.
     const input = changedInputValues(inputWrapper, settings, inputValues);
 
-    // On create: omit empty overrides entirely (server stores null).
-    // On edit: send `null` for cleared overrides so the row resets to
-    // "use the agent's persisted defaults". `undefined` would leave the
-    // existing override untouched per the Zod schema's optional rule.
-    const overridePayload = isEdit
-      ? {
-          model_id_override: overrides.model_id_override ?? null,
-          generation_config_override: overrides.generation_config_override ?? null,
-          proxy_id_override: overrides.proxy_id_override ?? null,
-          ...(versionOverrideChanged ? { version_override: versionOverride ?? null } : {}),
-          connection_overrides: overrides.connection_overrides ?? null,
-        }
-      : {
-          ...(overrides.model_id_override
-            ? { model_id_override: overrides.model_id_override }
-            : {}),
-          ...(overrides.generation_config_override
-            ? { generation_config_override: overrides.generation_config_override }
-            : {}),
-          ...(overrides.proxy_id_override
-            ? { proxy_id_override: overrides.proxy_id_override }
-            : {}),
-          ...(versionOverride ? { version_override: versionOverride } : {}),
-          ...(overrides.connection_overrides
-            ? { connection_overrides: overrides.connection_overrides }
-            : {}),
-        };
-
+    setSubmitted({ runsAs, picks: overrides.connection_overrides ?? {} });
     onSubmit({
       name: data.name || undefined,
       cron_expression: data.cron_expression,
       timezone: data.timezone,
       input,
       ...(isEdit ? { enabled: data.enabled } : {}),
-      ...overridePayload,
-      // Create: send whatever actor was picked (omitted → backend defaults to
-      // the caller). Edit: send only on a real change, and then drop the seeded
-      // connection_overrides so they reset under the new identity.
-      ...(isEdit
-        ? actorChanged
-          ? { actor, connection_overrides: undefined }
-          : {}
-        : actor
-          ? { actor }
-          : {}),
+      ...scheduleOverridePayload({
+        isEdit,
+        overrides,
+        versionOverride,
+        versionOverrideChanged,
+        actor,
+        currentActor,
+      }),
     });
   });
 
@@ -468,7 +484,7 @@ export function ScheduleForm({
                 is the caller. */}
             <ActorSelect
               value={actor}
-              onChange={setActor}
+              onChange={changeActor}
               placeholder={t("schedule.actorDefaultSelf")}
             />
             <p className="text-muted-foreground text-xs">{t("schedule.actorHint")}</p>
@@ -532,15 +548,22 @@ export function ScheduleForm({
                   persistedModelId={persistedModelId ?? null}
                   persistedGenerationConfig={persistedGenerationConfig ?? null}
                   persistedProxyId={persistedProxyId ?? null}
-                  {...(agentIntegrations ? { agentIntegrations } : {})}
+                  {...(actorIsViewer && firedIntegrations
+                    ? { agentIntegrations: firedIntegrations }
+                    : {})}
                   value={overrides}
                   onChange={setOverrides}
-                  // The definition every fire runs — inherit means the latest
-                  // published version, never the draft the picker would
-                  // otherwise judge for an author.
-                  version={versionOverride ?? VERSION_PUBLISHED}
-                  mustChoose={unchosen}
+                  version={firedVersion}
+                  mustChoose={pendingIds}
                 />
+                {showActorChoice && (
+                  <ScheduleActorConnectionChoice
+                    choices={refused}
+                    pendingIds={pendingIds}
+                    value={overrides.connection_overrides ?? {}}
+                    onChange={setConnectionPick}
+                  />
+                )}
               </CollapsibleContent>
             </Collapsible>
           )}

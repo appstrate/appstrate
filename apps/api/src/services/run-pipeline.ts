@@ -279,16 +279,27 @@ async function seedPinnedIntegrationManifests(params: {
 }
 
 /**
- * Refuse arming a schedule whose fire would raise `must_choose_connection`:
+ * The verdicts only an edit of the schedule itself can clear: an open choice
+ * (`must_choose_connection`) and a frozen pick the actor can no longer reach
+ * (`override_connection_unavailable`).
+ */
+const SCHEDULE_OWNED_CODES: ReadonlySet<string> = new Set([
+  "must_choose_connection",
+  "override_connection_unavailable",
+]);
+
+/**
+ * Refuse arming a schedule whose fire would fail on its own connection choice:
  * an unattended run cannot ask which connection to use, so the choice is made
  * when the schedule is written (the rule Make.com applies to a scenario).
  *
  * The same readiness the fire runs (`resolveRunPreflight`, same seeding, same
- * launch-override layer), keeping ONLY the ambiguity. Every other verdict
- * (not connected, needs reconnection, missing scopes, inactive integration…)
- * is repaired outside the schedule, so it stays a visible failed run at the
- * tick rather than a refusal to save. Non-throwing readiness on purpose: the
- * throwing wrapper would emit `onRunConnectionMissing` for a run nobody launched.
+ * launch-override layer), keeping ONLY {@link SCHEDULE_OWNED_CODES}. Every other
+ * verdict (not connected, needs reconnection, missing scopes, inactive
+ * integration…) is repaired outside the schedule, so it stays a visible failed
+ * run at the tick rather than a refusal to save. Non-throwing readiness on
+ * purpose: the throwing wrapper would emit `onRunConnectionMissing` for a run
+ * nobody launched.
  */
 export async function assertScheduleConnectionsChosen(params: {
   /** The agent at the version the schedule fires (`version_override` resolved). */
@@ -308,7 +319,7 @@ export async function assertScheduleConnectionsChosen(params: {
     launchOverrides: params.launchOverrides,
     manifestCache,
   });
-  const unchosen = errors.filter((e) => e.code === "must_choose_connection");
+  const unchosen = errors.filter((e) => SCHEDULE_OWNED_CODES.has(e.code));
   if (unchosen.length > 0) throw missingIntegrationConnection(unchosen);
 }
 

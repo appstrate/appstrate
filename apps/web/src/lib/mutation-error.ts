@@ -29,8 +29,8 @@ function refusalMessage(err: ApiError): string | null {
 export function onMutationError(err: Error) {
   // Skip the generic toast for missing_integration_connection (409): a run
   // launch answers it with the recovery modal (`useRunLauncher`, the one way
-  // to launch), which says strictly more; a schedule write goes through
-  // `onScheduleMutationError`.
+  // to launch), which says strictly more; a schedule form marks it inline, and
+  // a surface with no picker adds `toastScheduleConnectionChoice`.
   if (err instanceof ApiError && err.code === "missing_integration_connection") {
     return;
   }
@@ -45,15 +45,13 @@ export function onMutationError(err: Error) {
 }
 
 /**
- * A schedule write's refusal. Its `409 missing_integration_connection` means an
- * armed schedule leaves a connection choice open: the form marks the rows, and
- * this names the cause for a surface with no picker (the detail page's enable
- * toggle).
+ * A schedule write's `409 missing_integration_connection`, named for a surface
+ * with no picker (the detail page's enable toggle). The form needs none: it
+ * marks the refused integrations inline. Anything else is left to the hook's
+ * `onMutationError`, which stays silent on this code.
  */
-export function onScheduleMutationError(err: Error) {
+export function toastScheduleConnectionChoice(err: Error) {
   if (err instanceof ApiError && err.code === "missing_integration_connection") {
     toast.error(i18n.t("schedule.connectionChoiceRequired", { ns: "agents" }));
-    return;
   }
-  onMutationError(err);
 }

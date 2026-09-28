@@ -18,6 +18,7 @@ import { getModelIcon } from "./icons";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
+import { withConnectionPick } from "../lib/connection-set";
 import { ModelGenerationFields } from "./model-generation-fields";
 import {
   reconcileModelGenerationSettings,
@@ -77,8 +78,8 @@ interface RunOverridesPanelProps {
    */
   version?: string;
   /**
-   * Integrations a save was refused over for want of a connection choice
-   * (`must_choose_connection`); each row says so until a set is picked.
+   * Integrations a save was refused over for want of a connection choice, whose
+   * pick has not moved since; each row says so.
    */
   mustChoose?: readonly string[];
 }
@@ -314,12 +315,7 @@ function ScheduleConnectionOverridesSection({
             version={version}
             mustChoose={mustChoose?.includes(integ.id) ?? false}
             value={value[integ.id] ?? []}
-            onChange={(connIds) => {
-              const next = { ...value };
-              if (connIds.length > 0) next[integ.id] = connIds;
-              else delete next[integ.id];
-              onChange(next);
-            }}
+            onChange={(connIds) => onChange(withConnectionPick(value, integ.id, connIds))}
           />
         ))}
       </div>
@@ -367,7 +363,7 @@ function IntegrationOverrideRow({
         persistence={{ mode: "override", value, onChange }}
         version={version}
       />
-      {mustChoose && value.length === 0 && (
+      {mustChoose && (
         <p className="text-destructive text-xs" role="alert">
           {t("schedule.connectionOverrides.mustChoose")}
         </p>

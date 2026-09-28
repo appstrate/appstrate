@@ -26,6 +26,7 @@ import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { ActorLabel } from "../components/actor-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
+import { toastScheduleConnectionChoice } from "../lib/mutation-error";
 import { useAgents } from "../hooks/use-packages";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { formatDateField } from "../lib/format-date";
@@ -53,7 +54,10 @@ export function ScheduleDetailPage() {
   if (error || !schedule) return <ErrorState message={error?.message} />;
 
   const handleToggle = () => {
-    updateSchedule.mutate({ id: schedule.id, enabled: !schedule.enabled });
+    updateSchedule.mutate(
+      { id: schedule.id, enabled: !schedule.enabled },
+      { onError: toastScheduleConnectionChoice },
+    );
   };
 
   return (

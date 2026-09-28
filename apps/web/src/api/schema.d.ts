@@ -1662,7 +1662,7 @@ export interface paths {
         head?: never;
         /**
          * Update an integration connection's label and/or shared_with_org flag
-         * @description The connection owner or a holder of `integrations:configure` may edit it. Sharing (`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; unsharing is open to both, so a governor can withdraw a colleague's shared credentials. Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an enforced org default names the connection. Neither a member pin nor a soft org default blocks it: that member's next run fails with `pinned_connection_unavailable` until they pick again, and the resolver skips a soft default that no longer binds. A label is unique per (space, integration), compared verbatim: renaming to one another connection holds is refused with 409 `connection_label_taken`.
+         * @description The connection owner or a holder of `integrations:configure` may edit it. Sharing (`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; unsharing is open to both, so a governor can withdraw a colleague's shared credentials. Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection. A member pin does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick again. A label is unique per (space, integration), compared verbatim: renaming to one another connection holds is refused with 409 `connection_label_taken`.
          */
         patch: operations["updateIntegrationConnectionMetadata"];
         trace?: never;
@@ -1696,7 +1696,7 @@ export interface paths {
         };
         /**
          * Get the org-wide default connection for this integration
-         * @description The cross-agent governance baseline: one default connection set per (space, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Returns 204 when unset.
+         * @description The cross-agent governance baseline: one default connection set per (space, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Either way the set binds whole: a member that is no longer reachable fails the run with `pinned_connection_unavailable` rather than falling through. Returns 204 when unset.
          */
         get: operations["getIntegrationOrgDefault"];
         /**
@@ -1728,7 +1728,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a custom OAuth client
-         * @description Deletes one of this space's custom clients by id (an org-level client id is a 404 here), with the connections it minted. If it was the default, the cascade re-resolves (org default, else system client) with no auto-promotion. Refused with 409 `connection_pinned` while an admin pin or an enforced org default names one of the connections it minted; neither a member pin nor a soft org default blocks it (that member's next run fails with `pinned_connection_unavailable`; the resolver skips the soft default). Requires `integrations:configure`, which is never granted to an API key.
+         * @description Deletes one of this space's custom clients by id (an org-level client id is a 404 here), with the connections it minted. If it was the default, the cascade re-resolves (org default, else system client) with no auto-promotion. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names one of the connections it minted; a member pin does not block it (that member's next run fails with `pinned_connection_unavailable`). Requires `integrations:configure`, which is never granted to an API key.
          */
         delete: operations["deleteIntegrationOAuthClient"];
         options?: never;
@@ -1978,7 +1978,7 @@ export interface paths {
         post?: never;
         /**
          * Delete one of the caller's own connections (destructive)
-         * @description Removes the `integration_connections` row globally. Intent is destructive: 'I never want to use this credential anywhere again'. Refused with 409 `connection_pinned` while an admin pin or an enforced org default names the connection: those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes it from the pin(s) or default first. Neither a member pin nor a soft org default blocks the delete (the resolver skips a soft default that no longer binds). The caller's own member pins and schedule overrides drop the connection in the same transaction — a pin it empties is removed and a schedule override it empties drops that integration, so the cascade falls back; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. Another member's pins and schedules keep the id, and their next run fails (`pinned_connection_unavailable`, `override_connection_unavailable`) until they pick again — a set never shrinks behind its owner. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise).
+         * @description Removes the `integration_connections` row globally. Intent is destructive: 'I never want to use this credential anywhere again'. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection: those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes it from the pin(s) or default first. A member pin does not block the delete. The caller's own member pins and schedule overrides drop the connection in the same transaction — a pin it empties is removed and a schedule override it empties drops that integration, so the cascade falls back; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. Another member's pins and schedules keep the id, and their next run fails (`pinned_connection_unavailable`, `override_connection_unavailable`) until they pick again — a set never shrinks behind its owner. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise).
          */
         delete: operations["deleteMyConnection"];
         options?: never;
@@ -2750,7 +2750,7 @@ export interface paths {
         post?: never;
         /**
          * Delete an org-level OAuth client
-         * @description Deletes one org-level client by id (a space client id is a 404 here), with every connection it minted in any space of the org. Refused with 409 `connection_pinned` while an admin pin or an enforced org default names one of them. Requires `org-integrations:configure`, which is never granted to an API key.
+         * @description Deletes one org-level client by id (a space client id is a 404 here), with every connection it minted in any space of the org. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names one of them. Requires `org-integrations:configure`, which is never granted to an API key.
          */
         delete: operations["deleteOrgIntegrationOAuthClient"];
         options?: never;
@@ -4114,6 +4114,8 @@ export interface paths {
         /**
          * Create a remote-backed run (caller executes the agent)
          * @description Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.
+         *
+         *     A remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 agent_not_ready` naming it: pick one with a member pin, or run the agent on the platform.
          *
          *     **Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.
          */
@@ -8568,7 +8570,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description `no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`). */
             404: components["responses"]["NoPublishedVersion"];
-            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides`. Judged for the schedule's actor against the definition it fires (`version_override`). Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. */
+            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears. Judged for the schedule's actor against the definition it fires (`version_override`). Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -10475,9 +10477,9 @@ export interface operations {
                 "X-Stream-Response"?: "0" | "1";
                 /** @description Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set. */
                 "X-Max-Response-Size"?: string;
-                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id is a `404`, another actor's run a `403`, a finished run a `400`. The call then reaches ONLY the connections the run's kickoff bound to the integration (admin pins, enforced defaults, member pins already applied): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. */
+                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id or one of another space is a `404`, another actor's run a `403`, a finished run a `400`. It binds the call to the run's snapshot: the call reaches ONLY the connections the run's kickoff bound to the integration (every layer applied, agent-level ones included — admin pins, enforced defaults, launch overrides, member pins): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. Without it no agent is in play, so the admin and member pins (set per agent) cannot apply — only the space-level rules described under `X-Connection-Id` do. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the proxy uses that connection after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration. When absent (and no `X-Run-Id`), only the caller's own connections are considered: exactly one is used, none is a `404` (a shared connection is never used unless named here), several are a `409 must_choose_connection` listing the candidates to name. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
+                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the space-level rules apply in this order: (1) an ENFORCED org default of the integration binds its set — a named id must be a member (`400 connection_not_in_org_default` otherwise); (2) the named connection, after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration; (3) a SOFT org default binds its set; (4) the caller's own connections: exactly one is used, none with some shared by other members is a `409 must_choose_connection` (a shared connection is never used unless named or set as a default), none at all a `404`, several a `409 must_choose_connection`. A default set of one is used, several are a `409 must_choose_connection` over the set, and a member the caller cannot reach is a `409 pinned_connection_unavailable`. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -10496,7 +10498,7 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, or `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind. */
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10523,14 +10525,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description No credentials or connection for the requested integration — including when the caller owns none and names none (even if other members shared some), when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description `must_choose_connection` — no `X-Connection-Id` and several candidates: the `X-Run-Id` run bound several connections to the integration, or (no run) the caller owns several. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. */
+            /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10574,9 +10576,9 @@ export interface operations {
                 "X-Stream-Response"?: "0" | "1";
                 /** @description Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set. */
                 "X-Max-Response-Size"?: string;
-                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id is a `404`, another actor's run a `403`, a finished run a `400`. The call then reaches ONLY the connections the run's kickoff bound to the integration (admin pins, enforced defaults, member pins already applied): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. */
+                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id or one of another space is a `404`, another actor's run a `403`, a finished run a `400`. It binds the call to the run's snapshot: the call reaches ONLY the connections the run's kickoff bound to the integration (every layer applied, agent-level ones included — admin pins, enforced defaults, launch overrides, member pins): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. Without it no agent is in play, so the admin and member pins (set per agent) cannot apply — only the space-level rules described under `X-Connection-Id` do. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the proxy uses that connection after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration. When absent (and no `X-Run-Id`), only the caller's own connections are considered: exactly one is used, none is a `404` (a shared connection is never used unless named here), several are a `409 must_choose_connection` listing the candidates to name. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
+                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the space-level rules apply in this order: (1) an ENFORCED org default of the integration binds its set — a named id must be a member (`400 connection_not_in_org_default` otherwise); (2) the named connection, after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration; (3) a SOFT org default binds its set; (4) the caller's own connections: exactly one is used, none with some shared by other members is a `409 must_choose_connection` (a shared connection is never used unless named or set as a default), none at all a `404`, several a `409 must_choose_connection`. A default set of one is used, several are a `409 must_choose_connection` over the set, and a member the caller cannot reach is a `409 pinned_connection_unavailable`. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -10600,7 +10602,7 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, or `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind. */
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10627,14 +10629,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description No credentials or connection for the requested integration — including when the caller owns none and names none (even if other members shared some), when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description `must_choose_connection` — no `X-Connection-Id` and several candidates: the `X-Run-Id` run bound several connections to the integration, or (no run) the caller owns several. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. */
+            /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10678,9 +10680,9 @@ export interface operations {
                 "X-Stream-Response"?: "0" | "1";
                 /** @description Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set. */
                 "X-Max-Response-Size"?: string;
-                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id is a `404`, another actor's run a `403`, a finished run a `400`. The call then reaches ONLY the connections the run's kickoff bound to the integration (admin pins, enforced defaults, member pins already applied): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. */
+                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id or one of another space is a `404`, another actor's run a `403`, a finished run a `400`. It binds the call to the run's snapshot: the call reaches ONLY the connections the run's kickoff bound to the integration (every layer applied, agent-level ones included — admin pins, enforced defaults, launch overrides, member pins): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. Without it no agent is in play, so the admin and member pins (set per agent) cannot apply — only the space-level rules described under `X-Connection-Id` do. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the proxy uses that connection after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration. When absent (and no `X-Run-Id`), only the caller's own connections are considered: exactly one is used, none is a `404` (a shared connection is never used unless named here), several are a `409 must_choose_connection` listing the candidates to name. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
+                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the space-level rules apply in this order: (1) an ENFORCED org default of the integration binds its set — a named id must be a member (`400 connection_not_in_org_default` otherwise); (2) the named connection, after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration; (3) a SOFT org default binds its set; (4) the caller's own connections: exactly one is used, none with some shared by other members is a `409 must_choose_connection` (a shared connection is never used unless named or set as a default), none at all a `404`, several a `409 must_choose_connection`. A default set of one is used, several are a `409 must_choose_connection` over the set, and a member the caller cannot reach is a `409 pinned_connection_unavailable`. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -10704,7 +10706,7 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, or `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind. */
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10731,14 +10733,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description No credentials or connection for the requested integration — including when the caller owns none and names none (even if other members shared some), when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description `must_choose_connection` — no `X-Connection-Id` and several candidates: the `X-Run-Id` run bound several connections to the integration, or (no run) the caller owns several. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. */
+            /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10782,9 +10784,9 @@ export interface operations {
                 "X-Stream-Response"?: "0" | "1";
                 /** @description Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set. */
                 "X-Max-Response-Size"?: string;
-                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id is a `404`, another actor's run a `403`, a finished run a `400`. The call then reaches ONLY the connections the run's kickoff bound to the integration (admin pins, enforced defaults, member pins already applied): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. */
+                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id or one of another space is a `404`, another actor's run a `403`, a finished run a `400`. It binds the call to the run's snapshot: the call reaches ONLY the connections the run's kickoff bound to the integration (every layer applied, agent-level ones included — admin pins, enforced defaults, launch overrides, member pins): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. Without it no agent is in play, so the admin and member pins (set per agent) cannot apply — only the space-level rules described under `X-Connection-Id` do. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the proxy uses that connection after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration. When absent (and no `X-Run-Id`), only the caller's own connections are considered: exactly one is used, none is a `404` (a shared connection is never used unless named here), several are a `409 must_choose_connection` listing the candidates to name. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
+                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the space-level rules apply in this order: (1) an ENFORCED org default of the integration binds its set — a named id must be a member (`400 connection_not_in_org_default` otherwise); (2) the named connection, after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration; (3) a SOFT org default binds its set; (4) the caller's own connections: exactly one is used, none with some shared by other members is a `409 must_choose_connection` (a shared connection is never used unless named or set as a default), none at all a `404`, several a `409 must_choose_connection`. A default set of one is used, several are a `409 must_choose_connection` over the set, and a member the caller cannot reach is a `409 pinned_connection_unavailable`. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -10803,7 +10805,7 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, or `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind. */
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10830,14 +10832,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description No credentials or connection for the requested integration — including when the caller owns none and names none (even if other members shared some), when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description `must_choose_connection` — no `X-Connection-Id` and several candidates: the `X-Run-Id` run bound several connections to the integration, or (no run) the caller owns several. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. */
+            /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10881,9 +10883,9 @@ export interface operations {
                 "X-Stream-Response"?: "0" | "1";
                 /** @description Optional cap (in bytes) on the buffered upstream response before truncation. Clamped to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Ignored when `X-Stream-Response: 1` is set. */
                 "X-Max-Response-Size"?: string;
-                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id is a `404`, another actor's run a `403`, a finished run a `400`. The call then reaches ONLY the connections the run's kickoff bound to the integration (admin pins, enforced defaults, member pins already applied): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. */
+                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id or one of another space is a `404`, another actor's run a `403`, a finished run a `400`. It binds the call to the run's snapshot: the call reaches ONLY the connections the run's kickoff bound to the integration (every layer applied, agent-level ones included — admin pins, enforced defaults, launch overrides, member pins): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`. Without it no agent is in play, so the admin and member pins (set per agent) cannot apply — only the space-level rules described under `X-Connection-Id` do. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the proxy uses that connection after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration. When absent (and no `X-Run-Id`), only the caller's own connections are considered: exactly one is used, none is a `404` (a shared connection is never used unless named here), several are a `409 must_choose_connection` listing the candidates to name. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
+                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the space-level rules apply in this order: (1) an ENFORCED org default of the integration binds its set — a named id must be a member (`400 connection_not_in_org_default` otherwise); (2) the named connection, after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration; (3) a SOFT org default binds its set; (4) the caller's own connections: exactly one is used, none with some shared by other members is a `409 must_choose_connection` (a shared connection is never used unless named or set as a default), none at all a `404`, several a `409 must_choose_connection`. A default set of one is used, several are a `409 must_choose_connection` over the set, and a member the caller cannot reach is a `409 pinned_connection_unavailable`. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -10907,7 +10909,7 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, or `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind. */
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10934,14 +10936,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description No credentials or connection for the requested integration — including when the caller owns none and names none (even if other members shared some), when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description `must_choose_connection` — no `X-Connection-Id` and several candidates: the `X-Run-Id` run bound several connections to the integration, or (no run) the caller owns several. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. */
+            /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12637,7 +12639,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Unsharing a connection an admin pin or an enforced org default names (`connection_pinned`), or renaming it to a label another connection of this integration in the space holds (`connection_label_taken`) */
+            /** @description Unsharing a connection an admin pin or an org default names (`connection_pinned`), or renaming it to a label another connection of this integration in the space holds (`connection_label_taken`) */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -12919,7 +12921,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description A connection the client minted is named by an admin pin or an enforced org default */
+            /** @description A connection the client minted is named by an admin pin or an org default */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -13794,7 +13796,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Connection is named by an admin pin or an enforced org default (`connection_pinned`) */
+            /** @description Connection is named by an admin pin or an org default (`connection_pinned`) */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -16333,7 +16335,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description A connection the client minted is named by an admin pin or an enforced org default */
+            /** @description A connection the client minted is named by an admin pin or an org default */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -21984,7 +21986,7 @@ export interface operations {
             /** @description Insufficient permissions — including `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NoPublishedVersion"];
-            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides`. Judged for the schedule's actor against the definition it fires (`version_override`). Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. */
+            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears. Judged for the schedule's actor against the definition it fires (`version_override`). Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];

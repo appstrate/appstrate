@@ -2,9 +2,11 @@
 
 /**
  * An armed schedule must fire without asking which connection to use: a write
- * that leaves a `must_choose_connection` open for the schedule's actor is a
- * `409 missing_integration_connection` carrying only those items. Every other
- * connection verdict is accepted — it is repaired without editing the schedule.
+ * that leaves a `must_choose_connection` open for the schedule's actor, or
+ * freezes a pick that actor cannot reach (`override_connection_unavailable`),
+ * is a `409 missing_integration_connection` carrying only those items. Every
+ * other connection verdict is accepted — it is repaired without editing the
+ * schedule.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -169,6 +171,37 @@ describe("schedule writes — the connection choice is made up front", () => {
     const repaired = await patch(id, {
       name: "renamed",
       connection_overrides: { [INTEGRATION]: [first] },
+    });
+    expect(repaired.status).toBe(200);
+  });
+
+  it("refuses a create whose connection_overrides names a connection the actor cannot reach", async () => {
+    await seedAgentWithIntegration();
+    await seedIntegrationConnection(ctx, INTEGRATION);
+
+    const res = await create({ connection_overrides: { [INTEGRATION]: [crypto.randomUUID()] } });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as ProblemBody;
+    expect(body.errors.map((e) => [e.field, e.code])).toEqual([
+      [`integrations.${INTEGRATION}`, "override_connection_unavailable"],
+    ]);
+    expect(await db.select().from(schedules)).toHaveLength(0);
+  });
+
+  it("refuses any patch of an armed schedule whose frozen pick became unreachable", async () => {
+    // Only a new pick repairs it — nothing outside the schedule can.
+    await seedAgentWithIntegration();
+    const kept = await seedIntegrationConnection(ctx, INTEGRATION);
+    const schedule = await seedArmedSchedule({ [INTEGRATION]: [crypto.randomUUID()] });
+
+    const refused = await patch(schedule.id, { name: "renamed" });
+    expect(refused.status).toBe(409);
+    const body = (await refused.json()) as ProblemBody;
+    expect(body.errors.map((e) => e.code)).toEqual(["override_connection_unavailable"]);
+
+    const repaired = await patch(schedule.id, {
+      name: "renamed",
+      connection_overrides: { [INTEGRATION]: [kept] },
     });
     expect(repaired.status).toBe(200);
   });

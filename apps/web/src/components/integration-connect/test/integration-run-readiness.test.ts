@@ -3,8 +3,8 @@
 /**
  * Unit tests for `describeResolution` — the one reading of the server verdict
  * (`source` + `error_code`, the resolver's vocabulary) the picker, the 409
- * recovery modal and the Connexions tab share. This is where the mapping from
- * the resolver's codes to what the UI shows is pinned.
+ * recovery modal and the agent's integrations block share. This is where the
+ * mapping from the resolver's codes to what the UI shows is pinned.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -83,34 +83,46 @@ describe("describeResolution — (par défaut)", () => {
   });
 });
 
-describe("describeResolution — remedy", () => {
-  it("is null when the set binds, however it was bound", () => {
+describe("describeResolution — resolved", () => {
+  it("holds when connections bind with no error, however they were bound", () => {
     for (const source of ["admin_pin", "member_pin", "fallback_auto"] as const) {
-      expect(describeResolution(resolution({ source, error_code: null })).remedy).toBeNull();
+      expect(describeResolution(resolution({ source, error_code: null })).resolved).toBe(true);
     }
   });
 
-  it("is null when there is no verdict at all (no manifest loaded)", () => {
+  it("does not hold when there is no verdict at all (no manifest loaded)", () => {
+    // `source` and `error_code` both null: nothing bound, nothing refused —
+    // the recovery modal and the reuse hint must not read that as "ready".
     expect(
       describeResolution(
         resolution({ source: null, error_code: null, resolved_connection_ids: [] }),
-      ).remedy,
-    ).toBeNull();
+      ).resolved,
+    ).toBe(false);
   });
 
-  it("names the precise cause of every refusal", () => {
+  it("does not hold on any refusal", () => {
+    for (const error_code of [
+      "not_connected",
+      "must_choose_connection",
+      "needs_reconnection",
+      "override_connection_unavailable",
+    ] as const) {
+      expect(describeResolution(resolution({ error_code })).resolved).toBe(false);
+    }
+  });
+});
+
+describe("describeResolution — empty picker prompt", () => {
+  it("asks for a pick, a removal, or a connection", () => {
     const cases = [
-      ["not_connected", "connect"],
-      ["auth_key_mismatch", "connect"],
       ["must_choose_connection", "choose"],
-      ["needs_reconnection", "reconnect"],
-      ["insufficient_scopes", "upgrade"],
-      ["pinned_connection_unavailable", "replace_unavailable"],
-      ["override_connection_unavailable", "replace_unavailable"],
       ["auth_serves_no_selected_tool", "remove_unserving"],
+      ["not_connected", "connect"],
+      ["needs_reconnection", "connect"],
+      [null, "connect"],
     ] as const;
-    for (const [error_code, remedy] of cases) {
-      expect(describeResolution(resolution({ error_code })).remedy).toBe(remedy);
+    for (const [error_code, prompt] of cases) {
+      expect(describeResolution(resolution({ error_code })).emptyPickerPrompt).toBe(prompt);
     }
   });
 });

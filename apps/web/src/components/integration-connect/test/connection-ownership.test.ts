@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { isConnectionOwnedBy } from "../connection-ownership";
+import { connectionRowGrants, isConnectionOwnedBy } from "../connection-ownership";
 
 describe("isConnectionOwnedBy", () => {
   const mine = { owner_type: "user", owner_id: "user_1" } as const;
@@ -39,5 +39,41 @@ describe("isConnectionOwnedBy", () => {
     // default — controls appear once the session resolves, rather than
     // flashing enabled for rows that may not be the caller's.
     expect(isConnectionOwnedBy(mine, undefined)).toBe(false);
+  });
+});
+
+describe("connectionRowGrants", () => {
+  const base = { isOwn: false, isShared: false, canConnect: true, canConfigure: false };
+
+  it("gives the owner rename and the share toggle", () => {
+    expect(connectionRowGrants({ ...base, isOwn: true })).toEqual({
+      canRename: true,
+      canToggleShare: true,
+    });
+  });
+
+  it("lets a governor withdraw a colleague's share, never grant one", () => {
+    // Sharing is the owner's consent; `integrations:configure` only unshares.
+    expect(connectionRowGrants({ ...base, isShared: true, canConfigure: true })).toEqual({
+      canRename: true,
+      canToggleShare: true,
+    });
+    expect(connectionRowGrants({ ...base, isShared: false, canConfigure: true })).toEqual({
+      canRename: true,
+      canToggleShare: false,
+    });
+  });
+
+  it("gives a plain member nothing on a colleague's shared row", () => {
+    expect(connectionRowGrants({ ...base, isShared: true })).toEqual({
+      canRename: false,
+      canToggleShare: false,
+    });
+  });
+
+  it("gives nothing without integrations:connect, whoever owns the row", () => {
+    expect(
+      connectionRowGrants({ isOwn: true, isShared: true, canConnect: false, canConfigure: true }),
+    ).toEqual({ canRename: false, canToggleShare: false });
   });
 });

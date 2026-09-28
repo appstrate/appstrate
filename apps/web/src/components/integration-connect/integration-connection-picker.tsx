@@ -181,7 +181,7 @@ export function IntegrationConnectionPicker({
     member_pinned_connection_ids: memberPinnedConnectionIds,
     can_add_connection: canAddConnection,
   } = resolution;
-  const { lockedConnectionIds, byDefault, remedy } = describeResolution(resolution);
+  const { lockedConnectionIds, byDefault, emptyPickerPrompt } = describeResolution(resolution);
 
   const byId = (id: string): IntegrationCandidate | undefined =>
     candidates.find((c) => c.id === id);
@@ -332,9 +332,9 @@ export function IntegrationConnectionPicker({
           ? t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length })
           : overrideMode
             ? t("detail.integrationMemberPicker.inherit")
-            : remedy === "choose"
+            : emptyPickerPrompt === "choose"
               ? t("detail.integrationMemberPicker.chooseLabel")
-              : remedy === "remove_unserving"
+              : emptyPickerPrompt === "remove_unserving"
                 ? t("detail.integrationMemberPicker.unservingLabel")
                 : t("detail.integrationMemberPicker.connectLabel");
   // Amber on exactly the states that gate a run: pin mode reads the server's

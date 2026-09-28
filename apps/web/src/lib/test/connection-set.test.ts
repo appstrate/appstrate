@@ -15,6 +15,7 @@ import {
   checkedConnectionIds,
   joinCreatedConnection,
   unavailableConnectionIds,
+  withConnectionPick,
 } from "../connection-set";
 
 describe("toggleCapped", () => {
@@ -230,5 +231,20 @@ describe("unavailableConnectionIds", () => {
       checkedConnectionIds({ draft: null, explicitIds: ["gone"], resolvedIds: [], candidateIds }),
     ).toEqual([]);
     expect(canApplyConnectionSet([], ["gone"], false)).toBe(false);
+  });
+});
+
+describe("withConnectionPick", () => {
+  it("replaces one integration's set and leaves the others", () => {
+    const picks = { "@acme/a": ["1"], "@acme/b": ["2"] };
+    expect(withConnectionPick(picks, "@acme/a", ["3", "4"])).toEqual({
+      "@acme/a": ["3", "4"],
+      "@acme/b": ["2"],
+    });
+    expect(picks["@acme/a"]).toEqual(["1"]);
+  });
+
+  it("drops the key for an empty set — the wire refuses one", () => {
+    expect(withConnectionPick({ "@acme/a": ["1"] }, "@acme/a", [])).toEqual({});
   });
 });

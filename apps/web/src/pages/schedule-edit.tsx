@@ -9,7 +9,7 @@ import {
   useScheduleFormDeps,
 } from "../hooks/use-schedules";
 import { ScheduleForm } from "../components/schedule-form";
-import { mustChooseIntegrationIds } from "../lib/connection-choice";
+import { scheduleConnectionChoices } from "../lib/connection-choice";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { NoAccessState } from "../components/route-gate";
@@ -85,10 +85,9 @@ export function ScheduleEditPage() {
         persistedProxyId={deps.persistedProxyId}
         homeWritable={deps.homeWritable}
         packageId={schedule.packageId}
-        agentIntegrations={deps.agentIntegrations}
         blockedMessage={deps.hasFileInputs ? t("schedule.fileInputBlocked") : undefined}
         isPending={updateSchedule.isPending}
-        mustChooseIntegrationIds={mustChooseIntegrationIds(updateSchedule.error)}
+        connectionChoices={scheduleConnectionChoices(updateSchedule.error)}
         onSubmit={(data) => {
           updateSchedule.mutate(
             { id: schedule.id, ...data },

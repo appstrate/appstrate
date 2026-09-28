@@ -13,9 +13,14 @@ import { $api } from "../../api/client";
 
 export function ConnectionDeleteImpact({ connectionId }: { connectionId: string }) {
   const { t } = useTranslation("settings");
-  const { data } = $api.useQuery("get", "/api/me/connections/{connectionId}/delete-impact", {
-    params: { path: { connectionId } },
-  });
+  const { data } = $api.useQuery(
+    "get",
+    "/api/me/connections/{connectionId}/delete-impact",
+    { params: { path: { connectionId } } },
+    // Never answered from cache: the user confirms on what this says, and a
+    // pick made since the last open would be missing from it.
+    { gcTime: 0 },
+  );
   if (!data || (data.pins.length === 0 && data.schedules.length === 0)) return null;
 
   return (

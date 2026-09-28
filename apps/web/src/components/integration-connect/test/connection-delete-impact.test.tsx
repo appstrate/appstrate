@@ -3,7 +3,7 @@
 /**
  * The delete confirmation says which of the caller's agents and schedules lose
  * the connection, and what each keeps: fewer connections, or none (back to the
- * default resolution).
+ * usual resolution).
  */
 
 import { describe, expect, it } from "bun:test";

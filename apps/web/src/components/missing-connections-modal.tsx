@@ -11,7 +11,7 @@ import { IntegrationConnectionPicker } from "./integration-connect/integration-c
 import { describeResolution } from "./integration-connect/integration-run-readiness";
 import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
-import { integrationIdOfField } from "../lib/connection-choice";
+import { integrationIdOfField, type ConnectionChoiceCandidate } from "../lib/connection-choice";
 
 /**
  * Recovery surface for the run-kickoff 409 emitted by
@@ -64,13 +64,7 @@ export interface MissingIntegrationFieldError {
   /** Missing scopes — populated on insufficient_scopes for the OAuth re-consent upgrade. */
   missing_scopes?: string[];
   /** `must_choose_connection`: rows to pick from, dead ones flagged — for API/MCP callers; the modal renders the picker. */
-  candidate_connections?: {
-    id: string;
-    label: string;
-    account_id: string;
-    owned_by_actor: boolean;
-    needs_reconnection: boolean;
-  }[];
+  candidate_connections?: ConnectionChoiceCandidate[];
   /**
    * The dead/under-scoped connection id — populated on `needs_reconnection`
    * and `insufficient_scopes`.
@@ -242,8 +236,9 @@ function MissingRow({
   const entry = integrationEntries?.find((e) => e.id === packageId);
 
   // Resolved = the run-kickoff gate would no longer reject this integration:
-  // the verdict carries no remedy (the reading the picker and the tab share).
-  const resolved = !!resolution && describeResolution(resolution).remedy === null;
+  // connections bind and no error is raised (the reading the picker shares). No
+  // verdict at all is not "ready".
+  const resolved = !!resolution && describeResolution(resolution).resolved;
   // The picker needs the manifest + first verdict to render fully wired; hold
   // a spinner until both land (non-structural rows with the agent in context).
   // Both reads gate on `integrations:read`: without it neither lands, so the

@@ -141,7 +141,10 @@ import { useAuth } from "../hooks/use-auth";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useSetPackageActive } from "../hooks/use-library";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
-import { isConnectionOwnedBy } from "../components/integration-connect/connection-ownership";
+import {
+  connectionRowGrants,
+  isConnectionOwnedBy,
+} from "../components/integration-connect/connection-ownership";
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 
@@ -1334,8 +1337,12 @@ function ConnectionTableRow({
   // Rename, share and reconnect all write the connection, which guards on
   // `integrations:connect` whoever owns it.
   const canConnect = can("integrations:connect");
-  const canRename = canConnect && (isOwn || can("integrations:configure"));
-  const canToggleShare = (isOwn && canConnect) || (isShared && canRename);
+  const { canRename, canToggleShare } = connectionRowGrants({
+    isOwn,
+    isShared,
+    canConnect,
+    canConfigure: can("integrations:configure"),
+  });
   const startEdit = () => {
     setDraftLabel(connection.label);
     setEditing(true);

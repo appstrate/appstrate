@@ -7,6 +7,21 @@ export function toggleCapped(ids: string[], id: string, max: number): string[] {
   return [...ids, id];
 }
 
+/**
+ * `picks` (integration id → set) with one integration's set replaced; an empty
+ * set removes the key, since an empty set is refused on the wire.
+ */
+export function withConnectionPick(
+  picks: Readonly<Record<string, string[]>>,
+  integrationId: string,
+  connectionIds: string[],
+): Record<string, string[]> {
+  const next = { ...picks };
+  if (connectionIds.length > 0) next[integrationId] = connectionIds;
+  else delete next[integrationId];
+  return next;
+}
+
 export function keepAvailable(ids: string[], availableIds: string[]): string[] {
   return ids.filter((id) => availableIds.includes(id));
 }

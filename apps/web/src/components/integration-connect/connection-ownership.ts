@@ -19,3 +19,23 @@ interface ConnectionOwnerFields {
 export function isConnectionOwnedBy(c: ConnectionOwnerFields, userId: string | undefined): boolean {
   return c.owner_type === "user" && !!userId && c.owner_id === userId;
 }
+
+/**
+ * The write controls a connection row offers, on the rules the API enforces
+ * (every write also guards on `integrations:connect`, whoever owns the row):
+ * rename is the owner's or a governor's (`integrations:configure`); sharing is
+ * the owner's consent, and a governor can only WITHDRAW a share — so a
+ * colleague's unshared row offers them no toggle.
+ */
+export function connectionRowGrants(args: {
+  isOwn: boolean;
+  isShared: boolean;
+  canConnect: boolean;
+  canConfigure: boolean;
+}): { canRename: boolean; canToggleShare: boolean } {
+  const canRename = args.canConnect && (args.isOwn || args.canConfigure);
+  return {
+    canRename,
+    canToggleShare: (args.isOwn && args.canConnect) || (args.isShared && canRename),
+  };
+}
