@@ -368,14 +368,10 @@ describe("Schedules API", () => {
   });
 
   describe("connection_overrides shape (per-integration connection SETS)", () => {
-    // Regression guard for the schedule half of the connection-renewal flow.
-    // The wire shape is `Record<integrationId, connectionId[]>` matching the
-    // run route — `connectionOverridesSchema` in `lib/launch-schemas.ts`. Two
-    // shapes 400 here and both used to be sent by something: the nested
-    // `Record<int, Record<authKey, conn>>` an old frontend sent, and the bare
-    // string a pre-multi-connection caller sends. These tests pin all of them
-    // so a revert fails CI. Connection ids need not resolve to real rows: the
-    // route validates the shape only and freezes the map; resolution happens
+    // The wire shape is `Record<integrationId, connectionId[]>`, the run route's
+    // (`connectionOverridesSchema`, `lib/launch-schemas.ts`); a nested object or a
+    // string where a set belongs is a 400. Connection ids need not resolve to real
+    // rows: the route validates the shape and stores the map; resolution happens
     // at fire time.
 
     it("accepts a connection_overrides map of sets on create and round-trips it", async () => {
@@ -403,7 +399,7 @@ describe("Schedules API", () => {
       expect(body.connection_overrides).toEqual(overrides);
     });
 
-    it("rejects the legacy nested connection_overrides shape with 400", async () => {
+    it("rejects a nested object where a set belongs with 400", async () => {
       const fid = agentId("co-nested");
       await seedAgent({
         id: fid,
@@ -418,7 +414,6 @@ describe("Schedules API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           cron_expression: "0 9 * * 1-5",
-          // Old nested shape: integrationId → { authKey → connectionId }.
           connection_overrides: { "@runorg/svc": { primary: "conn_abc123" } },
         }),
       });
@@ -426,7 +421,7 @@ describe("Schedules API", () => {
       expect(res.status).toBe(400);
     });
 
-    it("rejects a BARE connection id (the retired single-connection shape) with 400", async () => {
+    it("rejects a string where a set belongs with 400", async () => {
       const fid = agentId("co-bare");
       await seedAgent({
         id: fid,

@@ -94,10 +94,7 @@ interface ResolveIntegrationsInput {
    * `IntegrationSpawnSpec.toolAllowlist` for sidecar-side enforcement (Phase 3).
    */
   agentManifest: Record<string, unknown>;
-  /**
-   * The cascade's kickoff snapshot (`runs.resolved_connections`): the SET bound
-   * per integration. Never re-picked here — a missing entry fails the integration.
-   */
+  /** The kickoff snapshot (`runs.resolved_connections`), never re-picked here. */
   resolvedConnections?: ResolvedConnectionMap | null;
   /**
    * Per-call-graph memo for integration manifest fetches — threaded from the
@@ -242,11 +239,7 @@ export async function resolveIntegrationSpawns(
   return { specs, dropped };
 }
 
-/**
- * One spec per bound connection, differing only in credentials and `connection`. `toolAllowlist:
- * undefined` is the §4.4 wildcard; remote HTTP injects its own token (no `httpDeliveryAuths`,
- * #543).
- */
+/** One spec per bound connection; `toolAllowlist: undefined` is the §4.4 wildcard. */
 async function resolveOne(
   integrationId: string,
   orgId: string,
@@ -598,6 +591,7 @@ async function resolveOne(
         ...(apiCalls.length > 0 ? { apiCalls } : {}),
         ...(hiddenToolsUnion.length > 0 ? { hiddenTools: hiddenToolsUnion } : {}),
         spawnEnv: deliveries.spawnEnv,
+        // Remote HTTP injects its own token (#543).
         ...(deliveries.httpDeliveryAuths && !isRemoteHttp
           ? { httpDeliveryAuths: deliveries.httpDeliveryAuths }
           : {}),

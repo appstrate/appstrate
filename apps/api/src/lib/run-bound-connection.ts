@@ -4,10 +4,8 @@ import { ApiError } from "./errors.ts";
 import { logger } from "./logger.ts";
 
 /**
- * The member of a run's kickoff snapshot (`runs.resolved_connections[packageId]`)
- * that `connectionId` names, else 400 `connection_not_in_run`. A run reaches
- * only the connections its cascade bound — the sidecar's credential endpoints
- * and the credential proxy's `X-Run-Id` path both gate on this.
+ * The member of a run's snapshot (`runs.resolved_connections[packageId]`) that `connectionId`
+ * names, else 400 `connection_not_in_run`: a run reaches only the connections it bound.
  */
 export function requireRunBoundMember<T extends { connectionId: string }>(args: {
   runId: string;

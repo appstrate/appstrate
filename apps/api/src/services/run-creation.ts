@@ -197,8 +197,6 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       packageId: agent.id,
       actor,
       scope: { orgId, spaceId },
-      // No launch override: the remote body accepts no per-run connection
-      // picks, and remote runs are never scheduled.
       launchOverrides: null,
       // Reads the pinned manifests frozen just above (auth keys / scopes match
       // what the spawn will use).
@@ -218,10 +216,10 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       };
     }
     resolvedConnections = outcome.resolved;
-    // The remote api_call tool exposes no argument addressing a set member (an
-    // `x-connection-id` header is only honoured when a caller already knows an
-    // id), so a set of several has no way to be used there.
-    const multi = multiConnectionIntegrations(resolvedConnections);
+    // The remote api_call tool takes no argument addressing a set member.
+    const multi = Object.entries(resolvedConnections ?? {})
+      .filter(([, set]) => set.length > 1)
+      .map(([integrationId]) => integrationId);
     if (multi.length > 0) {
       return {
         ok: false,
@@ -302,15 +300,4 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   // `onRunStatusChange` for remote-origin runs at the real transition.
 
   return { ok: true, runId, sinkCredentials: credentials };
-}
-
-/**
- * Integrations the snapshot binds to more than one connection. A remote runner
- * cannot address a set: the afps-runtime `api_call` tool takes no connection
- * argument, so its credential-proxy calls would answer 409 on every call.
- */
-function multiConnectionIntegrations(resolved: ResolvedConnectionMap | null): string[] {
-  return Object.entries(resolved ?? {})
-    .filter(([, set]) => set.length > 1)
-    .map(([integrationId]) => integrationId);
 }

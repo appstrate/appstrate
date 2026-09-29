@@ -30,7 +30,7 @@ import {
   updateSchedule,
   deleteSchedule,
   triggerScheduledRun,
-  resyncScheduleJobs,
+  removeScheduleJobs,
 } from "../../../src/services/scheduler.ts";
 import { deleteIntegrationConnection } from "../../../src/services/integration-connections.ts";
 import { getRedisQueueConnection } from "../../../src/lib/redis.ts";
@@ -733,36 +733,6 @@ describeRequiresRedis("scheduler service", () => {
     });
   });
 
-  // ── triggerScheduledRun — a row the write path would refuse ──
-  //
-  // A bare connection id where a set belongs (the shape before sets) must fail
-  // the fire loudly, never be read as a set of its characters.
-
-  describe("triggerScheduledRun connection_overrides shape", () => {
-    it("fails the fire when the row's connection_overrides value is a bare id, not a set", async () => {
-      const schedule = await createSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
-        cronExpression: "0 * * * *",
-      });
-      await db
-        .update(schedules)
-        .set({
-          connectionOverrides: {
-            "@vendor/ssh": "0b7e4f4e-1c1f-4d7e-9c63-9a7b1f0e2d11",
-          } as unknown as Record<string, string[]>,
-        })
-        .where(eq(schedules.id, schedule.id));
-
-      await triggerScheduledRun(schedule.id);
-
-      const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
-      expect(fired).toHaveLength(1);
-      expect(fired[0]!.status).toBe("failed");
-      // Before the version resolution: without the guard this same fire fails
-      // on "no published version" and never mentions the malformed payload.
-      expect(fired[0]!.error ?? "").toContain("connection_overrides");
-    });
-  });
-
   // ── triggerScheduledRun — declared-but-unspawnable integration (#737) ──
   //
   // The schedule has an actor, but the agent declares an integration whose
@@ -1083,7 +1053,7 @@ describeRequiresRedis("scheduler service", () => {
   //
   // The fire reads the pruned row; the job only has to follow `enabled`.
 
-  describe("deleteIntegrationConnection re-arms the owner's schedule job", () => {
+  describe("deleteIntegrationConnection and the owner's schedule job", () => {
     it("a shrunk set keeps the job armed, naming only the schedule", async () => {
       const integrationId = `@${orgSlug}/svc`;
       await seedPackage({ orgId, id: integrationId, type: "integration", source: "local" });
@@ -1110,10 +1080,15 @@ describeRequiresRedis("scheduler service", () => {
         connectionOverrides: { [integrationId]: [kept!, gone!] },
       });
 
-      // What `DELETE /api/me/connections/:id` does: the service prunes, the route re-arms.
-      await resyncScheduleJobs(
-        await deleteIntegrationConnection({ orgId, spaceId: defaultSpaceId }, gone!, actor),
+      // What `DELETE /api/me/connections/:id` does: the service prunes, the route drops the jobs
+      // of the schedules it disabled.
+      const { disabledScheduleIds } = await deleteIntegrationConnection(
+        { orgId, spaceId: defaultSpaceId },
+        gone!,
+        actor,
       );
+      expect(disabledScheduleIds).toEqual([]);
+      await removeScheduleJobs(disabledScheduleIds);
 
       const [after] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
       expect(after).toMatchObject({
@@ -1152,9 +1127,13 @@ describeRequiresRedis("scheduler service", () => {
         connectionOverrides: { [integrationId]: [row!.id] },
       });
 
-      await resyncScheduleJobs(
-        await deleteIntegrationConnection({ orgId, spaceId: defaultSpaceId }, row!.id, actor),
+      const { disabledScheduleIds } = await deleteIntegrationConnection(
+        { orgId, spaceId: defaultSpaceId },
+        row!.id,
+        actor,
       );
+      expect(disabledScheduleIds).toEqual([schedule.id]);
+      await removeScheduleJobs(disabledScheduleIds);
 
       const [after] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
       expect(after).toMatchObject({ enabled: false, nextRunAt: null, connectionOverrides: null });

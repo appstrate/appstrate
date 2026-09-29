@@ -777,10 +777,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     expect(await needsReconnection(foreignId)).toBe(false);
   });
 
-  // Plan §8 row 7 — a run binding TWO connections to one integration loses
-  // exactly the one that went away. The pre-set resolver had no way to express
-  // this: there was one connection per integration, so "gone" meant "the
-  // integration is gone".
+  // A run binding TWO connections to one integration loses exactly the one that went away.
   it("loses only the deleted member of a bound set — its sibling still resolves", async () => {
     const kept = await seedConnection({ userId: ctx.user.id, accountId: "acct-kept" });
     const removed = await seedConnection({ userId: ctx.user.id, accountId: "acct-removed" });

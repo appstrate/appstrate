@@ -226,8 +226,8 @@ describe("mcp run_and_wait — connection_overrides", () => {
     expect(resolved!.map((c) => c.connectionId).sort()).toEqual([first, second].sort());
   }, 60_000);
 
-  // A bare id is refused (400), never wrapped into a one-element set.
-  it("refuses a bare connection id without launching", async () => {
+  // A string where a set belongs is refused (400), never wrapped into a one-element set.
+  it("refuses a string where a set belongs, without launching", async () => {
     await seedConnectionTestIntegration(ctx, INTEGRATION);
     await seedDefaultOrgModel(ctx);
     const picked = await seedIntegrationConnection(ctx, INTEGRATION);

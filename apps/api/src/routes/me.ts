@@ -69,7 +69,7 @@ import {
   listUsableIntegrationsForActor,
 } from "../services/integration-connections.ts";
 import { handoffStepsFor } from "../services/connect/provisioning.ts";
-import { resyncScheduleJobs } from "../services/scheduler.ts";
+import { removeScheduleJobs } from "../services/scheduler.ts";
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
 import { logger } from "../lib/logger.ts";
 import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
@@ -207,9 +207,8 @@ router.get("/connections", requireCeiling("integrations", "read"), async (c) => 
 });
 
 /**
- * `GET /api/me/connections/:connectionId/delete-impact` — the caller's own member
- * pins and schedules that deleting this connection would rewrite, for the delete
- * confirmation. A non-UUID id is empty lists, like any id the caller references nowhere.
+ * `GET /api/me/connections/:connectionId/delete-impact` — the caller's own member pins and
+ * schedules the delete would rewrite. A non-UUID id answers empty lists.
  */
 router.get(
   "/connections/:connectionId/delete-impact",
@@ -336,13 +335,10 @@ router.delete(
 /**
  * `DELETE /api/me/connections/:connectionId` — destructive global delete.
  *
- * Removes the underlying `integration_connections` row — *destructive*: "I never
- * want to use this credential anywhere again" — unless an admin pin or an org
- * default, enforced or not, names it (409 `connection_pinned`,
- * `assertConnectionsUnpinned`). The caller's own member pins and schedule
- * overrides drop it in the same transaction — a schedule whose set it empties is
- * disabled, never silently switched — (`GET …/delete-impact` lists them
- * beforehand); another member's keep the id.
+ * Removes the underlying `integration_connections` row — *destructive* — unless an
+ * admin pin or an org default names it (409 `connection_pinned`). The caller's own
+ * member pins and schedule overrides drop it (a schedule it empties is disabled);
+ * `GET …/delete-impact` lists them beforehand.
  *
  * This is the ONLY entrypoint for that delete, and it is owner-scoped by
  * construction. Surfaced only from `/connections` (the user-owned management
@@ -418,9 +414,8 @@ router.delete(
     } else {
       scope = { spaceId: row.spaceId } satisfies ActorScope;
     }
-    // After the commit, the job of a schedule the delete disabled is removed (the others stay
-    // armed: a fire reads the pruned row).
-    await resyncScheduleJobs(await deleteIntegrationConnection(scope, connectionId, actor));
+    const { disabledScheduleIds } = await deleteIntegrationConnection(scope, connectionId, actor);
+    await removeScheduleJobs(disabledScheduleIds);
     await recordAuditFromContext(c, {
       action: "integration.connection.deleted",
       resourceType: "integration_connection",

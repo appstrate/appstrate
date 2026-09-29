@@ -44,7 +44,7 @@ import {
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
 import { notFound, conflict } from "../lib/errors.ts";
-import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
+import { isUniqueViolation } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
@@ -54,7 +54,6 @@ import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integ
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import { assertConnectionsUnpinned, lockConnectionLabels } from "./integration-connections.ts";
-import { lockConnectionRows } from "./connection-row-locks.ts";
 import { assertOwnerReachesSpaceForShare } from "./space-members.ts";
 import {
   resolveConnectionsForRun,
@@ -256,31 +255,26 @@ async function upsertPin(args: {
     connectionIds.map((id) => sql`${id}`),
     sql`, `,
   )}]::uuid[]`;
-  const [row] = await db.transaction(async (tx) => {
-    // Validated under a share lock, written in the same transaction: an unshare or delete of a
-    // member serializes against this write (`assertConnectionsUnpinned`).
-    await lockConnectionRows(tx, connectionIds, "share");
-    for (const id of connectionIds) {
-      await validatePinTarget(scope, integrationId, id, args.validateOpts, tx);
-    }
-    return toRows<{
-      connection_ids: string | unknown[];
-      created_at: string | Date;
-      updated_at: string | Date;
-    }>(
-      await tx.execute(sql`
-      INSERT INTO ${integrationPins}
-        (space_id, package_id, integration_package_id, user_id, connection_ids, created_by)
-      VALUES (${scope.spaceId}, ${agentPackageId}, ${integrationId}, ${userIdValue}, ${ids}, ${createdBy})
-      ON CONFLICT (space_id, package_id, integration_package_id, (coalesce(user_id, '')))
-      DO UPDATE SET
-        connection_ids = EXCLUDED.connection_ids,
-        created_by = EXCLUDED.created_by,
-        updated_at = now()
-      RETURNING connection_ids, created_at, updated_at
-    `),
-    );
-  });
+  for (const id of connectionIds) {
+    await validatePinTarget(scope, integrationId, id, args.validateOpts);
+  }
+  const [row] = toRows<{
+    connection_ids: string | unknown[];
+    created_at: string | Date;
+    updated_at: string | Date;
+  }>(
+    await db.execute(sql`
+    INSERT INTO ${integrationPins}
+      (space_id, package_id, integration_package_id, user_id, connection_ids, created_by)
+    VALUES (${scope.spaceId}, ${agentPackageId}, ${integrationId}, ${userIdValue}, ${ids}, ${createdBy})
+    ON CONFLICT (space_id, package_id, integration_package_id, (coalesce(user_id, '')))
+    DO UPDATE SET
+      connection_ids = EXCLUDED.connection_ids,
+      created_by = EXCLUDED.created_by,
+      updated_at = now()
+    RETURNING connection_ids, created_at, updated_at
+  `),
+  );
   return {
     packageId: agentPackageId,
     integration_package_id: integrationId,
@@ -339,9 +333,8 @@ export async function validatePinTarget(
   integrationId: string,
   connectionId: string,
   opts: { requireShared?: boolean; allowOwnedBy?: string },
-  executor: DbOrTx = db,
 ): Promise<ConnectionRow> {
-  const [conn] = await executor
+  const [conn] = await db
     .select()
     .from(integrationConnections)
     .where(eq(integrationConnections.id, connectionId))
@@ -477,9 +470,8 @@ export async function updateConnectionMetadata(
 
   const result = await db
     .transaction(async (tx) => {
-      // Lock order, everywhere: the label advisory lock, then (a share) the owner's membership
-      // and the space row, THEN the row lock (the unshare's check, else the UPDATE) — a
-      // rename-only write takes them in that order too.
+      // Lock order: the label advisory lock, then (a share) the owner's membership and the space
+      // row (`lockSpaceRow`, space-members.ts).
       if (input.label !== undefined) {
         const [conn] = await tx
           .select({

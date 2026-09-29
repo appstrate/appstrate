@@ -280,9 +280,8 @@ export async function updateSpace(
         }),
       )
       .returning();
-    // Closing an open space ends every implicit member's access. The UPDATE above holds the row
-    // lock a member removal or a share takes (`FOR SHARE`) before reading access, so they
-    // serialize with this recomputation instead of each reading the other's pre-commit state.
+    // Closing an open space ends every implicit member's access. The UPDATE above holds the
+    // space row lock a removal or a share waits on (`lockSpaceRow`, space-members.ts).
     if (updated && changesAccess) {
       await unshareConnectionsOfOwnersWithoutAccess(tx, { orgId, spaceId });
     }

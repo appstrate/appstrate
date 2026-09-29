@@ -644,8 +644,7 @@ export async function updateMemberRole(
         ? await deleteSpaceMembershipsInOrg(tx, orgId, targetUserId)
         : [];
     // A demotion drops the implicit reach of the org role (admin → member,
-    // member → guest on open spaces). Lock order: member row (above), then the spaces, then the
-    // connection rows — as `removeSpaceMember` and a share take them.
+    // member → guest on open spaces). Member row (above), then the spaces: see `lockSpaceRow`.
     await lockSpacesOfSharedConnections(tx, orgId, targetUserId);
     const unsharedConnectionIds = await unshareConnectionsOfOwnersWithoutAccess(tx, {
       orgId,

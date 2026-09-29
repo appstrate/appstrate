@@ -27,6 +27,7 @@ import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { ApiError, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
+import { ORG_ROLES_WITH_FULL_ACCESS, type OrgRole } from "@appstrate/core/permissions";
 import type { AuditPayload } from "@appstrate/core/module";
 import { parseListPagination } from "../lib/list-query.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -294,48 +295,34 @@ const actorSchema = z
   });
 
 /**
- * A schedule running as ANOTHER platform member runs with that member's reach on every fire — the
- * actor lends every connection of theirs to its runs — so it is governed by org owners/admins
- * (#738): naming such an actor, and any later write to such a schedule, is not something
- * `schedules:write` alone grants. Running as yourself or as an end user of the space stays a
- * `schedules:write` matter. `memberId` is the schedule's member actor, `null` for an end user.
+ * A schedule running as ANOTHER member fires with that member's reach, so naming such an actor and
+ * writing such a schedule is an org owner/admin act (#738). `memberId`: the member actor, `null`
+ * for an end user.
  */
 function mayGovernMemberSchedule(c: Context<AppEnv>, memberId: string | null | undefined): boolean {
   if (!memberId) return true;
   const caller = getActor(c);
   if (caller.type === "user" && caller.id === memberId) return true;
-  const role = callerOrgRole(c);
-  return role === "owner" || role === "admin";
+  return (ORG_ROLES_WITH_FULL_ACCESS as readonly OrgRole[]).includes(callerOrgRole(c));
 }
+
+const CHOOSE_MEMBER_ACTOR =
+  "Only an organization owner or admin can make another member a schedule's actor.";
+const WRITE_MEMBER_SCHEDULE =
+  "Only an organization owner or admin can change a schedule that runs as another member.";
 
 /**
- * Choosing the actor. Checked before the membership lookup, so a refused caller cannot probe who
- * is a member either.
+ * 403 unless {@link mayGovernMemberSchedule}. Choosing the actor is checked before the membership
+ * lookup, so a refused caller cannot probe who is a member either.
  */
-function assertMayChooseMemberActor(
+function assertMayGovern(
   c: Context<AppEnv>,
-  selected: { userId?: string } | undefined,
+  memberId: string | null | undefined,
+  detail: string,
+  param?: string,
 ): void {
-  if (mayGovernMemberSchedule(c, selected?.userId)) return;
-  throw new ApiError({
-    status: 403,
-    code: "forbidden",
-    title: "Forbidden",
-    detail: "Only an organization owner or admin can make another member a schedule's actor.",
-    param: "actor",
-  });
-}
-
-/** Any write (patch of any field, enable/disable, delete) to a stored schedule. */
-function assertMayWriteSchedule(c: Context<AppEnv>, schedule: { userId: string | null }): void {
-  if (mayGovernMemberSchedule(c, schedule.userId)) return;
-  throw new ApiError({
-    status: 403,
-    code: "forbidden",
-    title: "Forbidden",
-    detail:
-      "Only an organization owner or admin can change a schedule that runs as another member.",
-  });
+  if (mayGovernMemberSchedule(c, memberId)) return;
+  throw new ApiError({ status: 403, code: "forbidden", title: "Forbidden", detail, param });
 }
 
 /**
@@ -498,7 +485,7 @@ export function createSchedulesRouter() {
 
       // #738: actor defaults to the caller; an admin may name another member (validated against
       // this org/space scope).
-      assertMayChooseMemberActor(c, data.actor);
+      assertMayGovern(c, data.actor?.userId, CHOOSE_MEMBER_ACTOR, "actor");
       const actor = await resolveScheduleActor(scope, data.actor, getActor(c));
 
       // Reject a `model_id_override` that references no real model up front, so
@@ -582,7 +569,7 @@ export function createSchedulesRouter() {
     const id = c.req.param("id")!;
     const scope = getSpaceScope(c);
     const existing = await loadScheduleOr404(c, id, scope);
-    assertMayWriteSchedule(c, existing);
+    assertMayGovern(c, existing.userId, WRITE_MEMBER_SCHEDULE);
 
     const data = await readJsonBody(c, updateScheduleSchema);
 
@@ -757,9 +744,10 @@ export function createSchedulesRouter() {
     }
 
     // #738: re-point the actor when the caller selected one (validated against
-    // this org/space scope). `undefined` leaves the existing actor untouched. Re-sending the
-    // stored actor is no choice; writing a schedule running as another member was judged above.
-    if (data.actor?.userId !== existing.userId) assertMayChooseMemberActor(c, data.actor);
+    // this org/space scope). `undefined` leaves the existing actor untouched.
+    if (data.actor?.userId !== existing.userId) {
+      assertMayGovern(c, data.actor?.userId, CHOOSE_MEMBER_ACTOR, "actor");
+    }
     const actor = data.actor ? await resolveScheduleActor(scope, data.actor) : undefined;
 
     // Only a *real* identity change invalidates frozen connection picks. Picking
@@ -775,10 +763,8 @@ export function createSchedulesRouter() {
     const connectionOverrides =
       actorChanged && data.connection_overrides === undefined ? null : data.connection_overrides;
 
-    // A schedule that is (or stays) armed must fire without asking which
-    // connection to use — re-judged on every such write, since a connection
-    // added since the last save can make the resolution ambiguous. Disabling
-    // skips it: a patch that reduces what the row does is always applicable.
+    // An armed schedule must fire without asking which connection to use: re-judged on every
+    // write that leaves it armed (a new connection can make it ambiguous); disabling skips it.
     const nextActor = actor ?? existingActor;
     const nextOverrides =
       connectionOverrides !== undefined ? connectionOverrides : existing.connection_overrides;
@@ -814,9 +800,8 @@ export function createSchedulesRouter() {
       }
     }
 
-    // Translate snake_case wire fields to internal camelCase for the service. `existing` is the
-    // row every check above judged: the write applies only while the row still matches it
-    // (409 `schedule_modified_concurrently` otherwise).
+    // snake_case wire → camelCase service fields; the write applies only while the row still
+    // matches `existing` (409 `schedule_modified_concurrently`).
     const schedule = await updateSchedule(
       scope,
       existing,
@@ -876,7 +861,7 @@ export function createSchedulesRouter() {
   router.delete("/schedules/:id", requirePermission("schedules", "delete"), async (c) => {
     const id = c.req.param("id")!;
     const scope = getSpaceScope(c);
-    assertMayWriteSchedule(c, await loadScheduleOr404(c, id, scope));
+    assertMayGovern(c, (await loadScheduleOr404(c, id, scope)).userId, WRITE_MEMBER_SCHEDULE);
     await deleteSchedule(scope, id);
     await recordAuditFromContext(c, {
       action: "schedule.deleted",

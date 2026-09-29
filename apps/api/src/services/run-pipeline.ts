@@ -291,11 +291,8 @@ async function seedPinnedIntegrationManifests(params: {
 }
 
 /**
- * The verdicts only an edit of the schedule itself can clear: an open choice
- * (`must_choose_connection`), a frozen pick the actor can no longer reach
- * (`override_connection_unavailable`), and a frozen pick on an auth serving
- * none of the selected tools — the last only when the schedule's OWN set bound
- * it; bound by a pin or default, the fix is the pin's, not the schedule's.
+ * The verdicts only an edit of the schedule can clear: an open choice, an unreachable pick, and
+ * a pick on an auth serving no selected tool when the schedule's OWN set bound it.
  */
 function isScheduleOwned(e: ConnectionResolutionError): boolean {
   switch (e.code) {
@@ -310,10 +307,8 @@ function isScheduleOwned(e: ConnectionResolutionError): boolean {
 }
 
 /**
- * Who a schedule write acts for, as its connection rules see it: the caller itself; another
- * platform MEMBER, whose private connections the caller must neither see nor bind; or an END
- * USER, an identity the org's application manages — its caller picks its connections, as a run
- * override does for its runs.
+ * Who a schedule write acts for: the caller itself; another MEMBER, whose private connections the
+ * caller must neither see nor bind; or an END USER, whose connections its caller picks.
  */
 type ScheduleWriteFor = "self" | "member" | "end_user";
 
@@ -325,11 +320,10 @@ function scheduleWriteFor(caller: Actor, actor: Actor): ScheduleWriteFor {
 }
 
 /**
- * On EVERY schedule write — armed or not, create or patch — a caller writing for another member
- * binds only connections shared in the space: 409 `override_connection_unavailable` for any other
- * id, one uniform refusal whatever the id is, so a caller cannot probe for a colleague's private
- * rows. An integration's set is exempt only when this write changes neither the actor nor that
- * set — the ids the write that stored it already judged.
+ * On every schedule write, a caller writing for another member binds only connections shared in
+ * the space: 409 `override_connection_unavailable` otherwise, one refusal whatever the id, so it
+ * cannot probe for private rows. A set this write changes neither the actor nor the ids of was
+ * judged by the write that stored it and is exempt.
  */
 export async function assertScheduleOverridesReachable(params: {
   spaceId: string;
@@ -347,25 +341,11 @@ export async function assertScheduleOverridesReachable(params: {
       ? []
       : ids.map((id): [string, string] => [integrationId, id]),
   );
-  const uuids = named.map(([, id]) => id).filter(isUuid);
-  const shared =
-    uuids.length === 0
-      ? []
-      : await db
-          .select({
-            id: integrationConnections.id,
-            integrationId: integrationConnections.integrationId,
-          })
-          .from(integrationConnections)
-          .where(
-            and(
-              inArray(integrationConnections.id, uuids),
-              eq(integrationConnections.spaceId, params.spaceId),
-              eq(integrationConnections.sharedWithOrg, true),
-            ),
-          );
-  const reachable = new Set(shared.map((r) => `${r.integrationId}\0${r.id}`));
-  const refused = named.filter(([integrationId, id]) => !reachable.has(`${integrationId}\0${id}`));
+  const shared = await sharedConnections(
+    params.spaceId,
+    named.map(([, id]) => id),
+  );
+  const refused = named.filter(([integrationId, id]) => shared.get(id) !== integrationId);
   if (refused.length === 0) return;
   const layer = launchOverrideLayer("schedule_override");
   throw missingIntegrationConnection(
@@ -375,25 +355,36 @@ export async function assertScheduleOverridesReachable(params: {
   );
 }
 
+/** Connections among `ids` shared in `spaceId`: id → integration id. */
+async function sharedConnections(
+  spaceId: string,
+  ids: readonly string[],
+): Promise<Map<string, string>> {
+  const uuids = ids.filter(isUuid);
+  if (uuids.length === 0) return new Map();
+  const rows = await db
+    .select({ id: integrationConnections.id, integrationId: integrationConnections.integrationId })
+    .from(integrationConnections)
+    .where(
+      and(
+        inArray(integrationConnections.id, uuids),
+        eq(integrationConnections.spaceId, spaceId),
+        eq(integrationConnections.sharedWithOrg, true),
+      ),
+    );
+  return new Map(rows.map((r) => [r.id, r.integrationId]));
+}
+
 function sameSet(a: readonly string[], b: readonly string[] | undefined): boolean {
   return b !== undefined && a.length === b.length && a.every((id) => b.includes(id));
 }
 
 /**
- * Refuse arming a schedule whose fire would fail on its own connection choice:
- * an unattended run cannot ask which connection to use, so the choice is made
- * when the schedule is written (the rule Make.com applies to a scenario).
- *
- * The same readiness the fire runs (`resolveRunPreflight`, same seeding, same
- * launch-override layer), keeping ONLY {@link isScheduleOwned} verdicts. Every other
- * verdict (not connected, needs reconnection, missing scopes, inactive
- * integration…) is repaired outside the schedule, so it stays a visible failed
- * run at the tick rather than a refusal to save. Non-throwing readiness on
- * purpose: the throwing wrapper would emit `onRunConnectionMissing` for a run
- * nobody launched.
- *
- * The refusal is worded for whoever writes ({@link scheduleWriteFor}): for another member only
- * shared candidates are listed; for an end user the caller names one of all of them.
+ * Refuse arming a schedule whose fire would fail on its own connection choice: an unattended run
+ * cannot ask, so the choice is made at write time. The fire's readiness, keeping only
+ * {@link isScheduleOwned} verdicts (the rest stay failed runs at the tick); non-throwing, so no
+ * `onRunConnectionMissing` fires for a run nobody launched. Worded for whoever writes
+ * ({@link scheduleWriteFor}).
  */
 export async function assertScheduleConnectionsChosen(params: {
   /** The agent at the version the schedule fires (`version_override` resolved). */
@@ -424,7 +415,7 @@ export async function assertScheduleConnectionsChosen(params: {
       throw missingIntegrationConnection(unchosen.map(translateResolutionError));
     case "member":
       throw missingIntegrationConnection(
-        await withSharedCandidatesOnly(unchosen, params.connectionOverrides),
+        await withSharedCandidatesOnly(unchosen, params.spaceId, params.connectionOverrides),
       );
     case "end_user":
       throw missingIntegrationConnection(
@@ -443,34 +434,21 @@ export async function assertScheduleConnectionsChosen(params: {
 }
 
 /**
- * The refusal as a caller acting for another member may read it: a choice lists only the
- * candidates shared in the space. When none is, the choice is still open — the actor pins
- * one of their own for the agent, or an admin pins one. Any other item about a connection that
- * is not shared (an exempt stored set can hold the actor's private row) names no label or
- * account; its id stays only when the schedule's set names it, which the caller already reads.
+ * The refusal as a caller acting for another member may read it: a choice lists only shared
+ * candidates, and an item about an unshared connection names no label or account (its id only
+ * when the schedule's set already names it).
  */
 async function withSharedCandidatesOnly(
   errors: ConnectionResolutionError[],
+  spaceId: string,
   connectionOverrides: ConnectionOverrides | null,
 ): Promise<ValidationFieldError[]> {
-  const ids = errors.flatMap((e) => [
-    ...(e.candidateConnections ?? []).map((c) => c.id),
-    ...(e.connectionId ? [e.connectionId] : []),
-  ]);
-  const shared = new Set(
-    ids.length === 0
-      ? []
-      : (
-          await db
-            .select({ id: integrationConnections.id })
-            .from(integrationConnections)
-            .where(
-              and(
-                inArray(integrationConnections.id, ids),
-                eq(integrationConnections.sharedWithOrg, true),
-              ),
-            )
-        ).map((r) => r.id),
+  const shared = await sharedConnections(
+    spaceId,
+    errors.flatMap((e) => [
+      ...(e.candidateConnections ?? []).map((c) => c.id),
+      ...(e.connectionId ? [e.connectionId] : []),
+    ]),
   );
   return errors.map((e) => {
     if (e.code !== "must_choose_connection") {

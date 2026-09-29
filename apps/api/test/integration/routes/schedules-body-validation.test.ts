@@ -139,7 +139,7 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     await expectRejectedField(res, "connection_overrides.@acme/gmail");
   });
 
-  it("rejects a BARE connection id — the retired single-connection shape", async () => {
+  it("rejects a string where a set belongs", async () => {
     const res = await post({
       cron_expression: "0 9 * * 1-5",
       connection_overrides: { "@acme/gmail": "conn_1" },
@@ -289,7 +289,7 @@ describe("PATCH /api/schedules/:id — body validation", () => {
     await expectRejectedField(res, "connection_overrides.@acme/gmail[0]");
   });
 
-  it("rejects an EMPTY connection_overrides set and a BARE id", async () => {
+  it("rejects an EMPTY connection_overrides set and a string where a set belongs", async () => {
     await expectRejectedField(
       await put({ connection_overrides: { "@acme/gmail": [] } }),
       "connection_overrides.@acme/gmail",

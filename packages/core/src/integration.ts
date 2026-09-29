@@ -1302,19 +1302,13 @@ export function validateAgentIntegrationScopes(
 export const MAX_CONNECTIONS_PER_INTEGRATION = 10;
 
 /**
- * Per-integration connection picks. Used on `runs.connection_overrides`
- * (caller's run-time choice) and `package_schedules.connection_overrides`
- * (frozen at schedule create) — the resolver's ONE launch-override layer, fed
- * by whichever of the two launched the run (a scheduled fire carries no run
- * override). Shape: `{ "@scope/integration": ["<connection_id>", ...] }`.
+ * Per-integration connection picks on `runs.connection_overrides` and
+ * `package_schedules.connection_overrides` — the resolver's launch-override layer.
+ * Shape: `{ "@scope/integration": ["<connection_id>", ...] }`.
  */
 export type ConnectionOverrides = Record<string, string[]>;
 
-/**
- * The cascade layer that bound a set — drives the audit + UI badge. A run and a
- * schedule fire share the launch-override layer; the two values keep which one
- * launched it in `runs.resolved_connections`.
- */
+/** The cascade layer that bound a set — drives the audit + UI badge. */
 export type ConnectionResolutionSource =
   | "admin_pin"
   | "org_default_enforced"
@@ -1375,7 +1369,7 @@ export interface ConnectionCandidate {
   accountId: string;
   /** True when the row is the calling actor's own, false when inherited via org sharing. */
   ownedByActor: boolean;
-  /** True when the row's credentials died: pickable, but it must be reconnected before a run can use it. */
+  /** The row's credentials died: pickable, but a run needs it reconnected. */
   needsReconnection: boolean;
 }
 
@@ -1413,24 +1407,16 @@ export interface ConnectionResolutionError {
    * The integration manifest auth the connect flow must target
    * (`/auths/{authKey}/connect/...`), for the three codes a connect flow can
    * clear: `insufficient_scopes` and `needs_reconnection` (the resolved
-   * connection's own auth) and `not_connected` (among the auths serving the
-   * selected tools: the agent dep's pinned `auth_key`, else the single
-   * `oauth2` one). Omitted on `not_connected` when several oauth2 auths
-   * qualify (or none) and the dep pins none — the caller must then let the
-   * user choose.
+   * connection's own auth) and `not_connected` (the dep's `auth_key`, else the single serving
+   * `oauth2` auth; omitted when ambiguous — the user then chooses).
    */
   authKey?: string;
   /**
-   * The cascade layer whose set failed: an explicit layer naming a connection
-   * the actor cannot reach (`pinned_connection_unavailable`,
-   * `override_connection_unavailable`), or any layer whose bound set failed a
-   * health check (`needs_reconnection`, `insufficient_scopes`,
-   * `auth_serves_no_selected_tool`). Absent when no layer bound anything
-   * (`not_connected`, `must_choose_connection`, `auth_key_mismatch`), so a
-   * caller reads the verdict's layer here instead of re-deriving it.
+   * The cascade layer whose set failed, on every layer-bound code; absent when no layer bound
+   * anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`).
    */
   source?: ConnectionResolutionSource;
-  /** Every connection the layer that won bound, in its order — set when that set failed to bind. */
+  /** The failing layer's whole set, in its order. */
   boundConnectionIds?: string[];
   /**
    * True when the resolved connection belongs to the current actor. Carried on

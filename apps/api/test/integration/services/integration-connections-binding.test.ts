@@ -12,8 +12,7 @@
  * could pin integration B's connection while requesting integration A and get
  * B's credentials decrypted under A's manifest + `authorized_uris` allowlist.
  *
- * Exercised through the exported `selectAccessibleConnection` (the by-id
- * branch is exactly `loadAccessibleConnectionById`).
+ * Exercised through the exported `selectAccessibleConnection`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -26,9 +25,12 @@ import {
 } from "../../../src/services/integration-connections.ts";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 import type { Actor } from "@appstrate/connect";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 
 const INTEG_A = "@bindorg/gmail";
 const INTEG_B = "@bindorg/slack";
+const manifestOf = (name: string) =>
+  ({ name, auths: { oauth: { type: "api_key" } } }) as unknown as IntegrationManifest;
 
 describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-10)", () => {
   let ctx: TestContext;
@@ -68,17 +70,17 @@ describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-1
   });
 
   it("never resolves integration B's connection id under integration A", async () => {
-    // Ask for integration A's connection but pass B's connection id — the
-    // pre-fix code (id-only WHERE) returned B's row and injected B's
-    // credentials under A's manifest. Post-fix this MUST NOT resolve.
-    const leaked = await selectAccessibleConnection(INTEG_A, ["oauth"], connBId, {
+    // Ask for integration A's connection but pass B's connection id — an
+    // id-only WHERE would return B's row and inject B's credentials under A's
+    // manifest. This MUST NOT resolve.
+    const leaked = await selectAccessibleConnection(INTEG_A, manifestOf(INTEG_A), connBId, {
       spaceId: ctx.defaultSpaceId,
       actor,
     });
     expect(leaked).toBeNull();
 
     // Symmetric direction for completeness.
-    const leakedReverse = await selectAccessibleConnection(INTEG_B, ["oauth"], connAId, {
+    const leakedReverse = await selectAccessibleConnection(INTEG_B, manifestOf(INTEG_B), connAId, {
       spaceId: ctx.defaultSpaceId,
       actor,
     });
@@ -86,7 +88,7 @@ describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-1
   });
 
   it("resolves the connection when the id belongs to the requested integration (happy path)", async () => {
-    const resolved = await selectAccessibleConnection(INTEG_B, ["oauth"], connBId, {
+    const resolved = await selectAccessibleConnection(INTEG_B, manifestOf(INTEG_B), connBId, {
       spaceId: ctx.defaultSpaceId,
       actor,
     });

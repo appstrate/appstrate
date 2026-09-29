@@ -3,6 +3,7 @@
 // A label reaches the model verbatim (the tools' `connection` enum), so it
 // carries no line break, control, invisible or bidi character.
 
+import { truncateLabel } from "@appstrate/core/dedupe-label";
 import { isHiddenCodePoint } from "@appstrate/mcp-transport";
 
 export const CONNECTION_LABEL_MAX = 80;
@@ -43,10 +44,5 @@ export function toMintedLabel(raw: string): string {
     if (isLineOrTab(cp)) cleaned += " ";
     else if (!isForbidden(cp)) cleaned += ch;
   }
-  let out = "";
-  for (const ch of cleaned.replace(/\s+/g, " ").trim()) {
-    if (out.length + ch.length > CONNECTION_LABEL_MAX) break;
-    out += ch;
-  }
-  return out.trimEnd();
+  return truncateLabel(cleaned.replace(/\s+/g, " ").trim(), CONNECTION_LABEL_MAX);
 }

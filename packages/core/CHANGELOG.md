@@ -52,6 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   space, while the caller holds `chat:write` there, and serves a draft only at
   the `lockVersion` injected (409 `injected_draft_changed` once it moved).
 
+- **`dedupeLabel` takes an optional `{ maxLength }`**, and **`truncateLabel`** is
+  new (`@appstrate/core/dedupe-label`) — with `maxLength` every candidate fits it,
+  the base cut to leave room for its ` (n)` suffix; `truncateLabel` is that cut
+  (UTF-16 units, on a code-point boundary, trailing whitespace trimmed when
+  cut; a label within the limit is returned as is). Without
+  the option `dedupeLabel` behaves as before.
+
 - **`org-integrations:configure`** (`@appstrate/core/permissions`, #1264) — a new
   org-level core resource: managing the org-wide integration OAuth clients (and the
   org-tier default among them) that every space inherits. The org half of
@@ -62,12 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`ConnectionResolutionError.source` names the failing layer on every
-  layer-bound code** (`@appstrate/core/integration`) — no longer only on
-  `insufficient_scopes` and `auth_serves_no_selected_tool`, but also on
-  `needs_reconnection` and on an explicit layer naming an unreachable connection
-  (`pinned_connection_unavailable`, `override_connection_unavailable`). Still
-  absent when no layer bound anything (`not_connected`,
-  `must_choose_connection`, `auth_key_mismatch`). The field's type is unchanged.
+  layer-bound code** (`@appstrate/core/integration`) — previously set only on
+  `insufficient_scopes`; now on `needs_reconnection`, `insufficient_scopes`,
+  `auth_serves_no_selected_tool`, `pinned_connection_unavailable` and
+  `override_connection_unavailable`. Still absent when no layer bound anything
+  (`not_connected`, `must_choose_connection`, `auth_key_mismatch`). The field's
+  type is unchanged.
 
 - **`RunOrchestrator.initialize()` may be called again after it rejects**
   (`@appstrate/core/platform-types`, #1129) — the platform retries it in the

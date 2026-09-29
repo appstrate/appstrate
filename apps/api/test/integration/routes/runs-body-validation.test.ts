@@ -120,7 +120,7 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
     await expectRejectedField(res, "connection_overrides.@acme/gmail[0]");
   });
 
-  it("rejects a BARE connection id — the retired single-connection shape", async () => {
+  it("rejects a string where a set belongs", async () => {
     const res = await post({ input: {}, connection_overrides: { "@acme/gmail": "conn_1" } });
     await expectRejectedField(res, "connection_overrides.@acme/gmail");
   });

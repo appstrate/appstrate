@@ -63,7 +63,6 @@ import {
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
 import { isActiveHere } from "./package-activation.ts";
-import { lockConnectionRows } from "./connection-row-locks.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 import {
   setExactlyOneDefault,
@@ -88,11 +87,13 @@ import {
 } from "../lib/package-helpers.ts";
 import { integrationCallbackUrl } from "../lib/integration-callback-url.ts";
 import { CONNECTION_LABEL_MAX, toMintedLabel } from "../lib/connection-label.ts";
+import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import type { Actor } from "@appstrate/connect";
 import {
   resolveIntegrationToolCatalog,
   readDefaultTools,
+  type ConnectionCandidate,
   type ConnectionResolutionError,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
@@ -107,15 +108,11 @@ import { resolveConnectionOwnerNames } from "./integration-connection-owner-name
 import {
   actorIdentityOf,
   candidateOf,
-  isOwnedByActor,
-  orgDefaultLayer,
+  resolveConnections,
+  runLaunchOverrides,
   translateResolutionError,
-  unavailableMemberError,
 } from "./integration-connection-resolver.ts";
-import {
-  listOrgDefaultsForResolver,
-  type OrgDefaultPick,
-} from "./integration-org-defaults-service.ts";
+import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.ts";
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
@@ -278,229 +275,139 @@ export async function loadAccessibleConnectionById(
   return resolved;
 }
 
-/**
- * The run a credential-proxy call acts for (`X-Run-Id`). `boundSet` re-reads it
- * on every selection — the call and its 401 refresh alike — and throws unless it
- * is still the actor's and in flight; else it returns the set its kickoff bound
- * to the integration (`runs.resolved_connections[packageId]`). A finished run's
- * snapshot authorises nothing, not even a refresh.
- */
+/** The `X-Run-Id` run; `boundSet` re-checks it on every selection, the 401 refresh included. */
 export interface RunBoundSelection {
   id: string;
   boundSet: () => Promise<readonly { connectionId: string }[]>;
 }
 
-/** The caller's context for the credential proxy's connection selection. */
 interface ConnectionSelectionContext {
   spaceId: string;
   actor: Actor;
-  /** When set, its bound set is all the call may reach — the cascade already chose. */
   run?: RunBoundSelection;
 }
 
 /**
- * The credential proxy's connection selection. Every branch is bound to
- * `packageId`: a connection id of a DIFFERENT integration never resolves, so
- * foreign credentials are never decrypted under this integration's manifest
- * ({@link loadAccessibleConnectionById}).
- *
- *   - run-bound ({@link ConnectionSelectionContext.run}) — the kickoff already
- *     applied every layer, agent-level ones included: the set's single member,
- *     else the member `namedConnectionId` names (400 `connection_not_in_run` for
- *     a non-member), else 409 `must_choose_connection` over the set; an empty
- *     set → `null`;
- *   - no run — only the space-level layers, in the resolver's order (admin and
- *     member pins are per agent, and no agent is in play here):
- *       1. an ENFORCED org default — its set; a named id must be a member;
- *       2. `namedConnectionId` — that row, own or shared;
- *       3. a SOFT org default — its set;
- *       4. the actor's single own connection ({@link pickOwnConnection}).
- *     A default set binds whole, like in the resolver: a member the actor
- *     cannot reach is its `pinned_connection_unavailable`; one member → it,
- *     several → 409 `must_choose_connection` over the set.
+ * The credential proxy's connection of `packageId`: under a run, a member of its bound set; else
+ * the resolver's cascade without pins, `namedConnectionId` as the launch override.
  */
 export async function selectAccessibleConnection(
   packageId: string,
-  declaredAuthKeys: string[],
+  manifest: IntegrationManifest,
   namedConnectionId: string | null,
   context: ConnectionSelectionContext,
 ): Promise<ResolvedConnectionRow | null> {
-  const byId = (id: string) => loadAccessibleConnectionById(id, packageId, null, context);
+  const named = namedConnectionId?.toLowerCase() ?? null;
+  const identity = actorIdentityOf(context.actor);
+  const candidatesOf = (rows: readonly SelectableRow[]) =>
+    rows.map((r) => candidateOf(identity, r));
   const { run } = context;
   if (run) {
     const bound = await run.boundSet();
-    if (namedConnectionId) {
-      const member = requireRunBoundMember({
-        runId: run.id,
-        packageId,
-        connectionId: namedConnectionId,
-        bound,
-        param: "X-Connection-Id",
-      });
-      return byId(member.connectionId);
-    }
+    const pick = named
+      ? requireRunBoundMember({
+          runId: run.id,
+          packageId,
+          connectionId: named,
+          bound,
+          param: "X-Connection-Id",
+        })
+      : bound.length === 1
+        ? bound[0]!
+        : null;
+    if (pick) return loadAccessibleConnectionById(pick.connectionId, packageId, null, context);
     if (bound.length === 0) return null;
-    if (bound.length === 1) return byId(bound[0]!.connectionId);
-    const rows = await loadSelectableRows(
-      packageId,
-      context,
-      inArray(
-        integrationConnections.id,
-        bound.map((m) => m.connectionId),
-      ),
-    );
-    throw resolutionConflict({
-      integrationId: packageId,
-      code: "must_choose_connection",
-      message: `Run '${run.id}' bound several connections to '${packageId}' — name one with the X-Connection-Id header.`,
-      candidateConnections: rows.map((r) => candidateOf(actorIdentityOf(context.actor), r)),
+    const ids = new Set(bound.map((m) => m.connectionId));
+    const rows = (await loadSelectableRows(packageId, context)).filter((r) => ids.has(r.id));
+    throw mustChoose(packageId, candidatesOf(rows), `Run '${run.id}' bound several connections`);
+  }
+
+  const [rows, orgDefaults] = await Promise.all([
+    loadSelectableRows(packageId, context),
+    listOrgDefaultsForResolver(context.spaceId),
+  ]);
+  const { resolved, errors } = resolveConnections({
+    // No agent selection: every declared auth serves, no scope is required.
+    requirements: [
+      {
+        integrationId: packageId,
+        manifest,
+        hasSelectedTools: true,
+        agentTools: [],
+        agentScopes: [],
+      },
+    ],
+    accessibleConnections: rows,
+    pins: [],
+    orgDefaults,
+    launchOverrides: runLaunchOverrides(named ? { [packageId]: [named] } : null),
+    ...identity,
+  });
+  const error = errors[0];
+  if (error?.code === "not_connected" || error?.code === "override_connection_unavailable") {
+    return null;
+  }
+  if (error?.code === "must_choose_connection") {
+    const candidates = error.candidateConnections ?? [];
+    throw mustChoose(packageId, candidates, "No single own connection applies");
+  }
+  if (error) throw resolutionConflict(error);
+
+  // A named connection is layer 3: the set is that row, or an enforced org default outranking it.
+  const set = (resolved[packageId] ?? []).map((m) => rows.find((r) => r.id === m.connectionId)!);
+  if (named) {
+    const hit = set.find((r) => r.id === named);
+    if (hit) return toResolvedRow(hit);
+    throw new ApiError({
+      status: 400,
+      code: "connection_not_in_org_default",
+      title: "Connection Not In The Enforced Org Default",
+      detail:
+        `Connection '${namedConnectionId}' is not in the enforced org default of ` +
+        `'${packageId}' (members: ${set.map((r) => r.id).join(", ")}), which binds ` +
+        `every call in this space.`,
+      param: "X-Connection-Id",
     });
   }
-
-  const orgDefault = (await listOrgDefaultsForResolver(context.spaceId))[packageId];
-  if (orgDefault?.enforce && orgDefault.connectionIds.length > 0) {
-    return pickFromOrgDefault(packageId, declaredAuthKeys, orgDefault, namedConnectionId, context);
-  }
-  if (namedConnectionId) return byId(namedConnectionId);
-  if (orgDefault && orgDefault.connectionIds.length > 0) {
-    return pickFromOrgDefault(packageId, declaredAuthKeys, orgDefault, null, context);
-  }
-  return pickOwnConnection(packageId, declaredAuthKeys, context);
+  if (set.length === 1) return toResolvedRow(set[0]!);
+  throw mustChoose(packageId, candidatesOf(set), "The org default holds several connections");
 }
 
-/**
- * An org default's set, bound whole: every member must be reachable (else the
- * resolver's loud error for that layer), then the named member (enforced
- * default only), the single one, or a 409 over the set.
- */
-async function pickFromOrgDefault(
-  packageId: string,
-  authKeys: string[],
-  orgDefault: OrgDefaultPick,
-  namedConnectionId: string | null,
-  context: ConnectionSelectionContext,
-): Promise<ResolvedConnectionRow> {
-  const layer = orgDefaultLayer(orgDefault.enforce);
-  const rows =
-    authKeys.length === 0
-      ? []
-      : await loadSelectableRows(
-          packageId,
-          context,
-          and(
-            inArray(integrationConnections.id, orgDefault.connectionIds),
-            inArray(integrationConnections.authKey, authKeys),
-          )!,
-        );
-  const missingId = orgDefault.connectionIds.find((id) => !rows.some((r) => r.id === id));
-  if (missingId) throw resolutionConflict(unavailableMemberError(packageId, layer, missingId));
-
-  if (namedConnectionId) {
-    const named = rows.find((r) => r.id === namedConnectionId.toLowerCase());
-    if (!named) {
-      throw new ApiError({
-        status: 400,
-        code: "connection_not_in_org_default",
-        title: "Connection Not In The Enforced Org Default",
-        detail:
-          `Connection '${namedConnectionId}' is not in the enforced org default of ` +
-          `'${packageId}' (members: ${orgDefault.connectionIds.join(", ")}), which binds ` +
-          `every call in this space.`,
-        param: "X-Connection-Id",
-      });
-    }
-    return toResolvedRow(named);
-  }
-  if (rows.length === 1) return toResolvedRow(rows[0]!);
-  throw resolutionConflict({
-    integrationId: packageId,
-    code: "must_choose_connection",
-    message: `The org default for '${packageId}' holds several connections — name one with the X-Connection-Id header.`,
-    candidateConnections: rows.map((r) => candidateOf(actorIdentityOf(context.actor), r)),
-  });
+/** The actor's accessible rows (own + shared) of `packageId` in the space, in a stable order. */
+function loadSelectableRows(packageId: string, context: { spaceId: string; actor: Actor }) {
+  return db
+    .select()
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.integrationId, packageId),
+        eq(integrationConnections.spaceId, context.spaceId),
+        actorOrSharedFilter(context.actor, integrationConnections),
+      ),
+    )
+    .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id));
 }
 
-/**
- * No run, no named connection, no org default — the run fallback's rule
- * (`integration-connection-resolver.ts`, layer 6): bind only what is
- * unambiguously the actor's, its ONE own connection, dead or not. None →
- * 409 over the colleagues' shared ones when there are some (a shared
- * connection is used only when named with `X-Connection-Id`), `null` (not
- * connected) when there are none. Several own → 409.
- */
-async function pickOwnConnection(
-  packageId: string,
-  authKeys: string[],
-  context: ConnectionSelectionContext,
-): Promise<ResolvedConnectionRow | null> {
-  if (authKeys.length === 0) return null;
-  const rows = await loadSelectableRows(
-    packageId,
-    context,
-    inArray(integrationConnections.authKey, authKeys),
-  );
-  const identity = actorIdentityOf(context.actor);
-  const own = rows.filter((r) => isOwnedByActor(identity, r));
-  if (own.length === 1) return toResolvedRow(own[0]!);
-  if (rows.length === 0) return null;
-  throw resolutionConflict({
-    integrationId: packageId,
-    code: "must_choose_connection",
-    message:
-      own.length === 0
-        ? `Integration '${packageId}' has only connections shared by other members — name one with the X-Connection-Id header, or connect your own.`
-        : `Several connections of yours are available for '${packageId}' — name one with the X-Connection-Id header.`,
-    candidateConnections: rows.map((r) => candidateOf(identity, r)),
-  });
-}
-
-/** The actor's accessible rows (own + shared) of `packageId` in the space, narrowed by `narrow`. */
-async function loadSelectableRows(
-  packageId: string,
-  context: { spaceId: string; actor: Actor },
-  narrow: SQL,
-) {
-  return (
-    db
-      .select({
-        id: integrationConnections.id,
-        authKey: integrationConnections.authKey,
-        credentialsEncrypted: integrationConnections.credentialsEncrypted,
-        expiresAt: integrationConnections.expiresAt,
-        scopesGranted: integrationConnections.scopesGranted,
-        clientRef: integrationConnections.clientRef,
-        userId: integrationConnections.userId,
-        endUserId: integrationConnections.endUserId,
-        label: integrationConnections.label,
-        accountId: integrationConnections.accountId,
-        needsReconnection: integrationConnections.needsReconnection,
-      })
-      .from(integrationConnections)
-      .where(
-        and(
-          eq(integrationConnections.integrationId, packageId),
-          eq(integrationConnections.spaceId, context.spaceId),
-          actorOrSharedFilter(context.actor, integrationConnections),
-          narrow,
-        ),
-      )
-      // Stable candidate order in the 409.
-      .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id))
-  );
-}
-
-type SelectableRow = Awaited<ReturnType<typeof loadSelectableRows>>[number];
+type SelectableRow = typeof integrationConnections.$inferSelect;
 
 function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
   const { id, authKey, credentialsEncrypted, expiresAt, scopesGranted, clientRef } = row;
   return { id, authKey, credentialsEncrypted, expiresAt, scopesGranted, clientRef };
 }
 
-/**
- * A resolution error as a 409 of its own — the run surfaces' item (same
- * translator, same candidate shape) under the same code, so the caller
- * retries naming one of the candidates in `X-Connection-Id`.
- */
+function mustChoose(
+  packageId: string,
+  candidateConnections: ConnectionCandidate[],
+  reason: string,
+): ApiError {
+  return resolutionConflict({
+    integrationId: packageId,
+    code: "must_choose_connection",
+    message: `${reason} for '${packageId}' — name one with the X-Connection-Id header.`,
+    candidateConnections,
+  });
+}
+
 function resolutionConflict(error: ConnectionResolutionError): ApiError {
   const item = translateResolutionError(error);
   return new ApiError({
@@ -2359,19 +2266,13 @@ export async function lockConnectionLabels(
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key})::bigint)`);
 }
 
-/**
- * `label`, else its first " (n)" form no row of the (space, integration) holds,
- * the base cut so the whole stays within {@link CONNECTION_LABEL_MAX}. Call
- * under {@link lockConnectionLabels}.
- */
+/** Call under {@link lockConnectionLabels}. */
 async function firstFreeLabel(
   tx: Tx,
   spaceId: string,
   integrationId: string,
   label: string,
 ): Promise<string> {
-  // Every candidate starts with this stem — no " (n)" needs more room.
-  const stem = fitLabel(label, CONNECTION_LABEL_MAX - LONGEST_LABEL_SUFFIX);
   const rows = await tx
     .select({ label: integrationConnections.label })
     .from(integrationConnections)
@@ -2379,29 +2280,10 @@ async function firstFreeLabel(
       and(
         eq(integrationConnections.spaceId, spaceId),
         eq(integrationConnections.integrationId, integrationId),
-        sql`starts_with(${integrationConnections.label}, ${stem})`,
       ),
     );
-  const taken = new Set(rows.map((row) => row.label));
-  if (!taken.has(label)) return label;
-  for (let n = 2; ; n++) {
-    const suffix = ` (${n})`;
-    const candidate = `${fitLabel(label, CONNECTION_LABEL_MAX - suffix.length)}${suffix}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-}
-
-/** " (999999999)" — more rows than one (space, integration) will ever hold. */
-const LONGEST_LABEL_SUFFIX = 12;
-
-/** `label` cut to `max` UTF-16 units (the unit the label check counts) on a code-point boundary. */
-function fitLabel(label: string, max: number): string {
-  let out = "";
-  for (const ch of label) {
-    if (out.length + ch.length > max) break;
-    out += ch;
-  }
-  return out.trimEnd();
+  const taken = rows.map((row) => row.label);
+  return dedupeLabel(label, taken, { maxLength: CONNECTION_LABEL_MAX });
 }
 
 /**
@@ -2453,8 +2335,7 @@ export async function persistCredentialBundle(
     // mix of declared auths (OAuth + PAT + custom).
     //
     // Label: identity or `labelHint` (" (n)"-suffixed when taken), else "Connexion N" past the
-    // highest N across EVERY owner — free by construction. Labels are unique per
-    // (space, integration); the advisory lock serialises the reads that pick one.
+    // highest N across EVERY owner — unique per (space, integration) under the advisory lock.
     const namedLabel = [displayAccountId(input.accountId), input.labelHint]
       .map((raw) => (raw ? toMintedLabel(raw) : ""))
       .find((label) => label.length > 0);
@@ -2864,14 +2745,9 @@ export async function listUsableIntegrationsForActor(
 }
 
 /**
- * 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names one of
- * `ids` (the sets have no FK): each binds whole for every member of the space, so removing one
- * of its connections would fail everyone's runs at once. A member pin never blocks — it is that
- * member's own pick, and their next run reports `pinned_connection_unavailable`.
- *
- * Runs in the transaction of the unshare/delete it guards, after locking the rows
- * ({@link lockConnectionRows}): a pin or default upsert racing it either committed first (and is
- * seen here) or waits and then finds the row unshared or gone.
+ * 409 `connection_pinned` while an admin pin or an org default names one of `ids`: each binds
+ * whole for every member of the space, so removing a member would fail everyone's runs. A member
+ * pin never blocks — its owner's next run reports `pinned_connection_unavailable`.
  */
 export async function assertConnectionsUnpinned(
   tx: Tx,
@@ -2879,7 +2755,6 @@ export async function assertConnectionsUnpinned(
   refused: string,
 ): Promise<void> {
   if (ids.length === 0) return;
-  await lockConnectionRows(tx, ids, "update");
   const pins = await tx
     .select({ id: integrationPins.id })
     .from(integrationPins)
@@ -2907,22 +2782,15 @@ export async function assertConnectionsUnpinned(
 }
 
 /**
- * Delete one connection row. Used by the "disconnect" button per auth
- * (or per account, when multi-account). In the same transaction the row
- * leaves the OWNER's own member pins and schedule overrides — their act, so their
- * references follow it; an emptied member pin is dropped (the resolver falls back), an emptied
- * schedule override disables its schedule (see {@link dropConnectionFromOwnSchedules}).
- * Other members' pins and schedules keep the id and fail loudly until re-picked:
- * a set never shrinks behind them.
- *
- * @returns the rewritten schedule rows: the caller re-arms their jobs with
- *   `resyncScheduleJobs` (scheduler — not imported here, it would close a cycle).
+ * Delete one connection row and drop it from its OWNER's member pins and schedule overrides;
+ * other members' keep the id and fail loudly. Returns the schedules it disabled, whose jobs the
+ * caller removes once committed (importing the scheduler here would close a cycle).
  */
 export async function deleteIntegrationConnection(
   scope: SpaceScope | ActorScope,
   connectionId: string,
   actor: Actor,
-): Promise<(typeof schedules.$inferSelect)[]> {
+): Promise<{ disabledScheduleIds: string[] }> {
   // Confirm the target space belongs to the caller's org before touching
   // any connection — same escalation guard the other connection mutations run.
   // Without it a caller could pass a space id from another org and the
@@ -2965,7 +2833,7 @@ export async function deleteIntegrationConnection(
     }
     const id = deleted[0]!.id;
     if (actor.type === "user") await dropFromOwnMemberPins(tx, id, actor.id);
-    return dropConnectionFromOwnSchedules(tx, id, actor);
+    return { disabledScheduleIds: await dropConnectionFromOwnSchedules(tx, id, actor) };
   });
 }
 
@@ -2987,10 +2855,7 @@ async function dropFromOwnMemberPins(tx: Tx, connectionId: string, userId: strin
     .where(holding);
 }
 
-/**
- * `connection_overrides` names `connectionId` in one of its sets. The id is a jsonpath
- * variable, never spliced into the path.
- */
+/** `connection_overrides` names `connectionId` (a jsonpath variable, never spliced). */
 export function scheduleOverridesName(connectionId: string): SQL {
   return sql`jsonb_path_exists(
     ${schedules.connectionOverrides}, '$.*[*] ? (@ == $id)', jsonb_build_object('id', ${connectionId}::text)
@@ -2998,46 +2863,37 @@ export function scheduleOverridesName(connectionId: string): SQL {
 }
 
 /**
- * Remove `connectionId` from the override sets of `actor`'s OWN schedules, in the caller's
- * transaction: deleting a connection is its owner's act, so their schedules follow it. A set that
- * only shrinks keeps the schedule armed. A set it EMPTIES drops its integration AND disables the
- * schedule: falling back to the default resolution would silently switch (or leave ambiguous) the
- * account an unattended run acts as, so the owner re-picks and re-enables it instead. An emptied
- * map is stored NULL. Another actor's schedule keeps the id and fails loudly.
- *
- * @returns the rewritten rows — the caller passes them to `resyncScheduleJobs` (scheduler) once
- *   the transaction has committed, which removes a disabled one's job (a fire reads the row, so a
- *   kept one needs nothing more).
+ * Remove `connectionId` from `actor`'s OWN schedule overrides; emptying a set disables the
+ * schedule (a fallback would silently change its account). Returns the disabled ids.
  */
 async function dropConnectionFromOwnSchedules(
   tx: Tx,
   connectionId: string,
   actor: Actor,
-): Promise<(typeof schedules.$inferSelect)[]> {
+): Promise<string[]> {
   const held = await tx
     .select({ id: schedules.id, connectionOverrides: schedules.connectionOverrides })
     .from(schedules)
     .where(and(actorFilter(actor, schedules), scheduleOverridesName(connectionId)))
     .for("update");
-  const rewritten: (typeof schedules.$inferSelect)[] = [];
+  const disabled: string[] = [];
   for (const { id, connectionOverrides } of held) {
     const kept = Object.entries(connectionOverrides ?? {}).flatMap(([integrationId, ids]) => {
       const rest = ids.filter((c) => c !== connectionId);
       return rest.length > 0 ? [[integrationId, rest] as const] : [];
     });
     const emptiedASet = kept.length < Object.keys(connectionOverrides ?? {}).length;
-    const [row] = await tx
+    await tx
       .update(schedules)
       .set({
         connectionOverrides: kept.length > 0 ? Object.fromEntries(kept) : null,
         ...(emptiedASet ? { enabled: false, nextRunAt: null } : {}),
         updatedAt: new Date(),
       })
-      .where(eq(schedules.id, id))
-      .returning();
-    if (row) rewritten.push(row);
+      .where(eq(schedules.id, id));
+    if (emptiedASet) disabled.push(id);
   }
-  return rewritten;
+  return disabled;
 }
 
 /**

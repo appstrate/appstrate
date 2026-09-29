@@ -43,6 +43,7 @@ import {
   terminalRunStatusValues,
   type RunStatus,
 } from "@appstrate/core/run-status";
+import { ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
 import { extractFileIds } from "@appstrate/core/file-uri";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
@@ -51,7 +52,7 @@ import { scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { runLogDataSchema } from "../../lib/jsonb-schemas.ts";
-import { ApiError, conflict } from "../../lib/errors.ts";
+import { ApiError, conflict, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
 import { detachOrDeleteContainedFiles } from "../files.ts";
 import { enqueueStorageDeletion } from "../storage-deletion.ts";
@@ -1043,6 +1044,28 @@ export async function getRunAttribution(
     .where(and(eq(runs.id, runId), eq(runs.orgId, orgId)))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * The in-flight run an `X-Run-Id` names: unknown, other-org and (with `spaceId`) other-space ids
+ * are one 404, no existence probe; not `owner`'s (when set) is 403; finished is 400.
+ */
+export async function requireAttributableRun(input: {
+  orgId: string;
+  runId: string;
+  spaceId?: string | null;
+  owner?: Actor | null;
+}): Promise<NonNullable<Awaited<ReturnType<typeof getRunAttribution>>>> {
+  const { orgId, runId, spaceId, owner } = input;
+  const run = await getRunAttribution(orgId, runId);
+  if (!run || (spaceId && run.spaceId !== spaceId)) throw notFound(`run ${runId} not found`);
+  if (owner && (owner.type === "user" ? run.userId : run.endUserId) !== owner.id) {
+    throw forbidden("X-Run-Id does not reference a run of the calling actor");
+  }
+  if (!ACTIVE_RUN_STATUSES.has(run.status)) {
+    throw invalidRequest(`run ${runId} is no longer active`, "X-Run-Id");
+  }
+  return run;
 }
 
 export async function getRecentRuns(

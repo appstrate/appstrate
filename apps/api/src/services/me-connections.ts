@@ -16,7 +16,7 @@
  */
 
 import { db } from "@appstrate/db/client";
-import { and, arrayContains, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, arrayContains, asc, eq, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import {
   spacePackages,
   packageShares,
@@ -60,6 +60,22 @@ export type MeConnectionAuthority =
   { kind: "user_global" } | { kind: "bound"; orgId: string; spaceId?: string };
 
 /**
+ * A `bound` authority's org (and space, when it pins one) as a WHERE conjunct — in the SQL, so a
+ * bound credential can only ever SELECT rows inside its binding. Nothing for `user_global`.
+ */
+function authorityFilter(
+  authority: MeConnectionAuthority,
+  orgId: AnyColumn,
+  spaceId: AnyColumn,
+): SQL | undefined {
+  if (authority.kind !== "bound") return undefined;
+  return and(
+    eq(orgId, authority.orgId),
+    authority.spaceId ? eq(spaceId, authority.spaceId) : undefined,
+  );
+}
+
+/**
  * The integration ids ONE agent's draft manifest declares, projected as a
  * `text[]` — so the reuse count below never pulls a whole `draft_manifest`
  * across the wire, and needs no LATERAL join outside the query builder.
@@ -80,17 +96,6 @@ async function listAllActorIntegrationConnections(
   actor: Actor,
   authority: MeConnectionAuthority,
 ): Promise<MeConnectionSourceGroup[]> {
-  const ownerPredicate = actorFilter(actor, integrationConnections);
-  // Authority scope lands in the WHERE clause itself (not a post-filter): a
-  // bound credential can only ever SELECT rows inside its own binding.
-  const authorityPredicates =
-    authority.kind === "bound"
-      ? [
-          eq(spaces.orgId, authority.orgId),
-          ...(authority.spaceId ? [eq(integrationConnections.spaceId, authority.spaceId)] : []),
-        ]
-      : [];
-
   const rows = await db
     .select({
       connectionId: integrationConnections.id,
@@ -110,7 +115,12 @@ async function listAllActorIntegrationConnections(
     })
     .from(integrationConnections)
     .innerJoin(spaces, eq(integrationConnections.spaceId, spaces.id))
-    .where(and(ownerPredicate, ...authorityPredicates));
+    .where(
+      and(
+        actorFilter(actor, integrationConnections),
+        authorityFilter(authority, spaces.orgId, integrationConnections.spaceId),
+      ),
+    );
 
   if (rows.length === 0) return [];
 
@@ -263,7 +273,7 @@ export async function listMeConnections(
 }
 
 /** One of the caller's member pins that deleting a connection would shrink. */
-export interface OwnPinHoldingConnection {
+interface OwnPinHoldingConnection {
   agent_package_id: string;
   agent_display_name: string;
   integration_package_id: string;
@@ -272,7 +282,7 @@ export interface OwnPinHoldingConnection {
 }
 
 /** One of the caller's schedules whose override set for an integration names the connection. */
-export interface OwnScheduleHoldingConnection {
+interface OwnScheduleHoldingConnection {
   scheduleId: string;
   schedule_name: string | null;
   agent_package_id: string;
@@ -331,12 +341,7 @@ async function listOwnPinsHoldingConnection(
       and(
         eq(integrationPins.userId, actor.id),
         arrayContains(integrationPins.connectionIds, [connectionId]),
-        ...(authority.kind === "bound"
-          ? [
-              eq(spaces.orgId, authority.orgId),
-              ...(authority.spaceId ? [eq(integrationPins.spaceId, authority.spaceId)] : []),
-            ]
-          : []),
+        authorityFilter(authority, spaces.orgId, integrationPins.spaceId),
       ),
     )
     .orderBy(asc(integrationPins.packageId), asc(integrationPins.integrationId));
@@ -372,12 +377,7 @@ async function listOwnSchedulesHoldingConnection(
       and(
         actorFilter(actor, schedules),
         scheduleOverridesName(connectionId),
-        ...(authority.kind === "bound"
-          ? [
-              eq(schedules.orgId, authority.orgId),
-              ...(authority.spaceId ? [eq(schedules.spaceId, authority.spaceId)] : []),
-            ]
-          : []),
+        authorityFilter(authority, schedules.orgId, schedules.spaceId),
       ),
     )
     .orderBy(asc(schedules.packageId), asc(schedules.createdAt));

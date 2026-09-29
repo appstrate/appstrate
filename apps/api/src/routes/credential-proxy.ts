@@ -18,9 +18,8 @@
  *     doesn't fit an endpoint that reaches third-party providers.
  *   - Explicit `credential-proxy:call` scope — NOT granted by default
  *   - Per-space scope (principal cannot reach providers in another space)
- *   - Run binding — `X-Run-Id` must name an in-flight run of the caller, and
- *     the call reaches only the connections that run's kickoff bound; without
- *     it only the space-level rules (org defaults) apply, not the per-agent pins
+ *   - Run binding — `X-Run-Id` confines the call to its run's bound connections
+ *     (`selectAccessibleConnection`)
  *   - Rate-limit: 100 req/min per principal (configurable via
  *     `CREDENTIAL_PROXY_LIMITS.rate_per_min`)
  *   - Session binding keyed on a namespaced principal id (`apikey:<id>`
@@ -38,11 +37,10 @@ import type { Context } from "hono";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 // Streaming cap — single-sourced from the shared outbound-HTTP engine, the
-// same module the in-container resolvers enforce it from. It used to be a
-// third private copy of the literal here, so a change to the shared value
-// silently desynchronised this route from every runner. The streaming/buffered
-// decision is header-driven (X-Stream-Request), not threshold-driven, so only
-// the hard cap is needed here.
+// same module the in-container resolvers enforce it from, so this route and
+// every runner apply one value. The streaming/buffered decision is
+// header-driven (X-Stream-Request), not threshold-driven, so only the hard cap
+// is needed here.
 import { MAX_STREAMED_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
 
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
@@ -105,21 +103,11 @@ export function createCredentialProxyRouter() {
       const target = c.req.header("X-Target");
       const sessionId = c.req.header("X-Session-Id");
       const substituteBody = readFlagHeader(c, "X-Substitute-Body");
-      // X-Run-Id is optional — a runner executing a run (`appstrate run
-      // --report`) sends it on every call. It must name an in-flight run of
-      // this actor in this space, and binds the call to that run's snapshot
-      // (`runBoundSelection`): every cascade layer, agent-level ones included.
-      // Without it no agent is in play, so only the space-level rules hold
-      // (org defaults, then the named or the actor's own connection) — the
-      // per-agent admin and member pins cannot apply to such a call.
+      // X-Run-Id is optional — a runner executing a run (`appstrate run --report`) sends it.
       const runIdHeader = c.req.header("X-Run-Id");
       const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
-      // X-Connection-Id is optional — validated in the selector against the
-      // actor's accessible set AND against `X-Integration-Id`: an id of a
-      // different integration never resolves, so this header cannot inject
-      // another integration's credentials under this integration's manifest.
-      // Under X-Run-Id it must name a member of the run's bound set; under an
-      // enforced org default, a member of the default's set.
+      // X-Connection-Id is optional; the selector binds it to `X-Integration-Id`, so it can never
+      // inject another integration's credentials under this integration's manifest.
       const explicitConnectionHeader = c.req.header("X-Connection-Id");
       const explicitConnectionId =
         explicitConnectionHeader && explicitConnectionHeader.length > 0
@@ -168,11 +156,6 @@ export function createCredentialProxyRouter() {
       const userId = c.get("user").id;
       const endUser = c.get("endUser");
 
-      // The actor selects which `integration_connections` row is decrypted:
-      //   - `Appstrate-User` impersonation → the end-user's connection
-      //   - dashboard / CLI-JWT / API-key callers → the platform user's
-      //     connections, plus the `shared_with_org` ones when named or set
-      //     as an org default (`selectAccessibleConnection`).
       const actor = getActor(c);
       const run = runId ? runBoundSelection({ orgId, spaceId, runId, integrationId, actor }) : null;
 

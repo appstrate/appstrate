@@ -80,11 +80,7 @@ interface ProxyCallInput {
    * against the actor's accessible set).
    */
   connectionId?: string;
-  /**
-   * The run named by `X-Run-Id`: confines the call to the connections that
-   * run's kickoff bound, re-checked as the actor's and in flight on every
-   * selection — the 401 refresh included.
-   */
+  /** The run named by `X-Run-Id` — confines the call to the connections it bound. */
   run?: RunBoundSelection;
 
   /** Scoped integration package name (e.g. `@afps/gmail`). */
@@ -250,9 +246,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     ...(input.run ? { run: input.run } : {}),
   };
   let resolved;
-  // Both 401-refresh paths NAME the connection the call used: re-running the
-  // selection could land elsewhere (a connection added or a default changed
-  // since). Naming still re-checks reach — run membership, enforced default.
+  // Both 401-refresh paths NAME the connection the call used: a new selection could pick another.
   let refreshSelection;
   try {
     const result = await resolveIntegrationProxyCredentials(selection);

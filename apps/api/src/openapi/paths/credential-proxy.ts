@@ -146,7 +146,9 @@ const proxyParameters = [
       "never used unless named or set as a default), none at all a `404`, several a " +
       "`409 must_choose_connection`. A default set of one is used, several are a " +
       "`409 must_choose_connection` over the set, and a member the caller cannot reach is a " +
-      "`409 pinned_connection_unavailable`. A non-uuid value is a `400`; mismatched or " +
+      "`409 pinned_connection_unavailable`, and a bound connection whose credentials need " +
+      "reconnecting (a default's member included) a `409 needs_reconnection`. A non-uuid " +
+      "value is a `400`; mismatched or " +
       "unknown ids surface as `404 — no credentials`.",
     schema: { type: "string", format: "uuid" },
   },
@@ -217,7 +219,9 @@ const proxyResponses = {
       "set, the default's set, else every own and shared connection), with `label`, " +
       "`account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in " +
       "`X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a " +
-      "connection the caller cannot reach (deleted or unshared); an admin must fix the default.",
+      "connection the caller cannot reach (deleted or unshared); an admin must fix the default. " +
+      "`needs_reconnection` — (no run) the connection that would be bound, or a member of the " +
+      "org default, needs its owner to reconnect it.",
     content: {
       "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
     },

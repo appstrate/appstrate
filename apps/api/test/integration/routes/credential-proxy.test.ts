@@ -36,7 +36,6 @@ import {
   integrationOrgDefaults,
 } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
-import { eq } from "drizzle-orm";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   localIntegrationManifest,
@@ -829,28 +828,6 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
     });
     const res = await call({ "X-Run-Id": run.id });
     expect(res.status).toBe(404);
-    expect(upstreamAuth).toEqual([]);
-  });
-
-  it("without X-Run-Id falls back to the actor's single own connection", async () => {
-    await db.delete(integrationConnections).where(eq(integrationConnections.id, own2));
-    const res = await call({});
-    expect(res.status).toBe(200);
-    expect(upstreamAuth).toEqual(["Bearer tok-own-1"]);
-  });
-
-  it("without X-Run-Id and no own connection, a colleague's shared one is a 409 candidate — never picked", async () => {
-    await db.delete(integrationConnections).where(eq(integrationConnections.userId, ctx.user.id));
-    const res = await call({});
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as {
-      code: string;
-      errors: { candidate_connections: { id: string; owned_by_actor: boolean }[] }[];
-    };
-    expect(body.code).toBe("must_choose_connection");
-    expect(body.errors[0]!.candidate_connections).toEqual([
-      expect.objectContaining({ id: shared, owned_by_actor: false }),
-    ]);
     expect(upstreamAuth).toEqual([]);
   });
 

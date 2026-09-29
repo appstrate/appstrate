@@ -33,6 +33,7 @@ import {
 } from "../../../src/services/credential-proxy/integration-resolver.ts";
 import { selectAccessibleConnection } from "../../../src/services/integration-connections.ts";
 import { ApiError, type ResolutionFieldError } from "../../../src/lib/errors.ts";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 
 const INTEGRATION_ID = "@official/gmail";
 
@@ -551,7 +552,7 @@ describe("credential-proxy integration-resolver", () => {
       expect(named.connectionId).toBe(liveId);
     });
 
-    it("picks a lone own connection even when it needs reconnection (no silent switch)", async () => {
+    it("reports a lone dead own connection as 409 needs_reconnection — never switches to the shared one", async () => {
       const colleague = await createTestUser();
       await seedConnection({ userId: colleague.id, accountId: "shared", sharedWithOrg: true });
       const deadId = await seedConnection({
@@ -560,8 +561,12 @@ describe("credential-proxy integration-resolver", () => {
         needsReconnection: true,
       });
 
-      const resolved = await resolveIntegrationProxyCredentials(input());
-      expect(resolved.connectionId).toBe(deadId);
+      const err = (await rejectionOf(resolveIntegrationProxyCredentials(input()))) as ApiError;
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err.status).toBe(409);
+      expect(err.code).toBe("needs_reconnection");
+      const [item] = err.fieldErrors as ResolutionFieldError[];
+      expect(item!.connection_id).toBe(deadId);
     });
 
     it("counts only own connections on a declared auth", async () => {
@@ -571,19 +576,21 @@ describe("credential-proxy integration-resolver", () => {
         spaceId: ctx.defaultSpaceId,
         actor: { type: "user" as const, id: ctx.user.id },
       };
+      const manifest = gmailManifest(token.url) as unknown as IntegrationManifest;
+      const primary = manifest.auths!.primary!;
 
       const unpinned = await rejectionOf(
-        selectAccessibleConnection(INTEGRATION_ID, ["primary", "secondary"], null, context),
+        selectAccessibleConnection(
+          INTEGRATION_ID,
+          { ...manifest, auths: { primary, secondary: primary } },
+          null,
+          context,
+        ),
       );
       expect((unpinned as ApiError).code).toBe("must_choose_connection");
 
       // An undeclared auth key is never picked.
-      const primaryOnly = await selectAccessibleConnection(
-        INTEGRATION_ID,
-        ["primary"],
-        null,
-        context,
-      );
+      const primaryOnly = await selectAccessibleConnection(INTEGRATION_ID, manifest, null, context);
       expect(primaryOnly!.id).toBe(primaryId);
     });
   });

@@ -35,7 +35,6 @@ import {
 } from "../lib/space-role.ts";
 import { assertCanGrantSpaceRole, assertCanManageSpaceMember } from "../lib/space-role-policy.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
-import { lockConnectionRows } from "./connection-row-locks.ts";
 
 /** Assignment as the write routes accept it: one preset, or one custom role id. */
 export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
@@ -277,8 +276,8 @@ export interface SpaceMemberRemoval {
  * that admitted the request was never checked against. A concurrent
  * `PATCH /api/spaces/{id}` widening `default_role` is therefore NOT serialized
  * against this removal's authority bound: the request-scoped window RBAC spec §4.4
- * states and §13.8 declines to lock. The space row IS share-locked, but only so
- * the connection unshare reads the space as a concurrent access change left it.
+ * states and §13.8 declines to lock. The space row IS share-locked, but only for
+ * the connection unshare ({@link lockSpaceRow}).
  *
  * @throws 403 when the caller could not have granted the standing left behind,
  *   or the one being dropped.
@@ -292,8 +291,6 @@ export async function removeSpaceMember(params: {
   const { orgId, space, userId } = params;
   return db.transaction(async (tx) => {
     const target = await lockOrgMember(tx, orgId, userId);
-    // Before the unshare below reads the space: a concurrent close (`updateSpace`) and this
-    // removal would otherwise each read the other's pre-commit state and neither unshare.
     await lockSpaceRow(tx, space.id);
     // The standing is the TARGET's, so the caller id is theirs — a personal
     // space resolves `admin` for its owner and nothing for anyone else. No
@@ -356,16 +353,10 @@ export async function deleteSpaceMembershipsInOrg(
 }
 
 /**
- * Unshare every user-owned shared connection in `scope` whose owner no longer
- * reaches the connection's space — call it in the SAME transaction as any write
- * that can take a user's access away. A departed member's shared credentials
- * must not keep powering colleagues' runs, and once they have left nobody else
- * may unshare them. "Reaches" is {@link resolveSpaceRole}; no org membership
- * row means no access anywhere in the org.
- *
- * Deliberately NOT guarded by `assertConnectionsUnpinned`: an admin pin or an
- * org default naming such a connection then fails loudly at resolution
- * (`pinned_connection_unavailable`) instead of blocking the access change.
+ * Unshare every user-owned shared connection in `scope` whose owner no longer reaches its space
+ * ({@link resolveSpaceRole}; no org membership, no access) — in the SAME transaction as any write
+ * that can take access away. Not guarded by `assertConnectionsUnpinned`: a pin or default naming
+ * one fails loudly at resolution (`pinned_connection_unavailable`) instead.
  *
  * @returns the ids unshared, for the caller's audit.
  */
@@ -383,8 +374,6 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
     ),
   );
   if (lost.length === 0) return [];
-  // In id order, like every other connection-row locker — the UPDATE alone locks in scan order.
-  await lockConnectionRows(tx, lost, "update");
   await tx
     .update(integrationConnections)
     .set({ sharedWithOrg: false, updatedAt: new Date() })
@@ -395,11 +384,8 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
 /**
  * Refuse sharing a connection whose owner no longer reaches its space — the share-side twin of
  * {@link unshareConnectionsOfOwnersWithoutAccess}, same predicate. Call it in the sharing
- * transaction, before the write: it locks the owner's org membership (what a member removal and
- * an org role change lock) and the space row (what closing the space updates), so a share and
- * an access loss serialize and whichever commits second sees the other — without the locks each
- * reads the other's pre-commit state and the connection stays shared by someone without access.
- * No-op for a connection an end user owns: membership does not govern those.
+ * transaction, before the write (locks: {@link lockSpaceRow}). No-op for a connection an end
+ * user owns: membership does not govern those.
  *
  * @throws 409 `connection_owner_without_access`.
  */
@@ -430,10 +416,9 @@ export async function assertOwnerReachesSpaceForShare(tx: Tx, connectionId: stri
 }
 
 /**
- * Share-lock, in id order, every space of `orgId` where `userId` owns a shared connection — for
- * an org role change, whose unshare would otherwise read a concurrently closed space as still
- * open while the close reads the old role (neither unshares). A share landing meanwhile needs
- * the member lock the caller already holds, so the set cannot grow under it.
+ * Share-lock, in id order, every space of `orgId` where `userId` owns a shared connection — the
+ * org role change's side of {@link lockSpaceRow}. The caller holds the member lock, so no share
+ * can grow the set meanwhile.
  */
 export async function lockSpacesOfSharedConnections(
   tx: Tx,
@@ -458,8 +443,11 @@ export async function lockSpacesOfSharedConnections(
 }
 
 /**
- * Share-lock a space row: conflicts with the UPDATE that closes the space or changes its default
- * role, not with other share-lockers (two member removals need not wait on each other).
+ * Share-lock a space row: conflicts with the UPDATE that closes the space, not with other
+ * share-lockers. Share vs access loss: a share, a member removal, an org role change and a space
+ * close each first lock the owner's `org_members` row (`lockOrgMember`) and/or the space row, so
+ * whichever commits second sees the others and no connection stays shared by an owner without
+ * access.
  */
 async function lockSpaceRow(tx: Tx, spaceId: string): Promise<void> {
   await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.id, spaceId)).for("share");

@@ -110,16 +110,16 @@ End-user schedules retain their pinned-space identity check.
 an end-user of the space. A schedule running as ANOTHER platform member (`actor.userId` other
 than the caller's) runs every fire with that member's reach — every connection they hold — so
 naming such an actor, and any write to a schedule whose stored actor is such a member,
-additionally requires the org role `owner` or `admin`, read through `callerOrgRole` (the role
+additionally requires an org role in `ORG_ROLES_WITH_FULL_ACCESS` (`owner`, `admin`), read through `callerOrgRole` (the role
 pinned at admission, or a view-as persona's) — `mayGovernMemberSchedule`,
 `apps/api/src/routes/schedules.ts`. A `builder`, a custom role holding those permissions, and a
 space `admin` whose org role is `member` all get `403 forbidden`:
 
 - with `param: actor` on schedule creation, or on a `PATCH` that changes the actor, naming
-  another member (`assertMayChooseMemberActor`) — asked before the membership lookup, so a
+  another member (`assertMayGovern`) — asked before the membership lookup, so a
   refused caller cannot probe who is a member either;
 - on any `PATCH` (whatever the fields, enabling and disabling included) or `DELETE` of a
-  schedule already running as another member (`assertMayWriteSchedule`), asked before the body
+  schedule already running as another member (`assertMayGovern`), asked before the body
   is read.
 
 The member a schedule runs as still writes it. The SPA's actor picker (`ActorSelect`) lists
