@@ -59,10 +59,7 @@ async function initPGlite(): Promise<Db> {
   if (instance) {
     await Promise.all(instance.unlisten.splice(0).map((unlisten) => unlisten()));
   } else {
-    const created = new PGlite(dataDir);
-    // Cached only once ready: a failed open must not be reused by the next evaluation.
-    await created.waitReady;
-    instance = { client: created, unlisten: [] };
+    instance = { client: new PGlite(dataDir), unlisten: [] };
     pgliteInstances.set(dataDir, instance);
   }
   const { client, unlisten } = instance;
