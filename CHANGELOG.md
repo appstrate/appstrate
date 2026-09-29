@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   5. deploy: the new image applies drizzle **0077** at boot; it refuses a
      scalar override or snapshot, or a label held twice, left by a skipped
      `0032` (the batch rolls back whole, naming steps 3 and 4), but cannot
-     detect a skipped freeze or normalization;
+     detect a skipped outranked drop, freeze or normalization;
   6. reopen.
 
   `0033` unshares every `shared_with_org` connection whose owner no longer
@@ -45,7 +45,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      a set — a shape only the new readers accept; a value that is neither a
      set nor the scalar it wraps (a string override, an object snapshot)
      raises before any write;
-  2. freezes, as member pins, the shared connections the old fallback bound
+  2. drops from each schedule's `connection_overrides` every integration
+     whose set names a connection other than the one governing it — the admin
+     pin for that (space, agent, integration), else the space's enforced org
+     default. The previous release ignored such an override in silence and
+     bound the governing connection; this one refuses it with
+     `override_outranked` (see `### Changed`), so the schedule would record a
+     failed run at every fire. Dropping the key restores exactly the old
+     outcome: the fire inherits and the governing connection binds. An
+     override naming only that connection is kept, one left with no
+     integration becomes `NULL`, and the schedule's `enabled` is left as it is
+     (a disabled one is repaired too, so re-enabling it is not refused). Runs
+     are history and are not rewritten;
+  3. freezes, as member pins, the shared connections the old fallback bound
      implicitly (see `### Changed`): one pin per (space, agent, integration,
      user), taken from the most recent of the runs of the last 30 days and of
      the latest run that recorded a resolution of each enabled schedule,
@@ -54,7 +66,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      member pin or reachable org default decides, the integration's current
      manifest still declares the connection's auth, and neither the agent's
      draft nor its `latest` manifest pins (`auth_key`) another auth;
-  3. normalizes every label only as far as the label rule requires: a line
+  4. normalizes every label only as far as the label rule requires: a line
      break or tab becomes a space, any other control, invisible or
      bidirectional-override character is dropped, both ends are trimmed and
      the result is cut to 80 UTF-16 code units (an emoji counts 2). A label
@@ -62,7 +74,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      distinct labels are never merged. A label left empty becomes `NULL`, so
      0077 names it `Connexion N`. Such characters used to reach the agent's
      model verbatim;
-  4. renames every row but the oldest of a group sharing a (normalized) label
+  5. renames every row but the oldest of a group sharing a (normalized) label
      in its (space, integration) to `<base> (n)` — n the smallest numbers from
      2 no row holds, `<base>` the label cut so the whole stays within 80
      UTF-16 code units.
@@ -319,8 +331,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   or enforced org default governing that integration was silently dropped for
   that set, so the run used an account its caller had not chosen. It is now a
   `409 missing_integration_connection` item with the new resolver code
-  `override_outranked` — at kickoff, and at the write of an enabled schedule.
-  An override naming a subset of the governing set binds that subset.
+  `override_outranked` — at kickoff, at the write of an enabled schedule, and
+  at a scheduled fire, which records a failed run. An override naming a subset
+  of the governing set binds that subset. Existing schedules holding an
+  outranked override are repaired by `0032`, which drops the outranked
+  integration from it so the governing set binds as before (see
+  `### Operators`).
 - **BREAKING: a soft org default binds whole or fails, like every explicit
   layer.** A soft default naming a connection the actor cannot reach (unshared,
   its owner gone from the space) was skipped for the fallback, with a server

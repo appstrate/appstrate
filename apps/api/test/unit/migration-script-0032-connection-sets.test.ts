@@ -8,7 +8,8 @@
  *
  * Each freeze fixture is a connection the old fallback DID pick, and each
  * exercises one clause of the freeze: deleting that clause makes a pin appear
- * or vanish, or moves the counts the script prints.
+ * or vanish, or moves the counts the script prints. The `GOV_*` fixtures do the
+ * same for the outranked drop.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -48,6 +49,10 @@ const AUTH_PIN = "@acme0032/authpin";
 const AUTH_LATEST = "@acme0032/authlatest";
 const OVERRIDDEN = "@acme0032/overridden";
 const LABELS = "@acme0032/labels";
+/** Outranked drop: an admin pin (and an enforced default below it), an enforced default, a soft one. */
+const GOV_PIN = "@acme0032/gov-pin";
+const GOV_ENF = "@acme0032/gov-enforced";
+const GOV_SOFT = "@acme0032/gov-soft";
 const AGENT = "@acme0032/agent";
 const SHADOW = "@acme0032/inline-shadow";
 
@@ -178,7 +183,8 @@ beforeAll(async () => {
       ('${OWNED}', 'integration'), ('${ADMIN}', 'integration'), ('${MINE}', 'integration'),
       ('${DEFAULTED}', 'integration'), ('${UNREACH}', 'integration'), ('${EU}', 'integration'),
       ('${INLINE}', 'integration'), ('${AUTH_PIN}', 'integration'),
-      ('${AUTH_LATEST}', 'integration'), ('${OVERRIDDEN}', 'integration'), ('${LABELS}', 'integration');
+      ('${AUTH_LATEST}', 'integration'), ('${OVERRIDDEN}', 'integration'), ('${LABELS}', 'integration'),
+      ('${GOV_PIN}', 'integration'), ('${GOV_ENF}', 'integration'), ('${GOV_SOFT}', 'integration');
     INSERT INTO packages (id, type, draft_manifest) VALUES
       ('${AUTH_GONE}', 'integration', '{"auths": {"oauth": {}}}'),
       ('${AUTH_KEPT}', 'integration', '{"auths": {"primary": {}}}'),
@@ -233,6 +239,12 @@ beforeAll(async () => {
       ${bobShared(44, AUTH_PIN)},
       ${bobShared(45, AUTH_LATEST)},
       ${bobShared(46, OVERRIDDEN)},
+      ${bobShared(70, GOV_PIN)},
+      ${bobShared(71, GOV_PIN)},
+      ${bobShared(73, GOV_ENF)},
+      ${bobShared(74, GOV_ENF)},
+      ${bobShared(75, GOV_SOFT)},
+      ${bobShared(76, GOV_SOFT)},
       ${label(50, "Work\nMail")},
       ${label(51, "Ops\u0007Bot\u007F\u009B")},
       ${label(52, "‮gnp.exe")},
@@ -258,14 +270,31 @@ beforeAll(async () => {
        '{"${GMAIL}": "${conn(1)}"}'),
       ('sch_0032_array', '${AGENT}', '${ALICE}', '${ORG}', '${SPACE}', '0 * * * *', true,
        '{"${GMAIL}": ["${conn(1)}"]}'),
-      ('sch_0032_empty', '${AGENT}', '${ALICE}', '${ORG}', '${SPACE}', '0 * * * *', true, '{}');
+      ('sch_0032_empty', '${AGENT}', '${ALICE}', '${ORG}', '${SPACE}', '0 * * * *', true, '{}'),
+      -- GOV_PIN names a connection outside the admin pin; GOV_SOFT sits under a soft default
+      ('sch_0032_pin_out', '${AGENT}', '${ALICE}', '${ORG}', '${SPACE}', '0 * * * *', true,
+       '{"${GOV_PIN}": ["${conn(70)}", "${conn(71)}"], "${GOV_SOFT}": ["${conn(76)}"]}'),
+      -- the admin pin's own connection: a subset, though the enforced default names another
+      ('sch_0032_pin_subset', '${AGENT}', '${ALICE}', '${ORG}', '${SPACE}', '0 * * * *', true,
+       '{"${GOV_PIN}": ["${conn(70)}"]}'),
+      -- a scalar the enforced default outranks, its only key
+      ('sch_0032_enforced', '${AGENT}', '${ALICE}', '${ORG}', '${SPACE}', '0 * * * *', true,
+       '{"${GOV_ENF}": "${conn(74)}"}'),
+      -- a soft default, an admin pin on ANOTHER agent, Alice's member pin: none governs
+      ('sch_0032_soft', '${AGENT}', '${ALICE}', '${ORG}', '${SPACE}', '0 * * * *', true,
+       '{"${GOV_SOFT}": ["${conn(76)}"], "${MINE}": ["${conn(35)}"]}');
     INSERT INTO integration_org_defaults (space_id, integration_package_id, connection_id, enforce)
       VALUES ('${SPACE}', '${DRIVE}', '${conn(4)}', false),
              ('${SPACE}', '${DEFAULTED}', '${conn(37)}', false),
-             ('${SPACE}', '${UNREACH}', '${conn(39)}', false);
+             ('${SPACE}', '${UNREACH}', '${conn(39)}', false),
+             ('${SPACE}', '${GOV_PIN}', '${conn(71)}', true),
+             ('${SPACE}', '${GOV_ENF}', '${conn(73)}', true),
+             ('${SPACE}', '${GOV_SOFT}', '${conn(75)}', false);
     INSERT INTO integration_pins (space_id, package_id, integration_package_id, user_id, connection_id, created_by)
       VALUES ('${SPACE}', '${AGENT}', '${ADMIN}', NULL, '${conn(34)}', '${BOB}'),
-             ('${SPACE}', '${AGENT}', '${MINE}', '${ALICE}', '${conn(36)}', '${ALICE}');
+             ('${SPACE}', '${AGENT}', '${MINE}', '${ALICE}', '${conn(36)}', '${ALICE}'),
+             ('${SPACE}', '${AGENT}', '${GOV_PIN}', NULL, '${conn(70)}', '${BOB}'),
+             ('${SPACE}', '${SHADOW}', '${GOV_SOFT}', NULL, '${conn(75)}', '${BOB}');
     INSERT INTO runs
       (id, package_id, user_id, end_user_id, space_id, org_id, status, started_at, schedule_id,
        resolved_connections, connection_overrides)
@@ -309,9 +338,11 @@ afterAll(async () => {
 describe("scripts/migration/0032 — connection sets", () => {
   it("prints the size of every section, and 0 on every 'after' line", () => {
     expect(firstRunCounts).toEqual({
+      schedules_outranked_before: 2,
+      schedules_outranked_emptied_before: 1,
       runs_overrides_before: 1,
       runs_resolved_before: 8,
-      schedules_overrides_before: 1,
+      schedules_overrides_before: 2,
       implicit_shared_picks_before: 4,
       implicit_shared_picks_unpinned_after: 0,
       labels_to_normalize_before: 10,
@@ -321,6 +352,7 @@ describe("scripts/migration/0032 — connection sets", () => {
       labels_renamed: 7,
       duplicate_labels_after: 0,
       runs_overrides_after: 0,
+      schedules_outranked_after: 0,
       runs_resolved_after: 0,
       schedules_overrides_after: 0,
     });
@@ -348,7 +380,7 @@ describe("scripts/migration/0032 — connection sets", () => {
 
     const { rows: schedules } = await pg.query<{ id: string; overrides: unknown }>(
       `SELECT id, connection_overrides AS overrides FROM package_schedules
-       WHERE id LIKE 'sch_0032_%' AND connection_overrides IS NOT NULL ORDER BY id`,
+       WHERE id IN ('sch_0032_scalar', 'sch_0032_array', 'sch_0032_empty') ORDER BY id`,
     );
     expect(schedules).toEqual([
       { id: "sch_0032_array", overrides: { [GMAIL]: [conn(1)] } },
@@ -386,9 +418,31 @@ describe("scripts/migration/0032 — connection sets", () => {
     expect(rows.every((r) => r.created_by === ALICE)).toBe(true);
     const admin = await pg.query<{ integration: string; connection: string }>(
       `SELECT integration_package_id AS integration, connection_id::text AS connection
-       FROM integration_pins WHERE user_id IS NULL`,
+       FROM integration_pins WHERE user_id IS NULL AND integration_package_id = '${ADMIN}'`,
     );
     expect(admin.rows).toEqual([{ integration: ADMIN, connection: conn(34) }]);
+  });
+
+  it("drops a schedule override key the admin pin or the enforced org default outranks — the old cascade ignored it — and keeps a subset and what no governing layer outranks", async () => {
+    const { rows } = await pg.query<{ id: string; overrides: unknown; enabled: boolean }>(
+      `SELECT id, connection_overrides AS overrides, enabled FROM package_schedules
+       WHERE id IN ('sch_0032_pin_out', 'sch_0032_pin_subset', 'sch_0032_enforced', 'sch_0032_soft')
+       ORDER BY id`,
+    );
+    expect(rows).toEqual([
+      // the only key dropped: NULL, the service's "no overrides"; still enabled, governance binds
+      { id: "sch_0032_enforced", overrides: null, enabled: true },
+      // the outranked key dropped, the soft default's kept
+      { id: "sch_0032_pin_out", overrides: { [GOV_SOFT]: [conn(76)] }, enabled: true },
+      // the admin pin governs, not the enforced default below it
+      { id: "sch_0032_pin_subset", overrides: { [GOV_PIN]: [conn(70)] }, enabled: true },
+      // a soft default, another agent's admin pin, a member pin: kept verbatim
+      {
+        id: "sch_0032_soft",
+        overrides: { [GOV_SOFT]: [conn(76)], [MINE]: [conn(35)] },
+        enabled: true,
+      },
+    ]);
   });
 
   it("normalizes a label only as far as the label rule requires: line breaks to spaces, forbidden characters dropped, ends trimmed, cut to 80 UTF-16 units", async () => {

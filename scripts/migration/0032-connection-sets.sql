@@ -8,10 +8,10 @@
 -- because the freeze reads and writes the scalar `connection_id` columns `0077` folds and drops,
 -- and the dedupe is the precondition of `0077`'s unique index `idx_integration_conn_label`.
 -- Skipped, `0077`'s first statement refuses the batch on a scalar snapshot or override value or
--- on a label held twice, naming these steps; with neither, it lands and the freeze and the
--- normalization are simply missing.
+-- on a label held twice, naming these steps; with neither, it lands and the outranked drop, the
+-- freeze and the normalization are simply missing.
 --
--- Four sections in ONE transaction; each prints a "before" count and an "after" count that must
+-- Five sections in ONE transaction; each prints a "before" count and an "after" count that must
 -- read 0.
 --
 -- 1. SHAPE — the three snapshot columns hold SETS (a scalar becomes a one-element array; arrays
@@ -22,7 +22,20 @@
 --      runs.resolved_connections              { id: {…} }      → { id: [{…}] }
 --      package_schedules.connection_overrides { id: "<uuid>" } → { id: ["<uuid>"] }
 --
--- 2. FREEZE — the old fallback bound a colleague's shared connection implicitly; the new one binds
+-- 2. OUTRANKED — the old cascade let the governing layer silently outrank a schedule's frozen
+--    override; the new one refuses it (`override_outranked`), so such a schedule would record a
+--    failed run on every fire. The governing layer of a (space, agent, integration) is its admin
+--    pin (`user_id IS NULL`) if any, else the space's enforced org default (`enforce`) — one
+--    scalar `connection_id` each before `0077`. Every override key whose set names anything else
+--    is dropped; an override left with no key becomes NULL, what the service writes for "none".
+--    The fire then inherits and the governing layer binds, exactly as before. A set naming only
+--    the governing connection is a subset and is kept: it binds the same one. Ids are compared
+--    verbatim as text, as the resolver compares them. Every schedule, enabled or not (a disabled
+--    one would be refused when re-enabled), and `enabled` is left as it is; a key for an
+--    integration the agent does not declare is inert either way. Runs are history: not
+--    rewritten. Its "before" count reads either shape, so it prints beside SHAPE's.
+--
+-- 3. FREEZE — the old fallback bound a colleague's shared connection implicitly; the new one binds
 --    only the actor's single OWN connection. Each such pick becomes the member pin the member
 --    would have set (`user_id` = `created_by`, in the pre-`0077` scalar shape): one per (space,
 --    agent, integration, user), from the latest qualifying run among the last 30 days and the
@@ -37,7 +50,7 @@
 --    own no member pins: list their triples with the standalone query at the end, before the
 --    window.
 --
--- 3. NORMALIZE — every non-empty label is brought within what `connectionLabelProblem`
+-- 4. NORMALIZE — every non-empty label is brought within what `connectionLabelProblem`
 --    (`apps/api/src/lib/connection-label.ts`) accepts, and no further: line breaks → space, the
 --    code points it forbids (C0/DEL/C1, `isHiddenCodePoint`) dropped, both ends trimmed of what
 --    JS `trim()` strips, cut to 80 UTF-16 units and right-trimmed again; emptied → NULL (`0077`
@@ -45,7 +58,7 @@
 --    included — so two distinct legal labels are never merged into a needless " (2)". Runs before
 --    the dedupe, which must compare what the index will.
 --
--- 4. DEDUPE — within a (space, integration), every holder of a label after the oldest
+-- 5. DEDUPE — within a (space, integration), every holder of a label after the oldest
 --    (`created_at`, `id`) becomes "<base> (n)", n the smallest ≥ 2 the group does not hold, `base`
 --    cut so the result stays ≤ 80 UTF-16 units. It cannot collide with a held label, another
 --    rename, or a "Connexion N" `0077` mints. NULL and '' are left to `0077`'s backfill;
@@ -57,17 +70,53 @@
 -- Rows: NOT YET REHEARSED — rehearse on a restored dump and record every count here before the
 -- window.
 --
--- Rollback: none (collapsing a set is lossy); restore the pre-run `pg_dump`. Frozen pins and
--- renamed labels are ordinary rows their owners edit.
+-- Rollback: none (collapsing a set is lossy, a dropped override is gone); restore the pre-run
+-- `pg_dump`. Frozen pins and renamed labels are ordinary rows their owners edit.
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '120s';
 
+-- The (schedule, integration) override keys OUTRANKED drops: a governing connection exists and
+-- the set names anything else. Reads either shape — a scalar is read as a set of one — so the
+-- "before" line can precede SHAPE. At most one admin pin and one org default per key (their
+-- unique indexes), so each scalar subquery yields one row or none. A VIEW, so the "after" line
+-- re-evaluates it.
+CREATE TEMP VIEW _0032_outranked_overrides AS
+SELECT s.id AS schedule_id, e.k AS integration_id
+FROM package_schedules s
+CROSS JOIN LATERAL jsonb_each(s.connection_overrides) AS e(k, v)
+CROSS JOIN LATERAL (
+  SELECT coalesce(
+    (SELECT p.connection_id FROM integration_pins p
+      WHERE p.space_id = s.space_id
+        AND p.package_id = s.package_id
+        AND p.integration_package_id = e.k
+        AND p.user_id IS NULL),
+    (SELECT d.connection_id FROM integration_org_defaults d
+      WHERE d.space_id = s.space_id
+        AND d.integration_package_id = e.k
+        AND d.enforce = true)) AS id
+) AS governing
+WHERE governing.id IS NOT NULL
+  AND EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(
+           CASE jsonb_typeof(e.v) WHEN 'array' THEN e.v ELSE jsonb_build_array(e.v) END) AS o(id)
+    WHERE o.id <> to_jsonb(governing.id::text));
+
 -- ═══ 1. SHAPE ═══
 
--- VERIFY (before) — rows still holding a non-array value
+-- VERIFY (before) — rows still holding a non-array value, and the schedules OUTRANKED rewrites
+-- (`_emptied`: those left with no override at all)
 SELECT
+  (SELECT count(DISTINCT schedule_id) FROM _0032_outranked_overrides) AS schedules_outranked_before,
+  (SELECT count(*) FROM (
+     SELECT 1 FROM package_schedules s
+     JOIN _0032_outranked_overrides o ON o.schedule_id = s.id
+     GROUP BY s.id
+     HAVING s.connection_overrides - array_agg(o.integration_id) = '{}'::jsonb) emptied)
+                                                                  AS schedules_outranked_emptied_before,
   (SELECT count(*) FROM runs r
     WHERE r.connection_overrides IS NOT NULL
       AND EXISTS (SELECT 1 FROM jsonb_each(r.connection_overrides) AS e(k, v)
@@ -124,7 +173,20 @@ WHERE connection_overrides IS NOT NULL
   AND EXISTS (SELECT 1 FROM jsonb_each(connection_overrides) AS e(k, v)
                WHERE jsonb_typeof(v) <> 'array');
 
--- ═══ 2. FREEZE ═══
+-- ═══ 2. OUTRANKED ═══
+--
+-- Its "before" count prints with SHAPE's, its "after" count in the closing VERIFY.
+UPDATE package_schedules s
+SET connection_overrides = nullif(s.connection_overrides - o.keys, '{}'::jsonb),
+    updated_at = now()
+FROM (
+  SELECT schedule_id, array_agg(integration_id) AS keys
+  FROM _0032_outranked_overrides
+  GROUP BY schedule_id
+) o
+WHERE s.id = o.schedule_id;
+
+-- ═══ 3. FREEZE ═══
 --
 -- `connectionId` / `source` are the keys each snapshot element carries. Matched on `id::text`, so
 -- a malformed value matches nothing instead of failing a `::uuid` cast. Materialized once: the
@@ -253,7 +315,7 @@ WHERE NOT EXISTS (
 
 DROP TABLE _0032_implicit_shared_picks;
 
--- ═══ 3. NORMALIZE ═══
+-- ═══ 4. NORMALIZE ═══
 --
 -- A VIEW, so the "after" line re-evaluates the rewrite. `ascii()` is the code point (UTF-8
 -- database); `regexp_split_to_table(…, '')` splits by code point. `ws` is what JS `trim()` strips
@@ -309,7 +371,7 @@ WHERE normalized IS DISTINCT FROM label;
 
 DROP VIEW _0032_label_norm;
 
--- ═══ 4. DEDUPE ═══
+-- ═══ 5. DEDUPE ═══
 
 -- groups holding a non-empty label more than once
 SELECT count(*) AS duplicate_labels_before FROM (
@@ -392,8 +454,9 @@ SELECT count(*) AS duplicate_labels_after FROM (
   GROUP BY space_id, integration_package_id, label
   HAVING count(*) > 1) dup;
 
--- ═══ VERIFY (after) — all three must print 0 ═══
+-- ═══ VERIFY (after) — all four must print 0 ═══
 SELECT
+  (SELECT count(DISTINCT schedule_id) FROM _0032_outranked_overrides) AS schedules_outranked_after,
   (SELECT count(*) FROM runs r
     WHERE r.connection_overrides IS NOT NULL
       AND EXISTS (SELECT 1 FROM jsonb_each(r.connection_overrides) AS e(k, v)
@@ -407,13 +470,15 @@ SELECT
       AND EXISTS (SELECT 1 FROM jsonb_each(s.connection_overrides) AS e(k, v)
                    WHERE jsonb_typeof(v) <> 'array'))            AS schedules_overrides_after;
 
+DROP VIEW _0032_outranked_overrides;
+
 COMMIT;
 
 -- ═══ Standalone counts — read-only, before the window and after the fact ═══
 --
--- The dedupe and shape counts (the freeze and the normalization are sized by their "before"
--- lines on the rehearsal dump). After the run every `_todo` reads 0; the `_total` controls tell
--- "nothing to rewrite" from "nothing at all".
+-- The dedupe and shape counts (the outranked drop, the freeze and the normalization are sized by
+-- their "before" lines on the rehearsal dump). After the run every `_todo` reads 0; the `_total`
+-- controls tell "nothing to rewrite" from "nothing at all".
 --
 --   SELECT count(*) AS duplicate_labels_todo FROM (
 --     SELECT 1 FROM integration_connections
