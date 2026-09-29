@@ -295,6 +295,7 @@ export function createIntegrationCredentialsSource(
 ): IntegrationCredentialsSource {
   const fetchFn = options.fetchFn ?? fetch;
   const minRefreshIntervalMs = options.minRefreshIntervalMs ?? 5_000;
+  const logCtx = { integrationId: options.integrationId, connectionId: options.connectionId };
   let payload = options.initialPayload;
   // Transient-input substitution windows (connect-login P1). Empty by default —
   // the MITM listener behaves byte-identically to today unless a connect-login
@@ -353,7 +354,7 @@ export function createIntegrationCredentialsSource(
     const last = lastRefreshAt.get(authKey) ?? 0;
     if (now - last < minRefreshIntervalMs) {
       logger.info("integration credential refresh suppressed (cooldown)", {
-        integrationId: options.integrationId,
+        ...logCtx,
         authKey,
         cooldownMs: minRefreshIntervalMs,
         elapsedMs: now - last,
@@ -384,7 +385,7 @@ export function createIntegrationCredentialsSource(
       ok = await handler();
     } catch (err) {
       logger.warn("integration connect-login re-login handler failed", {
-        integrationId: options.integrationId,
+        ...logCtx,
         authKey,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -395,7 +396,7 @@ export function createIntegrationCredentialsSource(
     lastRefreshAt.set(authKey, Date.now());
     if (ok) {
       logger.info("integration connect-login session re-minted", {
-        integrationId: options.integrationId,
+        ...logCtx,
         authKey,
       });
     }
@@ -411,7 +412,7 @@ export function createIntegrationCredentialsSource(
       });
     } catch (err) {
       logger.warn("integration credential refresh fetch failed", {
-        integrationId: options.integrationId,
+        ...logCtx,
         authKey,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -423,7 +424,7 @@ export function createIntegrationCredentialsSource(
       // on the platform. The integration's next call will return 401
       // again; we don't want to chase it forever.
       logger.warn("integration credential refresh revoked", {
-        integrationId: options.integrationId,
+        ...logCtx,
         authKey,
         // W3 — definitive: the refresh token is dead, the user must reconnect.
         category: CREDENTIAL_FAILURE_RECONNECT_REQUIRED,
@@ -443,7 +444,7 @@ export function createIntegrationCredentialsSource(
       const authType = payload.auths.find((a) => a.authKey === authKey)?.authType;
       if (res.status !== 502 || authType === "oauth2") {
         logger.warn("integration credential refresh non-OK status", {
-          integrationId: options.integrationId,
+          ...logCtx,
           authKey,
           status: res.status,
         });
@@ -455,7 +456,7 @@ export function createIntegrationCredentialsSource(
       next = normalizeIntegrationCredentialsWire(await res.json());
     } catch (err) {
       logger.warn("integration credential refresh malformed JSON", {
-        integrationId: options.integrationId,
+        ...logCtx,
         authKey,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -467,7 +468,7 @@ export function createIntegrationCredentialsSource(
     payload = next;
     lastRefreshAt.set(authKey, Date.now());
     logger.info("integration credentials refreshed", {
-      integrationId: options.integrationId,
+      ...logCtx,
       authKey,
       authCount: payload.auths.length,
     });
@@ -492,7 +493,7 @@ export function createIntegrationCredentialsSource(
       },
     };
     logger.info("integration session outputs installed", {
-      integrationId: options.integrationId,
+      ...logCtx,
       authKey: auth.authKey,
     });
   };

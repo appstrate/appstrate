@@ -1347,14 +1347,12 @@ describe("McpApiUploadResolver — connection selector", () => {
     const { result, seen } = await runUpload("db");
     expect(result.ok).toBe(true);
     // Init + 2 chunks, and not one of them may omit the selector.
-    expect(seen.length).toBeGreaterThan(1);
-    expect(seen).toEqual(seen.map(() => "db"));
+    expect(seen).toEqual(["db", "db", "db"]);
   });
 
   it("CONTROL — a single-connection integration sends no connection at all", async () => {
     const { result, seen } = await runUpload();
     expect(result.ok).toBe(true);
-    expect(seen.length).toBeGreaterThan(1);
-    expect(seen).toEqual(seen.map(() => undefined));
+    expect(seen).toEqual([undefined, undefined, undefined]);
   });
 });

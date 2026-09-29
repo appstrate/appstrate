@@ -37,6 +37,7 @@ import {
   normaliseMcpToolNamespace,
 } from "@appstrate/core/naming";
 import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
+import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import {
   MAX_PARAMETER_DESCRIPTION_BYTES,
   MAX_TOOL_DESCRIPTION_BYTES,
@@ -71,7 +72,7 @@ interface McpHostUpstream {
   /** Connected client (any transport). */
   client: AppstrateMcpClient;
   /** The bound connection this upstream serves; its label is the selector value. */
-  connection?: { label: string; accountId: string | null };
+  connection?: Pick<NonNullable<IntegrationSpawnSpec["connection"]>, "label" | "accountId">;
   /**
    * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. When set, only
    * tools whose ORIGINAL name (as advertised by the upstream's
@@ -212,7 +213,6 @@ function connectionSelectionError(
  * exceed the schema-size cap after sanitisation are rejected.
  */
 export class McpHost {
-  private readonly namespaces = new Set<string>();
   // Raw requested namespace → allocated slot + its labels. Raw, so sibling connections
   // reuse the slot while two packages sharing a slug still get `_2`.
   private readonly namespaceSlots = new Map<string, { slot: string; labels: Set<ConnectionKey> }>();
@@ -226,7 +226,7 @@ export class McpHost {
   // canonically replaces a same-named untrusted descriptor; trusted/trusted
   // collisions remain fatal because they indicate a platform contract bug.
   private readonly toolTrusted = new Map<string, boolean>();
-  // Every distinct client registered, primary or merged — closed on dispose.
+  // Every distinct client registered, merged or not — closed on dispose.
   private readonly clients = new Set<AppstrateMcpClient>();
   private readonly toolDescriptors: Tool[] = [];
   private readonly options: McpHostOptions;
@@ -260,7 +260,7 @@ export class McpHost {
     // `intoNamespace` merges into an existing namespace (no allocation, no
     // suffix); otherwise allocate a fresh slot, disambiguating on collision.
     const merging = upstream.intoNamespace !== undefined;
-    if (merging && !this.namespaces.has(upstream.intoNamespace!)) {
+    if (merging && !this.allocatedNamespaces().has(upstream.intoNamespace!)) {
       throw new Error(
         `McpHost: intoNamespace '${upstream.intoNamespace}' is not a registered namespace`,
       );
@@ -315,7 +315,6 @@ export class McpHost {
 
     if (capabilities && !capabilities.tools) {
       // Server explicitly does NOT support tools — no point asking.
-      this.namespaces.add(normalisedNs);
       return normalisedNs;
     }
 
@@ -527,7 +526,6 @@ export class McpHost {
       if (!siblings.has(key)) siblings.set(key, finalName);
     }
 
-    this.namespaces.add(normalisedNs);
     return normalisedNs;
   }
 
@@ -566,10 +564,14 @@ export class McpHost {
    * Find a free namespace slot. The base slug is tried first; if it is
    * already in use we suffix `_2`, `_3`, … until we find an unused slot.
    * The chosen slot is what every subsequent index ({@link toolToNamespace},
-   * {@link namespaces}) keys against.
+   * {@link namespaceSlots}) keys against.
    */
   private allocateNamespace(base: string): string {
-    return allocateMcpToolNamespace(base, this.namespaces);
+    return allocateMcpToolNamespace(base, this.allocatedNamespaces());
+  }
+
+  private allocatedNamespaces(): Set<string> {
+    return new Set([...this.namespaceSlots.values()].map(({ slot }) => slot));
   }
 
   /** Routes, not descriptors: a second connection adds no descriptor but is not zero tools. */
@@ -653,7 +655,6 @@ export class McpHost {
         }),
       ),
     );
-    this.namespaces.clear();
     this.namespaceSlots.clear();
     this.toolToNamespace.clear();
     this.toolRoutes.clear();

@@ -243,7 +243,7 @@ function assertNever(value: never): never {
  * in neither a package id (`INTEGRATION_ID_RE`) nor a connection uuid, so the two parts are
  * unambiguous and no integration id can be crafted to forge another's scope.
  */
-function credentialScope(integrationId: string, connectionId: string): string {
+export function credentialScope(integrationId: string, connectionId: string): string {
   return `${integrationId}\u0000${connectionId}`;
 }
 

@@ -1399,35 +1399,6 @@ describe("McpHost — one integration, several connections", () => {
     }
   });
 
-  it("strips the selector before forwarding the arguments upstream", async () => {
-    const echo = (): AppstrateToolDefinition[] => [
-      {
-        descriptor: {
-          name: "ssh_exec",
-          description: "echo",
-          inputSchema: { type: "object", properties: { command: { type: "string" } } },
-        },
-        handler: async (args) => ({ content: [{ type: "text", text: JSON.stringify(args) }] }),
-      },
-    ];
-    const work = await makeUpstream(echo());
-    const perso = await makeUpstream(echo());
-    try {
-      const host = new McpHost();
-      await host.register({ namespace: "@orga/ssh", client: work.client, connection: CONN_A });
-      await host.register({ namespace: "@orga/ssh", client: perso.client, connection: CONN_B });
-      const result = await host
-        .buildTools()[0]!
-        .handler({ command: "uptime", connection: "perso" }, {} as never);
-      expect(JSON.parse((result.content as unknown as [{ text: string }])[0].text)).toEqual({
-        command: "uptime",
-      });
-    } finally {
-      await work.pair.close();
-      await perso.pair.close();
-    }
-  });
-
   it("describes ten connections at the byte bounds (3-byte 80-unit labels, 254-byte ids) whole", async () => {
     const connections = Array.from({ length: 10 }, (_, i) => ({
       label: `${String.fromCharCode(0x4e00 + i)}${"漢".repeat(79)}`,

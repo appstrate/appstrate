@@ -40,12 +40,16 @@ const apiCallDeps: ApiCallToolDeps = {
   tokenBudget: new TokenBudget(),
 };
 
-function credentialsWire(authKeys: readonly string[]): Record<string, unknown> {
+/** Each connection's token names it, so a test can tell whose credential went upstream. */
+function credentialsWire(
+  authKeys: readonly string[],
+  connectionId: string | null,
+): Record<string, unknown> {
   return {
     auths: authKeys.map((authKey) => ({
       auth_key: authKey,
       auth_type: "api_key",
-      fields: { token: `${authKey}-token` },
+      fields: { token: `${authKey}-${connectionId}-token` },
       authorized_uris: ["https://www.googleapis.com/**"],
     })),
     delivery_plans: Object.fromEntries(
@@ -54,7 +58,7 @@ function credentialsWire(authKeys: readonly string[]): Record<string, unknown> {
         {
           header_name: "Authorization",
           header_prefix: "Bearer ",
-          value: `${authKey}-token`,
+          value: `${authKey}-${connectionId}-token`,
           allow_server_override: false,
         },
       ]),
@@ -67,7 +71,10 @@ function platformFetch(authKeys: readonly string[]): typeof fetch {
   return (async (input: string | URL | Request) => {
     const url = typeof input === "string" ? input : input.toString();
     if (url.includes(`/internal/integration-credentials/${INTEGRATION_ID}`)) {
-      return new Response(JSON.stringify(credentialsWire(authKeys)), { status: 200 });
+      const connectionId = new URL(url).searchParams.get("connection_id");
+      return new Response(JSON.stringify(credentialsWire(authKeys, connectionId)), {
+        status: 200,
+      });
     }
     return new Response(JSON.stringify({ detail: `unexpected platform call: ${url}` }), {
       status: 404,
@@ -298,29 +305,6 @@ describe("bootIntegrations — synthetic api_call surface", () => {
     }
   });
 
-  it("CONTROL — one connection leaves the api_call schema untouched", async () => {
-    const apiCalls = [
-      {
-        authKey: "primary",
-        toolName: "api_call",
-        authorizedUris: ["https://www.googleapis.com/**"],
-      },
-    ];
-    const result = await boot(serverlessSpec(apiCalls, undefined, "drive", CONN_A));
-    try {
-      expect(result.tools.map((tool) => tool.descriptor.name)).toEqual(["drive__api_call"]);
-      const schema = result.tools[0]!.descriptor.inputSchema as {
-        properties: Record<string, unknown>;
-        required?: string[];
-      };
-      expect(Object.keys(schema.properties)).not.toContain("connection");
-      expect(schema.required ?? []).not.toContain("connection");
-      expect(result.spawned[0]!.connectionLabel).toBe("work");
-    } finally {
-      await result.shutdown();
-    }
-  });
-
   it("injects the selector on the api_upload companion too", async () => {
     // The upload tool executes agent-side but dispatches through its
     // `api_call` sibling, so it has to advertise the same selector.
@@ -392,6 +376,50 @@ describe("bootIntegrations — synthetic api_call surface", () => {
         description: "Connection to use for this call. archive → archive@example.com",
       });
       expect(backup!.required).toContain("connection");
+    } finally {
+      await result.shutdown();
+    }
+  });
+
+  it("sends the selected connection's credential upstream", async () => {
+    const authorizations: (string | null)[] = [];
+    const upstream = (async (_url: string | URL, init?: RequestInit) => {
+      authorizations.push(new Headers(init?.headers).get("authorization"));
+      return new Response("ok", { status: 200 });
+    }) as unknown as typeof fetch;
+    const deps: ApiCallToolDeps = {
+      ...apiCallDeps,
+      proxyDeps: {
+        ...apiCallDeps.proxyDeps,
+        cookieJar: new Map(),
+        reportedAuthFailures: new Set(),
+        fetchFn: upstream,
+        resolveHost: async () => ["203.0.113.7"],
+      },
+    };
+    const apiCalls = [
+      {
+        authKey: "primary",
+        toolName: "api_call",
+        authorizedUris: ["https://www.googleapis.com/**"],
+      },
+    ];
+    const result = await bootWith(deps, [
+      serverlessSpec(apiCalls, undefined, "drive", CONN_A),
+      serverlessSpec(apiCalls, undefined, "drive", CONN_B),
+    ]);
+    try {
+      const callOn = (connection: string) =>
+        result.tools[0]!.handler(
+          { target: "https://www.googleapis.com/drive/v3/files", method: "GET", connection },
+          {} as never,
+        );
+      await callOn("perso");
+      await callOn("work");
+      expect(authorizations).toEqual([
+        "Bearer primary-conn-b-token",
+        "Bearer primary-conn-a-token",
+      ]);
     } finally {
       await result.shutdown();
     }

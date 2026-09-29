@@ -10,12 +10,17 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { cookieScope } from "@appstrate/afps-runtime/resolvers";
-import { executeApiCall, type ApiCallDeps, type ApiCallRequestBody } from "../credential-proxy.ts";
+import {
+  credentialScope,
+  executeApiCall,
+  type ApiCallDeps,
+  type ApiCallRequestBody,
+} from "../credential-proxy.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
 /** The credential scope of `integrationId` on the `conn-1` connection these tests bind. */
-const scopeOf = (integrationId: string): string => `${integrationId}\u0000conn-1`;
+const scopeOf = (integrationId: string): string => credentialScope(integrationId, "conn-1");
 
 function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
   return {

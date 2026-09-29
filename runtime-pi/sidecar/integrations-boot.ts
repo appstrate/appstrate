@@ -1056,15 +1056,18 @@ export function reportCredentialRejections(
 /** Report a rejection like the MITM does on a 401 (forced refresh); fire-and-forget. */
 function reportRejectedCredential(spec: IntegrationSpawnSpec, opts: BundleFetchOptions): void {
   const { integrationId } = spec;
-  postIntegrationCredentialsRefresh(integrationId, spec.connection?.id, opts).then(
+  const connectionId = spec.connection?.id;
+  postIntegrationCredentialsRefresh(integrationId, connectionId, opts).then(
     (res) =>
       logger.warn("integration credential rejected by the target — reported", {
         integrationId,
+        connectionId,
         status: res.status,
       }),
     (err: unknown) =>
       logger.warn("integration credential rejection report failed", {
         integrationId,
+        connectionId,
         error: err instanceof Error ? err.message : String(err),
       }),
   );
@@ -1391,12 +1394,12 @@ export async function bootIntegrations(
       // spawned/remote integration — OUTSIDE any spawned container, so the
       // server code never sees the credential. One pipeline → McpHost owns
       // the namespacing (`{ns}__api_call`) + name validation. Two modes:
-      //  - serverless (`apiCall` block, no `spec.manifest.server`): api_call
-      //    is the namespace's PRIMARY client (`intoNamespace` omitted) and the
+      //  - serverless (`apiCall` block, no `spec.manifest.server`): the first
+      //    api_call allocates the namespace (`intoNamespace` omitted) and the
       //    integration does ONLY this, skipping spawn.
       //  - attachable (additive on a spawned/remote server): pass the server's
       //    ALLOCATED namespace so `{ns}__api_call` sits next to the native
-      //    tools under one namespace; the spawned server stays primary.
+      //    tools under one namespace.
       // Returns the number of tools added so callers can sum the tool count.
       const attachApiCall = async (intoNamespace?: string): Promise<number> => {
         const apiCalls = spec.apiCalls ?? [];
@@ -1419,13 +1422,11 @@ export async function bootIntegrations(
         // The SHARED source serves every auth; each api_call entry binds its own
         // auth via a per-auth adapter reading from that same source.
         let total = 0;
-        // A serverless multi-auth integration has no primary MCP upstream to
-        // allocate its namespace before these synthetic tools are attached.
-        // The first api_call registration therefore becomes the primary; all
-        // subsequent auth-scoped api_call servers must merge into the exact
-        // namespace it was allocated (which may already carry a collision
-        // suffix). Otherwise McpHost allocates `namespace_2` for the second
-        // auth and the runtime surface drifts from the integration catalog.
+        // A serverless multi-auth integration has no MCP upstream to allocate
+        // its namespace, so the first api_call registration allocates it and
+        // every later auth merges into that exact namespace (collision suffix
+        // included). Registered on its own, a later auth would repeat this
+        // connection's label in the slot, which McpHost refuses.
         let sharedNamespace = intoNamespace;
         for (const apiCall of apiCalls) {
           const credAdapter = createApiCallCredentialAdapter({
@@ -1496,7 +1497,7 @@ export async function bootIntegrations(
       };
 
       // Serverless integration (api_call-only, no MCP server) — the in-process
-      // api_call server is its entire surface (registered as the primary).
+      // api_call server is its entire surface (it allocates the namespace).
       //
       // Bind `server` from the same predicate that decides the branch, so the
       // dispatch and the narrowing cannot disagree.
