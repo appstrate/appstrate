@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -11,13 +12,17 @@ import {
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { $api } from "../../api/client";
 import { roleI18nKey } from "../../hooks/use-permissions";
-import { OrgInvitationForm } from "../../components/org-invitation-form";
+import {
+  OrgInvitationForm,
+  type OrgInvitationFormHandle,
+} from "../../components/org-invitation-form";
 
 export function OnboardingMembersStep() {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
   const orgId = useOnboardingGuard();
   const { nextRoute, prevRoute } = useOnboardingNav("members");
+  const inviteFormRef = useRef<OrgInvitationFormHandle>(null);
 
   const { data: orgData } = $api.useQuery(
     "get",
@@ -28,7 +33,8 @@ export function OnboardingMembersStep() {
 
   const invitations = orgData?.invitations ?? [];
 
-  const goNext = () => nextRoute && navigate(nextRoute);
+  // An email typed but never sent is still an invitation the user meant to make.
+  const goNext = () => inviteFormRef.current?.submitPending(() => nextRoute && navigate(nextRoute));
 
   if (!orgId) return null;
 
@@ -41,7 +47,7 @@ export function OnboardingMembersStep() {
       onBack={prevRoute ? () => navigate(prevRoute) : undefined}
     >
       <div className="flex flex-col gap-4">
-        <OrgInvitationForm key={orgId} orgId={orgId} />
+        <OrgInvitationForm ref={inviteFormRef} key={orgId} orgId={orgId} />
 
         {/* Pending invitations — scrollable */}
         {invitations.length > 0 && (

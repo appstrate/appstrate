@@ -49,6 +49,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **"Continuer" on the onboarding members step sends the invitation still
+  typed in the email field.** It used to drop it silently and move on. An
+  invalid address now shows the form's error, a failed invitation keeps the
+  step, and an empty field continues as before.
+
 - **Runs on an `openai-compatible` model that is not aliased reach
   `/chat/completions` again**. The agent installed its credential with
   `setRuntimeApiKey`, which leaves Pi's builtin `openai` provider untouched,

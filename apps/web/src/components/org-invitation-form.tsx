@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useImperativeHandle, type Ref } from "react";
 import { toast } from "sonner";
 import { useSpaces } from "../hooks/use-spaces";
 import { spaceRoleValue, useSpaceRoleOptions } from "../hooks/use-roles";
@@ -33,6 +34,15 @@ interface InviteFormValues {
   assignments: AssignmentDraft[];
 }
 
+export interface OrgInvitationFormHandle {
+  /**
+   * Send the invitation still typed in the field, exactly as the invite button
+   * would, then call `onSent`. An empty field calls it straight away; an invalid
+   * value or a failed invite stays in the form with its error instead.
+   */
+  submitPending: (onSent: () => void) => void;
+}
+
 /**
  * The same invitation flow in onboarding and organization settings. Remount on
  * org change. `allowGuest` offers the guest role on a NEW invitation (spaces
@@ -45,12 +55,14 @@ export function OrgInvitationForm({
   allowGuest = false,
   onSuccess,
   onCancel,
+  ref,
 }: {
   orgId: string;
   invitation?: components["schemas"]["OrgInvitationInfo"];
   allowGuest?: boolean;
   onSuccess?: () => void;
   onCancel?: () => void;
+  ref?: Ref<OrgInvitationFormHandle>;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const queryClient = useQueryClient();
@@ -94,24 +106,36 @@ export function OrgInvitationForm({
   });
   const isPending = invite.isPending || update.isPending;
   const fieldPrefix = invitation ? "edit-invite" : "invite";
+  const send = (data: InviteFormValues, onSent?: () => void) => {
+    const body = {
+      role: data.role,
+      space_assignments: assignmentsFor(data.role, toSpaceAssignments(data.assignments)),
+    };
+    if (invitation) {
+      update.mutate({ params: { path: { orgId, invitationId: invitation.id } }, body });
+    } else {
+      invite.mutate(
+        { params: { path: { orgId } }, body: { ...body, email: data.email.trim() } },
+        { onSuccess: onSent },
+      );
+    }
+  };
+
+  useImperativeHandle(ref, () => ({
+    submitPending: (onSent) => {
+      if (isPending) return;
+      if (!form.getValues("email")) {
+        onSent();
+        return;
+      }
+      void form.handleSubmit((data) => send(data, onSent))();
+    },
+  }));
 
   return (
     <form
       noValidate
-      onSubmit={form.handleSubmit((data) => {
-        const body = {
-          role: data.role,
-          space_assignments: assignmentsFor(data.role, toSpaceAssignments(data.assignments)),
-        };
-        if (invitation) {
-          update.mutate({ params: { path: { orgId, invitationId: invitation.id } }, body });
-        } else {
-          invite.mutate({
-            params: { path: { orgId } },
-            body: { ...body, email: data.email.trim() },
-          });
-        }
-      })}
+      onSubmit={form.handleSubmit((data) => send(data))}
       className="flex flex-col gap-4"
     >
       <FieldGroup>
