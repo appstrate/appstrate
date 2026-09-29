@@ -191,10 +191,8 @@ export function IntegrationConnectionPicker({
       ? t("detail.integrationMemberPicker.byYou")
       : (c.owner_name ?? t("detail.integrationMemberPicker.ownerUnknown"));
 
-  // Locked when an admin force is configured and the member can never override
-  // it: a per-agent admin pin OR an enforced org default. Either way we render
-  // the read-only lock instead of the editable dropdown. (A launch override
-  // would lose to either at run time, so locking it here is correct too.)
+  // An admin force (pin or enforced org default) renders read-only: a member pin or a launch
+  // override would lose to it at run time.
   if (lockedConnectionIds.length > 0) {
     const label = lockedConnectionIds.map((id) => byId(id)?.label ?? id).join(" · ");
     return (
@@ -627,13 +625,12 @@ export function IntegrationConnectionPicker({
         >
           <AlertTriangle className="size-3 shrink-0" />
           <span>
-            {fromDefault
-              ? t("detail.integrationMemberPicker.defaultUnavailableWarning", {
-                  count: unavailableIds.length,
-                })
-              : t("detail.integrationMemberPicker.unavailableWarning", {
-                  count: unavailableIds.length,
-                })}
+            {t(
+              fromDefault
+                ? "detail.integrationMemberPicker.defaultUnavailableWarning"
+                : "detail.integrationMemberPicker.unavailableWarning",
+              { count: unavailableIds.length },
+            )}
           </span>
         </div>
       )}

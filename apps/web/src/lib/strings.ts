@@ -15,3 +15,8 @@ export function toLiveSlug(value: string): string {
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/^-+/, "");
 }
+
+/** Whether two id lists hold the same ids, whatever their order. */
+export function sameSet(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((v) => b.includes(v));
+}

@@ -15,6 +15,7 @@ import {
   checkedConnectionIds,
   joinCreatedConnection,
   unavailableConnectionIds,
+  withConnectionOverride,
   withConnectionPick,
 } from "../connection-set";
 
@@ -246,5 +247,15 @@ describe("withConnectionPick", () => {
 
   it("drops the key for an empty set — the wire refuses one", () => {
     expect(withConnectionPick({ "@acme/a": ["1"] }, "@acme/a", [])).toEqual({});
+  });
+});
+
+describe("withConnectionOverride", () => {
+  it("drops `connection_overrides` once its last pick is cleared", () => {
+    const overrides = { model_id_override: "m", connection_overrides: { "@acme/a": ["1"] } };
+    expect(withConnectionOverride(overrides, "@acme/a", [])).toEqual({ model_id_override: "m" });
+    expect(withConnectionOverride({}, "@acme/a", ["1"])).toEqual({
+      connection_overrides: { "@acme/a": ["1"] },
+    });
   });
 });

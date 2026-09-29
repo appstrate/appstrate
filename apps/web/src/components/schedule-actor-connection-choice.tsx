@@ -9,13 +9,10 @@ import { type ConnectionChoice, refusalReasonKey } from "../lib/connection-choic
 import { toggleCapped } from "../lib/connection-set";
 
 /**
- * The connection section of a schedule that runs as someone other than the
- * viewer. The viewer's own pickers would judge the VIEWER's connections, so they
- * are not shown: the server resolves for the schedule's actor, and when a save is
- * refused for a choice, that refusal's own candidates are the pick control,
- * writing into the same `connection_overrides`. They are only the connections the
- * viewer can reach too (shared ones), so the list can be empty: the actor's
- * private connections are theirs to pick (a member pin), or an admin's to pin.
+ * The connection section of a schedule running as someone other than the viewer, whose own
+ * pickers would judge the VIEWER's connections. A refused save's candidates are the pick
+ * control instead — only connections the viewer reaches too, so the list can be empty: the
+ * actor's private connections are theirs (or an admin's) to pin.
  */
 export function ScheduleActorConnectionChoice({
   choices,

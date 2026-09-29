@@ -11,7 +11,8 @@ import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { paths } from "../api/client";
 import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credentials";
 import type { ModelPickRow } from "./model-source";
-import { catalogValues, sameSet, type CatalogModelValues } from "./row-overrides-catalog";
+import { catalogValues, type CatalogModelValues } from "./row-overrides-catalog";
+import { sameSet } from "./strings";
 
 /** The model form's controlled field values. */
 export interface ModelFormFields {

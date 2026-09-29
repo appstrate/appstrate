@@ -8,6 +8,7 @@
  */
 
 import { MODEL_INPUT_MODALITIES, type ModelInputModality } from "@appstrate/core/module";
+import { sameSet } from "./strings";
 
 /** The stored row's four catalog-derivable fields — an `OrgModel` fits. */
 export interface StoredModelValues {
@@ -22,10 +23,6 @@ export interface CatalogModelValues {
   contextWindow: number;
   maxTokens?: number | null;
   capabilities: string[];
-}
-
-export function sameSet(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((v) => b.includes(v));
 }
 
 /** The catalog entry's four answers, in the stored row's shape. */

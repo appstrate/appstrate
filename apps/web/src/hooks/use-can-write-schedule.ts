@@ -2,15 +2,11 @@
 
 import { useAuth } from "./use-auth";
 import { usePermissions } from "./use-permissions";
-import { canWriteSchedule } from "../lib/schedule-governance";
+import { mayGovernMemberSchedule } from "../lib/schedule-governance";
 
-/**
- * Whether this caller may edit, toggle or delete `schedule` beyond `schedules:write`/`delete`: a
- * schedule running as another member is an org owner/admin matter ({@link canWriteSchedule}).
- * `false` while the schedule is not loaded.
- */
+/** {@link mayGovernMemberSchedule} for a loaded schedule; `false` while it is not. */
 export function useCanWriteSchedule(schedule: { userId: string | null } | undefined): boolean {
   const { user } = useAuth();
   const { orgRole } = usePermissions();
-  return !!schedule && canWriteSchedule(schedule, { userId: user?.id, orgRole });
+  return !!schedule && mayGovernMemberSchedule(schedule.userId, { userId: user?.id, orgRole });
 }

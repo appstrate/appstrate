@@ -12,39 +12,19 @@ import { describeResolution } from "./integration-connect/integration-run-readin
 import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
 import { integrationIdOfField, type ConnectionChoiceCandidate } from "../lib/connection-choice";
+import { withConnectionPick } from "../lib/connection-set";
 
 /**
- * Recovery surface for the run-kickoff 409 emitted by
- * `validateAgentReadiness` when integration connections are missing. The
- * 409 ships every failing `(integration, auth)` pair on `errors[]`;
- * this modal renders one row per entry.
- *
- * Each actionable row embeds the SAME `IntegrationConnectionPicker` the
- * Connexions tab and the schedule editor use, in `override` mode: the picker
- * lists every accessible connection (own + shared — including ones that need
- * reconnection, with an inline renew button) and exposes the connect / renew /
- * upgrade / add flows. A validated SET accumulates into the modal's per-run
- * `connection_overrides` map; the footer's "Re-run with picks" button fires
- * the parent's `onRetryWithOverrides` callback with the full
- * `{ integrationId: connectionIds[] }` map (cascade layer 3, the launch override).
- *
- * Reusing the picker keeps this modal in lockstep with the dropdown — same
- * candidate list, scope/lock verdicts and connect orchestration — instead of
- * re-deriving an affordance from the static 409 payload. Only structural failures — the integration is not active here, or
- * its package is missing, mistyped or unloadable — keep a plain message: no
- * connection pick can fix them.
+ * Recovery surface for the run-kickoff `409 missing_integration_connection`: one row per
+ * `errors[]` entry. Each actionable row embeds the shared `IntegrationConnectionPicker` in
+ * `override` mode, so it stays in lockstep with the Connexions tab; validated sets accumulate
+ * into the per-run `connection_overrides` map that "Re-run" hands to `onRetryWithOverrides`.
+ * Structural failures keep a plain message: no connection pick can fix them.
  */
 
 export interface MissingIntegrationFieldError {
   field: string; // `integrations.{packageId}` (integration-level — auth_key lives on the candidate row)
-  /**
-   * The codes the server puts on an `integrations.*` item: the four verdicts
-   * `collectAgentReadinessErrors` raises about the integration PACKAGE
-   * (`agent-readiness.ts`) and the connection verdicts
-   * `integration-connection-resolver.ts` raises about the accounts behind it.
-   * `| string` keeps an unlisted one rendering its server message rather than
-   * crashing the row — it is not licence to adapt a shape nothing emits.
-   */
+  /** `| string`: an unlisted code still renders its server message. */
   code:
     | "not_connected"
     | "needs_reconnection"
@@ -63,7 +43,7 @@ export interface MissingIntegrationFieldError {
   message: string;
   /** Missing scopes — populated on insufficient_scopes for the OAuth re-consent upgrade. */
   missing_scopes?: string[];
-  /** `must_choose_connection`: rows to pick from, dead ones flagged — for API/MCP callers; the modal renders the picker. */
+  /** `must_choose_connection`: for API/MCP callers; the modal renders the picker. */
   candidate_connections?: ConnectionChoiceCandidate[];
   /**
    * The dead/under-scoped connection id — populated on `needs_reconnection`
@@ -75,13 +55,7 @@ export interface MissingIntegrationFieldError {
 /** Per-run picks in the run route's `connection_overrides` shape (`launch-schemas.ts`). */
 type ConnectionOverridesMap = Record<string, string[]>;
 
-/**
- * Codes that no connection pick can fix — surfaced as a plain message, no
- * picker. They are exactly the four the readiness pass raises about the
- * integration PACKAGE, before any account is looked at: the declared package is
- * absent, is not an integration, has a manifest that will not load, or is not
- * active in this space. Connecting an account changes none of them.
- */
+/** The package-level verdicts, raised before any account is looked at: no pick fixes them. */
 function isStructuralCode(code: string): boolean {
   return (
     code === "integration_not_active" ||
@@ -95,19 +69,9 @@ interface MissingConnectionsModalProps {
   open: boolean;
   onClose: () => void;
   errors: MissingIntegrationFieldError[];
-  /**
-   * The agent whose run 409'd. Keys the bulk server resolution
-   * (`GET /api/agents/:scope/:name/connection-readiness`) each picker consumes
-   * so its status + CTA stay in lockstep with the Connexions tab. Omitted only
-   * by callers without the agent in context (none today).
-   */
+  /** The agent whose run 409'd; keys the server resolution each picker consumes. */
   agentPackageId?: string;
-  /**
-   * The agent's declared integration entries (tools/scopes per integration).
-   * Forwarded to the picker so a fresh connection / re-consent requests
-   * exactly the scopes THIS agent needs (avoids an immediate
-   * insufficient_scopes re-run).
-   */
+  /** The agent's tools/scopes per integration, so a (re)connect requests exactly those. */
   integrationEntries?: AgentIntegrationEntry[];
   /** Re-run with the picked overrides. */
   onRetryWithOverrides: (overrides: ConnectionOverridesMap) => void;
@@ -129,10 +93,8 @@ export function MissingConnectionsModal({
 
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
 
-  // must_choose rows have no auto-pick (several own connections, or only
-  // colleagues' shared ones), so a re-run can't proceed until the user picks. Other actionable rows (connect / renew /
-  // upgrade) resolve through the picker's own flow and re-run freely — a fresh
-  // 409 just reopens the modal with the updated error list.
+  // must_choose rows have no auto-pick, so a re-run waits for the user's pick. Other actionable
+  // rows resolve through the picker's own flow and re-run freely — a fresh 409 reopens the modal.
   const mustChooseIds = integrationErrors
     .filter((e) => e.code === "must_choose_connection")
     .map((e) => integrationIdOfField(e.field));
@@ -142,19 +104,10 @@ export function MissingConnectionsModal({
   const showRetry = hasActionable;
   const canRetry = !retrying && allMustChosen;
 
-  // Validating a set writes the per-run override; clearing (empty set, the
-  // picker's "inherit / reset" entry) drops the key so the resolver falls
-  // back to the member pin / cascade default at re-run.
-  const setPick = (integrationId: string, connectionIds: string[]) => {
-    setPicks((prev) => {
-      if (connectionIds.length === 0) {
-        const { [integrationId]: _omit, ...rest } = prev;
-        void _omit;
-        return rest;
-      }
-      return { ...prev, [integrationId]: connectionIds };
-    });
-  };
+  // Clearing (the picker's "inherit / reset" entry) drops the key so the resolver falls back to
+  // the member pin / cascade default at re-run.
+  const setPick = (integrationId: string, connectionIds: string[]) =>
+    setPicks((prev) => withConnectionPick(prev, integrationId, connectionIds));
 
   return (
     <Modal
@@ -235,9 +188,7 @@ function MissingRow({
   );
   const entry = integrationEntries?.find((e) => e.id === packageId);
 
-  // Resolved = the run-kickoff gate would no longer reject this integration:
-  // connections bind and no error is raised (the reading the picker shares). No
-  // verdict at all is not "ready".
+  // Resolved = the run-kickoff gate would no longer reject it; no verdict is not "ready".
   const resolved = !!resolution && describeResolution(resolution).resolved;
   // The picker needs the manifest + first verdict to render fully wired; hold
   // a spinner until both land (non-structural rows with the agent in context).

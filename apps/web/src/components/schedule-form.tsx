@@ -39,7 +39,7 @@ import {
   picksAfterActorChange,
   refusalForActor,
 } from "../lib/connection-choice";
-import { withConnectionPick } from "../lib/connection-set";
+import { withConnectionOverride } from "../lib/connection-set";
 import { sameActor, scheduleOverridePayload } from "../lib/schedule-payload";
 import { useAuth } from "../hooks/use-auth";
 import { useScheduleFormDeps } from "../hooks/use-schedules";
@@ -273,15 +273,9 @@ export function ScheduleForm({
     setActor(next);
   };
   const setConnectionPick = (integrationId: string, connectionIds: string[]) =>
-    setOverrides((prev) => {
-      const { connection_overrides: picks, ...rest } = prev;
-      const next = withConnectionPick(picks ?? {}, integrationId, connectionIds);
-      return Object.keys(next).length > 0 ? { ...rest, connection_overrides: next } : rest;
-    });
+    setOverrides((prev) => withConnectionOverride(prev, integrationId, connectionIds));
 
-  // A refusal speaks for the identity and the picks it was sent with: stale
-  // once the actor moves, answered once an integration's pick moves. Derived
-  // rather than synced, so no effect sets state.
+  // Derived, not synced: a refusal is stale once the actor moves, answered once a pick moves.
   const [submitted, setSubmitted] = useState<SubmittedPicks | null>(null);
   const refused = refusalForActor(connectionChoices, submitted, runsAs);
   const pending = pendingConnectionChoices(
@@ -290,13 +284,11 @@ export function ScheduleForm({
     overrides.connection_overrides,
   );
   const pendingIds = pending.map((c) => c.integrationId);
-  // Open for as long as a refusal speaks for this actor, not just while it is
-  // unanswered: answering it must not fold away the pick just made.
+  // Open while a refusal speaks for this actor, so answering it does not fold the pick away.
   const overridesShown = overridesOpen || refused.length > 0;
 
-  // The rows come from the definition every fire runs — inherit means the
-  // latest published version, never the draft this page would otherwise
-  // project for an author — the same one the pickers and the server judge.
+  // Rows come from the definition every fire runs: inherit is the latest published version,
+  // never the draft this page would otherwise project for an author.
   const firedVersion = versionOverride ?? VERSION_PUBLISHED;
   const firedIntegrations = useScheduleFormDeps(packageId, firedVersion).deps?.agentIntegrations;
   const showActorChoice =

@@ -21,15 +21,9 @@ interface ScheduleOverridePayload {
 }
 
 /**
- * The override half of a schedule write, built from the form's state.
- *
- * Create omits whatever is empty (the server stores null) and sends the actor
- * only when one was picked (else the caller). Edit sends every override, `null`
- * for a cleared one — an absent key would leave the row untouched — except
- * `version_override`, sent only on a real change (see the form), and the actor,
- * sent only when it differs from the schedule's. The connection picks always
- * travel as they stand: the form already dropped them when the actor changed,
- * because they belonged to the previous identity.
+ * The override half of a schedule write. Create omits whatever is empty. Edit sends every
+ * override, `null` for a cleared one (an absent key leaves the row untouched), except
+ * `version_override` and the actor, sent only when they changed.
  */
 export function scheduleOverridePayload(args: {
   isEdit: boolean;

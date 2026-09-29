@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ApiError, client, type components } from "../api/client";
+import { client, type components } from "../api/client";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import type { PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
@@ -21,6 +21,7 @@ import {
 } from "../lib/query-keys";
 import { retryLaunch, type RunLaunch } from "../lib/run-launch";
 import type { MissingIntegrationFieldError } from "../components/missing-connections-modal";
+import { missingConnectionErrors } from "../lib/connection-choice";
 
 // NOTE on query keys: run-cache keys (["runs"], ["paginated-runs"], ["run"])
 // are PINNED legacy keys — use-global-run-sync.ts patches them from SSE
@@ -117,11 +118,8 @@ export function useRunLauncher(packageId: string) {
   const lastLaunch = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
 
   const onError = (err: Error) => {
-    if (err instanceof ApiError && err.code === "missing_integration_connection") {
-      setMissingErrors(
-        Array.isArray(err.details) ? (err.details as MissingIntegrationFieldError[]) : [],
-      );
-    }
+    const errors = missingConnectionErrors(err);
+    if (errors) setMissingErrors(errors);
   };
 
   return {

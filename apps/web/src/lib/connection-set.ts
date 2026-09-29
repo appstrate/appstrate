@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { RunOverridesValue } from "../components/run-overrides-panel";
+import { sameSet } from "./strings";
+
 /** At the cap an addition is refused and `ids` comes back unchanged. */
 export function toggleCapped(ids: string[], id: string, max: number): string[] {
   if (ids.includes(id)) return ids.filter((x) => x !== id);
@@ -22,6 +25,17 @@ export function withConnectionPick(
   return next;
 }
 
+/** {@link withConnectionPick} on `overrides.connection_overrides`; an empty map drops the key. */
+export function withConnectionOverride(
+  overrides: RunOverridesValue,
+  integrationId: string,
+  connectionIds: string[],
+): RunOverridesValue {
+  const { connection_overrides: picks, ...rest } = overrides;
+  const next = withConnectionPick(picks ?? {}, integrationId, connectionIds);
+  return Object.keys(next).length > 0 ? { ...rest, connection_overrides: next } : rest;
+}
+
 export function keepAvailable(ids: string[], availableIds: string[]): string[] {
   return ids.filter((id) => availableIds.includes(id));
 }
@@ -37,8 +51,10 @@ export function canApplyConnectionSet(
 ): boolean {
   if (checked.length === 0) return false;
   if (!touched && explicitIds.length === 0) return false;
-  const ids = checked.map((c) => c.id);
-  return !(ids.length === explicitIds.length && ids.every((id) => explicitIds.includes(id)));
+  return !sameSet(
+    checked.map((c) => c.id),
+    explicitIds,
+  );
 }
 
 /** Bound as displayed: an unpinned member still sees the cascade; an unpicked override inherits. */
@@ -64,10 +80,8 @@ export function checkedConnectionIds(input: {
 }
 
 /**
- * Stored members that are no candidate for this agent (deleted, unshared, or on an auth
- * serving no selected tool). They stay in the stored set — the resolver refuses it
- * rather than bind what is left — so the picker names them, and "Valider" visibly
- * drops them.
+ * Stored members that are no candidate for this agent. The resolver refuses such a set rather
+ * than bind what is left, so the picker names them and "Valider" visibly drops them.
  */
 export function unavailableConnectionIds(explicitIds: string[], candidateIds: string[]): string[] {
   return explicitIds.filter((id) => !candidateIds.includes(id));

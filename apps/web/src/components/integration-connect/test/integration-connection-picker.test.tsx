@@ -204,8 +204,8 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
   });
 
   it("a soft default with a member serving no selected tool is named whole", () => {
-    // {WEB serves, GONE does not}: the candidates hold WEB alone, so reading the
-    // trigger off them showed one bound connection where the run is refused.
+    // {WEB serves, GONE does not}: the candidates hold WEB alone, but the trigger
+    // counts the whole stored set, since the run is refused over GONE.
     const html = renderPicker(
       resolution({
         source: "org_default",
@@ -224,7 +224,7 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
   });
 
   it("a soft default naming an unreachable connection says the default is unavailable", () => {
-    // Nothing resolved: this used to read "Connecter (par défaut)".
+    // Nothing resolved: the trigger names the broken default, not a connect prompt.
     const html = renderPicker(
       resolution({
         source: "org_default",
