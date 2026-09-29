@@ -588,7 +588,9 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
             ? credentialInjection.headerName.toLowerCase()
             : null,
       authorizedUris: creds.authorizedUris ?? undefined,
-      allowAllUris: creds.allowAllUris,
+      // The downgraded flag (4a): a raw `allowAllUris` would skip the per-hop
+      // allowlist and let a substituted credential follow a redirect off it.
+      allowAllUris: effectiveAllowAll,
       // Thread the injected DNS resolver into the per-hop SSRF rebind
       // check — same resolver the initial-target gate uses. Without it
       // the follower falls back to the system resolver, which diverges
@@ -698,8 +700,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     authMode: credentialInjection === "inject" ? "header" : credentialInjection,
     injectedHeader:
       credentialInjection === "inject" ? (creds.credentialHeaderName?.toLowerCase() ?? null) : null,
-    // Which URL-trust policy gated the call.
-    urlPolicy: creds.allowAllUris
+    // Which URL-trust policy gated the call (after the 4a downgrade).
+    urlPolicy: effectiveAllowAll
       ? "allow_all"
       : creds.authorizedUris && creds.authorizedUris.length
         ? "allowlist"

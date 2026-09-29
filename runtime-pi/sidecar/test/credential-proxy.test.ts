@@ -1486,6 +1486,125 @@ describe("executeApiCall — debug diagnostic envelope (#404)", () => {
     expect(envelope!.injectedHeader).toBeNull();
     expect(envelope!.urlPolicy).toBe("allow_all");
   });
+
+  it("reports urlPolicy 'allowlist' when a templated credential downgrades allow_all", async () => {
+    const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { api_key: "SECRET" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: true,
+      credentialFieldName: "api_key",
+    }));
+    const records = await captureLogs("debug", async () => {
+      const r = await executeApiCall(
+        {
+          integrationId: "gmail",
+          targetUrl: "https://api.example.com/messages",
+          method: "GET",
+          callerHeaders: { "X-Key": "{{api_key}}" },
+          body: { kind: "none" },
+        },
+        makeDeps({ fetchCredentials }),
+      );
+      expect(r.ok).toBe(true);
+    });
+    const envelope = records.find((r) => r.msg === "integration api_call completed");
+    expect(envelope).toBeDefined();
+    expect(envelope!.urlPolicy).toBe("allowlist");
+  });
+});
+
+describe("executeApiCall — redirects after the credential-exfiltration downgrade", () => {
+  /** allow_all_uris AND an allowlist; no server-side header injection. */
+  const allowAllWithAllowlist = () =>
+    mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { api_key: "SECRET" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: true,
+      credentialFieldName: "api_key",
+    }));
+
+  /** Allowlisted host answers `status → location`; every other host 200s. */
+  function redirectingFetch(status: number, location: string) {
+    const calls: { url: string; init: RequestInit & { headers: Record<string, string> } }[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      calls.push({ url: u, init: init as RequestInit & { headers: Record<string, string> } });
+      if (u.startsWith("https://api.example.com")) {
+        return new Response(null, { status, headers: { location } });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    return { fetchFn: fetchFn as unknown as typeof fetch, calls };
+  }
+
+  it("refuses a 302 off the allowlist when a header templates a credential", async () => {
+    const { fetchFn, calls } = redirectingFetch(302, "https://evil.example.net/c");
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        targetUrl: "https://api.example.com/start",
+        method: "GET",
+        callerHeaders: { "X-Key": "{{api_key}}" },
+        body: { kind: "none" },
+      },
+      makeDeps({ fetchFn, fetchCredentials: allowAllWithAllowlist() }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
+      expect(result.error).toContain("evil.example.net");
+    }
+    expect(calls.map((c) => c.url)).toEqual(["https://api.example.com/start"]);
+    expect(calls[0]!.init.headers["X-Key"]).toBe("SECRET");
+  });
+
+  it("refuses a 307 off the allowlist when the substituted body carries a credential", async () => {
+    const { fetchFn, calls } = redirectingFetch(307, "https://evil.example.net/c");
+    const text = '{"key":"{{api_key}}"}';
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        targetUrl: "https://api.example.com/start",
+        method: "POST",
+        callerHeaders: { "content-type": "application/json" },
+        body: {
+          kind: "buffered",
+          bytes: new TextEncoder().encode(text).buffer as ArrayBuffer,
+          text,
+        },
+        substituteBody: true,
+      },
+      makeDeps({ fetchFn, fetchCredentials: allowAllWithAllowlist() }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
+    }
+    expect(calls.map((c) => c.url)).toEqual(["https://api.example.com/start"]);
+    expect(calls[0]!.init.body).toBe('{"key":"SECRET"}');
+  });
+
+  it("still follows allow_all redirects to a public host when no credential is templated", async () => {
+    const { fetchFn, calls } = redirectingFetch(302, "https://elsewhere.example.net/c");
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        targetUrl: "https://api.example.com/start",
+        method: "GET",
+        callerHeaders: { "X-Custom": "x" },
+        body: { kind: "none" },
+      },
+      makeDeps({ fetchFn, fetchCredentials: allowAllWithAllowlist() }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.finalUrl).toBe("https://elsewhere.example.net/c");
+    expect(calls.map((c) => c.url)).toEqual([
+      "https://api.example.com/start",
+      "https://elsewhere.example.net/c",
+    ]);
+  });
 });
 
 describe("executeApiCall — SSRF DNS-rebind layer", () => {
