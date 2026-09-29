@@ -96,7 +96,7 @@ export type ApiCallRequestBody =
 
 interface ApiCallArgs {
   integrationId: string;
-  connectionId?: string;
+  connectionId: string;
   targetUrl: string;
   method: string;
   /** Hop-by-hop and routing headers must already be filtered out. */
@@ -266,10 +266,8 @@ type CookieGate = "allowlist" | "open";
 const COOKIE_KEY_SEP = "\u0000";
 
 /** Per-connection key of the cookie jar and 401 verdicts; see SIDECAR.md, cookie jar scoping. */
-function credentialScope(integrationId: string, connectionId?: string): string {
-  return connectionId === undefined
-    ? integrationId
-    : `${integrationId}${COOKIE_KEY_SEP}${connectionId}`;
+function credentialScope(integrationId: string, connectionId: string): string {
+  return `${integrationId}${COOKIE_KEY_SEP}${connectionId}`;
 }
 
 /**

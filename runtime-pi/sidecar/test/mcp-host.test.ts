@@ -1168,6 +1168,88 @@ describe("McpHost — one integration, several connections", () => {
     }
   });
 
+  it("fails a second connection when a tool only the first serves declares `connection`", async () => {
+    const work = await makeUpstream([
+      {
+        descriptor: {
+          name: "query",
+          description: "query",
+          inputSchema: { type: "object", properties: { connection: { type: "string" } } },
+        },
+        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      },
+    ]);
+    const perso = await makeUpstream(sshTool("db"));
+    try {
+      const host = new McpHost();
+      await host.register({ namespace: "@orga/db", client: work.client, connection: CONN_A });
+      await expect(
+        host.register({ namespace: "@orga/db", client: perso.client, connection: CONN_B }),
+      ).rejects.toThrow(/connection_param_conflict — tool "orga_db__query"/);
+    } finally {
+      await work.pair.close();
+      await perso.pair.close();
+    }
+  });
+
+  it("puts the selector on a tool only one connection serves, and strips it", async () => {
+    // Multi-auth integration: `work` is bound on oauth, `perso` on a PAT, so each
+    // api_call tool has ONE route — yet the namespace holds two accounts.
+    const authTool = (auth: string): AppstrateToolDefinition[] => [
+      {
+        descriptor: {
+          name: `api_call__${auth}`,
+          description: auth,
+          inputSchema: { type: "object", properties: { target: { type: "string" } } },
+        },
+        handler: async (args) => ({ content: [{ type: "text", text: JSON.stringify(args) }] }),
+      },
+    ];
+    const work = await makeUpstream(authTool("oauth"));
+    const perso = await makeUpstream(authTool("pat"));
+    try {
+      const host = new McpHost();
+      await host.register({ namespace: "@orga/gh", client: work.client, connection: CONN_A });
+      await host.register({ namespace: "@orga/gh", client: perso.client, connection: CONN_B });
+      const tools = host.buildTools();
+      expect(tools.map((t) => t.descriptor.name)).toEqual([
+        "orga_gh__api_call__oauth",
+        "orga_gh__api_call__pat",
+      ]);
+      const [oauth, pat] = tools as [AppstrateToolDefinition, AppstrateToolDefinition];
+      expect(oauth.descriptor.inputSchema).toEqual({
+        type: "object",
+        properties: {
+          target: { type: "string" },
+          connection: {
+            type: "string",
+            enum: ["work"],
+            description: "Connection to use for this call. work → work@example.com",
+          },
+        },
+        required: ["connection"],
+      });
+      const patSchema = pat.descriptor.inputSchema as {
+        properties: Record<string, { enum?: string[] }>;
+      };
+      expect(patSchema.properties.connection!.enum).toEqual(["perso"]);
+
+      const reached = await oauth.handler({ target: "/user", connection: "work" }, {} as never);
+      expect(JSON.parse((reached.content as unknown as [{ text: string }])[0].text)).toEqual({
+        target: "/user",
+      });
+      // The other account is not a route of this tool.
+      const crossed = await oauth.handler({ target: "/user", connection: "perso" }, {} as never);
+      expect(crossed.isError).toBe(true);
+      expect((crossed.content as unknown as [{ text: string }])[0].text).toContain(
+        'one of: work. Received "perso"',
+      );
+    } finally {
+      await work.pair.close();
+      await perso.pair.close();
+    }
+  });
+
   it("CONTROL — a single connection tolerates an upstream `connection` property", async () => {
     const work = await makeUpstream([
       {

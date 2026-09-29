@@ -357,7 +357,8 @@ describe("bootIntegrations — synthetic api_call surface", () => {
 
   it("routes each connection only on the api_call of its own auth", async () => {
     // A connection holds ONE auth, so its spec lists only that auth's
-    // api_call; the selector enumerates the connections on that auth alone.
+    // api_call; each selector enumerates the connections on that auth alone,
+    // and a tool one connection serves still names it.
     const onAuth = (authKey: string) => [
       {
         authKey,
@@ -379,11 +380,18 @@ describe("bootIntegrations — synthetic api_call surface", () => {
       ]);
       const [primary, backup] = result.tools.map(
         (tool) =>
-          tool.descriptor.inputSchema as { properties: Record<string, { enum?: string[] }> },
+          tool.descriptor.inputSchema as {
+            properties: Record<string, { type?: string; enum?: string[]; description?: string }>;
+            required: string[];
+          },
       );
       expect(primary!.properties.connection!.enum).toEqual(["work", "perso"]);
-      // One connection on `backup`: nothing to select.
-      expect(Object.keys(backup!.properties)).not.toContain("connection");
+      expect(backup!.properties.connection).toEqual({
+        type: "string",
+        enum: ["archive"],
+        description: "Connection to use for this call. archive → archive@example.com",
+      });
+      expect(backup!.required).toContain("connection");
     } finally {
       await result.shutdown();
     }

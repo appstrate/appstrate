@@ -122,7 +122,7 @@ interface McpHostOptions {
   onLog?: (event: { source: string; level: string; data: unknown }) => void;
 }
 
-/** Reserved: an upstream that declares it cannot be served by N connections. */
+/** Reserved: a tool that declares it cannot sit in a namespace served by several connections. */
 const CONNECTION_PARAM = "connection";
 
 const CONNECTION_DESCRIPTION_PREFIX = "Connection to use for this call. ";
@@ -152,9 +152,9 @@ function siblingKey(trusted: boolean, originalName: string): string {
   return `${trusted ? "t" : "u"}:${originalName}`;
 }
 
-function declaresConnectionParam(descriptor: Tool | undefined): boolean {
-  const schema = descriptor?.inputSchema as { properties?: Record<string, unknown> } | undefined;
-  const properties = schema?.properties;
+function declaresConnectionParam(descriptor: Tool): boolean {
+  const properties = (descriptor.inputSchema as { properties?: Record<string, unknown> })
+    .properties;
   return properties !== undefined && Object.hasOwn(properties, CONNECTION_PARAM);
 }
 
@@ -200,7 +200,7 @@ function connectionSelectionError(
     content: [
       {
         type: "text",
-        text: `Tool "${toolName}" is served by ${labels.length} connections. Set "${CONNECTION_PARAM}" to one of: ${labels.join(", ")}.${suffix}`,
+        text: `Tool "${toolName}" requires "${CONNECTION_PARAM}", one of: ${labels.join(", ")}.${suffix}`,
       },
     ],
   };
@@ -213,7 +213,8 @@ function connectionSelectionError(
  *   1. `register({ namespace, client, connection })` — ingest one upstream.
  *      Calls `listTools()` on the client and snapshots the descriptors.
  *   2. Tool dispatch: `tools/call` routes by (tool name, connection label);
- *      see {@link withConnectionParam} for the selector a shared name gets.
+ *      every tool of a namespace served by several connections carries the
+ *      selector of {@link withConnectionParam}, one route or many.
  *   3. `dispose()` — closes every client. Idempotent.
  *
  * The host renames each upstream tool to `{namespace}__{name}` and
@@ -341,6 +342,23 @@ export class McpHost {
     // the allowlist, so authors declare names exactly as the upstream
     // advertises them.
     const hiddenSet = upstream.hiddenTools ? new Set<string>(upstream.hiddenTools) : null;
+    // A slot served by several connections puts the selector on every tool it
+    // holds, so none of them may declare `connection` itself.
+    const admitted = tools.filter(
+      (tool) => (!allowlist || allowlist.has(tool.name)) && !hiddenSet?.has(tool.name),
+    );
+    const slotLabels = this.labelsBySlot().get(normalisedNs) ?? new Set<string>();
+    if (admitted.length > 0 && [...slotLabels].some((other) => other !== label)) {
+      const conflicting = [
+        ...admitted,
+        ...this.toolDescriptors.filter((d) => this.toolToNamespace.get(d.name) === normalisedNs),
+      ].find(declaresConnectionParam);
+      if (conflicting) {
+        throw new Error(
+          `McpHost: connection_param_conflict — tool ${JSON.stringify(conflicting.name)} already declares a "${CONNECTION_PARAM}" property, so the per-connection selector cannot be injected`,
+        );
+      }
+    }
     // Trusted descriptors participate in a platform/catalog contract. Validate
     // their complete surface atomically before mutating any tool index: a
     // fallback or collision suffix would create a runtime-only name, while a
@@ -433,7 +451,12 @@ export class McpHost {
       }
       const sibling = this.siblingName(normalisedNs, upstream.trusted === true, tool.name, label);
       if (sibling !== undefined) {
-        this.addRoute(sibling, effectiveUpstream, sanitised, tool.name, normalisedNs);
+        this.toolRoutes.get(sibling)!.set(label, this.routeFor(effectiveUpstream, tool.name));
+        this.options.onLog?.({
+          source: `host:${normalisedNs}`,
+          level: "info",
+          data: { event: "tool_connection_route_added", name: sibling, connection: label },
+        });
         continue;
       }
       // Trusted first-party tools are already emitted in the canonical body
@@ -538,27 +561,16 @@ export class McpHost {
     return name !== undefined && !this.toolRoutes.get(name)!.has(label) ? name : undefined;
   }
 
-  private addRoute(
-    name: string,
-    upstream: McpHostUpstream,
-    incoming: Tool,
-    originalName: string,
-    namespace: string,
-  ): void {
-    const routes = this.toolRoutes.get(name)!;
-    const label: ConnectionKey = upstream.connection?.label ?? null;
-    const served = this.toolDescriptors.find((d) => d.name === name);
-    if (declaresConnectionParam(served) || declaresConnectionParam(incoming)) {
-      throw new Error(
-        `McpHost: connection_param_conflict — tool ${JSON.stringify(name)} already declares a "${CONNECTION_PARAM}" property, so the per-connection selector cannot be injected`,
-      );
+  /** Per slot, the labels of the connections holding at least one route in it. */
+  private labelsBySlot(): Map<string, Set<string>> {
+    const bySlot = new Map<string, Set<string>>();
+    for (const [name, routes] of this.toolRoutes) {
+      const slot = this.toolToNamespace.get(name)!;
+      const labels = bySlot.get(slot) ?? new Set<string>();
+      for (const label of routeLabels(routes)) labels.add(label);
+      bySlot.set(slot, labels);
     }
-    routes.set(label, this.routeFor(upstream, originalName));
-    this.options.onLog?.({
-      source: `host:${namespace}`,
-      level: "info",
-      data: { event: "tool_connection_route_added", name, connection: label },
-    });
+    return bySlot;
   }
 
   /**
@@ -590,6 +602,7 @@ export class McpHost {
    */
   buildTools(inject: AppstrateToolDefinition[] = []): AppstrateToolDefinition[] {
     const firstPartyNames = new Set(inject.map((t) => t.descriptor.name));
+    const labelsBySlot = this.labelsBySlot();
     const thirdParty: AppstrateToolDefinition[] = [];
     for (const desc of this.toolDescriptors) {
       if (firstPartyNames.has(desc.name)) continue;
@@ -605,7 +618,9 @@ export class McpHost {
             { ...(extra.signal ? { signal: extra.signal } : {}) },
           ),
         );
-      if (routes.size === 1) {
+      // One connection: the upstream descriptor as is. Several: every tool of the
+      // slot names its connection, so a call always states the account it acts on.
+      if (labelsBySlot.get(this.toolToNamespace.get(desc.name)!)!.size < 2) {
         const [sole] = [...routes.values()];
         thirdParty.push({
           descriptor: desc,

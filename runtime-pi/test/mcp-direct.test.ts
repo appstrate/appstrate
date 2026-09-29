@@ -115,6 +115,7 @@ function apiIntegration(
   return {
     namespace,
     integrationId,
+    connectionId: "conn-1",
     fetchCredentials:
       unreachableApiCallDependency as unknown as ApiCallIntegrationConfig["fetchCredentials"],
     refreshCredentials:

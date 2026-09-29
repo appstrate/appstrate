@@ -320,7 +320,7 @@ export function isHostPathSafeForMount(hostPath: string): boolean {
 }
 
 /** Where {@link materializeFileMountsOnHost} places one spec's files. */
-export interface FileMountPlacement {
+interface FileMountPlacement {
   /** Scopes the scratch dir, so two connections of a run never share it. */
   connectionId?: string;
   /** Canonical declared paths another connection of the run already holds. */

@@ -90,8 +90,7 @@ function stripHiddenCodePoints(value: string): string {
 
 /**
  * C0 control characters (U+0000-U+001F) plus DEL (U+007F), with `\n`
- * and `\t` preserved. Built via constructor + escapes for the same
- * reason as HIDDEN_UNICODE_RE.
+ * and `\t` preserved.
  */
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS_RE = new RegExp("[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]", "g");

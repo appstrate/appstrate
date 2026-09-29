@@ -858,7 +858,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         refreshCredentials: integ.refreshCredentials,
       },
       integrationId: integ.integrationId,
-      ...(integ.connectionId !== undefined ? { connectionId: integ.connectionId } : {}),
+      connectionId: integ.connectionId,
       label: toolName,
     };
     return {
@@ -1010,7 +1010,7 @@ function buildSidecarTools(options: MountMcpOptions): {
    */
   async function credentialProxyInner(
     rawArgs: unknown,
-    ctx: { proxyDeps: ApiCallDeps; integrationId: string; connectionId?: string; label: string },
+    ctx: { proxyDeps: ApiCallDeps; integrationId: string; connectionId: string; label: string },
   ): Promise<CallToolResult> {
     {
       const args = rawArgs as {
@@ -1105,7 +1105,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       const result = await executeApiCall(
         {
           integrationId: ctx.integrationId,
-          ...(ctx.connectionId !== undefined ? { connectionId: ctx.connectionId } : {}),
+          connectionId: ctx.connectionId,
           targetUrl: args.target,
           method,
           callerHeaders,
@@ -1698,7 +1698,7 @@ export interface ApiCallIntegrationConfig {
   /** Integration package id (used as the proxy `integrationId` + audit source). */
   integrationId: string;
   /** Bound connection whose credentials this tool injects. */
-  connectionId?: string;
+  connectionId: string;
   /** Resolve the integration's credentials into the proxy payload. */
   fetchCredentials: ApiCallDeps["fetchCredentials"];
   /** Force-refresh on a mid-run 401 and re-resolve (null when not rotated). */
