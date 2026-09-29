@@ -18,23 +18,31 @@
 -- connection. The index's precondition — no group holding a label twice — is
 -- NOT repaired here: §2 licenses no write beside a `CREATE UNIQUE INDEX`.
 -- `scripts/migration/0032-connection-sets.sql` renames the duplicates before
--- this batch; on a database that skipped it the index raises 23505 and the
--- batch rolls back whole. The backfill above cannot make one: every label it
--- mints is a "Connexion N" above every "Connexion <n>" of the group, and two
--- minted labels differ in N.
+-- this batch. The backfill above cannot make one: every label it mints is a
+-- "Connexion N" above every "Connexion <n>" of the group, and two minted labels
+-- differ in N — so the index's duplicates are exactly the non-empty labels
+-- already held twice.
 --
 -- That index leads with `space_id`, so it also serves the space-only scans
 -- (FK cascade on space delete) `idx_integration_conn_space` existed for.
 --
--- The read-only DO block first refuses a database where 0032's SHAPE section
--- has not run: a scalar left where a set belongs, which no index here catches.
+-- The read-only DO block refuses, before any write, a database where 0032 has
+-- not run: a scalar left where a set belongs (its SHAPE section), which no
+-- constraint here catches, and a label held twice (its DEDUPE section), which
+-- the index would refuse as a bare 23505. Both name the steps that repair it.
 DO $$
+DECLARE
+  next_steps CONSTANT text := 'Run scripts/migration/0033-unshare-space-access-loss.ts --apply, then scripts/migration/0032-connection-sets.sql, then redeploy.';
 BEGIN
   IF EXISTS (SELECT 1 FROM "runs" r, jsonb_each(r."connection_overrides") e(k, v) WHERE jsonb_typeof(e.v) <> 'array')
     OR EXISTS (SELECT 1 FROM "runs" r, jsonb_each(r."resolved_connections") e(k, v) WHERE jsonb_typeof(e.v) <> 'array')
     OR EXISTS (SELECT 1 FROM "package_schedules" s, jsonb_each(s."connection_overrides") e(k, v) WHERE jsonb_typeof(e.v) <> 'array')
   THEN
-    RAISE EXCEPTION 'runs.connection_overrides, runs.resolved_connections or package_schedules.connection_overrides still holds a scalar connection value. Run scripts/migration/0032-connection-sets.sql first, then redeploy.';
+    RAISE EXCEPTION 'runs.connection_overrides, runs.resolved_connections or package_schedules.connection_overrides still holds a scalar connection value. %', next_steps;
+  END IF;
+  IF EXISTS (SELECT 1 FROM "integration_connections" WHERE "label" <> '' GROUP BY "space_id", "integration_package_id", "label" HAVING count(*) > 1)
+  THEN
+    RAISE EXCEPTION 'integration_connections holds a label twice in one (space, integration). %', next_steps;
   END IF;
 END $$;--> statement-breakpoint
 ALTER TABLE "integration_pins" ADD COLUMN "connection_ids" uuid[];--> statement-breakpoint

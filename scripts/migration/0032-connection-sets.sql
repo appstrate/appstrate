@@ -1,20 +1,23 @@
 -- 0032 — the row work the connection-sets release needs BEFORE its drizzle batch.
 --
--- Run with the platform STOPPED: stop → `0033-unshare-space-access-loss.ts --apply` → run this
--- file → deploy the new image (`0077` applies at boot) → reopen. After `0033`, because the freeze
+-- Run with the platform STOPPED: stop → `pg_dump` → `0033-unshare-space-access-loss.ts --apply` →
+-- run this file → deploy the new image (`0077` applies at boot) → reopen. The dump follows the stop:
+-- it is the only rollback, so no write may land after it. After `0033`, because the freeze
 -- turns a colleague's shared connection into a member pin: a connection `0033` unshares (its owner
 -- no longer reaches the space) is then no longer shared, so it is never frozen. Before the batch
 -- because the freeze reads and writes the scalar `connection_id` columns `0077` folds and drops,
 -- and the dedupe is the precondition of `0077`'s unique index `idx_integration_conn_label`.
--- Skipped, `0077` refuses the batch on a scalar snapshot or override value (its first statement)
--- or on a duplicate label (23505); with neither, it lands and the freeze and the normalization are
--- simply missing.
+-- Skipped, `0077`'s first statement refuses the batch on a scalar snapshot or override value or
+-- on a label held twice, naming these steps; with neither, it lands and the freeze and the
+-- normalization are simply missing.
 --
 -- Four sections in ONE transaction; each prints a "before" count and an "after" count that must
 -- read 0.
 --
 -- 1. SHAPE — the three snapshot columns hold SETS (a scalar becomes a one-element array; arrays
---    and `{}` are left alone). The readers accept only sets.
+--    and `{}` are left alone). The readers accept only sets. The only scalars wrapped are a
+--    string override and an object snapshot: any other value (JSON null, a number, …) raises
+--    before any write, so the rehearsal proves there is none.
 --      runs.connection_overrides              { id: "<uuid>" } → { id: ["<uuid>"] }
 --      runs.resolved_connections              { id: {…} }      → { id: [{…}] }
 --      package_schedules.connection_overrides { id: "<uuid>" } → { id: ["<uuid>"] }
@@ -34,11 +37,13 @@
 --    own no member pins: list their triples with the standalone query at the end, before the
 --    window.
 --
--- 3. NORMALIZE — every non-empty label becomes what `toMintedLabel`
---    (`apps/api/src/lib/connection-label.ts`) makes of it: line breaks → space, C0/DEL/C1 and
---    `isHiddenCodePoint` code points dropped, whitespace runs → one space, trimmed, cut to 80
---    UTF-16 units; emptied → NULL (`0077` backfills it). Runs before the dedupe, which must compare
---    what the index will.
+-- 3. NORMALIZE — every non-empty label is brought within what `connectionLabelProblem`
+--    (`apps/api/src/lib/connection-label.ts`) accepts, and no further: line breaks → space, the
+--    code points it forbids (C0/DEL/C1, `isHiddenCodePoint`) dropped, both ends trimmed of what
+--    JS `trim()` strips, cut to 80 UTF-16 units and right-trimmed again; emptied → NULL (`0077`
+--    backfills it). A label the API accepts is left verbatim — inner whitespace runs and NBSP
+--    included — so two distinct legal labels are never merged into a needless " (2)". Runs before
+--    the dedupe, which must compare what the index will.
 --
 -- 4. DEDUPE — within a (space, integration), every holder of a label after the oldest
 --    (`created_at`, `id`) becomes "<base> (n)", n the smallest ≥ 2 the group does not hold, `base`
@@ -75,6 +80,22 @@ SELECT
     WHERE s.connection_overrides IS NOT NULL
       AND EXISTS (SELECT 1 FROM jsonb_each(s.connection_overrides) AS e(k, v)
                    WHERE jsonb_typeof(v) <> 'array'))            AS schedules_overrides_before;
+
+-- REFUSE — a non-array value SHAPE would wrap that is not the scalar it expects
+DO $$
+DECLARE
+  overrides bigint := (SELECT count(*) FROM runs r, jsonb_each(r.connection_overrides) AS e(k, v)
+                        WHERE jsonb_typeof(v) NOT IN ('array', 'string'));
+  resolved  bigint := (SELECT count(*) FROM runs r, jsonb_each(r.resolved_connections) AS e(k, v)
+                        WHERE jsonb_typeof(v) NOT IN ('array', 'object'));
+  schedules bigint := (SELECT count(*) FROM package_schedules s, jsonb_each(s.connection_overrides) AS e(k, v)
+                        WHERE jsonb_typeof(v) NOT IN ('array', 'string'));
+BEGIN
+  IF overrides + resolved + schedules > 0 THEN
+    RAISE EXCEPTION '0032: % runs.connection_overrides, % runs.resolved_connections and % package_schedules.connection_overrides value(s) are neither a set nor the scalar SHAPE wraps (a string override, an object snapshot). Nothing was written; inspect them.',
+      overrides, resolved, schedules;
+  END IF;
+END $$;
 
 UPDATE runs
 SET connection_overrides = (
@@ -235,13 +256,15 @@ DROP TABLE _0032_implicit_shared_picks;
 -- ═══ 3. NORMALIZE ═══
 --
 -- A VIEW, so the "after" line re-evaluates the rewrite. `ascii()` is the code point (UTF-8
--- database); `regexp_split_to_table(…, '')` splits by code point.
+-- database); `regexp_split_to_table(…, '')` splits by code point. `ws` is what JS `trim()` strips
+-- that the mapping leaves: U+0020 and the other Zs space separators.
 CREATE TEMP VIEW _0032_label_norm AS
 SELECT c.id, c.label, cut.label AS normalized
 FROM integration_connections c
--- line break → space, forbidden → dropped, other whitespace → space
+CROSS JOIN (SELECT U&' \00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\202F\205F\3000' AS ws) k
+-- line break → space (`isLineOrTab`), forbidden → dropped (`isForbidden`), both ends trimmed
 CROSS JOIN LATERAL (
-  SELECT string_agg(
+  SELECT btrim(string_agg(
            CASE
              WHEN p.cp BETWEEN 0x09 AND 0x0D OR p.cp IN (0x85, 0x2028, 0x2029) THEN ' '
              WHEN p.cp <= 0x1F
@@ -251,21 +274,18 @@ CROSS JOIN LATERAL (
                OR p.cp BETWEEN 0x202A AND 0x202E
                OR p.cp BETWEEN 0x2060 AND 0x206F
                OR p.cp BETWEEN 0xE0000 AND 0xE007F THEN ''
-             WHEN p.cp IN (0x20, 0xA0, 0x1680, 0x202F, 0x205F, 0x3000)
-               OR p.cp BETWEEN 0x2000 AND 0x200A THEN ' '
              ELSE s.ch
-           END, '' ORDER BY s.i) AS mapped
+           END, '' ORDER BY s.i), k.ws) AS mapped
   FROM regexp_split_to_table(c.label, '') WITH ORDINALITY AS s(ch, i)
   CROSS JOIN LATERAL (SELECT ascii(s.ch) AS cp) p
 ) m
--- runs of spaces → one, both ends trimmed, cut to 80 UTF-16 units, right-trimmed, '' → NULL
+-- cut to 80 UTF-16 units, right-trimmed, '' → NULL
 CROSS JOIN LATERAL (
-  SELECT NULLIF(rtrim(string_agg(w.ch, '' ORDER BY w.i) FILTER (WHERE w.run <= 80), ' '), '') AS label
+  SELECT NULLIF(rtrim(string_agg(w.ch, '' ORDER BY w.i) FILTER (WHERE w.run <= 80), k.ws), '') AS label
   FROM (
     SELECT t.ch, t.i,
            sum(CASE WHEN ascii(t.ch) > 0xFFFF THEN 2 ELSE 1 END) OVER (ORDER BY t.i) AS run
-    FROM regexp_split_to_table(btrim(regexp_replace(m.mapped, ' {2,}', ' ', 'g'), ' '), '')
-         WITH ORDINALITY AS t(ch, i)
+    FROM regexp_split_to_table(m.mapped, '') WITH ORDINALITY AS t(ch, i)
   ) w
 ) cut
 WHERE c.label IS NOT NULL AND c.label <> '';

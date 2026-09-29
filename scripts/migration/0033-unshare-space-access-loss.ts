@@ -8,11 +8,11 @@
  *   set -a && . ./.env && set +a && \
  *     bun scripts/migration/0033-unshare-space-access-loss.ts [--apply]
  *
- * Run FIRST in the deploy window, from the release checkout: platform stopped, `--apply`, then
- * `0032-connection-sets.sql`, then the deploy (`0077` applies at boot), then reopen. Before `0032`
- * because its freeze turns a colleague's still-shared connection into a member pin: run after it,
- * this would unshare connections just frozen, and those members would fail on pins they never
- * set. Safe on the pre-`0077` schema: it reads and writes only `integration_connections`
+ * Run FIRST in the deploy window, from the release checkout: platform stopped, then `pg_dump`,
+ * then `--apply`, then `0032-connection-sets.sql`, then the deploy (`0077` applies at boot), then
+ * reopen. Before `0032` because its freeze turns a colleague's still-shared connection into a
+ * member pin: run after it, this would unshare connections just frozen, and those members would
+ * fail on pins they never set. Safe on the pre-`0077` schema: it reads and writes only `integration_connections`
  * (`id`, `user_id`, `space_id`, `shared_with_org`, `updated_at`), `spaces`, `org_members`,
  * `space_members` and `space_roles`, none of which `0077` changes.
  *

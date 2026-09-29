@@ -149,10 +149,11 @@ export const integrationConnections = pgTable(
     index("idx_integration_conn_end_user")
       .on(table.endUserId)
       .where(sql`${table.endUserId} IS NOT NULL`),
-    // Hot path for the fallback resolution: when an actor has no pin
-    // and no override, the resolver enumerates own + shared connections
-    // for (space, integration, authKey). Partial index keeps the sharing
-    // set small.
+    // The shared side of `actorOrSharedFilter` for one (space, integration):
+    // the connection pickers and the resolver's selectable rows (own +
+    // shared), and the shared-only checks of admin pins, org defaults and a
+    // schedule written for another member. Partial, so it stays the size of
+    // the sharing set.
     index("idx_integration_conn_shared")
       .on(table.spaceId, table.integrationId, table.authKey)
       .where(sql`${table.sharedWithOrg} = true`),

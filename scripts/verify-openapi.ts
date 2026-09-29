@@ -564,13 +564,13 @@ function compareValueConstraints(
     }
   }
 
-  // Both-sides-set only: the webhook bodies (`POST /api/webhooks`, `PATCH /api/webhooks/{id}`)
-  // omit `events`' Zod `minItems: 1` from the spec.
   for (const keyword of ["minItems", "maxItems"] as const) {
     const zodValue = zodProp[keyword];
     const oaValue = oaProp[keyword];
-    if (zodValue !== undefined && oaValue !== undefined && zodValue !== oaValue) {
-      issues.push(`Property "${label}" ${keyword}: Zod=${zodValue}, OpenAPI=${oaValue}`);
+    if (zodValue !== oaValue) {
+      issues.push(
+        `Property "${label}" ${keyword}: Zod=${zodValue ?? "unset"}, OpenAPI=${oaValue ?? "unset"}`,
+      );
     }
   }
 

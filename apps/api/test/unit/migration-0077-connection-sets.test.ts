@@ -16,6 +16,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { replayJournal } from "../helpers/journal.ts";
 
 const MIGRATIONS_DIR = resolve(import.meta.dir, "../../../../packages/db/drizzle");
@@ -31,6 +32,9 @@ const SLACK = "@acme0077/slack";
 const AGENT = "@acme0077/agent";
 
 const conn = (n: number) => `c0770000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+/** The steps every refusal of a database that skipped the scripts names, in order. */
+const NEXT_STEPS =
+  "Run scripts/migration/0033-unshare-space-access-loss.ts --apply, then scripts/migration/0032-connection-sets.sql, then redeploy.";
 
 const pg = new PGlite();
 
@@ -180,15 +184,18 @@ describe("0077 — connection sets", () => {
     expect(await labelOf(conn(5))).toBe("prod");
   });
 
-  it("refuses, whole, a database that skipped 0032's shape rewrite, naming the script", () => {
+  it("refuses, whole, a database that skipped 0032's shape rewrite, naming the scripts", () => {
     expect(scalarErrors).toHaveLength(3);
     for (const error of scalarErrors) {
-      expect(error?.message).toContain("Run scripts/migration/0032-connection-sets.sql first");
+      expect(error?.message).toContain(NEXT_STEPS);
     }
   });
 
-  it("refuses, whole, a database that skipped 0032's label dedupe", async () => {
-    expect(skippedScriptError?.code).toBe("23505");
+  it("refuses, whole, a database that skipped 0032's label dedupe, naming the scripts", () => {
+    // Its own guard, not the unique index's bare 23505.
+    expect(skippedScriptError?.code).toBe("P0001");
+    expect(skippedScriptError?.message).toContain("holds a label twice");
+    expect(skippedScriptError?.message).toContain(NEXT_STEPS);
   });
 
   it("makes a label unique per (space, integration), verbatim", async () => {
@@ -213,16 +220,20 @@ describe("0077 — connection sets", () => {
   });
 
   it("refuses an empty set, a set past the cap, and an empty label", async () => {
-    const eleven = Array.from({ length: 11 }, (_, i) => `'${conn(100 + i)}'`).join(",");
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `'${conn(100 + i)}'`).join(",");
     const pin = (ids: string) =>
       `UPDATE integration_pins SET connection_ids = ${ids} WHERE user_id IS NULL`;
     expect(await rejects(pin("ARRAY[]::uuid[]"))).toBe(true);
-    expect(await rejects(pin(`ARRAY[${eleven}]::uuid[]`))).toBe(true);
+    expect(await rejects(pin(`ARRAY[${ids(MAX_CONNECTIONS_PER_INTEGRATION + 1)}]::uuid[]`))).toBe(
+      true,
+    );
     expect(
       await rejects(`UPDATE integration_connections SET label = '' WHERE id = '${conn(5)}'`),
     ).toBe(true);
-    // Control: a set of two and a real label land.
-    expect(await rejects(pin(`ARRAY['${conn(1)}', '${conn(2)}']::uuid[]`))).toBe(false);
+    // Control: a set at the cap and a real label land.
+    expect(await rejects(pin(`ARRAY[${ids(MAX_CONNECTIONS_PER_INTEGRATION)}]::uuid[]`))).toBe(
+      false,
+    );
     expect(
       await rejects(`UPDATE integration_connections SET label = 'staging' WHERE id = '${conn(5)}'`),
     ).toBe(false);

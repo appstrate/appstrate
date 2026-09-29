@@ -244,7 +244,11 @@ beforeAll(async () => {
       ${label(58, "Tag\u{E0041}X﻿")},
       ${label(59, `${"a".repeat(79)}\tbb`)},
       ${label(60, `${EMOJI}\u0085z`)},
-      ${label(61, "Clean one")};
+      ${label(61, "Clean one")},
+      ${label(62, "Two  spaces")},
+      ${label(63, "Two spaces")},
+      ${label(64, "No\u00A0break")},
+      ${label(65, "No break")};
     INSERT INTO package_schedules
       (id, package_id, user_id, org_id, space_id, cron_expression, enabled, connection_overrides)
     VALUES
@@ -387,7 +391,7 @@ describe("scripts/migration/0032 — connection sets", () => {
     expect(admin.rows).toEqual([{ integration: ADMIN, connection: conn(34) }]);
   });
 
-  it("normalizes a label to what the label rule mints: line breaks to spaces, forbidden characters dropped, whitespace collapsed, cut to 80 UTF-16 units", async () => {
+  it("normalizes a label only as far as the label rule requires: line breaks to spaces, forbidden characters dropped, ends trimmed, cut to 80 UTF-16 units", async () => {
     expect(await labelOf(conn(50))).toBe("Work Mail");
     // BEL, DEL and a C1 control
     expect(await labelOf(conn(51))).toBe("OpsBot");
@@ -395,8 +399,8 @@ describe("scripts/migration/0032 — connection sets", () => {
     expect(await labelOf(conn(52))).toBe("gnp.exe");
     // a zero-width space and a soft hyphen
     expect(await labelOf(conn(53))).toBe("TeamA");
-    // runs of mixed whitespace, NBSP included, collapse to one space and trim
-    expect(await labelOf(conn(55))).toBe("Sales Team");
+    // the ends are trimmed; the inner run, NBSP included, is legal and kept
+    expect(await labelOf(conn(55))).toBe("Sales \u00A0  Team");
     // a tag character (above U+FFFF) and a BOM
     expect(await labelOf(conn(58))).toBe("TagX");
     // the cut lands on the space the tab became, and the right-trim drops it
@@ -404,6 +408,12 @@ describe("scripts/migration/0032 — connection sets", () => {
     // 40 emoji are 80 units: the NEL's space and the "z" fall past the cut
     expect(await labelOf(conn(60))).toBe(EMOJI);
     expect(await labelOf(conn(61))).toBe("Clean one");
+    // Legal labels are kept verbatim: collapsing whitespace would merge each
+    // pair into one label and force a needless " (2)".
+    expect(await labelOf(conn(62))).toBe("Two  spaces");
+    expect(await labelOf(conn(63))).toBe("Two spaces");
+    expect(await labelOf(conn(64))).toBe("No\u00A0break");
+    expect(await labelOf(conn(65))).toBe("No break");
   });
 
   it("empties a whitespace-only label to NULL, and dedupes labels normalization made equal", async () => {
@@ -448,6 +458,26 @@ describe("scripts/migration/0032 — connection sets", () => {
   it("changes nothing on a second run, and finds nothing to do", () => {
     expect(afterSecondRun).toBe(afterFirstRun);
     expect(Object.entries(secondRunCounts).filter(([, n]) => n !== 0)).toEqual([]);
+  });
+
+  it("refuses, writing nothing, a value SHAPE would wrap that is neither a string override nor an object snapshot", async () => {
+    await pg.exec(`BEGIN;
+      UPDATE runs SET connection_overrides = '{"${GMAIL}": 42}', resolved_connections = '{"${GMAIL}": null}'
+        WHERE id = 'run_0032_empty';
+      UPDATE package_schedules SET connection_overrides = '{"${GMAIL}": {"id": "${conn(1)}"}}'
+        WHERE id = 'sch_0032_empty';`);
+    let refusal: unknown;
+    try {
+      await pg.exec(await Bun.file(SCRIPT).text());
+    } catch (error) {
+      refusal = error;
+    } finally {
+      await pg.exec("ROLLBACK");
+    }
+    expect((refusal as Error | undefined)?.message).toContain(
+      "0032: 1 runs.connection_overrides, 1 runs.resolved_connections and 1 package_schedules.connection_overrides value(s) are neither",
+    );
+    expect(await snapshot()).toBe(afterSecondRun);
   });
 
   it("leaves 0077 applicable: its backfill mints past every 'Connexion N' and the unique index lands", async () => {

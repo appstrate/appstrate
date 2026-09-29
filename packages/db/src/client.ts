@@ -36,8 +36,14 @@ export function getPGliteClient(): PGliteClient | null {
 // process. A second PGlite opened on a data directory the first still holds
 // corrupts it (the next boot aborts inside the core migrations), so instances
 // live on `globalThis`, which survives re-evaluation, keyed by data directory.
+// Each entry also keeps the unsubscribes of the LISTEN handlers registered on it: the evaluation
+// that registered them is gone after a reload, which registers its own.
 const PGLITE_INSTANCES = Symbol.for("appstrate.db.pgliteInstances");
-const pgliteInstances = ((globalThis as { [PGLITE_INSTANCES]?: Map<string, PGliteClient> })[
+interface PGliteInstance {
+  client: PGliteClient;
+  unlisten: (() => Promise<void>)[];
+}
+const pgliteInstances = ((globalThis as { [PGLITE_INSTANCES]?: Map<string, PGliteInstance> })[
   PGLITE_INSTANCES
 ] ??= new Map());
 
@@ -49,8 +55,17 @@ async function initPGlite(): Promise<Db> {
 
   const dataDir = resolve(env.PGLITE_DATA_DIR);
   mkdirSync(dataDir, { recursive: true });
-  const client = pgliteInstances.get(dataDir) ?? new PGlite(dataDir);
-  pgliteInstances.set(dataDir, client);
+  let instance: PGliteInstance | undefined = pgliteInstances.get(dataDir);
+  if (instance) {
+    await Promise.all(instance.unlisten.splice(0).map((unlisten) => unlisten()));
+  } else {
+    const created = new PGlite(dataDir);
+    // Cached only once ready: a failed open must not be reused by the next evaluation.
+    await created.waitReady;
+    instance = { client: created, unlisten: [] };
+    pgliteInstances.set(dataDir, instance);
+  }
+  const { client, unlisten } = instance;
 
   _pgliteClient = client;
   _closeDb = () => {
@@ -59,7 +74,7 @@ async function initPGlite(): Promise<Db> {
   };
   _listenClient = {
     listen: async (channel, handler) => {
-      await client.listen(channel, handler);
+      unlisten.push(await client.listen(channel, handler));
     },
   };
 
