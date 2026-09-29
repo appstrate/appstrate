@@ -26,7 +26,9 @@
  *   - Audit log on every call (requestId, authMethod, apiKeyId, userId,
  *     endUserId, integrationId, target, status)
  *   - URL allowlist enforced via the integration manifest
- *     (`authorized_uris` / `allow_all_uris`)
+ *     (`authorized_uris` / `allow_all_uris`; the latter is ignored when the
+ *     caller templates a credential field into the call)
+ *   - Upstream `Set-Cookie` never relayed to the caller
  *   - Request / response size caps
  */
 
@@ -289,11 +291,10 @@ export function createCredentialProxyRouter() {
         });
 
         // Strip hop-by-hop + stale content-encoding/length (shared helper),
-        // plus the X-Stream-* transport hints between the runtime and this
-        // proxy, which must not reach the caller.
+        // plus the route-specific set (transport hints, Set-Cookie).
         const responseHeaders = stripUpstreamResponseHeaders(
           result.headers,
-          STREAM_CONTROL_HEADERS,
+          CALLER_RESPONSE_SKIP_HEADERS,
         );
 
         // Streaming upload on a 401: credentials may be stale but the body
@@ -410,8 +411,17 @@ const PROXY_CONTROL_HEADERS = new Set([
   "accept-encoding",
 ]);
 
-/** Transport hints between the runtime and this proxy — never forwarded to the caller. */
-const STREAM_CONTROL_HEADERS = new Set(["x-stream-request", "x-stream-response"]);
+/**
+ * Upstream response headers never relayed to the caller: the X-Stream-*
+ * transport hints, and Set-Cookie — a rotated session cookie can BE the
+ * credential; continuity lives in the server-side jar (X-Session-Id).
+ */
+const CALLER_RESPONSE_SKIP_HEADERS = new Set([
+  "x-stream-request",
+  "x-stream-response",
+  "set-cookie",
+  "set-cookie2",
+]);
 
 /** Context passed to {@link capStreamingBody} for structured warning logs. */
 interface StreamCapLogCtx {
