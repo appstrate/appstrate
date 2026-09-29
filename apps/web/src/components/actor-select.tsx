@@ -21,12 +21,7 @@ import { useEndUsers, useEndUser } from "../hooks/use-end-users";
 import { useAuth } from "../hooks/use-auth";
 import { usePermissions } from "../hooks/use-permissions";
 import { mayGovernMemberSchedule } from "../lib/schedule-governance";
-
-/**
- * An execution identity. Exactly one field is set; `undefined` means no
- * selection. Mirrors the platform `actor` wire shape (user XOR end-user).
- */
-export type ActorValue = { userId?: string; endUserId?: string };
+import type { ActorValue } from "../lib/schedule-payload";
 
 interface ActorSelectProps {
   value?: ActorValue;

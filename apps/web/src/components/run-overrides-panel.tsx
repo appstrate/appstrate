@@ -19,6 +19,7 @@ import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { withConnectionOverride } from "../lib/connection-set";
+import type { RunOverridesValue } from "../lib/schedule-payload";
 import { ModelGenerationFields } from "./model-generation-fields";
 import {
   reconcileModelGenerationSettings,
@@ -33,21 +34,6 @@ const INHERIT = "__inherit__";
 // with "None" selected is no longer silently routed through the org-default
 // proxy.
 const NONE = "none";
-
-export interface RunOverridesValue {
-  /** Per-run model id override. */
-  model_id_override?: string;
-  /** Per-run/schedule generation layer. */
-  generation_config_override?: ModelGenerationSettings;
-  /** Per-run proxy id override. */
-  proxy_id_override?: string;
-  /**
-   * Per-integration connection picks — frozen at schedule create/edit so
-   * every fire uses the same rows. Loses to admin pins; beats
-   * schedule-less fallback + per-run overrides on the actor.
-   */
-  connection_overrides?: Record<string, string[]>;
-}
 
 interface AgentIntegrationRef {
   id: string;

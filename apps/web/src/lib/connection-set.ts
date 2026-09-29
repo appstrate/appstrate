@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { RunOverridesValue } from "../components/run-overrides-panel";
+import type { RunOverridesValue } from "./schedule-payload";
 import { sameSet } from "./strings";
 
 /** At the cap an addition is refused and `ids` comes back unchanged. */

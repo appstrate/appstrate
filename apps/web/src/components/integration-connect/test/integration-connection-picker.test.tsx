@@ -282,6 +282,22 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(html).toContain(`member-pick-locked-${INTEGRATION}`);
   });
 
+  it("names a locked member that is no candidate as unavailable, and warns while runs are blocked", () => {
+    const html = renderPicker(
+      resolution({
+        source: "admin_pin",
+        error_code: "pinned_connection_unavailable",
+        admin_pinned_connection_ids: [WEB, GONE],
+      }),
+      true,
+    );
+    expect(html).toContain(`member-pick-locked-${INTEGRATION}`);
+    expect(html).not.toContain(GONE);
+    expect(html).toContain(t("unavailableCount", { count: 1 }));
+    expect(html).toContain(WARNING);
+    expect(html).toContain("text-amber-600");
+  });
+
   it("a soft org default leaves the dropdown open", () => {
     const html = renderPicker(
       resolution({ source: "org_default", org_default_connection_ids: [WEB] }),

@@ -144,6 +144,7 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useSetPackageActive } from "../hooks/use-library";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
 import {
+  connectionLockHintKey,
   connectionRowGrants,
   isConnectionOwnedBy,
 } from "../components/integration-connect/connection-ownership";
@@ -1399,13 +1400,8 @@ function ConnectionTableRow({
   });
   // An admin pin or the space default names the row: unsharing and deleting it
   // are refused (409 `connection_pinned`) until it is removed from there.
-  const lockHint = connection.locked_by
-    ? t(
-        connection.locked_by === "admin_pin"
-          ? "integration.connection.lock.adminPin"
-          : "integration.connection.lock.orgDefault",
-      )
-    : null;
+  const lockKey = connectionLockHintKey(connection.locked_by);
+  const lockHint = lockKey ? t(lockKey) : null;
   const startEdit = () => {
     setDraftLabel(connection.label);
     setEditing(true);

@@ -36,9 +36,10 @@ interface InviteFormValues {
 
 export interface OrgInvitationFormHandle {
   /**
-   * Send the invitation still typed in the field, exactly as the invite button
-   * would. Resolves `true` once sent or when the field is empty; `false` when the
-   * value is invalid or the invite fails, the form then showing why.
+   * Invite the email still typed in the field — a new invitation, never an edit of
+   * `invitation`. Resolves `true` once sent or when the field is blank; `false` while
+   * an invite is in flight, or when the value is invalid or the invite fails, the
+   * form then showing why.
    */
   submitPending: () => Promise<boolean>;
 }
@@ -117,7 +118,8 @@ export function OrgInvitationForm({
 
   useImperativeHandle(ref, () => ({
     submitPending: async () => {
-      if (!form.getValues("email")) return true;
+      if (invite.isPending) return false;
+      if (!form.getValues("email").trim()) return true;
       if (!(await form.trigger())) return false;
       // The hook's `onError` already shows a refusal on the form.
       return invite.mutateAsync(inviteRequest(form.getValues())).then(

@@ -26,9 +26,9 @@ import type { AgentDetail } from "@appstrate/shared-types";
 import { AgentInputForm } from "./agent-input-form";
 import type { AgentInputSettings } from "@appstrate/core/input-resolution";
 import { changedInputValues, hasInputFields, initialInputValues } from "../lib/agent-input";
-import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
+import { RunOverridesPanel } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
-import { ActorSelect, type ActorValue } from "./actor-select";
+import { ActorSelect } from "./actor-select";
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionRefusals } from "./schedule-connection-refusals";
 import { VERSION_PUBLISHED } from "../lib/version-selector";
@@ -40,9 +40,14 @@ import {
   refusalForActor,
 } from "../lib/connection-choice";
 import { withConnectionOverride } from "../lib/connection-set";
-import { sameActor, scheduleOverridePayload } from "../lib/schedule-payload";
+import {
+  type ActorValue,
+  type RunOverridesValue,
+  sameActor,
+  scheduleOverridePayload,
+} from "../lib/schedule-payload";
 import { useAuth } from "../hooks/use-auth";
-import { useScheduleFormDeps } from "../hooks/use-schedules";
+import { usePackageDetail } from "../hooks/use-packages";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 // Sentinel for the schedule's "inherit" version choice — nothing stored; the
@@ -289,9 +294,13 @@ export function ScheduleForm({
   // Rows come from the definition every fire runs: inherit is the latest published version,
   // never the draft this page would otherwise project for an author.
   const firedVersion = versionOverride ?? VERSION_PUBLISHED;
-  const firedIntegrations = useScheduleFormDeps(packageId, firedVersion).deps?.agentIntegrations;
+  const firedIntegrations = usePackageDetail("agent", packageId, { version: firedVersion }).data
+    ?.dependencies.integrations;
   const showActorChoice =
-    !actorIsViewer && ((firedIntegrations?.length ?? 0) > 0 || refused.length > 0);
+    !actorIsViewer &&
+    ((firedIntegrations?.length ?? 0) > 0 ||
+      refused.length > 0 ||
+      Object.keys(overrides.connection_overrides ?? {}).length > 0);
 
   const {
     register,

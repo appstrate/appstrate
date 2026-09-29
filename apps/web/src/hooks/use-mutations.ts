@@ -20,7 +20,7 @@ import {
   invalidatePackageFiles,
 } from "../lib/query-keys";
 import { retryLaunch, type RunLaunch } from "../lib/run-launch";
-import type { MissingIntegrationFieldError } from "../components/missing-connections-modal";
+import type { MissingIntegrationFieldError } from "../lib/connection-choice";
 import { missingConnectionErrors } from "../lib/connection-choice";
 
 // NOTE on query keys: run-cache keys (["runs"], ["paginated-runs"], ["run"])

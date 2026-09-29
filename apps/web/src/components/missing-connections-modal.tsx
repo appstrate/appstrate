@@ -11,48 +11,9 @@ import { IntegrationConnectionPicker } from "./integration-connect/integration-c
 import { describeResolution } from "./integration-connect/integration-run-readiness";
 import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
-import { integrationIdOfField, type ConnectionChoiceCandidate } from "../lib/connection-choice";
+import { integrationIdOfField, type MissingIntegrationFieldError } from "../lib/connection-choice";
 import { withConnectionPick } from "../lib/connection-set";
 import { refusalMessage } from "../lib/mutation-error";
-
-/**
- * Recovery surface for the run-kickoff `409 missing_integration_connection`: one row per
- * `errors[]` entry. Each actionable row embeds the shared `IntegrationConnectionPicker` in
- * `override` mode, so it stays in lockstep with the Connexions tab; validated sets accumulate
- * into the per-run `connection_overrides` map that "Re-run" hands to `onRetryWithOverrides`.
- * Structural failures keep a plain message: no connection pick can fix them.
- */
-
-export interface MissingIntegrationFieldError {
-  field: string; // `integrations.{packageId}` (integration-level — auth_key lives on the candidate row)
-  /** `| string`: an unlisted code still renders its server message. */
-  code:
-    | "not_connected"
-    | "needs_reconnection"
-    | "insufficient_scopes"
-    | "must_choose_connection"
-    | "auth_key_mismatch"
-    | "auth_serves_no_selected_tool"
-    | "auth_key_serves_no_selected_tool"
-    | "pinned_connection_unavailable"
-    | "override_connection_unavailable"
-    | "integration_not_found"
-    | "integration_wrong_type"
-    | "integration_invalid_manifest"
-    | "integration_not_active"
-    | string;
-  title?: string;
-  message: string;
-  /** Missing scopes — populated on insufficient_scopes for the OAuth re-consent upgrade. */
-  missing_scopes?: string[];
-  /** `must_choose_connection`: for API/MCP callers; the modal renders the picker. */
-  candidate_connections?: ConnectionChoiceCandidate[];
-  /**
-   * The dead/under-scoped connection id — populated on `needs_reconnection`
-   * and `insufficient_scopes`.
-   */
-  connection_id?: string;
-}
 
 /** Per-run picks in the run route's `connection_overrides` shape (`launch-schemas.ts`). */
 type ConnectionOverridesMap = Record<string, string[]>;
@@ -85,6 +46,12 @@ interface MissingConnectionsModalProps {
   retrying?: boolean;
 }
 
+/**
+ * Recovery surface for the run-kickoff `409 missing_integration_connection`: one row per
+ * `errors[]` entry. Actionable rows embed `IntegrationConnectionPicker` in `override` mode;
+ * validated sets accumulate into the `connection_overrides` "Re-run" hands to
+ * `onRetryWithOverrides`. Structural failures keep a plain message: no pick fixes them.
+ */
 export function MissingConnectionsModal({
   open,
   onClose,
@@ -99,8 +66,7 @@ export function MissingConnectionsModal({
 
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
 
-  // must_choose rows have no auto-pick, so a re-run waits for the user's pick. Other actionable
-  // rows resolve through the picker's own flow and re-run freely — a fresh 409 reopens the modal.
+  // A must_choose row waits for a pick; the others re-run freely (a fresh 409 reopens this).
   const mustChooseIds = integrationErrors
     .filter((e) => e.code === "must_choose_connection")
     .map((e) => integrationIdOfField(e.field));
@@ -110,8 +76,7 @@ export function MissingConnectionsModal({
   const showRetry = hasActionable;
   const canRetry = !retrying && allMustChosen;
 
-  // Clearing (the picker's "inherit / reset" entry) drops the key so the resolver falls back to
-  // the member pin / cascade default at re-run.
+  // An empty pick drops the key: the re-run falls back to the cascade.
   const setPick = (integrationId: string, connectionIds: string[]) =>
     setPicks((prev) => withConnectionPick(prev, integrationId, connectionIds));
 

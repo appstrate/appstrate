@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { OrgRole } from "@appstrate/shared-types";
-import { ORG_ROLES_WITH_FULL_ACCESS } from "@appstrate/core/permissions";
+import { hasFullOrgAccess } from "./org-role";
 
 /** Who is asking: the signed-in user and their (effective) org role. */
 interface ScheduleCaller {
@@ -19,8 +19,5 @@ export function mayGovernMemberSchedule(
 ): boolean {
   if (!memberId) return true;
   if (caller.userId === memberId) return true;
-  return (
-    caller.orgRole !== null &&
-    (ORG_ROLES_WITH_FULL_ACCESS as readonly OrgRole[]).includes(caller.orgRole)
-  );
+  return hasFullOrgAccess(caller.orgRole);
 }

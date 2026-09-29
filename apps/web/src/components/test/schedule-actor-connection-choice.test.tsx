@@ -74,6 +74,27 @@ describe("ScheduleActorConnectionChoice", () => {
     expect(html).not.toContain('role="alert"');
   });
 
+  it("lets a picked dead connection be unticked, but not a fresh one ticked", () => {
+    const box = (html: string) =>
+      html.match(new RegExp(`<button[^>]*id="sched-choice-${GMAIL}-c_team"[^>]*>`))![0];
+    expect(box(renderChoice({ [GMAIL]: ["c_team"] }))).not.toContain('disabled=""');
+    expect(box(renderChoice({}))).toContain('disabled=""');
+  });
+
+  it("shows a stored pick nothing refused, read-only and clearable", () => {
+    const html = render(
+      <ScheduleActorConnectionChoice
+        choices={[]}
+        value={{ "@acme/slack": ["c_private"] }}
+        onChange={() => {}}
+      />,
+    );
+    expect(html).toContain("schedule-actor-stored-@acme/slack");
+    expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.privateConnection"));
+    expect(html).not.toContain("c_private");
+    expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.clearChoice"));
+  });
+
   it("with nothing the viewer may name, offers no checkbox", () => {
     const html = render(
       <ScheduleActorConnectionChoice

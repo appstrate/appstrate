@@ -6,28 +6,26 @@ interface ConnectionOwnerFields {
 }
 
 /**
- * Whether a connection belongs to the signed-in dashboard user.
- *
- * The connection lists return org-shared rows owned by other members (and,
- * in a headless space, by end-users), so several controls key off
- * ownership: the delete button, the share toggle and the OAuth renew CTA are
- * owner-only server-side, and "do I already have an account connected?" must
- * not count someone else's row. Both halves of the check matter — an
- * `end_user` id could in principle collide with a user id, and only the pair
- * identifies the owner.
+ * Whether a connection belongs to the signed-in dashboard user. The lists include rows shared
+ * by others; only the (type, id) pair identifies the owner.
  */
 export function isConnectionOwnedBy(c: ConnectionOwnerFields, userId: string | undefined): boolean {
   return c.owner_type === "user" && !!userId && c.owner_id === userId;
 }
 
+/** The `settings` key saying why a locked connection refuses an unshare or delete; null unlocked. */
+export function connectionLockHintKey(lockedBy: "admin_pin" | "org_default" | null | undefined) {
+  if (!lockedBy) return null;
+  return lockedBy === "admin_pin"
+    ? "integration.connection.lock.adminPin"
+    : "integration.connection.lock.orgDefault";
+}
+
 /**
- * The write controls a connection row offers, on the rules the API enforces
- * (every write also guards on `integrations:connect`, whoever owns the row):
- * rename is the owner's or a governor's (`integrations:configure`); sharing is
- * the owner's consent, and a governor can only WITHDRAW a share — so a
- * colleague's unshared row offers them no toggle. While an admin pin or the
- * space default names the row (`locked`), unsharing it is refused (409
- * `connection_pinned`): the toggle stays, disabled (`shareLocked`).
+ * The write controls a connection row offers, as the API enforces them (every write needs
+ * `integrations:connect`): rename is the owner's or a governor's; sharing is the owner's
+ * consent, a governor only withdraws one. A `locked` row refuses an unshare (409
+ * `connection_pinned`): the toggle stays, disabled.
  */
 export function connectionRowGrants(args: {
   isOwn: boolean;

@@ -3,14 +3,12 @@
 import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import i18n from "../i18n";
-import { ApiError } from "../api/client";
+import { ApiError } from "../api/errors";
 
 /**
- * Refusals whose English server `detail` is replaced by a translated sentence. The lock codes
- * interpolate the field named in `param`; `draft_not_writable` says which version will run instead;
- * `connection_label_taken` answers a rename, whose caller just typed the label. The connection
- * writes answer `connection_pinned` / `connection_owner_without_access`; the resolver codes after
- * them are the per-integration `errors[]` items the run-launch recovery modal shows.
+ * Refusals whose English server `detail` is replaced by a translated sentence; the lock codes
+ * interpolate the field named in `param`. From `pinned_connection_unavailable` on, the codes are
+ * the resolver's per-integration `errors[]` items.
  */
 const REFUSAL_ERROR_KEYS: Record<string, string> = {
   locked_input_field: "error.lockedInputField",
@@ -28,6 +26,7 @@ const REFUSAL_ERROR_KEYS: Record<string, string> = {
   auth_key_mismatch: "error.authKeyMismatch",
   auth_serves_no_selected_tool: "error.authServesNoSelectedTool",
   auth_key_serves_no_selected_tool: "error.authKeyServesNoSelectedTool",
+  override_outranked: "error.overrideOutranked",
 };
 
 export function refusalMessage(err: { code: string; param?: string }): string | null {
@@ -40,10 +39,8 @@ export function refusalMessage(err: { code: string; param?: string }): string | 
 }
 
 export function onMutationError(err: Error) {
-  // Skip the generic toast for missing_integration_connection (409): a run
-  // launch answers it with the recovery modal (`useRunLauncher`, the one way
-  // to launch), which says strictly more; a schedule form marks it inline, and
-  // a surface with no picker adds `toastScheduleConnectionChoice`.
+  // A run launch answers this 409 with its recovery modal, a schedule form inline, and a
+  // surface with no picker with `toastScheduleConnectionChoice`.
   if (err instanceof ApiError && err.code === "missing_integration_connection") {
     return;
   }
@@ -58,10 +55,8 @@ export function onMutationError(err: Error) {
 }
 
 /**
- * A schedule write's `409 missing_integration_connection`, named for a surface
- * with no picker (the detail page's enable toggle). The form needs none: it
- * marks the refused integrations inline. Anything else is left to the hook's
- * `onMutationError`, which stays silent on this code.
+ * A schedule write's `409 missing_integration_connection`, for a surface with no picker (the
+ * detail page's enable toggle). Anything else is left to `onMutationError`.
  */
 export function toastScheduleConnectionChoice(err: Error) {
   if (err instanceof ApiError && err.code === "missing_integration_connection") {

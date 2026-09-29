@@ -2,9 +2,7 @@
 
 import { ApiError } from "../api/errors";
 import type { components } from "../api/schema";
-import type { ActorValue } from "../components/actor-select";
-import type { MissingIntegrationFieldError } from "../components/missing-connections-modal";
-import { sameActor } from "./schedule-payload";
+import { type ActorValue, sameActor } from "./schedule-payload";
 import { sameSet } from "./strings";
 
 /** The integration package id an `integrations.{packageId}` error field names. */
@@ -12,8 +10,11 @@ export function integrationIdOfField(field: string): string {
   return field.slice("integrations.".length);
 }
 
+/** One `errors[]` item of a `409 missing_integration_connection`. */
+export type MissingIntegrationFieldError = components["schemas"]["ResolutionFieldError"];
+
 export type ConnectionChoiceCandidate = NonNullable<
-  components["schemas"]["ResolutionFieldError"]["candidate_connections"]
+  MissingIntegrationFieldError["candidate_connections"]
 >[number];
 
 /**
@@ -23,7 +24,10 @@ export type ConnectionChoiceCandidate = NonNullable<
 export interface ConnectionChoice {
   integrationId: string;
   code:
-    "must_choose_connection" | "override_connection_unavailable" | "auth_serves_no_selected_tool";
+    | "must_choose_connection"
+    | "override_connection_unavailable"
+    | "auth_serves_no_selected_tool"
+    | "override_outranked";
   candidates: ConnectionChoiceCandidate[];
 }
 
@@ -31,6 +35,7 @@ const SCHEDULE_CHOICE_CODES: ReadonlySet<string> = new Set([
   "must_choose_connection",
   "override_connection_unavailable",
   "auth_serves_no_selected_tool",
+  "override_outranked",
 ]);
 
 /** The `errors[]` of a `409 missing_integration_connection`; `null` for any other error. */
@@ -105,6 +110,8 @@ export function refusalReasonKey(choice: ConnectionChoice): string {
       return "schedule.connectionOverrides.unavailable";
     case "auth_serves_no_selected_tool":
       return "schedule.connectionOverrides.unserving";
+    case "override_outranked":
+      return "schedule.connectionOverrides.outranked";
     case "must_choose_connection":
       return choice.candidates.length > 0
         ? "schedule.connectionOverrides.mustChoose"

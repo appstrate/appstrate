@@ -3,9 +3,8 @@
 import type { IntegrationAgentResolution } from "@appstrate/shared-types";
 
 /**
- * A broken explicit set never reaches an empty trigger: the picker names that set whole.
- * `reconfigure`: the agent's own `auth_key` serves none of its selected tools — no pick or
- * connection clears it, so nothing is offered.
+ * What the picker's trigger asks for when nothing is bound. `reconfigure`: the agent's own
+ * `auth_key` serves none of its selected tools — no pick or connection clears it.
  */
 type EmptyPickerPrompt = "choose" | "connect" | "reconfigure";
 

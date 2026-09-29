@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
@@ -57,6 +57,7 @@ import { client } from "../../api/client";
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
 import { isVersioned } from "../../lib/version-selector";
 import { usePermissions } from "../../hooks/use-permissions";
+import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { useCanReach } from "../../hooks/use-can-reach";
 
 /**
@@ -93,6 +94,20 @@ type ConnectionPickerPersistence =
  * orchestration (hosted connect portal popup) are identical across both; only
  * where the pick lands differs.
  */
+const AMBER_TEXT = "text-amber-600 dark:text-amber-400";
+
+function PickerWarning({ testId, children }: { testId: string; children: ReactNode }) {
+  return (
+    <div
+      className="mt-1.5 flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
+      data-testid={testId}
+    >
+      <AlertTriangle className="size-3 shrink-0" />
+      <span>{children}</span>
+    </div>
+  );
+}
+
 // Module-level constant so the default prop is a stable reference across
 // renders (a `{ mode: "pin" }` literal default would be a new object each
 // render — react/no-object-type-as-default-prop).
@@ -188,17 +203,18 @@ export function IntegrationConnectionPicker({
   if (emptyPickerPrompt === "reconfigure") {
     return (
       <div data-testid={`member-picker-${integrationId}`}>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled
-          className="h-7 justify-start gap-1.5 text-xs text-amber-600 dark:text-amber-400"
-          title={t("error.authKeyServesNoSelectedTool")}
-          data-testid={`member-pick-reconfigure-${integrationId}`}
-        >
-          <AlertTriangle className="size-3" />
-          <span className="truncate">{t("detail.integrationMemberPicker.reconfigureLabel")}</span>
-        </Button>
+        <DisabledReasonTooltip reason={t("error.authKeyServesNoSelectedTool")}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled
+            className="h-7 justify-start gap-1.5 text-xs text-amber-600 dark:text-amber-400"
+            data-testid={`member-pick-reconfigure-${integrationId}`}
+          >
+            <AlertTriangle className="size-3" />
+            <span className="truncate">{t("detail.integrationMemberPicker.reconfigureLabel")}</span>
+          </Button>
+        </DisabledReasonTooltip>
       </div>
     );
   }
@@ -210,27 +226,43 @@ export function IntegrationConnectionPicker({
       ? t("detail.integrationMemberPicker.byYou")
       : (c.owner_name ?? t("detail.integrationMemberPicker.ownerUnknown"));
 
+  const candidateIds = candidates.map((c) => c.id);
+  const setLabel = (ids: string[], unavailable: string[]): string =>
+    unavailable.length > 0
+      ? `${t("detail.integrationMemberPicker.selectedCount", { count: ids.length })} · ${t(
+          "detail.integrationMemberPicker.unavailableCount",
+          { count: unavailable.length },
+        )}`
+      : ids.map((id) => byId(id)!.label).join(" · ");
+
   // An admin force (pin or enforced org default) renders read-only: a member pin or a launch
   // override would lose to it at run time.
   if (lockedConnectionIds.length > 0) {
-    const label = lockedConnectionIds.map((id) => byId(id)?.label ?? id).join(" · ");
+    const lockedUnavailableIds = unavailableConnectionIds(lockedConnectionIds, candidateIds);
     return (
       <div data-testid={`member-picker-${integrationId}`}>
         <Button
           variant="outline"
           size="sm"
           disabled
-          className="h-7 justify-start gap-1.5 text-xs"
+          className={`h-7 justify-start gap-1.5 text-xs ${runBlocking ? AMBER_TEXT : ""}`}
           data-testid={`member-pick-locked-${integrationId}`}
         >
-          <Lock className="size-3" />
-          <span className="truncate">{label}</span>
+          {runBlocking ? <AlertTriangle className="size-3" /> : <Lock className="size-3" />}
+          <span className="truncate">{setLabel(lockedConnectionIds, lockedUnavailableIds)}</span>
           <Badge variant="secondary" className="ml-1 text-[0.6rem]">
             {t("detail.integrationMemberPicker.adminLocked", {
               count: lockedConnectionIds.length,
             })}
           </Badge>
         </Button>
+        {lockedUnavailableIds.length > 0 && (
+          <PickerWarning testId={`member-pick-unavailable-warning-${integrationId}`}>
+            {t("detail.integrationMemberPicker.lockedUnavailableWarning", {
+              count: lockedUnavailableIds.length,
+            })}
+          </PickerWarning>
+        )}
       </div>
     );
   }
@@ -241,7 +273,6 @@ export function IntegrationConnectionPicker({
     explicitIds,
     resolvedIds: resolvedConnectionIds,
   });
-  const candidateIds = candidates.map((c) => c.id);
   // The set in play, named whole: the actor's own pick, else (pin mode) a soft
   // space default — a member of either that is no candidate blocks the run.
   const fromDefault = !overrideMode && explicitIds.length === 0 && softDefaultIds.length > 0;
@@ -351,10 +382,7 @@ export function IntegrationConnectionPicker({
 
   const triggerLabel =
     unavailableIds.length > 0
-      ? `${t("detail.integrationMemberPicker.selectedCount", { count: storedIds.length })} · ${t(
-          "detail.integrationMemberPicker.unavailableCount",
-          { count: unavailableIds.length },
-        )}`
+      ? setLabel(storedIds, unavailableIds)
       : displayConns.length === 1
         ? displayConns[0]!.label
         : displayConns.length > 1
@@ -431,7 +459,7 @@ export function IntegrationConnectionPicker({
           <Button
             variant="outline"
             size="sm"
-            className={`h-7 justify-start gap-1.5 text-xs ${triggerWarn ? "text-amber-600 dark:text-amber-400" : ""}`}
+            className={`h-7 justify-start gap-1.5 text-xs ${triggerWarn ? AMBER_TEXT : ""}`}
             data-testid={`member-pick-${integrationId}`}
           >
             <TriggerIcon className="size-3" />
@@ -647,34 +675,22 @@ export function IntegrationConnectionPicker({
           — or, for the space default, until the member picks their own or an
           admin fixes the default. */}
       {unavailableIds.length > 0 && (
-        <div
-          className="mt-1.5 flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
-          data-testid={`member-pick-unavailable-warning-${integrationId}`}
-        >
-          <AlertTriangle className="size-3 shrink-0" />
-          <span>
-            {t(
-              fromDefault
-                ? "detail.integrationMemberPicker.defaultUnavailableWarning"
-                : "detail.integrationMemberPicker.unavailableWarning",
-              { count: unavailableIds.length },
-            )}
-          </span>
-        </div>
+        <PickerWarning testId={`member-pick-unavailable-warning-${integrationId}`}>
+          {t(
+            fromDefault
+              ? "detail.integrationMemberPicker.defaultUnavailableWarning"
+              : "detail.integrationMemberPicker.unavailableWarning",
+            { count: unavailableIds.length },
+          )}
+        </PickerWarning>
       )}
       {/* A dead member fails every run that binds it until its owner reconnects it. */}
       {deadConns.length > 0 && (
-        <div
-          className="mt-1.5 flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
-          data-testid={`member-pick-dead-warning-${integrationId}`}
-        >
-          <AlertTriangle className="size-3 shrink-0" />
-          <span>
-            {t("detail.integrationMemberPicker.needsReconnectionWarning", {
-              count: deadConns.length,
-            })}
-          </span>
-        </div>
+        <PickerWarning testId={`member-pick-dead-warning-${integrationId}`}>
+          {t("detail.integrationMemberPicker.needsReconnectionWarning", {
+            count: deadConns.length,
+          })}
+        </PickerWarning>
       )}
       {/* Under-scoped → blocked server-side. The owner can upgrade in place;
           a foreign owner can only be flagged. */}

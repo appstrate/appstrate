@@ -20,6 +20,8 @@ import { ConnectionTeardownSteps } from "../../components/integration-connect/co
 import { ConnectionDeleteImpact } from "../../components/integration-connect/connection-delete-impact";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { useCanReach } from "../../hooks/use-can-reach";
+import { DisabledReasonTooltip } from "../../components/disabled-reason-tooltip";
+import { connectionLockHintKey } from "../../components/integration-connect/connection-ownership";
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -127,6 +129,9 @@ function ConnectionRow({
   updating: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
+  // An admin pin or the space default names it: unshare and delete answer 409 until removed there.
+  const lockKey = connectionLockHintKey(conn.locked_by);
+  const lockHint = lockKey ? t(lockKey) : null;
 
   const rows: { label: string; value: React.ReactNode }[] = [];
 
@@ -206,27 +211,31 @@ function ConnectionRow({
 
         {/* Share toggle */}
         {onToggleShare && (
-          <label className="text-muted-foreground inline-flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={conn.shared_with_org}
-              disabled={updating}
-              onChange={(e) => onToggleShare(e.target.checked)}
-            />
-            <span>{t("connections.shareWithOrgLabel")}</span>
-          </label>
+          <DisabledReasonTooltip reason={conn.shared_with_org ? lockHint : null}>
+            <label className="text-muted-foreground inline-flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={conn.shared_with_org}
+                disabled={updating || (conn.shared_with_org && !!lockHint)}
+                onChange={(e) => onToggleShare(e.target.checked)}
+              />
+              <span>{t("connections.shareWithOrgLabel")}</span>
+            </label>
+          </DisabledReasonTooltip>
         )}
       </div>
 
-      <Button
-        variant="destructive"
-        size="sm"
-        className="shrink-0"
-        onClick={onDisconnect}
-        disabled={disconnecting}
-      >
-        {t("btn.disconnect")}
-      </Button>
+      <DisabledReasonTooltip reason={lockHint}>
+        <Button
+          variant="destructive"
+          size="sm"
+          className="shrink-0"
+          onClick={onDisconnect}
+          disabled={disconnecting || !!lockHint}
+        >
+          {t("btn.disconnect")}
+        </Button>
+      </DisabledReasonTooltip>
     </div>
   );
 }

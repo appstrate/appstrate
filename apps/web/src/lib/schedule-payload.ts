@@ -1,8 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
-import type { ActorValue } from "../components/actor-select";
-import type { RunOverridesValue } from "../components/run-overrides-panel";
+
+/**
+ * An execution identity. Exactly one field is set; `undefined` means no
+ * selection. Mirrors the platform `actor` wire shape (user XOR end-user).
+ */
+export type ActorValue = { userId?: string; endUserId?: string };
+
+export interface RunOverridesValue {
+  /** Per-run model id override. */
+  model_id_override?: string;
+  /** Per-run/schedule generation layer. */
+  generation_config_override?: ModelGenerationSettings;
+  /** Per-run proxy id override. */
+  proxy_id_override?: string;
+  /**
+   * Per-integration connection picks — frozen at schedule create/edit so
+   * every fire uses the same rows. Loses to admin pins; beats
+   * schedule-less fallback + per-run overrides on the actor.
+   */
+  connection_overrides?: Record<string, string[]>;
+}
 
 /** Whether two identities are the same one; `undefined` is no identity. */
 export function sameActor(a: ActorValue | undefined, b: ActorValue | undefined): boolean {
