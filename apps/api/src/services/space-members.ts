@@ -247,6 +247,8 @@ export interface SpaceMemberRemoval {
    * space no longer.
    */
   accessAfter: SpaceRoleRef | null;
+  /** The connections the removal unshared, for the caller's audit. */
+  unsharedConnectionIds: string[];
 }
 
 /**
@@ -298,15 +300,19 @@ export async function removeSpaceMember(params: {
     const accessAfter = target ? resolveSpaceRole(target.role, space, null, userId) : null;
     assertCanGrantSpaceRole(params.actorPermissions, accessAfter);
     const existing = await loadSpaceMember(space.id, userId, tx);
-    if (!existing) return { removed: false, accessAfter };
+    if (!existing) return { removed: false, accessAfter, unsharedConnectionIds: [] };
     assertCanManageSpaceMember(params.actorPermissions, existing.ref);
     const deleted = await tx
       .delete(spaceMembers)
       .where(and(eq(spaceMembers.spaceId, space.id), eq(spaceMembers.userId, userId)))
       .returning({ userId: spaceMembers.userId });
-    if (deleted.length === 0) return { removed: false, accessAfter };
-    await unshareConnectionsOfOwnersWithoutAccess(tx, { orgId, userId, spaceId: space.id });
-    return { removed: true, accessAfter };
+    if (deleted.length === 0) return { removed: false, accessAfter, unsharedConnectionIds: [] };
+    const unsharedConnectionIds = await unshareConnectionsOfOwnersWithoutAccess(tx, {
+      orgId,
+      userId,
+      spaceId: space.id,
+    });
+    return { removed: true, accessAfter, unsharedConnectionIds };
   });
 }
 

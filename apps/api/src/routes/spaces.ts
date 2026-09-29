@@ -741,7 +741,7 @@ export function createSpacesRouter() {
     // a concurrent promotion can move between the read and the DELETE (#1439),
     // which is also why `access_after` comes back from that transaction rather
     // than from a lookup after it.
-    const { removed, accessAfter } = await removeSpaceMember({
+    const { removed, accessAfter, unsharedConnectionIds } = await removeSpaceMember({
       orgId: c.get("orgId"),
       space,
       userId,
@@ -752,6 +752,7 @@ export function createSpacesRouter() {
       action: "space.member_removed",
       resourceType: "space_member",
       resourceId: `${space.id}:${userId}`,
+      after: { unsharedConnectionIds },
     });
 
     return c.json({ access_after: accessAfter ? "implicit" : "none" });

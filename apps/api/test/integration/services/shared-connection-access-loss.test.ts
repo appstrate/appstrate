@@ -195,14 +195,15 @@ describe("unsharing on access loss", () => {
     const inOpen = await seedConnection({ spaceId: open.id, userId: member });
     const admin = presetPermissions("admin");
 
-    await removeSpaceMember({
+    const closedRemoval = await removeSpaceMember({
       orgId: ctx.orgId,
       space: closed,
       userId: member,
       actorPermissions: admin,
     });
+    expect(closedRemoval.unsharedConnectionIds).toEqual([inClosed]);
     // Still reaches the open space through its default role.
-    const { accessAfter } = await removeSpaceMember({
+    const { accessAfter, unsharedConnectionIds } = await removeSpaceMember({
       orgId: ctx.orgId,
       space: open,
       userId: member,
@@ -210,6 +211,7 @@ describe("unsharing on access loss", () => {
     });
 
     expect(accessAfter).not.toBeNull();
+    expect(unsharedConnectionIds).toEqual([]);
     expect(await stillShared([inClosed, inOpen])).toEqual([inOpen]);
   });
 
