@@ -125,7 +125,8 @@ const proxyParameters = [
       "ones included — admin pins, enforced defaults, launch overrides, member pins): one bound " +
       "connection is used; several require `X-Connection-Id` naming one of them " +
       "(`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names " +
-      "another); none is a `404`. Without it no agent is in play, so the admin and member pins " +
+      "another); none is a `404`; a bound one that needs reconnecting is a " +
+      "`409 needs_reconnection`. Without it no agent is in play, so the admin and member pins " +
       "(set per agent) cannot apply — only the space-level rules described under " +
       "`X-Connection-Id` do.",
     schema: { type: "string" },
@@ -220,8 +221,8 @@ const proxyResponses = {
       "`account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in " +
       "`X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a " +
       "connection the caller cannot reach (deleted or unshared); an admin must fix the default. " +
-      "`needs_reconnection` — (no run) the connection that would be bound, or a member of the " +
-      "org default, needs its owner to reconnect it.",
+      "`needs_reconnection` — the connection that would be bound (the run's bound one included), " +
+      "or a member of the org default, needs its owner to reconnect it.",
     content: {
       "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
     },

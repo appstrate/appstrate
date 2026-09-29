@@ -245,8 +245,8 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
   try {
     // Cross-instance / cross-restart guard: claim the occurrence exactly once.
     // A duplicate delivery or a retry after the run was already triggered must
-    // NOT create a second run (triggerScheduledRun swallows its own errors, so
-    // a later failure in this handler would otherwise re-fire on retry).
+    // NOT create a second run. The claim runs only after the row is read, so a
+    // failed read leaves the occurrence unconsumed and the job fails loudly.
     const claim = async () => {
       if (await claimScheduleFire(fireKey)) return true;
       logger.warn("Schedule fire already claimed, skipping duplicate", {
