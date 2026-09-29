@@ -37,10 +37,10 @@ interface InviteFormValues {
 export interface OrgInvitationFormHandle {
   /**
    * Send the invitation still typed in the field, exactly as the invite button
-   * would, then call `onSent`. An empty field calls it straight away; an invalid
-   * value or a failed invite stays in the form with its error instead.
+   * would. Resolves `true` once sent or when the field is empty; `false` when the
+   * value is invalid or the invite fails, the form then showing why.
    */
-  submitPending: (onSent: () => void) => void;
+  submitPending: () => Promise<boolean>;
 }
 
 /**
@@ -106,36 +106,40 @@ export function OrgInvitationForm({
   });
   const isPending = invite.isPending || update.isPending;
   const fieldPrefix = invitation ? "edit-invite" : "invite";
-  const send = (data: InviteFormValues, onSent?: () => void) => {
-    const body = {
-      role: data.role,
-      space_assignments: assignmentsFor(data.role, toSpaceAssignments(data.assignments)),
-    };
-    if (invitation) {
-      update.mutate({ params: { path: { orgId, invitationId: invitation.id } }, body });
-    } else {
-      invite.mutate(
-        { params: { path: { orgId } }, body: { ...body, email: data.email.trim() } },
-        { onSuccess: onSent },
-      );
-    }
-  };
+  const bodyOf = (data: InviteFormValues) => ({
+    role: data.role,
+    space_assignments: assignmentsFor(data.role, toSpaceAssignments(data.assignments)),
+  });
+  const inviteRequest = (data: InviteFormValues) => ({
+    params: { path: { orgId } },
+    body: { ...bodyOf(data), email: data.email.trim() },
+  });
 
   useImperativeHandle(ref, () => ({
-    submitPending: (onSent) => {
-      if (isPending) return;
-      if (!form.getValues("email")) {
-        onSent();
-        return;
-      }
-      void form.handleSubmit((data) => send(data, onSent))();
+    submitPending: async () => {
+      if (!form.getValues("email")) return true;
+      if (!(await form.trigger())) return false;
+      // The hook's `onError` already shows a refusal on the form.
+      return invite.mutateAsync(inviteRequest(form.getValues())).then(
+        () => true,
+        () => false,
+      );
     },
   }));
 
   return (
     <form
       noValidate
-      onSubmit={form.handleSubmit((data) => send(data))}
+      onSubmit={form.handleSubmit((data) => {
+        if (invitation) {
+          update.mutate({
+            params: { path: { orgId, invitationId: invitation.id } },
+            body: bodyOf(data),
+          });
+        } else {
+          invite.mutate(inviteRequest(data));
+        }
+      })}
       className="flex flex-col gap-4"
     >
       <FieldGroup>
