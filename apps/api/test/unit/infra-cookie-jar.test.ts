@@ -12,64 +12,85 @@ import { describe, it, expect } from "bun:test";
 import { LocalCookieJarStore } from "../../src/infra/cookie-jar/local-cookie-jar.ts";
 import { RedisCookieJarStore } from "../../src/infra/cookie-jar/redis-cookie-jar.ts";
 import type { KeyValueCache, CacheSetOptions } from "../../src/infra/cache/interface.ts";
+import { cookieBucketKey, type CookieJar } from "@appstrate/afps-runtime/resolvers";
+
+/** Two buckets, as the proxy writes them. */
+const JAR: CookieJar = new Map([
+  [cookieBucketKey("@s/shop", "open", "https://a.example"), ["a=1", "b=2"]],
+  [cookieBucketKey("@s/shop", "allowlist", "https://b.example"), ["c=3"]],
+]);
+
+const jarOf = (cookie: string): CookieJar => new Map([["bucket", [cookie]]]);
 
 describe("LocalCookieJarStore", () => {
-  it("returns [] for a missing entry", async () => {
+  it("returns an empty jar for a missing entry", async () => {
     const jar = new LocalCookieJarStore();
-    expect(await jar.get("s1", "gmail")).toEqual([]);
+    expect(await jar.get("s1", "gmail")).toEqual(new Map());
   });
 
-  it("stores and returns cookies for the same (session, provider)", async () => {
+  it("round-trips a multi-bucket jar for the same (session, integration)", async () => {
     const jar = new LocalCookieJarStore();
-    await jar.set("s1", "gmail", ["a=1", "b=2"], 60);
-    expect(await jar.get("s1", "gmail")).toEqual(["a=1", "b=2"]);
+    await jar.set("s1", "gmail", JAR, 60);
+    expect(await jar.get("s1", "gmail")).toEqual(JAR);
   });
 
-  it("isolates cookies across providers within the same session", async () => {
+  it("isolates jars across integrations within the same session", async () => {
     const jar = new LocalCookieJarStore();
-    await jar.set("s1", "gmail", ["gm=1"], 60);
-    await jar.set("s1", "notion", ["nt=1"], 60);
-    expect(await jar.get("s1", "gmail")).toEqual(["gm=1"]);
-    expect(await jar.get("s1", "notion")).toEqual(["nt=1"]);
+    await jar.set("s1", "gmail", jarOf("gm=1"), 60);
+    await jar.set("s1", "notion", jarOf("nt=1"), 60);
+    expect(await jar.get("s1", "gmail")).toEqual(jarOf("gm=1"));
+    expect(await jar.get("s1", "notion")).toEqual(jarOf("nt=1"));
   });
 
-  it("isolates cookies across sessions for the same provider", async () => {
+  it("isolates jars across sessions for the same integration", async () => {
     const jar = new LocalCookieJarStore();
-    await jar.set("s1", "gmail", ["a=1"], 60);
-    await jar.set("s2", "gmail", ["b=2"], 60);
-    expect(await jar.get("s1", "gmail")).toEqual(["a=1"]);
-    expect(await jar.get("s2", "gmail")).toEqual(["b=2"]);
+    await jar.set("s1", "gmail", jarOf("a=1"), 60);
+    await jar.set("s2", "gmail", jarOf("b=2"), 60);
+    expect(await jar.get("s1", "gmail")).toEqual(jarOf("a=1"));
+    expect(await jar.get("s2", "gmail")).toEqual(jarOf("b=2"));
   });
 
-  it("overwrites cookies on subsequent set for the same key", async () => {
+  it("overwrites the jar on subsequent set for the same key", async () => {
     const jar = new LocalCookieJarStore();
-    await jar.set("s1", "gmail", ["old"], 60);
-    await jar.set("s1", "gmail", ["new"], 60);
-    expect(await jar.get("s1", "gmail")).toEqual(["new"]);
+    await jar.set("s1", "gmail", jarOf("old=1"), 60);
+    await jar.set("s1", "gmail", jarOf("new=1"), 60);
+    expect(await jar.get("s1", "gmail")).toEqual(jarOf("new=1"));
+  });
+
+  it("does not let a caller mutate the stored jar in place", async () => {
+    const jar = new LocalCookieJarStore();
+    const written = jarOf("a=1");
+    await jar.set("s1", "gmail", written, 60);
+    written.get("bucket")!.push("leak=1");
+    const read = await jar.get("s1", "gmail");
+    read.get("bucket")!.push("leak=2");
+    read.set("other", ["leak=3"]);
+    expect(await jar.get("s1", "gmail")).toEqual(jarOf("a=1"));
   });
 
   it("treats expired entries as missing and removes them", async () => {
     const jar = new LocalCookieJarStore();
     // 0-second TTL → expired immediately.
-    await jar.set("s1", "gmail", ["x=1"], 0);
+    await jar.set("s1", "gmail", jarOf("x=1"), 0);
     // Nudge the clock.
     await new Promise((r) => setTimeout(r, 5));
-    expect(await jar.get("s1", "gmail")).toEqual([]);
+    expect(await jar.get("s1", "gmail")).toEqual(new Map());
+    expect(jar._size()).toBe(0);
   });
 
   it("opportunistically purges expired entries past the soft limit", async () => {
     const jar = new LocalCookieJarStore({ softLimit: 2 });
-    await jar.set("expired-1", "p", ["a"], 0);
-    await jar.set("expired-2", "p", ["b"], 0);
+    await jar.set("expired-1", "p", jarOf("a=1"), 0);
+    await jar.set("expired-2", "p", jarOf("b=1"), 0);
     await new Promise((r) => setTimeout(r, 5));
-    await jar.set("fresh", "p", ["c"], 60);
+    await jar.set("fresh", "p", jarOf("c=1"), 60);
     expect(jar._size()).toBe(1);
-    expect(await jar.get("fresh", "p")).toEqual(["c"]);
+    expect(await jar.get("fresh", "p")).toEqual(jarOf("c=1"));
   });
 
   it("clears the store on shutdown", async () => {
     const jar = new LocalCookieJarStore();
-    await jar.set("s1", "gmail", ["a"], 60);
+    await jar.set("s1", "gmail", jarOf("a=1"), 60);
     await jar.shutdown();
     expect(jar._size()).toBe(0);
   });
@@ -105,28 +126,28 @@ function injectCache(cache: KeyValueCache): { getCache: () => Promise<KeyValueCa
 }
 
 describe("RedisCookieJarStore", () => {
-  it("writes cookies as JSON under the cp:jar: namespace with TTL", async () => {
+  it("writes the jar entries as JSON under the cp:jar: namespace with TTL", async () => {
     const fake = createFakeCache();
     const jar = new RedisCookieJarStore(injectCache(fake));
-    await jar.set("xyz", "gmail", ["a=1", "b=2"], 90);
-    expect(fake._store.get("cp:jar:xyz:gmail")).toBe(JSON.stringify(["a=1", "b=2"]));
+    await jar.set("xyz", "gmail", JAR, 90);
+    expect(fake._store.get("cp:jar:xyz:gmail")).toBe(JSON.stringify([...JAR]));
     expect(fake._lastTtl.get("cp:jar:xyz:gmail")).toBe(90);
   });
 
-  it("reads JSON and returns string[]", async () => {
+  it("round-trips a multi-bucket jar", async () => {
     const fake = createFakeCache();
     const jar = new RedisCookieJarStore(injectCache(fake));
-    await jar.set("s1", "gmail", ["only"], 60);
-    expect(await jar.get("s1", "gmail")).toEqual(["only"]);
+    await jar.set("s1", "gmail", JAR, 60);
+    expect(await jar.get("s1", "gmail")).toEqual(JAR);
   });
 
-  it("returns [] on missing keys", async () => {
+  it("returns an empty jar on missing keys", async () => {
     const fake = createFakeCache();
     const jar = new RedisCookieJarStore(injectCache(fake));
-    expect(await jar.get("unknown", "anywhere")).toEqual([]);
+    expect(await jar.get("unknown", "anywhere")).toEqual(new Map());
   });
 
-  it("returns [] and logs on GET failure", async () => {
+  it("returns an empty jar and logs on GET failure", async () => {
     const failing: KeyValueCache = {
       async get() {
         throw new Error("boom");
@@ -138,14 +159,19 @@ describe("RedisCookieJarStore", () => {
       async shutdown() {},
     };
     const jar = new RedisCookieJarStore(injectCache(failing));
-    expect(await jar.get("s1", "gmail")).toEqual([]);
+    expect(await jar.get("s1", "gmail")).toEqual(new Map());
   });
 
-  it("tolerates non-array JSON values", async () => {
+  it.each([
+    ["non-array JSON", JSON.stringify({ not: "array" })],
+    ["the flat string[] format", JSON.stringify(["a=1", "b=2"])],
+    ["an entry with non-string cookies", JSON.stringify([["bucket", [1]]])],
+    ["invalid JSON", "{not json"],
+  ])("reads %s as an empty jar", async (_label, raw) => {
     const fake = createFakeCache();
-    fake._store.set("cp:jar:s1:gmail", JSON.stringify({ not: "array" }));
+    fake._store.set("cp:jar:s1:gmail", raw);
     const jar = new RedisCookieJarStore(injectCache(fake));
-    expect(await jar.get("s1", "gmail")).toEqual([]);
+    expect(await jar.get("s1", "gmail")).toEqual(new Map());
   });
 
   it("swallows SET errors without throwing", async () => {
@@ -161,18 +187,18 @@ describe("RedisCookieJarStore", () => {
     };
     const jar = new RedisCookieJarStore(injectCache(failing));
     // Should not throw — cookie persistence is best-effort.
-    await jar.set("s1", "gmail", ["a"], 60);
+    await jar.set("s1", "gmail", jarOf("a=1"), 60);
   });
 
-  it("scopes keys per (session, provider)", async () => {
+  it("scopes keys per (session, integration)", async () => {
     const fake = createFakeCache();
     const jar = new RedisCookieJarStore(injectCache(fake));
-    await jar.set("s1", "gmail", ["a"], 60);
-    await jar.set("s1", "notion", ["b"], 60);
-    await jar.set("s2", "gmail", ["c"], 60);
+    await jar.set("s1", "gmail", jarOf("a=1"), 60);
+    await jar.set("s1", "notion", jarOf("b=1"), 60);
+    await jar.set("s2", "gmail", jarOf("c=1"), 60);
     expect(fake._store.size).toBe(3);
-    expect(await jar.get("s1", "gmail")).toEqual(["a"]);
-    expect(await jar.get("s1", "notion")).toEqual(["b"]);
-    expect(await jar.get("s2", "gmail")).toEqual(["c"]);
+    expect(await jar.get("s1", "gmail")).toEqual(jarOf("a=1"));
+    expect(await jar.get("s1", "notion")).toEqual(jarOf("b=1"));
+    expect(await jar.get("s2", "gmail")).toEqual(jarOf("c=1"));
   });
 });

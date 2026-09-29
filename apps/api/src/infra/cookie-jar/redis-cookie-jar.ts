@@ -1,10 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
 import type { CookieJarStore } from "./interface.ts";
 import type { KeyValueCache } from "../cache/interface.ts";
 import { getCache } from "../index.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+
+/**
+ * Parse a stored jar (JSON array of `[bucketKey, cookies]` entries). Anything
+ * else — including the retired flat `string[]` format — reads as empty.
+ */
+function parseJar(raw: string): CookieJar {
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed)) return new Map();
+  const isEntry = (e: unknown): e is [string, string[]] =>
+    Array.isArray(e) &&
+    e.length === 2 &&
+    typeof e[0] === "string" &&
+    Array.isArray(e[1]) &&
+    e[1].every((c) => typeof c === "string");
+  return parsed.every(isEntry) ? new Map(parsed) : new Map();
+}
 
 /**
  * {@link CookieJarStore} backed by the shared {@link KeyValueCache} (Redis
@@ -26,30 +43,28 @@ export class RedisCookieJarStore implements CookieJarStore {
     return `cp:jar:${sessionId}:${integrationKey}`;
   }
 
-  async get(sessionId: string, integrationKey: string): Promise<string[]> {
+  async get(sessionId: string, integrationKey: string): Promise<CookieJar> {
     try {
       const cache = await this.getCache();
       const raw = await cache.get(this.cacheKey(sessionId, integrationKey));
-      if (!raw) return [];
-      const parsed: unknown = JSON.parse(raw);
-      return Array.isArray(parsed) ? (parsed as string[]) : [];
+      return raw ? parseJar(raw) : new Map();
     } catch (err) {
       logger.warn("credential-proxy cookie jar GET failed", {
         error: getErrorMessage(err),
       });
-      return [];
+      return new Map();
     }
   }
 
   async set(
     sessionId: string,
     integrationKey: string,
-    cookies: string[],
+    jar: CookieJar,
     ttlSeconds: number,
   ): Promise<void> {
     try {
       const cache = await this.getCache();
-      await cache.set(this.cacheKey(sessionId, integrationKey), JSON.stringify(cookies), {
+      await cache.set(this.cacheKey(sessionId, integrationKey), JSON.stringify([...jar]), {
         ttlSeconds,
       });
     } catch (err) {

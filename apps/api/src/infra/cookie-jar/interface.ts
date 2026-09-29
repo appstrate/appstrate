@@ -1,31 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Credential-proxy cookie jar — per-session persistent cookie storage
- * across successive `proxyCall()` invocations. Needed for multi-step OAuth
- * flows where an integration's first response sets a session cookie that
- * subsequent calls must carry back.
+ * Credential-proxy cookie jar — per-session storage of the cookies upstreams
+ * set across successive `proxyCall()` invocations sharing one `X-Session-Id`.
  *
  * Implementations: in-memory `Map` (single-instance, Tier 0/1) and a
  * Redis-backed store via the shared {@link KeyValueCache} (multi-instance,
- * Tier 2+ — no loss on round-robin load balancers during an in-progress
- * OAuth flow). Both expose the exact same contract; callers cannot tell
- * which backing store they are talking to.
+ * Tier 2+). Both expose the exact same contract.
  *
- * Keyed by `(sessionId, integrationKey)` since a single X-Session-Id can
- * drive calls across multiple integrations, each with its own cookie scope.
+ * One entry per `(sessionId, integrationKey)`: the integration's whole
+ * {@link CookieJar}, bucketed by capture origin (see `cookieBucketKey`).
  */
 
+import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
+
 export interface CookieJarStore {
-  /** Read cookies for an integration within a session. Returns [] when absent. */
-  get(sessionId: string, integrationKey: string): Promise<string[]>;
-  /** Replace cookies for an integration within a session. Resets the TTL. */
-  set(
-    sessionId: string,
-    integrationKey: string,
-    cookies: string[],
-    ttlSeconds: number,
-  ): Promise<void>;
+  /** Read an integration's jar within a session. Returns an empty jar when absent. */
+  get(sessionId: string, integrationKey: string): Promise<CookieJar>;
+  /** Replace an integration's jar within a session. Resets the TTL. */
+  set(sessionId: string, integrationKey: string, jar: CookieJar, ttlSeconds: number): Promise<void>;
   /** Release all resources (timers, connections). */
   shutdown(): Promise<void>;
 }

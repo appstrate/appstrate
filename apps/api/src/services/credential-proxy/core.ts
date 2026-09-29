@@ -32,6 +32,16 @@ import {
   applyInjectedCredentialHeaderToHeaders,
   normalizeAuthSchemeTemplate,
 } from "@appstrate/connect";
+import {
+  cookieBucketKey,
+  originOf,
+  eligibleCookies,
+  mergeSetCookieIntoJar,
+  composeCookieHeader,
+  hostLiterallyAllowlisted,
+  type CookieJar,
+  type CookieGate,
+} from "@appstrate/afps-runtime/resolvers";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import type { Actor } from "../../lib/actor.ts";
@@ -55,13 +65,8 @@ const OUTBOUND_TIMEOUT_MS = 30_000;
  * narrow contract here so the core stays free of infra imports.
  */
 interface CookieJarAdapter {
-  get(sessionId: string, integrationKey: string): Promise<string[]>;
-  set(
-    sessionId: string,
-    integrationKey: string,
-    cookies: string[],
-    ttlSeconds: number,
-  ): Promise<void>;
+  get(sessionId: string, integrationKey: string): Promise<CookieJar>;
+  set(sessionId: string, integrationKey: string, jar: CookieJar, ttlSeconds: number): Promise<void>;
 }
 
 interface ProxyCallInput {
@@ -368,16 +373,29 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     }
   }
 
-  // Cookie jar — inject stored cookies, capture any Set-Cookie.
-  const jar = input.cookieJar;
+  // Cookie jar — same scoping as the sidecar (docs/architecture/SIDECAR.md,
+  // "Sticky-cookie jar scoping"): a cookie is replayed to its capture origin,
+  // or across hosts only when both are literal `authorized_uris` entries.
+  const jarStore = input.cookieJar;
   const jarSessionId = input.jarSessionId;
   const jarTtl = input.cookieJarTtlSeconds;
-  if (jar && jarSessionId) {
-    const cookies = await jar.get(jarSessionId, input.integrationId);
-    if (cookies.length > 0) {
-      headers.set("Cookie", cookies.join("; "));
-    }
-  }
+  const cookieJar: CookieJar | null =
+    jarStore && jarSessionId ? await jarStore.get(jarSessionId, input.integrationId) : null;
+  const cookieGate: CookieGate =
+    !resolved.allowAllUris && hostLiterallyAllowlisted(target, resolved.authorizedUris ?? [])
+      ? "allowlist"
+      : "open";
+  const targetOrigin = originOf(target);
+  // Jar cookies win by name over the injected credential / caller cookies:
+  // an upstream-rotated session must replace the stored one.
+  const applyJarCookies = (): void => {
+    if (!cookieJar) return;
+    const stored = eligibleCookies(cookieJar, input.integrationId, cookieGate, targetOrigin);
+    const cookie = composeCookieHeader(headers.get("cookie"), stored.values());
+    if (cookie === undefined) headers.delete("cookie");
+    else headers.set("cookie", cookie);
+  };
+  applyJarCookies();
 
   const fetchInit: RequestInit & { duplex?: string } = {
     method: input.method,
@@ -470,6 +488,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
           sensitiveHeaderNames.add(refreshed.credentialHeaderName);
         }
         credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, refreshed);
+        applyJarCookies();
         res = await performFetch({
           ...fetchInit,
           headers,
@@ -489,10 +508,15 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     }
   }
 
-  if (jar && jarSessionId && jarTtl && jarTtl > 0) {
-    const setCookies = res.headers.getSetCookie?.();
-    if (setCookies && setCookies.length > 0) {
-      await jar.set(jarSessionId, input.integrationId, setCookies, jarTtl);
+  if (jarStore && jarSessionId && cookieJar && jarTtl && jarTtl > 0) {
+    const setCookies = res.headers.getSetCookie();
+    if (setCookies.length > 0) {
+      mergeSetCookieIntoJar(
+        setCookies,
+        cookieJar,
+        cookieBucketKey(input.integrationId, cookieGate, targetOrigin),
+      );
+      await jarStore.set(jarSessionId, input.integrationId, cookieJar, jarTtl);
     }
   }
 
