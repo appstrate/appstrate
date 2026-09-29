@@ -36,7 +36,9 @@ import {
   cookieScope,
   credentialUrlPolicy,
   redactCredentialHost,
+  redactCredentialMessage,
   redactCredentialValues,
+  redactionFields,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
@@ -234,12 +236,6 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       `Unresolved placeholders in target: {{${unresolvedInTarget.join(",")}}}`,
     );
   }
-  // Redacted twin of `target`, computed ONCE. `target` carries decrypted
-  // credential values (the substitution above) — it goes on the wire and
-  // NOWHERE else. Every error message / log-bound string below must use
-  // `redactedTarget` instead.
-  const redactedTarget = redactCredentialValues(target, fields);
-
   // Header and body templates exactly as substituted below. `Bearer{{token}}`
   // → `Bearer {{token}}` is repaired on the TEMPLATE, never on the resolved
   // value: a raw secret starting with a scheme name must reach the upstream
@@ -262,6 +258,12 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     allowAllUris: resolved.allowAllUris,
     authorizedUris: resolved.authorizedUris ?? [],
   });
+  // Redacted twin of `target`, computed ONCE. `target` carries decrypted
+  // credential values (the substitution above) — it goes on the wire and
+  // NOWHERE else. Every error message / log-bound string below must use
+  // `redactedTarget` / `redactFields` instead.
+  const redactFields = redactionFields(policy, fields);
+  const redactedTarget = redactCredentialValues(target, redactFields);
   if (policy.refuse) {
     throw new ProxyAuthorizationError(
       `Call for integration "${input.integrationId}" substitutes a credential into an agent-controlled URL, header, or body but no authorized_uris allowlist applies to it; refusing to prevent credential exfiltration.`,
@@ -289,7 +291,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     const ok = policy.authorizedUris.some((p) => matchesAuthorizedUriSpec(p, hopTarget));
     if (!ok) {
       throw new ProxyAuthorizationError(
-        `Target host ${redactCredentialHost(hopTarget, fields)} is not in the authorized_uris allowlist for ${input.integrationId}`,
+        `Target host ${redactCredentialHost(hopTarget, redactFields)} is not in the authorized_uris allowlist for ${input.integrationId}`,
       );
     }
     // Note: an empty allowlist can never reach here — `allowlist.some(...)` is
@@ -435,12 +437,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       if (err instanceof Error) {
         // Bun fetch errors carry the request URL — on a redirect hop a
         // normalised one — so every URL is cut down to its redacted host.
-        const redacted = redactCredentialValues(
-          err.message.replace(/https?:\/\/[^\s"'<>]+/gi, (url) =>
-            redactCredentialHost(url, fields),
-          ),
-          fields,
-        );
+        const redacted = redactCredentialMessage(err.message, redactFields);
         if (redacted !== err.message) {
           // Re-wrap with the scrubbed message; keep the name so callers can
           // still discriminate (e.g. TimeoutError). The original error is

@@ -687,6 +687,13 @@ CLI resolver and the platform proxy share this rule (`credentialUrlPolicy`). An
 integration whose endpoint is per-connection (`webhook_url`, `site_url`) therefore
 cannot template it into an `api_call` under this guard.
 
+What the guard covers is narrow. A templated credential cannot leave the declared
+`authorized_uris`, which bound host and path, not tenant: an allowlisted multi-tenant
+API such as `https://discord.com/api/**` still reaches other tenants' endpoints on that
+path. The server-injected credential header (`delivery.http`) is not templated: under
+`allow_all_uris`, an untemplated call sends it to any public host, by design. Set
+`allow_all_uris` only when that is acceptable for the credential.
+
 The runtime layer (sidecar MITM) enforces this on the wire, including across redirect
 hops (per-hop allowlist check, per-hop SSRF blocklist, hybrid credential-strip on
 cross-host hops). For a `source.kind: "local"` integration run in Docker, the same list is also the

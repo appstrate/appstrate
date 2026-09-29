@@ -264,18 +264,22 @@ export function redactHost(url: string): string {
  * Replace every credential value in `value` with its `{{field}}` placeholder,
  * raw and percent-encoded (WHATWG parsing encodes reserved characters). No
  * minimum length: even a 1-char credential fragment must not be echoed.
+ * Longest needle first, so a value containing another is not left half-replaced.
  */
 export function redactCredentialValues(
   value: string,
   fields: Readonly<Record<string, unknown>>,
 ): string {
-  let out = value;
+  const needles: Array<[string, string]> = [];
   for (const [name, fieldValue] of Object.entries(fields)) {
     if (typeof fieldValue !== "string" || fieldValue.length === 0) continue;
-    out = out.split(fieldValue).join(`{{${name}}}`);
+    needles.push([fieldValue, name]);
     const encoded = encodeURIComponent(fieldValue);
-    if (encoded !== fieldValue) out = out.split(encoded).join(`{{${name}}}`);
+    if (encoded !== fieldValue) needles.push([encoded, name]);
   }
+  needles.sort((a, b) => b[0].length - a[0].length);
+  let out = value;
+  for (const [needle, name] of needles) out = out.split(needle).join(`{{${name}}}`);
   return out;
 }
 
@@ -292,6 +296,20 @@ export function redactCredentialHost(
     Object.entries(fields).map(([name, v]) => [name, typeof v === "string" ? v.toLowerCase() : ""]),
   );
   return redactCredentialValues(redactHost(url), lowered);
+}
+
+/**
+ * Error message with every URL cut to its redacted host and credential values
+ * scrubbed: Bun fetch errors embed the full (substituted) request URL.
+ */
+export function redactCredentialMessage(
+  message: string,
+  fields: Readonly<Record<string, unknown>>,
+): string {
+  return redactCredentialValues(
+    message.replace(/https?:\/\/[^\s"'<>]+/gi, (url) => redactCredentialHost(url, fields)),
+    fields,
+  );
 }
 
 /** Optional observability hook — callers pass a logger; defaults to no-op. */
@@ -495,7 +513,9 @@ export async function fetchFollowingRedirectsCapturingCookies(
     currentUrl = nextUrl;
   }
 
-  throw new Error(`Too many redirects (>${MAX_REDIRECTS}) starting at ${url}`);
+  throw new Error(
+    `Too many redirects (>${MAX_REDIRECTS}) starting at ${redactCredentialHost(url, opts.credentialFields ?? {})}`,
+  );
 }
 
 /**

@@ -15,6 +15,7 @@ import {
   type RunEvent,
   type ToolContext,
 } from "../../src/resolvers/index.ts";
+import type { ResolverError } from "../../src/errors.ts";
 // Package-internal, deliberately not on the `resolvers` barrel.
 import { apiCallToolName } from "../../src/resolvers/integration-api-call.ts";
 import {
@@ -560,6 +561,84 @@ describe("LocalIntegrationResolver", () => {
     expect(err?.message).toContain("could not be resolved");
     expect(err!.message).not.toContain(secret);
     expect(err!.message).not.toContain(secret.toLowerCase());
+    expect((err as ResolverError).details?.target).toBe("https://{{api_key}}.api-us1.com/");
+  });
+
+  it("does not scrub a guessed credential value from the host of an untemplated call", async () => {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(
+        apiKeyIntegrationManifest("@acme/api", { authorizedUris: ["https://*.api-us1.com/**"] })
+          .integration,
+      ),
+    });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => [],
+      creds: {
+        version: 1,
+        integrations: { "@acme/api": { fields: { api_key: "k", username: "jdoe" } } },
+      },
+      fetch: (() =>
+        Promise.resolve(new Response("{}", { status: 200 }))) as unknown as typeof fetch,
+    });
+    const tools = await resolver.resolve(
+      [{ name: "@acme/api", version: "^1" }],
+      makeBundle(root, [integ]),
+    );
+    const { ctx } = makeCtx();
+    // A matching guess must read exactly like a non-matching one.
+    for (const guess of ["jdoe", "alice"]) {
+      const err = await tools[0]!
+        .execute({ method: "GET", target: `https://${guess}.api-us1.com/` }, ctx)
+        .then(
+          () => null,
+          (e: unknown) => e as Error,
+        );
+      expect(err?.message).toContain(`(${guess}.api-us1.com)`);
+    }
+  });
+
+  it("scrubs the substituted secret from a transport error and its event", async () => {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
+    });
+    const secret = "SeCrEt loop/42";
+    const encoded = encodeURIComponent(secret);
+    for (const fetchImpl of [
+      // Redirect loop on an allowlisted host: the budget error names the start URL.
+      (u: string) => Promise.resolve(new Response(null, { status: 302, headers: { location: u } })),
+      // Bun-shaped fetch error: full URL in the message and on `.path`.
+      (u: string) =>
+        Promise.reject(
+          Object.assign(new Error(`Unable to connect. Is the computer able to access ${u}?`), {
+            code: "ConnectionRefused",
+            path: u,
+          }),
+        ),
+    ]) {
+      const resolver = new LocalIntegrationResolver({
+        resolveHost: async () => ["203.0.113.7"],
+        creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: secret } } } },
+        fetch: fetchImpl as unknown as typeof fetch,
+      });
+      const tools = await resolver.resolve(
+        [{ name: "@acme/api", version: "^1" }],
+        makeBundle(root, [integ]),
+      );
+      const { ctx, events } = makeCtx();
+      const err = await tools[0]!
+        .execute({ method: "GET", target: "https://api.acme.com/v1?key={{api_key}}" }, ctx)
+        .then(
+          () => null,
+          (e: unknown) => e as Error,
+        );
+      expect(err?.message).toContain("api.acme.com");
+      const seen = JSON.stringify({ message: err!.message, err, events });
+      for (const leaked of [secret, encoded, "SeCrEt", "loop%2F42"]) {
+        expect(seen).not.toContain(leaked);
+      }
+    }
   });
 
   it("strips a caller-supplied header of the same name (allowServerOverride default false)", async () => {

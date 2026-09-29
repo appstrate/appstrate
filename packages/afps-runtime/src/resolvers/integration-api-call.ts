@@ -57,7 +57,12 @@ import {
   allocateMcpToolNamespace,
   normaliseMcpToolNamespace,
 } from "@appstrate/afps-shared/mcp-naming";
-import { guardedFetch, PreflightError, type HostResolver } from "./api-call-engine.ts";
+import {
+  guardedFetch,
+  PreflightError,
+  redactCredentialMessage,
+  type HostResolver,
+} from "./api-call-engine.ts";
 import { AuthorizedUrisError, ResolverError } from "../errors.ts";
 import {
   planHttpDeliveryInjection,
@@ -71,7 +76,7 @@ import {
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
 import { substituteVars } from "./template-vars.ts";
-import { credentialUrlPolicy } from "./credential-guard.ts";
+import { credentialUrlPolicy, redactionFields } from "./credential-guard.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
 
 // ─────────────────────────────────────────────
@@ -486,6 +491,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
           { integration: meta.name },
         );
       }
+      const redactFields = redactionFields(policy, fields);
 
       const resolvedBody = await resolveBodyForFetch(req.body, {
         allowFromFile: true,
@@ -521,7 +527,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
           injectedCredentialHeader: injectedCredentialHeader?.toLowerCase() ?? null,
           integrationId: meta.name,
           resolveHost: this.resolveHost,
-          credentialFields: fields,
+          credentialFields: redactFields,
         });
         res = result.response;
       } catch (err) {
@@ -552,6 +558,12 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
             `Integration ${meta.name}: redirect blocked (${(err as { reason?: string }).reason})`,
             { integration: meta.name },
           );
+        }
+        if (err instanceof Error) {
+          // Bun fetch errors carry the substituted URL (message, `.path`): rethrow a scrubbed copy.
+          const clean = new Error(redactCredentialMessage(err.message, redactFields));
+          clean.name = err.name;
+          throw clean;
         }
         throw err;
       }

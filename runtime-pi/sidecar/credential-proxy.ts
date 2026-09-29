@@ -45,6 +45,7 @@ import {
 import {
   cookieScope,
   credentialUrlPolicy,
+  redactionFields,
   fetchFollowingRedirectsCapturingCookies,
   hostLiterallyAllowlisted,
   redactCredentialHost,
@@ -339,6 +340,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     allowAllUris: creds.allowAllUris,
     authorizedUris: creds.authorizedUris ?? [],
   });
+  const redactFields = redactionFields(policy, creds.credentials);
 
   if (policy.refuse) {
     return {
@@ -347,7 +349,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       error: `Call for integration "${integrationId}" substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`,
     };
   } else if (policy.allowAllUris) {
-    const refusal = await refuseSsrfTarget(resolvedUrl, creds.credentials, deps.resolveHost);
+    const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
     if (refusal) return refusal;
   } else if (policy.authorizedUris.length) {
     if (!matchesAuthorizedUri(resolvedUrl, policy.authorizedUris)) {
@@ -358,12 +360,12 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       };
     }
     if (!hostLiterallyAllowlisted(resolvedUrl, policy.authorizedUris)) {
-      const refusal = await refuseSsrfTarget(resolvedUrl, creds.credentials, deps.resolveHost);
+      const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
       if (refusal) return refusal;
     }
   } else {
     // No authorizedUris and no allowAllUris — apply the SSRF safety net.
-    const refusal = await refuseSsrfTarget(resolvedUrl, creds.credentials, deps.resolveHost);
+    const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
     if (refusal) return refusal;
   }
 
@@ -589,7 +591,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       ...(deps.resolveHost ? { resolveHost: deps.resolveHost } : {}),
       // Preserve the sidecar's structured per-hop refusal logging.
       logger,
-      credentialFields: activeCreds.credentials,
+      credentialFields: redactionFields(policy, activeCreds.credentials),
     });
     return {
       ...followed,
@@ -616,7 +618,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     requestHeaderNames = r.requestHeaderNames;
     credentialInjection = r.credentialInjection;
   } catch (err) {
-    return wrapRequestError(err, resolvedUrl, creds.credentials);
+    return wrapRequestError(err, resolvedUrl, redactFields);
   }
 
   let authRefreshed = false;
@@ -646,7 +648,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
           requestHeaderNames = r.requestHeaderNames;
           credentialInjection = r.credentialInjection;
         } catch (err) {
-          return wrapRequestError(err, resolvedUrl, creds.credentials);
+          return wrapRequestError(err, resolvedUrl, redactFields);
         }
       } else {
         // Body already consumed — surface the rotated-but-still-401 signal to
@@ -681,7 +683,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   logger.debug("integration api_call completed", {
     integrationId,
     method,
-    host: redactCredentialHost(upstreamFinalUrl, creds.credentials),
+    host: redactCredentialHost(upstreamFinalUrl, redactFields),
     status: upstream.status,
     durationMs: Math.round(performance.now() - requestStartedAt),
     hops: upstreamHops,

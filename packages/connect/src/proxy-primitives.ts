@@ -3,10 +3,10 @@
 /**
  * Shared primitives used by the credential-proxy server route
  * (`apps/api/src/routes/credential-proxy.ts`) and the in-container
- * sidecar (`runtime-pi/sidecar/app.ts`). Both code paths implement the
- * same wire protocol (X-Integration-Id/X-Target; neither relays upstream
- * `Set-Cookie` to the caller) and share the AFPS spec-compliant URL allowlist
- * matcher so drift is impossible by construction.
+ * sidecar (`runtime-pi/sidecar/app.ts`). The route speaks the
+ * X-Integration-Id/X-Target HTTP protocol, the sidecar the MCP `api_call`
+ * tool (it strips those headers); neither relays upstream `Set-Cookie` to the
+ * caller, and both share the AFPS spec-compliant URL allowlist matcher.
  *
  * The same argument brings the LLM-stream idle bound here
  * ({@link withIdleBound}, {@link STREAM_IDLE},

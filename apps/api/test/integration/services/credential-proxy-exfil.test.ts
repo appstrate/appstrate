@@ -263,4 +263,33 @@ describe("proxyCall — credential-exfiltration guard", () => {
       expect(up.hits).toEqual([`${ATTACKER}/anything`]);
     });
   });
+
+  it("scrubs the substituted secret from a transport error", async () => {
+    await seedIntegration(ctx, [`${ALLOWED}/**`]);
+    // Bun-shaped fetch error: the full request URL in the message and on `.path`.
+    const fetchImpl = ((url: string | URL) =>
+      Promise.reject(
+        Object.assign(new Error(`Unable to connect. Is the computer able to access ${url}?`), {
+          code: "ConnectionRefused",
+          path: url.toString(),
+        }),
+      )) as unknown as typeof fetch;
+    const err = await call(fetchImpl, `${ALLOWED}/v1?k={{api_key}}`).then(
+      () => null,
+      (e: unknown) => e as Error,
+    );
+    expect(err?.message).toContain("1.1.1.1");
+    expect(JSON.stringify({ message: err!.message, err })).not.toContain(SECRET);
+  });
+
+  it("does not scrub a guessed credential value on an untemplated call (no oracle)", async () => {
+    await seedEndpointIntegration(ctx, { username: "jdoe", api_key: SECRET });
+    const up = upstream();
+    // A matching guess reads exactly like a non-matching one.
+    for (const guess of ["alice", "jdoe"]) {
+      const message = await expectRefused(call(up.fetchImpl, `https://10.0.0.1/?u=${guess}`));
+      expect(message).toContain(`?u=${guess} `);
+    }
+    expect(up.hits).toEqual([]);
+  });
 });

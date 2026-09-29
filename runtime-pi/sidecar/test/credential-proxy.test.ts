@@ -1746,6 +1746,35 @@ describe("executeApiCall — no credential in an error host", () => {
       expect(result.error).not.toContain(SECRET.toLowerCase());
     }
   });
+
+  it("does not scrub a guessed credential value on an untemplated call (no oracle)", async () => {
+    const probe = async (host: string) => {
+      const result = await executeApiCall(
+        {
+          integrationId: "wp",
+          targetUrl: `https://${host}.nx.invalid/`,
+          method: "GET",
+          callerHeaders: {},
+          body: { kind: "none" },
+        },
+        makeDeps({
+          resolveHost: async () => Promise.reject(new Error("ENOTFOUND")),
+          fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+            credentials: { username: "jdoe", application_password: "xxxx yyyy" },
+            authorizedUris: [],
+            allowAllUris: true,
+            credentialHeaderName: "Authorization",
+            credentialHeaderPrefix: "Basic ",
+            credentialFieldName: "application_password",
+          })),
+        }),
+      );
+      return result.ok ? "" : result.error;
+    };
+    // A matching guess reads exactly like a non-matching one.
+    expect(await probe("alice")).toContain("(alice.nx.invalid)");
+    expect(await probe("jdoe")).toContain("(jdoe.nx.invalid)");
+  });
 });
 
 describe("executeApiCall — SSRF DNS-rebind layer", () => {

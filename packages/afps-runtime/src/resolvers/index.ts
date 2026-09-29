@@ -56,7 +56,11 @@ export { substituteVars } from "./template-vars.ts";
 
 // Credential-exfiltration guard shared by the sidecar, the local resolver and
 // the platform credential proxy.
-export { credentialUrlPolicy, type CredentialUrlPolicy } from "./credential-guard.ts";
+export {
+  credentialUrlPolicy,
+  redactionFields,
+  type CredentialUrlPolicy,
+} from "./credential-guard.ts";
 
 // Reusable credential-injecting HTTP-call core — tool factory + helpers.
 export {
@@ -97,6 +101,7 @@ export {
   redactHost,
   redactCredentialValues,
   redactCredentialHost,
+  redactCredentialMessage,
   fetchFollowingRedirectsCapturingCookies,
   guardedFetch,
   RedirectBlockedError,

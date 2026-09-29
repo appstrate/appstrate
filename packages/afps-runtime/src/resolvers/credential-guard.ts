@@ -49,3 +49,15 @@ export function credentialUrlPolicy(input: {
     refuse: substitutesCredential && authorizedUris.length === 0,
   };
 }
+
+/**
+ * Credential values to scrub from a URL or host echoed back to the caller. Only
+ * a call that templates a credential can carry one in its URL; scrubbing any
+ * other call would tell the agent whether a guessed host matches a field.
+ */
+export function redactionFields<T>(
+  policy: CredentialUrlPolicy,
+  fields: Readonly<Record<string, T>>,
+): Readonly<Record<string, T>> {
+  return policy.substitutesCredential ? fields : {};
+}
