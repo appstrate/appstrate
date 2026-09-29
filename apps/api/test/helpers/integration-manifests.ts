@@ -298,6 +298,24 @@ export function apiIntegrationManifest(opts: {
 }
 
 /**
+ * An `api_call` integration whose two api_key auths, `primary` and `backup`, both expose `api_call`:
+ * an agent selecting `api_call__primary` is served by a `primary` connection only.
+ */
+export function twoAuthApiIntegrationManifest(
+  name: string,
+  authorizedUris = { primary: "https://api.example.com/**", backup: "https://api.example.com/**" },
+): IntegrationManifest {
+  const auth = (uri: string) => ({ type: "api_key" as const, authorizedUris: [uri] });
+  return {
+    ...apiIntegrationManifest({
+      name,
+      auths: { primary: auth(authorizedUris.primary), backup: auth(authorizedUris.backup) },
+    }),
+    _meta: { "dev.appstrate/api": { auths: { primary: {}, backup: {} } } },
+  } as IntegrationManifest;
+}
+
+/**
  * AFPS orchestrated `connect.tool` block: the marker object `{}` plus the
  * Appstrate run-policy fields (`tool`, `run_at`, `produces`, `persist_login_secret`,
  * `reauth_on`) under `_meta["dev.appstrate/connect"]`.

@@ -42,6 +42,7 @@ import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
+import { updateConnectionMetadata } from "../../../src/services/integration-pins-service.ts";
 
 const app = getTestApp();
 
@@ -842,6 +843,26 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
     await call({ ...session, "X-Connection-Id": own2 });
     await call({ ...session, "X-Connection-Id": own1 });
     expect(sent.map((s) => s.cookie?.split(";")[0] ?? null)).toEqual([null, null, "sid=own-1"]);
+  });
+
+  it("stops serving a bound shared connection its owner unshares mid-run (404)", async () => {
+    const runId = await runBinding([shared]);
+    expect((await call({ "X-Run-Id": runId })).status).toBe(200);
+
+    await updateConnectionMetadata(shared, { sharedWithOrg: false });
+
+    expect((await call({ "X-Run-Id": runId })).status).toBe(404);
+    expect(upstreamAuth).toEqual(["Bearer tok-shared"]);
+  });
+
+  it("refuses a colleague's private connection named without X-Run-Id as not connected (404)", async () => {
+    const theirs = await insertConnection("colleague-private", colleagueId);
+    const res = await call({ "X-Connection-Id": theirs });
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain("colleague-private");
+    // Control: the caller's own connection named the same way is served.
+    expect((await call({ "X-Connection-Id": own1 })).status).toBe(200);
+    expect(upstreamAuth).toEqual(["Bearer tok-own-1"]);
   });
 
   it("refuses a named connection the run did not bind (400 connection_not_in_run)", async () => {

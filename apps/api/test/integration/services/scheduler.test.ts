@@ -17,9 +17,17 @@ import { db } from "@appstrate/db/client";
 import { integrationConnections, organizationMembers, runs, schedules } from "@appstrate/db/schema";
 import { Queue, type ConnectionOptions } from "bullmq";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestUser, createTestOrg, addOrgMember } from "../../helpers/auth.ts";
+import {
+  createTestUser,
+  createTestOrg,
+  addOrgMember,
+  createTestContext,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { seedPackage, seedSpace, seedSpacePackage, seedEndUser } from "../../helpers/seed.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
+import type { SpaceScope } from "../../../src/lib/scope.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
 import { describeRequiresRedis } from "../../helpers/tier.ts";
 import {
@@ -33,6 +41,7 @@ import {
   removeScheduleJobs,
 } from "../../../src/services/scheduler.ts";
 import { deleteIntegrationConnection } from "../../../src/services/integration-connections.ts";
+import { leaveOrganization } from "../../../src/services/organizations.ts";
 import { getRedisQueueConnection } from "../../../src/lib/redis.ts";
 
 // Real BullMQ repeatable-job semantics — skipped in tier0 (in-memory queue).
@@ -565,76 +574,6 @@ describeRequiresRedis("scheduler service", () => {
       expect(updated).not.toBeNull();
       expect(updated!.input).toEqual({ key: "updated", extra: true });
     });
-
-    // The snapshot is what the caller's checks judged; a row that moved since writes nothing.
-    // Every schedule writer bumps `updated_at`; a second later stands for "any later write".
-    const bumped = sql`${schedules.updatedAt} + interval '1 second'`;
-
-    it("refuses a stale snapshot with 409 and leaves the row as it is", async () => {
-      const scope = { orgId: orgId, spaceId: defaultSpaceId };
-      const created = await createSchedule(scope, packageId, actor, {
-        cronExpression: "0 * * * *",
-      });
-      // A concurrent write (e.g. a connection delete) disabled it after the caller's read.
-      await db
-        .update(schedules)
-        .set({ enabled: false, updatedAt: bumped })
-        .where(eq(schedules.id, created.id));
-
-      await expect(
-        updateSchedule(scope, created, { name: "renamed" }, null, undefined),
-      ).rejects.toMatchObject({ status: 409, code: "schedule_modified_concurrently" });
-      const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));
-      expect(row).toMatchObject({ enabled: false, name: null });
-    });
-
-    // One stamp covers every field a check reads, not a list that can miss one.
-    it("refuses a snapshot whose row moved on a field no patch check lists, like version_override", async () => {
-      const scope = { orgId: orgId, spaceId: defaultSpaceId };
-      const created = await createSchedule(scope, packageId, actor, {
-        cronExpression: "0 * * * *",
-      });
-      await db
-        .update(schedules)
-        .set({ versionOverride: "draft", updatedAt: bumped })
-        .where(eq(schedules.id, created.id));
-
-      await expect(
-        updateSchedule(scope, created, { enabled: true }, null, undefined),
-      ).rejects.toMatchObject({ status: 409, code: "schedule_modified_concurrently" });
-    });
-
-    it("accepts the snapshot of a row stamped by the database clock (microseconds)", async () => {
-      const scope = { orgId: orgId, spaceId: defaultSpaceId };
-      const created = await createSchedule(scope, packageId, actor, {
-        cronExpression: "0 * * * *",
-      });
-      await db
-        .update(schedules)
-        .set({ updatedAt: sql`now()` })
-        .where(eq(schedules.id, created.id));
-      const [fresh] = await db.select().from(schedules).where(eq(schedules.id, created.id));
-
-      const updated = await updateSchedule(
-        scope,
-        { ...created, updatedAt: fresh!.updatedAt.toISOString() },
-        { name: "renamed" },
-        null,
-        undefined,
-      );
-      expect(updated.name).toBe("renamed");
-    });
-
-    it("refuses a snapshot of a row deleted since, with the same 409", async () => {
-      const scope = { orgId: orgId, spaceId: defaultSpaceId };
-      const created = await createSchedule(scope, packageId, actor, {
-        cronExpression: "0 * * * *",
-      });
-      await deleteSchedule(scope, created.id);
-      await expect(
-        updateSchedule(scope, created, { cronExpression: "*/5 * * * *" }, null, undefined),
-      ).rejects.toMatchObject({ status: 409, code: "schedule_modified_concurrently" });
-    });
   });
 
   // ── deleteSchedule ──────────────────────────────────────
@@ -1150,5 +1089,128 @@ describeRequiresRedis("scheduler service", () => {
         await queue.close();
       }
     });
+  });
+});
+
+// A plain `describe`: the compare-and-set is SQL on `updated_at`, no queue semantics, so every tier
+// runs it. The snapshot is what the caller's checks judged; a row that moved since writes nothing.
+describe("updateSchedule — a compare-and-set on the caller's read", () => {
+  let ctx: TestContext;
+  let scope: SpaceScope;
+  let actor: Actor;
+  let packageId: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "casorg" });
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    actor = { type: "user", id: ctx.user.id };
+    packageId = (await seedPackage({ orgId: ctx.orgId, id: "@casorg/agent" })).id;
+  });
+
+  /** The caller's read of a new schedule — what a PATCH judges, then writes against. */
+  function read(as: Actor = actor, connectionOverrides?: Record<string, string[]>) {
+    return createSchedule(scope, packageId, as, {
+      cronExpression: "0 * * * *",
+      ...(connectionOverrides ? { connectionOverrides } : {}),
+    });
+  }
+
+  const refusedAsStale = { status: 409, code: "schedule_modified_concurrently" };
+  // Every schedule writer bumps `updated_at`; a second later stands for "any later write".
+  const bumped = sql`${schedules.updatedAt} + interval '1 second'`;
+
+  it("refuses a stale snapshot with 409 and leaves the row as it is", async () => {
+    const created = await read();
+    await db
+      .update(schedules)
+      .set({ enabled: false, updatedAt: bumped })
+      .where(eq(schedules.id, created.id));
+
+    await expect(
+      updateSchedule(scope, created, { name: "renamed" }, null, undefined),
+    ).rejects.toMatchObject(refusedAsStale);
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));
+    expect(row).toMatchObject({ enabled: false, name: null });
+  });
+
+  // One stamp covers every field a check reads, not a list that can miss one.
+  it("refuses a snapshot whose row moved on a field no patch check lists, like version_override", async () => {
+    const created = await read();
+    await db
+      .update(schedules)
+      .set({ versionOverride: "draft", updatedAt: bumped })
+      .where(eq(schedules.id, created.id));
+
+    await expect(
+      updateSchedule(scope, created, { enabled: true }, null, undefined),
+    ).rejects.toMatchObject(refusedAsStale);
+  });
+
+  it("accepts the snapshot of a row stamped by the database clock (microseconds)", async () => {
+    const created = await read();
+    await db
+      .update(schedules)
+      .set({ updatedAt: sql`now()` })
+      .where(eq(schedules.id, created.id));
+    const [fresh] = await db.select().from(schedules).where(eq(schedules.id, created.id));
+
+    const updated = await updateSchedule(
+      scope,
+      { ...created, updatedAt: fresh!.updatedAt.toISOString() },
+      { name: "renamed" },
+      null,
+      undefined,
+    );
+    expect(updated.name).toBe("renamed");
+  });
+
+  it("refuses a snapshot of a row deleted since, with the same 409", async () => {
+    const created = await read();
+    await deleteSchedule(scope, created.id);
+    await expect(
+      updateSchedule(scope, created, { cronExpression: "*/5 * * * *" }, null, undefined),
+    ).rejects.toMatchObject(refusedAsStale);
+  });
+
+  // The real writers, not a hand-bumped stamp: each must move the token it races.
+  it("a connection delete pruning the schedule's set makes the read stale", async () => {
+    const integrationId = "@casorg/svc";
+    await seedPackage({ orgId: ctx.orgId, id: integrationId, type: "integration" });
+    const [kept, gone] = await db
+      .insert(integrationConnections)
+      .values(
+        ["kept", "gone"].map((label) => ({
+          integrationId,
+          authKey: "primary",
+          accountId: label,
+          spaceId: ctx.defaultSpaceId,
+          userId: ctx.user.id,
+          credentialsEncrypted: "x",
+          scopesGranted: [],
+          label,
+        })),
+      )
+      .returning({ id: integrationConnections.id });
+    const created = await read(actor, { [integrationId]: [kept!.id, gone!.id] });
+
+    await deleteIntegrationConnection(scope, gone!.id, actor);
+
+    await expect(
+      updateSchedule(scope, created, { name: "renamed" }, null, undefined),
+    ).rejects.toMatchObject(refusedAsStale);
+  });
+
+  it("the actor leaving the organization, which disables the schedule, makes the read stale", async () => {
+    const member = await memberContext(ctx, "member");
+    const created = await read({ type: "user", id: member.user.id });
+
+    await leaveOrganization(ctx.orgId, member.user.id);
+
+    await expect(
+      updateSchedule(scope, created, { name: "renamed" }, null, undefined),
+    ).rejects.toMatchObject(refusedAsStale);
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));
+    expect(row).toMatchObject({ enabled: false, name: null });
   });
 });

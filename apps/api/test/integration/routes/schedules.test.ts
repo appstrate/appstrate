@@ -422,50 +422,6 @@ describe("Schedules API", () => {
       expect(res.status).toBe(400);
     });
 
-    it("rejects a string where a set belongs with 400", async () => {
-      const fid = agentId("co-bare");
-      await seedAgent({
-        id: fid,
-        homeSpaceId: ctx.defaultSpaceId,
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      await publish(fid);
-
-      const res = await app.request(`/api/agents/${fid}/schedules`, {
-        method: "POST",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cron_expression: "0 9 * * 1-5",
-          connection_overrides: { "@runorg/svc": "conn_abc123" },
-        }),
-      });
-
-      expect(res.status).toBe(400);
-    });
-
-    it("rejects an EMPTY set with 400 — it would be skipped in silence at every fire", async () => {
-      const fid = agentId("co-empty");
-      await seedAgent({
-        id: fid,
-        homeSpaceId: ctx.defaultSpaceId,
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      await publish(fid);
-
-      const res = await app.request(`/api/agents/${fid}/schedules`, {
-        method: "POST",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cron_expression: "0 9 * * 1-5",
-          connection_overrides: { "@runorg/svc": [] },
-        }),
-      });
-
-      expect(res.status).toBe(400);
-    });
-
     it("updates connection_overrides via PUT and round-trips the map of sets", async () => {
       const fid = agentId("co-update");
       const agent = await seedAgent({

@@ -27,10 +27,10 @@ import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
-  apiIntegrationManifest,
   localIntegrationManifest,
   mcpServerManifest,
   envDelivery,
+  twoAuthApiIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/ssh";
@@ -269,24 +269,10 @@ describe("resolveIntegrationSpawns — api_call per connection auth", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "orga" });
-    const manifest = apiIntegrationManifest({
-      name: API,
-      auths: {
-        primary: {
-          type: "api_key",
-          authorizedUris: ["https://a.example.com/**"],
-          credentialFields: ["api_key"],
-        },
-        backup: {
-          type: "api_key",
-          authorizedUris: ["https://b.example.com/**"],
-          credentialFields: ["api_key"],
-        },
-      },
+    const manifest = twoAuthApiIntegrationManifest(API, {
+      primary: "https://a.example.com/**",
+      backup: "https://b.example.com/**",
     });
-    (manifest as unknown as { _meta: unknown })._meta = {
-      "dev.appstrate/api": { auths: { primary: {}, backup: {} } },
-    };
     await seedPackage({
       id: API,
       orgId: ctx.orgId,

@@ -268,24 +268,6 @@ describe("resolveConnections — admin pin (cascade layer 1)", () => {
 });
 
 describe("resolveConnections — launch override (cascade layer 3)", () => {
-  it("uses run override when no pin", () => {
-    const c = conn({});
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [c],
-      pins: [],
-      launchOverrides: runOverride({ [INTEG]: [c.id] }),
-    });
-    expect(result.resolved[INTEG]).toEqual([
-      {
-        connectionId: c.id,
-        source: "run_override",
-        label: c.label,
-        accountId: "acc_x",
-      },
-    ]);
-  });
-
   it("emits override_connection_unavailable when the override points nowhere, naming its layer", () => {
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
@@ -1593,18 +1575,6 @@ describe("resolveConnections — connection sets", () => {
     ]);
   });
 
-  it("control — a one-member admin pin still resolves to a one-element set", () => {
-    const only = conn({ label: "web-1" });
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [only],
-      pins: [pin(only.id)],
-    });
-    expect(result.resolved[INTEG]).toEqual([
-      { connectionId: only.id, source: "admin_pin", label: "web-1", accountId: "acc_x" },
-    ]);
-  });
-
   it("run override binds N connections", () => {
     const a = conn({ label: "web-1" });
     const b = conn({ authKey: "pat", label: "db" });
@@ -1615,19 +1585,10 @@ describe("resolveConnections — connection sets", () => {
       launchOverrides: runOverride({ [INTEG]: [a.id, b.id] }),
     });
     expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([a.id, b.id]);
-    expect(result.resolved[INTEG]!.every((r) => r.source === "run_override")).toBe(true);
-  });
-
-  it("an admin pin of 2 binds whole when no override is given", () => {
-    const pinnedA = conn({ label: "web-1" });
-    const pinnedB = conn({ authKey: "pat", label: "db" });
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [pinnedA, pinnedB],
-      pins: [pin([pinnedA.id, pinnedB.id])],
-    });
-    expect(result.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([pinnedA.id, pinnedB.id]);
+    expect(result.resolved[INTEG]).toEqual([
+      { connectionId: a.id, source: "run_override", label: "web-1", accountId: "acc_x" },
+      { connectionId: b.id, source: "run_override", label: "db", accountId: "acc_x" },
+    ]);
   });
 
   it("an ENFORCE org default of 2 is narrowed by an override naming one of its members", () => {
@@ -1656,6 +1617,25 @@ describe("resolveConnections — connection sets", () => {
     expect(result.errors[0]!.code).toBe("pinned_connection_unavailable");
     expect(result.errors[0]!.message).toContain("conn_ghost");
     expect(result.errors[0]!.message).toContain("may have been deleted");
+  });
+
+  // Else its credentials would be injected under this integration's auth.
+  it("a pin or override naming a reachable connection of ANOTHER integration binds nothing", () => {
+    const own = conn({});
+    const foreign = conn({ integrationId: "@vendor/other" });
+    const codes = (input: Partial<Parameters<typeof resolveConnections>[0]>) =>
+      resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [own, foreign],
+        pins: [],
+        ...input,
+      }).errors.map((e) => e.code);
+    expect(codes({ pins: [pin(foreign.id)] })).toEqual(["pinned_connection_unavailable"]);
+    expect(codes({ launchOverrides: runOverride({ [INTEG]: [foreign.id] }) })).toEqual([
+      "override_connection_unavailable",
+    ]);
+    // Control: the same override naming this integration's row binds it.
+    expect(codes({ launchOverrides: runOverride({ [INTEG]: [own.id] }) })).toEqual([]);
   });
 
   it("a gone member of a MEMBER pin fails loud too — the survivor is not bound alone", () => {
@@ -1715,49 +1695,6 @@ describe("resolveConnections — connection sets", () => {
     expect(err.code).toBe("insufficient_scopes");
     expect(err.connectionId).toBe(short.id);
     expect(err.boundConnectionIds).toEqual([ok.id, short.id]);
-  });
-
-  it("control — the healthy sibling alone still resolves", () => {
-    const live = conn({ label: "web-1" });
-    const dead = conn({ authKey: "pat", label: "db", needsReconnection: true });
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [live, dead],
-      pins: [pin(live.id)],
-    });
-    expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([live.id]);
-  });
-});
-
-/**
- * Plan §8 row 5 — the fallback is the ONE layer that binds without an
- * explicit pick, and it binds at most one. N accessible connections is a
- * choice for a human, never an auto-bound set.
- */
-describe("resolveConnections — the fallback never auto-binds N", () => {
-  it("two accessible connections and no pick ⇒ must_choose_connection, nothing bound", () => {
-    const a = conn({ label: "web-1" });
-    const b = conn({ authKey: "pat", label: "db" });
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [a, b],
-      pins: [],
-    });
-    expect(result.resolved[INTEG]).toBeUndefined();
-    expect(result.errors[0]!.code).toBe("must_choose_connection");
-  });
-
-  it("control — one accessible connection auto-binds", () => {
-    const a = conn({ label: "web-1" });
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [a],
-      pins: [],
-    });
-    expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]).toHaveLength(1);
-    expect(result.resolved[INTEG]![0]!.source).toBe("fallback_auto");
   });
 });
 

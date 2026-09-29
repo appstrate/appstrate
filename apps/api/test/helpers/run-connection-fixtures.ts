@@ -165,20 +165,20 @@ export async function seedConnectionTestIntegration(ctx: TestContext, id: string
 
 /**
  * Add one connection on the integration's `primary` auth, owned by the ctx
- * user. `label` is NOT NULL and unique per (space, integration), so it
- * defaults here to a generated name. Pass one when the test asserts on it.
+ * user. `label` is NOT NULL and unique per (space, integration), so it and
+ * `accountId` default here to generated names. Pass them when the test asserts on them.
  */
 export async function seedIntegrationConnection(
   ctx: TestContext,
   integrationId: string,
-  opts: { label?: string } = {},
+  opts: { label?: string; accountId?: string } = {},
 ): Promise<string> {
   const [row] = await db
     .insert(integrationConnections)
     .values({
       integrationId,
       authKey: "primary",
-      accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
+      accountId: opts.accountId ?? `acct-${crypto.randomUUID().slice(0, 8)}`,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,

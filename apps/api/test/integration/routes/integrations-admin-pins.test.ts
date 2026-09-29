@@ -131,6 +131,14 @@ describe("/api/integrations/:packageId admin surface", () => {
     return row!.id;
   }
 
+  function putPin(connectionIds: string[], agent = AGENT, headers = authHeaders(ctx)) {
+    return app.request(`/api/integrations/${INTEGRATION}/pins/${agent}`, {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ connection_ids: connectionIds }),
+    });
+  }
+
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "adminorg" });
@@ -309,32 +317,14 @@ describe("/api/integrations/:packageId admin surface", () => {
   // ─── PUT /:packageId/pins/:agentPackageId (admin org pin) ─
 
   describe("PUT /:packageId/pins/:agentPackageId", () => {
-    it("ALLOW: admin pins a sharedWithOrg connection (returns the upserted pin)", async () => {
-      const connId = await seedSharedConnection();
-
-      const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connection_ids: [connId] }),
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { connection_ids: string[] };
-      // Wire shape uses snake_case (IntegrationPin DTO).
-      expect(body.connection_ids).toEqual([connId]);
-    });
-
     it("ALLOW: admin pins a SET of connections, and the readiness reports all of them", async () => {
       const connA = await seedSharedConnection();
       const connB = await seedSharedConnection();
 
-      const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connection_ids: [connA, connB] }),
-      });
+      const res = await putPin([connA, connB]);
 
       expect(res.status).toBe(200);
+      // Wire shape uses snake_case (IntegrationPin DTO).
       const body = (await res.json()) as { connection_ids: string[] };
       expect([...body.connection_ids].sort()).toEqual([connA, connB].sort());
 
@@ -342,35 +332,24 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect([...resolution.admin_pinned_connection_ids].sort()).toEqual([connA, connB].sort());
     });
 
-    it("ALLOW: a second PUT REPLACES the set rather than merging into it", async () => {
-      const connA = await seedSharedConnection();
-      const connB = await seedSharedConnection();
-      const put = (ids: string[]) =>
-        app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
-          method: "PUT",
-          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-          body: JSON.stringify({ connection_ids: ids }),
-        });
+    // An admin pin binds every member's run: the admin's own private account is no pin target.
+    it("DENY: 404 not_found on the admin's own private connection, and the pin stays as it was", async () => {
+      const shared = await seedSharedConnection();
+      expect((await putPin([shared])).status).toBe(200);
+      const own = await seedPrivateConnectionFor(ctx.user.id);
 
-      await put([connA, connB]);
-      const res = await put([connA]);
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { connection_ids: string[] };
-      expect(body.connection_ids).toEqual([connA]);
-
-      const resolution = await getResolution(AGENT, INTEGRATION);
-      expect(resolution.admin_pinned_connection_ids).toEqual([connA]);
+      const res = await putPin([own]);
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as { code: string }).code).toBe("not_found");
+      expect((await getResolution(AGENT, INTEGRATION)).admin_pinned_connection_ids).toEqual([
+        shared,
+      ]);
     });
 
     it("a deleted member of a pinned set blocks the run by name — the pin does not shrink", async () => {
       const connA = await seedSharedConnection();
       const connB = await seedSharedConnection();
-      const put = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connection_ids: [connA, connB] }),
-      });
-      expect(put.status).toBe(200);
+      expect((await putPin([connA, connB])).status).toBe(200);
 
       // The API refuses to drop a pinned member...
       const del = await app.request(`/api/me/connections/${connB}`, {
@@ -437,33 +416,21 @@ describe("/api/integrations/:packageId admin surface", () => {
 
     it("DENY: 400 on an empty set, a repeated id, and a set over the cap", async () => {
       const connId = await seedSharedConnection();
-      const put = (ids: string[]) =>
-        app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
-          method: "PUT",
-          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-          body: JSON.stringify({ connection_ids: ids }),
-        });
 
-      expect((await put([])).status).toBe(400);
-      expect((await put([connId, connId])).status).toBe(400);
+      expect((await putPin([])).status).toBe(400);
+      expect((await putPin([connId, connId])).status).toBe(400);
       const over = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION + 1 }, () =>
         crypto.randomUUID(),
       );
-      expect((await put(over)).status).toBe(400);
+      expect((await putPin(over)).status).toBe(400);
       // Control: the singleton the other cases degenerate from still lands.
-      expect((await put([connId])).status).toBe(200);
+      expect((await putPin([connId])).status).toBe(200);
     });
 
     it("the body's ids are lowercased, and a repeat that differs only in case is refused", async () => {
       const connId = await seedSharedConnection();
-      const put = (ids: string[]) =>
-        app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
-          method: "PUT",
-          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-          body: JSON.stringify({ connection_ids: ids }),
-        });
-      expect((await put([connId, connId.toUpperCase()])).status).toBe(400);
-      const ok = await put([connId.toUpperCase()]);
+      expect((await putPin([connId, connId.toUpperCase()])).status).toBe(400);
+      const ok = await putPin([connId.toUpperCase()]);
       expect(ok.status).toBe(200);
       expect(((await ok.json()) as { connection_ids: string[] }).connection_ids).toEqual([connId]);
     });
@@ -491,15 +458,10 @@ describe("/api/integrations/:packageId admin surface", () => {
         role: "member",
       });
 
-      const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
-        method: "PUT",
-        headers: {
-          Cookie: member.cookie,
-          "X-Org-Id": ctx.orgId,
-          "X-Space-Id": ctx.defaultSpaceId,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ connection_ids: [connId] }),
+      const res = await putPin([connId], AGENT, {
+        Cookie: member.cookie,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
       });
 
       // A member's space preset (`operator`) does not hold
@@ -508,12 +470,7 @@ describe("/api/integrations/:packageId admin surface", () => {
     });
 
     it("DENY: 401 without auth", async () => {
-      const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ connection_ids: ["00000000-0000-0000-0000-000000000000"] }),
-      });
-      expect(res.status).toBe(401);
+      expect((await putPin(["00000000-0000-0000-0000-000000000000"], AGENT, {})).status).toBe(401);
     });
   });
 
@@ -565,12 +522,7 @@ describe("/api/integrations/:packageId admin surface", () => {
   describe("DELETE /:packageId/pins/:agentPackageId", () => {
     it("ALLOW: admin removes a pin (204)", async () => {
       const connId = await seedSharedConnection();
-      // Create via PUT first to have something to delete.
-      await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connection_ids: [connId] }),
-      });
+      expect((await putPin([connId])).status).toBe(200);
 
       const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
         method: "DELETE",
@@ -626,11 +578,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, SECOND_AGENT);
 
       for (const id of [AGENT, SECOND_AGENT]) {
-        await app.request(`/api/integrations/${INTEGRATION}/pins/${id}`, {
-          method: "PUT",
-          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-          body: JSON.stringify({ connection_ids: [connId] }),
-        });
+        expect((await putPin([connId], id)).status).toBe(200);
       }
 
       const res = await app.request(`/api/integrations/${INTEGRATION}/pins`, {

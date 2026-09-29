@@ -28,7 +28,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import {
   seedAgent,
   seedPackage,
@@ -38,6 +38,7 @@ import {
 } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
+import { leaveOrganization } from "../../../src/services/organizations.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -140,14 +141,19 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
   }
 
   /**
-   * Seed a connection for the test user with an explicit auth key + blob. The
-   * label is distinct per call: several tests below bind TWO connections of the
+   * Seed a connection (the test user's unless `userId` says otherwise) with an explicit auth key +
+   * blob. The label is distinct per call: several tests below bind TWO connections of the
    * same integration to one run, and the label is what tells them apart.
    */
   let seededConnections = 0;
   async function seedConnectionRow(
     integrationId: string,
-    opts: { authKey?: string; credentialsEncrypted?: string } = {},
+    opts: {
+      authKey?: string;
+      credentialsEncrypted?: string;
+      userId?: string;
+      sharedWithOrg?: boolean;
+    } = {},
   ): Promise<string> {
     const label = `acct-test-${++seededConnections}`;
     const [row] = await db
@@ -158,12 +164,13 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
         accountId: label,
         label,
         spaceId: ctx.defaultSpaceId,
-        userId: ctx.user.id,
+        userId: opts.userId ?? ctx.user.id,
         endUserId: null,
         credentialsEncrypted:
           opts.credentialsEncrypted ??
           encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } }),
         scopesGranted: [],
+        sharedWithOrg: opts.sharedWithOrg ?? false,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -324,6 +331,25 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     expect(body.detail).toContain(INTEGRATION);
     expect(body.detail).toContain(connectionId);
     expect(body.detail).toMatch(/relaunch the run/i);
+  });
+
+  it("DENY: 404 once a bound colleague's shared connection is unshared by its owner leaving", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const colleague = await memberContext(ctx, "member");
+    const connectionId = await seedConnectionRow(INTEGRATION, {
+      userId: colleague.user.id,
+      sharedWithOrg: true,
+    });
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    const fetchCredentials = () =>
+      app.request(credentialsUrl(INTEGRATION, connectionId), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    expect((await fetchCredentials()).status).toBe(200);
+
+    await leaveOrganization(ctx.orgId, colleague.user.id);
+
+    expect((await fetchCredentials()).status).toBe(404);
   });
 
   // ─── The connection selector (plan §8 row 8) ───

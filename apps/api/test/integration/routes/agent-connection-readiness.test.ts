@@ -26,9 +26,9 @@ import { join } from "node:path";
 import { integrationConnections, integrationPins, packages } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
-  apiIntegrationManifest,
   localIntegrationManifest,
   httpHeaderDelivery,
+  twoAuthApiIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
@@ -146,6 +146,22 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
       scopesGranted: [],
       label: "Readiness",
     });
+  }
+
+  /** The two-auth `api_call` integration, and the agent selecting `api_call__primary` of it. */
+  async function seedTwoAuthIntegration(config: Record<string, unknown> = {}) {
+    await seedAgentWith({
+      ...buildAgentManifest([INTEGRATION], false),
+      integrations_configuration: { [INTEGRATION]: { tools: ["api_call__primary"], ...config } },
+    });
+    await seedPackage({
+      id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      draftManifest: twoAuthApiIntegrationManifest(INTEGRATION),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
   }
 
   function getReadiness() {
@@ -271,31 +287,8 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
   // A pinned set may span the auths of a multi-auth integration, but each
   // member's spec carries only its own auth's api_call tools: a member whose
   // auth serves none of the selection must fail readiness AND kickoff alike.
-  it("a pinned member whose auth serves no selected api_call → blocks_run + run 412s (parity)", async () => {
-    const auth = {
-      type: "api_key" as const,
-      authorizedUris: ["https://api.example.com/**"],
-      credentialFields: ["api_key"],
-    };
-    const manifest = apiIntegrationManifest({
-      name: INTEGRATION,
-      auths: { primary: auth, backup: auth },
-    });
-    (manifest as unknown as { _meta: unknown })._meta = {
-      "dev.appstrate/api": { auths: { primary: {}, backup: {} } },
-    };
-    await seedAgentWith({
-      ...buildAgentManifest([INTEGRATION], false),
-      integrations_configuration: { [INTEGRATION]: { tools: ["api_call__primary"] } },
-    });
-    await seedPackage({
-      id: INTEGRATION,
-      homeSpaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      type: "integration",
-      draftManifest: manifest,
-    });
-    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+  it("a pinned member whose auth serves no selected api_call → blocks_run + run 409s (parity)", async () => {
+    await seedTwoAuthIntegration();
     const ids: string[] = [];
     for (const [authKey, label] of [
       ["primary", "main"],
@@ -349,30 +342,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
   });
 
   it("fallback with only a non-serving connection → not_connected, and no candidate", async () => {
-    const auth = {
-      type: "api_key" as const,
-      authorizedUris: ["https://api.example.com/**"],
-      credentialFields: ["api_key"],
-    };
-    const manifest = apiIntegrationManifest({
-      name: INTEGRATION,
-      auths: { primary: auth, backup: auth },
-    });
-    (manifest as unknown as { _meta: unknown })._meta = {
-      "dev.appstrate/api": { auths: { primary: {}, backup: {} } },
-    };
-    await seedAgentWith({
-      ...buildAgentManifest([INTEGRATION], false),
-      integrations_configuration: { [INTEGRATION]: { tools: ["api_call__primary"] } },
-    });
-    await seedPackage({
-      id: INTEGRATION,
-      homeSpaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      type: "integration",
-      draftManifest: manifest,
-    });
-    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    await seedTwoAuthIntegration();
     await db.insert(integrationConnections).values({
       integrationId: INTEGRATION,
       authKey: "backup",
@@ -400,32 +370,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
   // The agent's own auth_key serving none of its selection is a configuration error, reported
   // as such — not `auth_key_mismatch` against the actor's connection on the serving auth.
   it("agent auth_key serving no selected tool → configuration error (parity)", async () => {
-    const auth = {
-      type: "api_key" as const,
-      authorizedUris: ["https://api.example.com/**"],
-      credentialFields: ["api_key"],
-    };
-    const manifest = apiIntegrationManifest({
-      name: INTEGRATION,
-      auths: { primary: auth, backup: auth },
-    });
-    (manifest as unknown as { _meta: unknown })._meta = {
-      "dev.appstrate/api": { auths: { primary: {}, backup: {} } },
-    };
-    await seedAgentWith({
-      ...buildAgentManifest([INTEGRATION], false),
-      integrations_configuration: {
-        [INTEGRATION]: { tools: ["api_call__primary"], auth_key: "backup" },
-      },
-    });
-    await seedPackage({
-      id: INTEGRATION,
-      homeSpaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      type: "integration",
-      draftManifest: manifest,
-    });
-    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    await seedTwoAuthIntegration({ auth_key: "backup" });
     await db.insert(integrationConnections).values({
       integrationId: INTEGRATION,
       authKey: "primary",

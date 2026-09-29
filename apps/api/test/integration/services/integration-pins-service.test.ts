@@ -156,6 +156,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       });
       const unknown = crypto.randomUUID();
       const answer = await refusal([shared, unknown], unknown, {});
+      expect(answer.message).toContain("<id>");
       expect(answer).toEqual(await refusal([unknown], unknown, {}));
     });
 
@@ -321,6 +322,26 @@ describe("integration-pins-service — DB access/ownership", () => {
         );
       }
       return ids.sort();
+    }
+
+    /** A custom OAuth client of the space, marked as the minter of `connectionIds`; returns its id. */
+    async function seedClientMinting(connectionIds: string[]): Promise<string> {
+      const [client] = await db
+        .insert(integrationOauthClients)
+        .values({
+          orgId: scope.orgId,
+          spaceId: scope.spaceId,
+          integrationId: INTEGRATION,
+          authKey: "google",
+          clientId: "byo-app",
+          clientSecretEncrypted: "x",
+        })
+        .returning({ id: integrationOauthClients.id });
+      await db
+        .update(integrationConnections)
+        .set({ clientRef: client!.id })
+        .where(inArray(integrationConnections.id, connectionIds));
+      return client!.id;
     }
 
     beforeEach(async () => {
@@ -638,6 +659,30 @@ describe("integration-pins-service — DB access/ownership", () => {
         expect(await overridesOf(member)).toEqual({ [INTEGRATION]: [id] });
       });
 
+      it("an OAuth client delete forgets its minted connections the same way", async () => {
+        const [minted, kept] = await seedSharedConnections(2);
+        const clientId = await seedClientMinting([minted!]);
+        await pinAs(memberId, [minted!, kept!]);
+        await pinAs(memberId, [minted!], OTHER_AGENT);
+        const emptied = await scheduleWith({ [INTEGRATION]: [minted!] });
+
+        const { disabledScheduleIds } = await deleteIntegrationOAuthClient(
+          scope,
+          INTEGRATION,
+          clientId,
+        );
+
+        expect(await memberPinSet(memberId)).toEqual([kept!]);
+        expect(await memberPinSet(memberId, OTHER_AGENT)).toBeNull();
+        expect(await overridesOf(emptied)).toBeNull();
+        expect(disabledScheduleIds).toEqual([emptied]);
+        const [row] = await db
+          .select({ enabled: schedules.enabled })
+          .from(schedules)
+          .where(eq(schedules.id, emptied));
+        expect(row!.enabled).toBe(false);
+      });
+
       it("touches no pin and no schedule when the delete is refused", async () => {
         const [a, b] = await seedSharedConnections(2);
         await pinAs(memberId, [a!, b!]);
@@ -678,38 +723,21 @@ describe("integration-pins-service — DB access/ownership", () => {
     }
 
     it("refuses to delete an OAuth client whose minted connection is pinned", async () => {
-      const [client] = await db
-        .insert(integrationOauthClients)
-        .values({
-          orgId: scope.orgId,
-          spaceId: scope.spaceId,
-          integrationId: INTEGRATION,
-          authKey: "google",
-          clientId: "byo-app",
-          clientSecretEncrypted: "x",
-        })
-        .returning({ id: integrationOauthClients.id });
       const ids = await seedSharedConnections(1);
-      await db
-        .update(integrationConnections)
-        .set({ clientRef: client!.id })
-        .where(eq(integrationConnections.id, ids[0]!));
+      const clientId = await seedClientMinting(ids);
       await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
         createdBy: ctx.user.id,
       });
       await expect(
-        deleteIntegrationOAuthClient(scope, INTEGRATION, client!.id),
-      ).rejects.toMatchObject({
-        status: 409,
-        code: "connection_pinned",
-      });
+        deleteIntegrationOAuthClient(scope, INTEGRATION, clientId),
+      ).rejects.toMatchObject({ status: 409, code: "connection_pinned" });
       const [kept] = await db
         .select({ id: integrationOauthClients.id })
         .from(integrationOauthClients)
-        .where(eq(integrationOauthClients.id, client!.id));
-      expect(kept?.id).toBe(client!.id);
+        .where(eq(integrationOauthClients.id, clientId));
+      expect(kept?.id).toBe(clientId);
     });
 
     it("refuses the whole set when ONE member is not shared", async () => {
