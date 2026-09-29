@@ -70,7 +70,8 @@ import {
   projectHttpDeliveryConfig,
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
-import { substituteVars, referencesField } from "./template-vars.ts";
+import { substituteVars } from "./template-vars.ts";
+import { credentialUrlPolicy } from "./credential-guard.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
 
 // ─────────────────────────────────────────────
@@ -269,21 +270,6 @@ const RESERVED_TRANSPORT_HEADERS: ReadonlySet<string> = new Set([
   "appstrate-user",
 ]);
 
-/**
- * True when `input` references at least one declared credential field via a
- * `{{field}}` placeholder. Used by the local resolver to detect a
- * credential-bearing call (the agent embedded the secret into the URL / a
- * header) so it can refuse to honour `allow_all_uris` and instead gate the
- * dispatch on the auth's `authorized_uris` allowlist — preventing secret
- * exfiltration to an arbitrary off-allowlist host.
- */
-function referencesCredentialField(
-  input: string,
-  fields: Readonly<Record<string, string>>,
-): boolean {
-  return referencesField(input, fields);
-}
-
 // ─────────────────────────────────────────────
 // Resolver contract
 // ─────────────────────────────────────────────
@@ -448,23 +434,13 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
     return async (req, ctx) => {
       const fields = entry.fields;
 
-      // Detect credential exfiltration via `{{field}}` substitution: when the
-      // agent embeds a decrypted credential field into the target URL or a
-      // header, that call must NOT be allowed to reach an off-allowlist host
-      // (see `allowAllUris` below). This is distinct from the credential
-      // header the resolver injects itself — that one is protected on
-      // cross-origin redirect hops by the shared engine's credential-strip,
-      // and allow_all_uris integrations legitimately send it to the
-      // agent-chosen first hop.
-      let substitutesCredential = referencesCredentialField(req.target, fields);
-      // A `{{field}}` credential reference in the request BODY is the same
-      // exfiltration channel as one in the URL/headers — only a string body is
-      // substituted (`transformString` below runs on strings only; multipart /
-      // fromFile / fromBytes parts are never `{{}}`-substituted), so that is the
-      // one shape to scan.
-      if (typeof req.body === "string" && referencesCredentialField(req.body, fields)) {
-        substitutesCredential = true;
-      }
+      // Every string `{{field}}` substitution runs on: the target, the kept
+      // header values, and a string body (`transformString` below runs on
+      // strings only; multipart / fromFile / fromBytes are never substituted).
+      // The resolver's own injected header is not a template — the engine's
+      // credential-strip protects it on redirects.
+      const templates = [req.target];
+      if (typeof req.body === "string") templates.push(req.body);
       const target = substituteVars(req.target, fields);
 
       const deliveryPlan = resolveLocalDeliveryPlan(meta, entry);
@@ -485,7 +461,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         ) {
           continue;
         }
-        if (referencesCredentialField(value, fields)) substitutesCredential = true;
+        templates.push(value);
         headers[key] = substituteVars(value, fields);
       }
       // Inject the credential header locally and capture its name so the
@@ -495,21 +471,15 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         ? applyDeliveryPlan(headers, deliveryPlan)
         : null;
 
-      // A call that substitutes a credential field into the agent-controlled
-      // URL / headers / body MUST respect the auth's `authorized_uris`
-      // allowlist — `allow_all_uris` is not honoured for it, so the secret
-      // can't be exfiltrated to an arbitrary off-allowlist host.
-      const allowAllUris = meta.allowAllUris && !substitutesCredential;
-
-      // When allow_all_uris was the integration's ONLY permission (no
-      // authorized_uris allowlist exists), downgrading the flag alone is not
-      // enough: the engine's preflight would fall back to the internal-host
-      // SSRF net and still let the call proceed to any PUBLIC host with the
-      // credential embedded. Refuse outright instead — same semantics as the
-      // sidecar's credential-proxy 403 for this exact case.
-      // (`allowAllUris` is already false whenever `substitutesCredential` is
-      // true — see its definition above — so only the allowlist matters here.)
-      if (substitutesCredential && meta.authorizedUris.length === 0) {
+      // Credential-exfiltration guard (`credentialUrlPolicy`): a templated
+      // credential drops allow_all_uris and is refused without an allowlist.
+      const policy = credentialUrlPolicy({
+        templates,
+        fields,
+        allowAllUris: meta.allowAllUris,
+        authorizedUris: meta.authorizedUris,
+      });
+      if (policy.refuse) {
         throw new ResolverError(
           "RESOLVER_CREDENTIAL_EXFIL_BLOCKED",
           `Integration ${meta.name}: the call substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`,
@@ -546,8 +516,10 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
           url: target,
           init,
           fetchFn: this.fetchImpl,
-          authorizedUris: meta.authorizedUris,
-          allowAllUris,
+          authorizedUris: policy.authorizedUris,
+          allowAllUris: policy.allowAllUris,
+          // Field origins are not operator host pins: they keep the SSRF net.
+          literalHostPins: meta.authorizedUris,
           injectedCredentialHeader: injectedCredentialHeader?.toLowerCase() ?? null,
           integrationId: meta.name,
           resolveHost: this.resolveHost,

@@ -157,6 +157,12 @@ interface PreflightOptions {
    */
   allowAllUris?: boolean;
   /**
+   * Entries whose literal host exempts the target from the SSRF net; defaults
+   * to `authorizedUris`. Pass the operator-declared list when `authorizedUris`
+   * was augmented (`credentialUrlPolicy`'s credential-field origins).
+   */
+  literalHostPins?: readonly string[];
+  /**
    * DNS resolver for the SSRF rebind check — injectable for tests.
    * Production callers omit it (system resolver via `node:dns`).
    */
@@ -236,7 +242,7 @@ export async function preflightUrl(url: string, opts: PreflightOptions): Promise
         message: `URL not in authorized_uris allowlist. Allowed: ${authorizedUris.join(", ")}`,
       };
     }
-    if (!hostLiterallyAllowlisted(url, authorizedUris)) {
+    if (!hostLiterallyAllowlisted(url, opts.literalHostPins ?? authorizedUris)) {
       return refuseSsrfUrl(url, opts.resolveHost);
     }
     return { ok: true };
@@ -483,6 +489,8 @@ interface GuardedFetchOptions {
   fetchFn?: typeof fetch;
   authorizedUris?: string[] | null;
   allowAllUris?: boolean;
+  /** See {@link PreflightOptions.literalHostPins}. */
+  literalHostPins?: readonly string[];
   /** Lowercased name of the credential header injected by the caller. */
   injectedCredentialHeader?: string | null;
   integrationId?: string;
@@ -508,6 +516,7 @@ export async function guardedFetch(
   const pre = await preflightUrl(opts.url, {
     authorizedUris: opts.authorizedUris,
     allowAllUris: opts.allowAllUris,
+    ...(opts.literalHostPins ? { literalHostPins: opts.literalHostPins } : {}),
     resolveHost: opts.resolveHost,
   });
   if (!pre.ok) {

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `credentialUrlPolicy`
+
+- `credentialUrlPolicy({ templates, fields, allowAllUris, authorizedUris })`,
+  exported from `@appstrate/afps-runtime/resolvers`: the credential-exfiltration
+  guard shared by the sidecar, the local resolver and the platform credential
+  proxy. A templated credential drops `allow_all_uris`; `refuse` is set when no
+  allowlist remains.
+- `guardedFetch` / `preflightUrl` take an optional `literalHostPins`: the entries
+  whose literal host exempts the target from the SSRF net (defaults to
+  `authorizedUris`).
+
+### Changed — URL-valued credential fields contribute their origin
+
+- When a call templates a credential, the origin of every credential field
+  holding an absolute `http(s)` URL joins the enforced allowlist as
+  `${origin}/**`, so integrations whose endpoint is a connection field
+  (`webhook_url`, `site_url`) work again under `allow_all_uris`. These origins
+  keep the SSRF net.
+
+### Fixed — credential detection
+
+- Placeholder lookups (`substituteVars` and the guard) match own properties
+  only: `{{constructor}}` no longer resolves to `Object.prototype`'s.
+- The sidecar scans a JSON body's string leaves — what it substitutes — instead
+  of `JSON.stringify(body)`, whose escaping hid `{{\tapi_key}}`.
+
 ### Changed — redirect follower takes a `CookieScope` (BREAKING)
 
 - `fetchFollowingRedirectsCapturingCookies` takes `cookies: CookieScope` in
