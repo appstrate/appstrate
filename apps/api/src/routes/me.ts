@@ -374,8 +374,9 @@ router.delete(
     // (userId | endUserId) filter, not by org membership: a connection
     // belongs to its owner regardless of which org context they're browsing.
     const [row] = await db
-      .select({ spaceId: integrationConnections.spaceId })
+      .select({ spaceId: integrationConnections.spaceId, orgId: spaces.orgId })
       .from(integrationConnections)
+      .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
       .where(eq(integrationConnections.id, connectionId))
       .limit(1);
     if (!row) {
@@ -416,10 +417,13 @@ router.delete(
     }
     const { disabledScheduleIds } = await deleteIntegrationConnection(scope, connectionId, actor);
     await removeScheduleJobs(disabledScheduleIds);
+    // A cookie session carries no org context on /me/*: the audit names the connection's org.
     await recordAuditFromContext(c, {
       action: "integration.connection.deleted",
       resourceType: "integration_connection",
       resourceId: connectionId,
+      after: { disabledScheduleIds },
+      orgIdOverride: row.orgId,
     });
     return c.body(null, 204);
   },

@@ -23,7 +23,7 @@ import {
 import { seedApiKey, seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { assertDbHas } from "../../helpers/assertions.ts";
-import { integrationConnections } from "@appstrate/db/schema";
+import { auditEvents, integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 
 const app = getTestApp();
@@ -565,6 +565,26 @@ describe("Me API (/api/me)", () => {
         .from(integrationConnections)
         .where(eq(integrationConnections.id, connId));
       expect(after).toHaveLength(0);
+    });
+
+    it("audits a cookie-session delete in the connection's org", async () => {
+      const ctx = await createTestContext({ orgSlug: "self-del-audit" });
+      const connId = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@del/audited",
+        userId: ctx.user.id,
+      });
+
+      const res = await app.request(`/api/me/connections/${connId}`, {
+        method: "DELETE",
+        headers: { Cookie: ctx.cookie },
+      });
+      expect(res.status).toBe(204);
+
+      const [event] = await db.select().from(auditEvents).where(eq(auditEvents.resourceId, connId));
+      expect(event?.action).toBe("integration.connection.deleted");
+      expect(event?.orgId).toBe(ctx.orgId);
     });
 
     it("returns 401 without authentication", async () => {
