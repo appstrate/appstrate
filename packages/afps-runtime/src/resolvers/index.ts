@@ -91,11 +91,22 @@ export {
   hostLiterallyAllowlisted,
   stripUserInfoAndFragment,
   redactHost,
-  mergeSetCookieIntoJar,
   fetchFollowingRedirectsCapturingCookies,
   guardedFetch,
   RedirectBlockedError,
 } from "./api-call-engine.ts";
+
+// Sticky-cookie jar shared by both credential proxies (sidecar + platform)
+// and the redirect follower above.
+export {
+  cookieBucketKey,
+  originOf,
+  eligibleCookies,
+  mergeSetCookieIntoJar,
+  composeCookieHeader,
+  type CookieJar,
+  type CookieGate,
+} from "./cookie-jar.ts";
 
 // Integration `api_call` surface — the portable equivalent of the platform's
 // `{ns}__api_call` MCP tool. Reuses the same HTTP core (`makeApiCallTool`) as

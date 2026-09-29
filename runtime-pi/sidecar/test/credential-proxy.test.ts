@@ -9,7 +9,8 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import { cookieBucketKey, executeApiCall, type ApiCallDeps } from "../credential-proxy.ts";
+import { cookieBucketKey } from "@appstrate/afps-runtime/resolvers";
+import { executeApiCall, type ApiCallDeps, type ApiCallRequestBody } from "../credential-proxy.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
@@ -1993,4 +1994,97 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     );
     expect(cookiesSeen[1] ?? "").not.toContain("FROM-OPEN-CALL");
   });
+});
+
+describe("executeApiCall — injected Cookie credential meets the jar (#1613)", () => {
+  // A session integration delivering its credential as a `Cookie` header.
+  const sessionCreds = mock(async (): Promise<CredentialsResponse> => ({
+    credentials: { session: "injected" },
+    authorizedUris: ["https://api.example.com/**"],
+    allowAllUris: false,
+    credentialHeaderName: "Cookie",
+    credentialHeaderPrefix: "PHPSESSID=",
+    credentialFieldName: "session",
+  }));
+
+  /** Answers call N with `setCookies[N]` and records every `Cookie` header sent. */
+  function scriptedFetch(setCookies: (string | undefined)[]) {
+    const sent: string[][] = [];
+    let call = 0;
+    const fetchFn = mock(async (_url: string | URL, init?: RequestInit) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      sent.push(
+        Object.entries(headers)
+          .filter(([k]) => k.toLowerCase() === "cookie")
+          .map(([, v]) => v),
+      );
+      const setCookie = setCookies[call++];
+      return new Response("{}", {
+        status: 200,
+        headers: setCookie ? { "Set-Cookie": setCookie } : {},
+      });
+    });
+    return { sent, fetchFn: fetchFn as unknown as typeof fetch };
+  }
+
+  const bodies = {
+    buffered: (): ApiCallRequestBody => ({ kind: "none" }),
+    streaming: (): ApiCallRequestBody => ({
+      kind: "streaming",
+      stream: new ReadableStream({
+        start(c) {
+          c.enqueue(new Uint8Array([1]));
+          c.close();
+        },
+      }),
+    }),
+  };
+  async function callTimes(deps: ApiCallDeps, n: number, body: () => ApiCallRequestBody) {
+    for (let i = 0; i < n; i++) {
+      await executeApiCall(
+        {
+          integrationId: "legacy",
+          targetUrl: "https://api.example.com/page",
+          method: "POST",
+          callerHeaders: {},
+          body: body(),
+        },
+        deps,
+      );
+    }
+  }
+
+  it("sends ONE Cookie header carrying the injected session and a captured cookie", async () => {
+    const { sent, fetchFn } = scriptedFetch(["pref=1; Path=/"]);
+    const deps = makeDeps({ fetchFn, fetchCredentials: sessionCreds });
+    await callTimes(deps, 2, bodies.buffered);
+
+    expect(sent[0]).toEqual(["PHPSESSID=injected"]);
+    expect(sent[1]).toEqual(["PHPSESSID=injected; pref=1"]);
+  });
+
+  for (const [kind, body] of Object.entries(bodies)) {
+    it(`replays a rotated session once, without a duplicate name (${kind})`, async () => {
+      const { sent, fetchFn } = scriptedFetch(["PHPSESSID=rotated; HttpOnly"]);
+      const deps = makeDeps({ fetchFn, fetchCredentials: sessionCreds });
+      await callTimes(deps, 2, body);
+
+      expect(sent[1]).toEqual(["PHPSESSID=rotated"]);
+    });
+
+    it(`falls back to the injected session once upstream deletes it (${kind})`, async () => {
+      const { sent, fetchFn } = scriptedFetch([
+        "PHPSESSID=rotated",
+        "PHPSESSID=; Max-Age=0; Path=/",
+      ]);
+      const deps = makeDeps({ fetchFn, fetchCredentials: sessionCreds });
+      await callTimes(deps, 3, body);
+
+      expect(sent[1]).toEqual(["PHPSESSID=rotated"]);
+      expect(sent[2]).toEqual(["PHPSESSID=injected"]);
+      expect(
+        deps.cookieJar.has(cookieBucketKey("legacy", "allowlist", "https://api.example.com")),
+      ).toBe(false);
+    });
+  }
 });

@@ -69,8 +69,8 @@
  *     that is what makes multi-host APIs (Dropbox `api.` ⇄ `content.`) work.
  *     Folding the two would mean an option that disables the shared
  *     primitive's central safety property for one caller.
- *   - **Cookie continuity.** Every hop's `Set-Cookie` is merged into a
- *     per-integration jar and recomposed onto the next hop (#473). The shared
+ *   - **Cookie continuity.** Every hop's `Set-Cookie` is merged into the
+ *     caller's jar bucket and recomposed onto the next hop (#473). The shared
  *     primitive has no jar and no reason to grow one.
  *
  * What the two DO share is now actually shared: the SSRF blocklist
@@ -84,6 +84,7 @@ import { isBlockedUrl } from "@appstrate/afps-shared/ssrf";
 import { DEFAULT_MAX_REDIRECTS } from "@appstrate/afps-shared/guarded-fetch";
 import { resolveAndCheckHost, type HostResolver } from "@appstrate/afps-shared/ssrf-dns";
 import { matchesAuthorizedUriSpec, stripUserInfoAndFragment } from "./http-call-core.ts";
+import { composeCookieHeader, mergeSetCookieIntoJar, type CookieJar } from "./cookie-jar.ts";
 
 // Re-exported from its new home in `http-call-core.ts`, where the
 // `authorized_uris` matcher itself needs it (see
@@ -283,33 +284,6 @@ export function redactHost(url: string): string {
   }
 }
 
-/** Dedup by cookie name; strip attributes (Path, Expires, Domain, SameSite, …). */
-export function mergeSetCookieIntoJar(
-  setCookieHeaders: string[],
-  cookieJar: Map<string, string[]>,
-  integrationId: string,
-): void {
-  if (!setCookieHeaders.length) return;
-  const byName = new Map<string, string>();
-  for (const ck of cookieJar.get(integrationId) ?? []) byName.set(ck.split("=")[0]!, ck);
-  for (const h of setCookieHeaders) {
-    const ck = h.split(";")[0]!.trim();
-    byName.set(ck.split("=")[0]!, ck);
-  }
-  cookieJar.set(integrationId, [...byName.values()]);
-}
-
-/** Parse a `Cookie:` header value into name→pair entries, deduped by name. */
-function parseCookieHeader(value: string | null): Map<string, string> {
-  const byName = new Map<string, string>();
-  if (!value) return byName;
-  for (const part of value.split(";")) {
-    const trimmed = part.trim();
-    if (trimmed) byName.set(trimmed.split("=")[0]!, trimmed);
-  }
-  return byName;
-}
-
 /** Optional observability hook — callers pass a logger; defaults to no-op. */
 interface RedirectLogger {
   warn(message: string, fields?: Record<string, unknown>): void;
@@ -321,7 +295,10 @@ interface RedirectFollowOptions {
   url: string;
   init: RequestInit;
   fetchFn: typeof fetch;
-  cookieJar: Map<string, string[]>;
+  cookieJar: CookieJar;
+  /** Jar bucket every hop's `Set-Cookie` is merged under and replayed from. */
+  cookieJarKey: string;
+  /** Logging only. */
   integrationId: string;
   /** Lowercased name of the credential header server-injected by the caller. */
   injectedCredentialHeader: string | null;
@@ -351,7 +328,7 @@ interface RedirectFollowOptions {
 
 /**
  * Manually follow 3xx redirects so we can capture `Set-Cookie` from
- * **every** hop into the per-integration jar — Bun's / undici's native
+ * **every** hop into `cookieJar[cookieJarKey]` — Bun's / undici's native
  * fetch only surfaces the final hop's `Set-Cookie`, which breaks
  * multi-step OAuth/CAS flows where the session cookie lands on an
  * intermediate 302 (see #473).
@@ -376,8 +353,8 @@ interface RedirectFollowOptions {
  * native fetch — bodies can't be replayed across hops). The initial-URL
  * allowlist check still bounds the SSRF surface for that path.
  *
- * Caller-supplied cookies are preserved across hops (the jar wins on name
- * conflict so server-rotated values replace stale caller-supplied ones).
+ * The initial `Cookie` header is preserved across hops (the jar bucket wins
+ * on name conflict so server-rotated values replace stale initial ones).
  *
  * Returns the terminal `Response`, the URL it was served from (so
  * callers driving redirect-chain flows — OAuth code, CAS ticket,
@@ -395,6 +372,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
     init,
     fetchFn,
     cookieJar,
+    cookieJarKey,
     integrationId,
     injectedCredentialHeader,
     authorizedUris,
@@ -402,16 +380,14 @@ export async function fetchFollowingRedirectsCapturingCookies(
   } = opts;
   const logger = opts.logger ?? NOOP_LOGGER;
   const hasAllowlist = !!authorizedUris && authorizedUris.length > 0;
-  const callerCookies = parseCookieHeader(
-    new Headers(init.headers as RequestInit["headers"]).get("cookie"),
-  );
+  const initialCookie = new Headers(init.headers as RequestInit["headers"]).get("cookie");
 
   let currentUrl = url;
   let currentInit: RequestInit = { ...init, redirect: "manual" };
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     const response = await fetchFn(currentUrl, currentInit);
-    mergeSetCookieIntoJar(response.headers.getSetCookie(), cookieJar, integrationId);
+    mergeSetCookieIntoJar(response.headers.getSetCookie(), cookieJar, cookieJarKey);
 
     if (response.status < 300 || response.status >= 400) {
       return { response, finalUrl: currentUrl, hops: hop };
@@ -482,10 +458,8 @@ export async function fetchFollowingRedirectsCapturingCookies(
 
     const headers = new Headers(currentInit.headers as RequestInit["headers"]);
     headers.delete("cookie");
-    // Compose Cookie from caller-supplied + jar (jar wins on dup name).
-    const merged = new Map(callerCookies);
-    for (const ck of cookieJar.get(integrationId) ?? []) merged.set(ck.split("=")[0]!, ck);
-    if (merged.size) headers.set("cookie", [...merged.values()].join("; "));
+    const cookie = composeCookieHeader(initialCookie, cookieJar.get(cookieJarKey) ?? []);
+    if (cookie) headers.set("cookie", cookie);
     if (dropBody) {
       headers.delete("content-length");
       headers.delete("content-type");
@@ -583,12 +557,15 @@ export async function guardedFetch(
     return { response, finalUrl: response.url || opts.url, hops: 0 };
   }
 
+  const integrationId = opts.integrationId ?? "local";
   return fetchFollowingRedirectsCapturingCookies({
     url: opts.url,
     init,
     fetchFn,
-    cookieJar: new Map<string, string[]>(),
-    integrationId: opts.integrationId ?? "local",
+    // Fresh per-call jar: the bucket key only has to be stable within it.
+    cookieJar: new Map(),
+    cookieJarKey: integrationId,
+    integrationId,
     injectedCredentialHeader: opts.injectedCredentialHeader ?? null,
     authorizedUris: opts.authorizedUris ?? undefined,
     allowAllUris: opts.allowAllUris,
