@@ -78,6 +78,22 @@ function scriptedUpstream(setCookies: string[][]) {
   return { fetchImpl, seen };
 }
 
+/** Upstream answering `respond(url, n)` for the n-th request (1-based), redirect hops included. */
+function recordingUpstream(respond: (url: string, n: number) => Response) {
+  const seen: Array<{ request: string; cookie: string | null }> = [];
+  const fetchImpl = ((url: string | URL, init: RequestInit) => {
+    seen.push({
+      request: `${init.method} ${url}`,
+      cookie: new Headers(init.headers).get("cookie"),
+    });
+    return Promise.resolve(respond(url.toString(), seen.length));
+  }) as unknown as typeof fetch;
+  return { fetchImpl, seen };
+}
+
+const redirect = (location: string, setCookie: string) =>
+  new Response(null, { status: 302, headers: { location, "Set-Cookie": setCookie } });
+
 /** A `Cookie` header as a sorted list of `name=value` pairs. */
 function cookiePairs(cookie: string | null | undefined): string[] {
   return cookie
@@ -234,34 +250,73 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     expect(cookiePairs(upstream.seen[2]?.get("cookie"))).toEqual(["PHPSESSID=rotated-a"]);
   });
 
-  it("captures a redirected response's cookies under the origin that served it", async () => {
+  it("files each redirect hop's cookies under that hop's origin", async () => {
     const packageId = "@cpcookieorg/open";
     await cookieCredential(packageId, true);
-    const seen: Array<{ url: string; cookie: string | null }> = [];
-    const fetchImpl = ((url: string | URL, init: RequestInit) => {
-      seen.push({ url: url.toString(), cookie: new Headers(init.headers).get("cookie") });
-      if (url.toString().startsWith("https://1.1.1.1") && seen.length === 1) {
-        return Promise.resolve(
-          new Response(null, { status: 302, headers: { location: "https://8.8.8.8/landing" } }),
-        );
-      }
-      return Promise.resolve(
-        new Response("{}", { status: 200, headers: { "Set-Cookie": "PHPSESSID=planted" } }),
-      );
-    }) as unknown as typeof fetch;
+    const upstream = recordingUpstream((_url, n) =>
+      n === 1
+        ? new Response(null, { status: 302, headers: { location: "https://8.8.8.8/landing" } })
+        : new Response("{}", { status: 200, headers: { "Set-Cookie": "PHPSESSID=planted" } }),
+    );
 
-    await call(packageId, "https://1.1.1.1/cart", fetchImpl);
-    await call(packageId, "https://1.1.1.1/cart", fetchImpl);
-    await call(packageId, "https://8.8.8.8/landing", fetchImpl);
+    await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
+    await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
+    await call(packageId, "https://8.8.8.8/landing", upstream.fetchImpl);
 
-    expect(seen.map((s) => s.url)).toEqual([
-      "https://1.1.1.1/cart",
-      "https://8.8.8.8/landing",
-      "https://1.1.1.1/cart",
-      "https://8.8.8.8/landing",
+    expect(upstream.seen.map((s) => s.request)).toEqual([
+      "POST https://1.1.1.1/cart",
+      "GET https://8.8.8.8/landing",
+      "POST https://1.1.1.1/cart",
+      "POST https://8.8.8.8/landing",
     ]);
-    expect(cookiePairs(seen[2]?.cookie)).toEqual(["PHPSESSID=sess-abc"]);
-    expect(cookiePairs(seen[3]?.cookie)).toEqual(["PHPSESSID=planted"]);
+    expect(upstream.seen[1]?.cookie).toBeNull(); // cross-origin hop: credential stripped
+    expect(cookiePairs(upstream.seen[2]?.cookie)).toEqual(["PHPSESSID=sess-abc"]);
+    expect(cookiePairs(upstream.seen[3]?.cookie)).toEqual(["PHPSESSID=planted"]);
+  });
+
+  it("sends a session rotated on a redirect to the next hop and the next call", async () => {
+    const packageId = "@cpcookieorg/shop";
+    await cookieCredential(packageId);
+    const upstream = recordingUpstream((url) =>
+      url.endsWith("/cart/add")
+        ? redirect("/cart", "PHPSESSID=new; Path=/; HttpOnly")
+        : new Response("{}", { status: 200 }),
+    );
+
+    await call(packageId, "https://1.1.1.1/cart/add", upstream.fetchImpl);
+    await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
+
+    expect(upstream.seen.map((s) => s.request)).toEqual([
+      "POST https://1.1.1.1/cart/add",
+      "GET https://1.1.1.1/cart",
+      "POST https://1.1.1.1/cart",
+    ]);
+    expect(upstream.seen.map((s) => s.cookie)).toEqual([
+      "PHPSESSID=sess-abc",
+      "PHPSESSID=new",
+      "PHPSESSID=new",
+    ]);
+  });
+
+  it("falls back to the injected session on the hop after a redirect deletes the cookie", async () => {
+    const packageId = "@cpcookieorg/shop";
+    await cookieCredential(packageId);
+    const upstream = recordingUpstream((url, n) => {
+      if (n === 1) return new Response("{}", { headers: { "Set-Cookie": "PHPSESSID=rotated" } });
+      if (url.endsWith("/cart/add")) return redirect("/cart", "PHPSESSID=; Max-Age=0");
+      return new Response("{}", { status: 200 });
+    });
+
+    await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
+    await call(packageId, "https://1.1.1.1/cart/add", upstream.fetchImpl);
+    await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
+
+    expect(upstream.seen.map((s) => s.cookie)).toEqual([
+      "PHPSESSID=sess-abc",
+      "PHPSESSID=rotated",
+      "PHPSESSID=sess-abc", // GET hop after the 302 deleted it
+      "PHPSESSID=sess-abc",
+    ]);
   });
 
   describe("origin scoping", () => {

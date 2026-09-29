@@ -369,7 +369,10 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const jarSessionId = input.jarSessionId;
   const jarTtl = input.cookieJarTtlSeconds;
   const literalAllowlist = resolved.allowAllUris ? null : (resolved.authorizedUris ?? []);
-  const cookies =
+  // guardedFetch composes every hop's Cookie from this snapshot and captures every hop's
+  // Set-Cookie into it; `captured` is replayed over a fresh read at the end.
+  const captured: Array<[string, string[]]> = [];
+  const scope =
     jarStore && jarSessionId
       ? cookieScope(
           await jarStore.get(jarSessionId, connectionId),
@@ -377,11 +380,13 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
           literalAllowlist,
         )
       : null;
-  const applyJarCookies = (): void => {
-    const cookie = cookies?.header(target, headers.get("cookie"));
-    if (cookie) headers.set("cookie", cookie);
+  const cookies = scope && {
+    header: (url: string, base: string | null) => scope.header(url, base),
+    capture: (url: string, setCookies: string[]) => {
+      scope.capture(url, setCookies);
+      if (setCookies.length) captured.push([url, setCookies]);
+    },
   };
-  applyJarCookies();
 
   const fetchInit: RequestInit & { duplex?: string } = {
     method: input.method,
@@ -393,9 +398,6 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   if (isStreamBody) {
     fetchInit.duplex = "half";
   }
-
-  // Last hop `validateHop` passed (`Response.url` may be the pinned IP).
-  let servedFrom = target;
 
   // Single outbound transport: the SSRF-guarded platform egress primitive.
   // Per-hop DNS re-validation + manual redirects + connection pinned to the
@@ -419,11 +421,9 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     try {
       return await egressGuardedFetch(target, fetchArgs, {
         ...(input.fetch ? { fetchImpl: input.fetch } : {}),
-        validateHop: (url) => {
-          assertHopAuthorized(url.toString());
-          servedFrom = url.toString();
-        },
+        validateHop: (url) => assertHopAuthorized(url.toString()),
         sensitiveHeaders: [...sensitiveHeaderNames],
+        ...(cookies ? { cookies } : {}),
       });
     } catch (err) {
       if (err instanceof ProxyAuthorizationError) {
@@ -480,7 +480,6 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
           sensitiveHeaderNames.add(refreshed.credentialHeaderName);
         }
         credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, refreshed);
-        applyJarCookies();
         res = await performFetch({
           ...fetchInit,
           headers,
@@ -501,10 +500,10 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   }
 
   // Re-read first: narrows (not closes) a concurrent lost update to one get/set round trip.
-  const setCookies = res.headers.getSetCookie();
-  if (jarStore && jarSessionId && jarTtl && jarTtl > 0 && setCookies.length > 0) {
+  if (jarStore && jarSessionId && jarTtl && jarTtl > 0 && captured.length > 0) {
     const latest = await jarStore.get(jarSessionId, connectionId);
-    cookieScope(latest, input.integrationId, literalAllowlist).capture(servedFrom, setCookies);
+    const fresh = cookieScope(latest, input.integrationId, literalAllowlist);
+    for (const [url, setCookies] of captured) fresh.capture(url, setCookies);
     await jarStore.set(jarSessionId, connectionId, latest, jarTtl);
   }
 
