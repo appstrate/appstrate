@@ -44,8 +44,9 @@ export interface RunLaunch {
  * input typed in the run modal above all (#1539). The picks answer the
  * integrations the 409 named, so they win over a per-run pick the launch
  * already carried for the same one; picks for other integrations are kept —
- * except one refused as `override_outranked`, which the admin's lock forbids
- * re-picking, so replaying it would only be refused again.
+ * except one refused as `override_outranked`: the recovery picker renders the
+ * admin's lock read-only, so that pick can only be dropped (replaying it would
+ * only be refused again).
  */
 export function retryLaunch(
   launch: RunLaunch,

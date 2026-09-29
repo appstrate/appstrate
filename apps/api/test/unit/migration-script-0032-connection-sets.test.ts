@@ -24,6 +24,8 @@ const REPLAY_THROUGH = "0076_space_packages_chat_enforced";
 
 const ORG = "e0000000-0000-4000-8000-00000000d032";
 const SPACE = "spc_d0320000-0000-4000-8000-000000000001";
+/** Holds the only admin pin and enforced default of `GOV_OTHER`: they govern there, not in `SPACE`. */
+const OTHER_SPACE = "spc_d0320000-0000-4000-8000-000000000002";
 const ALICE = "usr_0032_alice";
 const BOB = "usr_0032_bob";
 /** Left the organization before the deploy: a `user` row, no `org_members` row. */
@@ -53,6 +55,7 @@ const LABELS = "@acme0032/labels";
 const GOV_PIN = "@acme0032/gov-pin";
 const GOV_ENF = "@acme0032/gov-enforced";
 const GOV_SOFT = "@acme0032/gov-soft";
+const GOV_OTHER = "@acme0032/gov-other-space";
 const AGENT = "@acme0032/agent";
 const SHADOW = "@acme0032/inline-shadow";
 
@@ -124,9 +127,15 @@ beforeAll(async () => {
     integ: string,
     owner: string,
     label: string | null,
-    opts: { shared?: boolean; healthy?: boolean; at?: string; authKey?: string } = {},
+    opts: {
+      shared?: boolean;
+      healthy?: boolean;
+      at?: string;
+      authKey?: string;
+      space?: string;
+    } = {},
   ) =>
-    `('${conn(n)}', '${integ}', '${opts.authKey ?? "primary"}', 'acct-${n}', '${SPACE}', '${owner}', 'x',
+    `('${conn(n)}', '${integ}', '${opts.authKey ?? "primary"}', 'acct-${n}', '${opts.space ?? SPACE}', '${owner}', 'x',
       ${sqlText(label)}, ${opts.shared ?? false}, ${!(opts.healthy ?? false)}, '${opts.at ?? "2026-01-01"}')`;
   /** A shared, healthy connection of Bob's: the kind the old fallback handed Alice. */
   const bobShared = (n: number, integ: string, authKey?: string) =>
@@ -169,7 +178,8 @@ beforeAll(async () => {
 
   await pg.exec(`
     INSERT INTO organizations (id, name, slug) VALUES ('${ORG}', 'Zero32', 'zero-32');
-    INSERT INTO spaces (id, org_id, name, is_default) VALUES ('${SPACE}', '${ORG}', 'Default', true);
+    INSERT INTO spaces (id, org_id, name, is_default) VALUES
+      ('${SPACE}', '${ORG}', 'Default', true), ('${OTHER_SPACE}', '${ORG}', 'Other', false);
     INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES
       ('${ALICE}', 'Alice', 'a-0032@example.com', true, now(), now()),
       ('${BOB}', 'Bob', 'b-0032@example.com', true, now(), now()),
@@ -184,7 +194,8 @@ beforeAll(async () => {
       ('${DEFAULTED}', 'integration'), ('${UNREACH}', 'integration'), ('${EU}', 'integration'),
       ('${INLINE}', 'integration'), ('${AUTH_PIN}', 'integration'),
       ('${AUTH_LATEST}', 'integration'), ('${OVERRIDDEN}', 'integration'), ('${LABELS}', 'integration'),
-      ('${GOV_PIN}', 'integration'), ('${GOV_ENF}', 'integration'), ('${GOV_SOFT}', 'integration');
+      ('${GOV_PIN}', 'integration'), ('${GOV_ENF}', 'integration'), ('${GOV_SOFT}', 'integration'),
+      ('${GOV_OTHER}', 'integration');
     INSERT INTO packages (id, type, draft_manifest) VALUES
       ('${AUTH_GONE}', 'integration', '{"auths": {"oauth": {}}}'),
       ('${AUTH_KEPT}', 'integration', '{"auths": {"primary": {}}}'),
@@ -245,6 +256,8 @@ beforeAll(async () => {
       ${bobShared(74, GOV_ENF)},
       ${bobShared(75, GOV_SOFT)},
       ${bobShared(76, GOV_SOFT)},
+      ${bobShared(77, GOV_OTHER)},
+      ${connection(78, GOV_OTHER, BOB, "c78", { shared: true, healthy: true, space: OTHER_SPACE })},
       ${label(50, "Work\nMail")},
       ${label(51, "Ops\u0007Bot\u007F\u009B")},
       ${label(52, "‮gnp.exe")},
@@ -282,19 +295,27 @@ beforeAll(async () => {
        '{"${GOV_ENF}": "${conn(74)}"}'),
       -- a soft default, an admin pin on ANOTHER agent, Alice's member pin: none governs
       ('sch_0032_soft', '${AGENT}', '${ALICE}', '${ORG}', '${SPACE}', '0 * * * *', true,
-       '{"${GOV_SOFT}": ["${conn(76)}"], "${MINE}": ["${conn(35)}"]}');
+       '{"${GOV_SOFT}": ["${conn(76)}"], "${MINE}": ["${conn(35)}"]}'),
+      -- disabled, and outranked all the same: it would be refused when re-enabled
+      ('sch_0032_off_out', '${AGENT}', '${ALICE}', '${ORG}', '${SPACE}', '0 * * * *', false,
+       '{"${GOV_ENF}": ["${conn(74)}"]}'),
+      -- the admin pin and the enforced default of GOV_OTHER live in ANOTHER space
+      ('sch_0032_other_space', '${AGENT}', '${ALICE}', '${ORG}', '${SPACE}', '0 * * * *', true,
+       '{"${GOV_OTHER}": ["${conn(77)}"]}');
     INSERT INTO integration_org_defaults (space_id, integration_package_id, connection_id, enforce)
       VALUES ('${SPACE}', '${DRIVE}', '${conn(4)}', false),
              ('${SPACE}', '${DEFAULTED}', '${conn(37)}', false),
              ('${SPACE}', '${UNREACH}', '${conn(39)}', false),
              ('${SPACE}', '${GOV_PIN}', '${conn(71)}', true),
              ('${SPACE}', '${GOV_ENF}', '${conn(73)}', true),
-             ('${SPACE}', '${GOV_SOFT}', '${conn(75)}', false);
+             ('${SPACE}', '${GOV_SOFT}', '${conn(75)}', false),
+             ('${OTHER_SPACE}', '${GOV_OTHER}', '${conn(78)}', true);
     INSERT INTO integration_pins (space_id, package_id, integration_package_id, user_id, connection_id, created_by)
       VALUES ('${SPACE}', '${AGENT}', '${ADMIN}', NULL, '${conn(34)}', '${BOB}'),
              ('${SPACE}', '${AGENT}', '${MINE}', '${ALICE}', '${conn(36)}', '${ALICE}'),
              ('${SPACE}', '${AGENT}', '${GOV_PIN}', NULL, '${conn(70)}', '${BOB}'),
-             ('${SPACE}', '${SHADOW}', '${GOV_SOFT}', NULL, '${conn(75)}', '${BOB}');
+             ('${SPACE}', '${SHADOW}', '${GOV_SOFT}', NULL, '${conn(75)}', '${BOB}'),
+             ('${OTHER_SPACE}', '${AGENT}', '${GOV_OTHER}', NULL, '${conn(78)}', '${BOB}');
     INSERT INTO runs
       (id, package_id, user_id, end_user_id, space_id, org_id, status, started_at, schedule_id,
        resolved_connections, connection_overrides)
@@ -338,8 +359,8 @@ afterAll(async () => {
 describe("scripts/migration/0032 — connection sets", () => {
   it("prints the size of every section, and 0 on every 'after' line", () => {
     expect(firstRunCounts).toEqual({
-      schedules_outranked_before: 2,
-      schedules_outranked_emptied_before: 1,
+      schedules_outranked_before: 3,
+      schedules_outranked_emptied_before: 2,
       runs_overrides_before: 1,
       runs_resolved_before: 8,
       schedules_overrides_before: 2,
@@ -426,12 +447,17 @@ describe("scripts/migration/0032 — connection sets", () => {
   it("drops a schedule override key the admin pin or the enforced org default outranks — the old cascade ignored it — and keeps a subset and what no governing layer outranks", async () => {
     const { rows } = await pg.query<{ id: string; overrides: unknown; enabled: boolean }>(
       `SELECT id, connection_overrides AS overrides, enabled FROM package_schedules
-       WHERE id IN ('sch_0032_pin_out', 'sch_0032_pin_subset', 'sch_0032_enforced', 'sch_0032_soft')
+       WHERE id IN ('sch_0032_pin_out', 'sch_0032_pin_subset', 'sch_0032_enforced', 'sch_0032_soft',
+                    'sch_0032_off_out', 'sch_0032_other_space')
        ORDER BY id`,
     );
     expect(rows).toEqual([
       // the only key dropped: NULL, the service's "no overrides"; still enabled, governance binds
       { id: "sch_0032_enforced", overrides: null, enabled: true },
+      // a disabled schedule is dropped the same, and stays disabled
+      { id: "sch_0032_off_out", overrides: null, enabled: false },
+      // another space's admin pin and enforced default govern that space only: kept verbatim
+      { id: "sch_0032_other_space", overrides: { [GOV_OTHER]: [conn(77)] }, enabled: true },
       // the outranked key dropped, the soft default's kept
       { id: "sch_0032_pin_out", overrides: { [GOV_SOFT]: [conn(76)] }, enabled: true },
       // the admin pin governs, not the enforced default below it

@@ -19,6 +19,7 @@ import { useOrg } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
 import { hasFullOrgAccess } from "../../lib/org-role";
+import type { ViewAsOrgRole } from "@appstrate/core/permissions";
 import { OrgInvitationForm } from "../../components/org-invitation-form";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -30,11 +31,15 @@ import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstr
 type OrgMember = components["schemas"]["OrgMember"];
 
 /**
- * Implicit space reach per role — full org access, then a member's, then a guest's none: a drop
- * ends access, and the server then unshares connections.
+ * Implicit space reach of every role without full org access — a member's, then a guest's none.
+ * Exhaustive, so a new role must be placed here rather than read as one that revokes access.
  */
+const PARTIAL_ROLE_REACH = { member: 1, guest: 0 } satisfies Record<ViewAsOrgRole, number>;
+
+/** Implicit space reach per role: a drop ends access, and the server then unshares connections. */
 function roleReach(role: OrgRole): number {
-  return hasFullOrgAccess(role) ? 2 : role === "member" ? 1 : 0;
+  // `ViewAsOrgRole` is exactly the roles `hasFullOrgAccess` rejects.
+  return hasFullOrgAccess(role) ? 2 : PARTIAL_ROLE_REACH[role as ViewAsOrgRole];
 }
 
 export function OrgSettingsMembersPage() {

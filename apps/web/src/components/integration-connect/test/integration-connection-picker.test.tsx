@@ -318,6 +318,19 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(renderPicker(locked, false)).not.toContain(clear);
   });
 
+  it("shows an override stored within the lock as what binds, with nothing to clear", () => {
+    // The server accepts a subset of the locked set: it narrows the lock, it is not outranked.
+    const html = renderPicker(
+      resolution({ source: "admin_pin", admin_pinned_connection_ids: [WEB, DB] }),
+      false,
+      { mode: "override", value: [DB], onChange: () => {} },
+    );
+    expect(html).toContain(`member-pick-locked-${INTEGRATION}`);
+    expect(html).toContain(">db<");
+    expect(html).not.toContain("web · db");
+    expect(html).not.toContain(`member-pick-clear-${INTEGRATION}`);
+  });
+
   it("a soft org default leaves the dropdown open", () => {
     const html = renderPicker(
       resolution({ source: "org_default", org_default_connection_ids: [WEB] }),

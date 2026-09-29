@@ -125,7 +125,8 @@ const proxyParameters = [
       "ones included — admin pins, enforced defaults, launch overrides, member pins): one bound " +
       "connection is used; several require `X-Connection-Id` naming one of them " +
       "(`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names " +
-      "another); none is a `404`; a bound one that needs reconnecting is a " +
+      "another); none is a `404`, and so is a bound one no longer reachable (deleted or " +
+      "unshared); a bound one that needs reconnecting is a " +
       "`409 needs_reconnection`. Without it no agent is in play, so the admin and member pins " +
       "(set per agent) cannot apply — only the space-level rules described under " +
       "`X-Connection-Id` do.",

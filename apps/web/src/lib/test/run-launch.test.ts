@@ -5,7 +5,8 @@
  *
  * The retry of a launch refused with `409 missing_integration_connection` only
  * touches connection picks (adds the modal's, drops an outranked one); dropping
- * anything else changes the run — or gets it refused, as the input did (#1539). "Lancer avec options…" sends an option
+ * anything else changes the run — or gets it refused, as the input did (#1539).
+ * A second 409 retries the first retry, not the original launch. "Lancer avec options…" sends an option
  * only when set, so an untouched modal launches what plain "Lancer" does.
  */
 
@@ -63,6 +64,21 @@ describe("retryLaunch", () => {
         {},
         [{ field: "integrations.@acme/crm", code: "override_outranked", message: "outranked" }],
       ).connectionOverrides,
+    ).toEqual({ "@acme/mail": ["conn_mail"] });
+  });
+
+  it("a second 409 builds on the first retry: a pick dropped as outranked stays dropped", () => {
+    // The launcher keeps each retried launch, so the next retry starts from it.
+    const first = retryLaunch(
+      { connectionOverrides: { "@acme/crm": ["conn_outside"], "@acme/mail": ["conn_mail"] } },
+      {},
+      [{ field: "integrations.@acme/crm", code: "override_outranked", message: "outranked" }],
+    );
+    // The second 409 names another integration, with nothing to pick: crm must not come back.
+    expect(
+      retryLaunch(first, {}, [
+        { field: "integrations.@acme/mail", code: "not_connected", message: "connect" },
+      ]).connectionOverrides,
     ).toEqual({ "@acme/mail": ["conn_mail"] });
   });
 });

@@ -110,7 +110,9 @@ function useRunAgent(packageId: string) {
  * The one way the SPA launches a run. A `409 missing_integration_connection`
  * is a question, not a failure: the launcher keeps the refused launch and the
  * server's errors, `RunLaunchRecovery` renders them as the recovery modal, and
- * `retry` replays that launch with the user's picks.
+ * `retry` replays that launch with the user's picks. The retried launch becomes
+ * the kept one, so a second 409 builds on it: a pick one 409 dropped as
+ * outranked stays dropped.
  */
 export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
@@ -132,7 +134,9 @@ export function useRunLauncher(packageId: string) {
     },
     retry: (picks: Record<string, string[]>) => {
       const { launch, onSuccess } = lastLaunch.current;
-      runAgent.mutate(retryLaunch(launch, picks, missingErrors ?? []), {
+      const next = retryLaunch(launch, picks, missingErrors ?? []);
+      lastLaunch.current = { launch: next, onSuccess };
+      runAgent.mutate(next, {
         onSuccess: () => {
           setMissingErrors(null);
           onSuccess?.();

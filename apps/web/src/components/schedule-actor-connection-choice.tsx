@@ -137,10 +137,11 @@ function StoredChoice({
   );
 }
 
-function ClearChoiceButton({ onClick }: { onClick: () => void }) {
+/** Drops a stored connection pick — here and in the picker, under a lock that outranks it. */
+export function ClearChoiceButton({ onClick, testId }: { onClick: () => void; testId?: string }) {
   const { t } = useTranslation(["agents"]);
   return (
-    <Button type="button" variant="outline" size="sm" onClick={onClick}>
+    <Button type="button" variant="outline" size="sm" onClick={onClick} data-testid={testId}>
       {t("schedule.connectionOverrides.clearChoice")}
     </Button>
   );

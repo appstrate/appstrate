@@ -504,6 +504,26 @@ COMMIT;
 --     (SELECT count(*) FROM runs WHERE resolved_connections <> '{}'::jsonb)             AS runs_resolved_total,
 --     (SELECT count(*) FROM package_schedules WHERE connection_overrides <> '{}'::jsonb) AS schedules_overrides_total;
 --
+-- After `0077` only (it reads `connection_ids`): the schedule override keys still outranked —
+-- naming a connection outside the admin pin's set, else the enforced default's. Must list nothing.
+--
+--   SELECT s.id AS schedule_id, s.space_id, s.package_id, e.k AS integration_id
+--   FROM package_schedules s
+--   CROSS JOIN LATERAL jsonb_each(s.connection_overrides) AS e(k, v)
+--   CROSS JOIN LATERAL (
+--     SELECT coalesce(
+--       (SELECT p.connection_ids FROM integration_pins p
+--         WHERE p.space_id = s.space_id AND p.package_id = s.package_id
+--           AND p.integration_package_id = e.k AND p.user_id IS NULL),
+--       (SELECT d.connection_ids FROM integration_org_defaults d
+--         WHERE d.space_id = s.space_id AND d.integration_package_id = e.k
+--           AND d.enforce = true)) AS ids
+--   ) AS governing
+--   WHERE governing.ids IS NOT NULL
+--     AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(e.v) AS o(id)
+--                  WHERE o.id <> ALL (governing.ids::text[]))
+--   ORDER BY s.space_id, s.id;
+--
 -- ═══ Standalone listing — end-user runs this file does NOT cover ═══
 --
 -- Read-only, before the window: the (space, agent, integration) triples whose end-user runs of

@@ -59,6 +59,7 @@ import { isVersioned } from "../../lib/version-selector";
 import { usePermissions } from "../../hooks/use-permissions";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { useCanReach } from "../../hooks/use-can-reach";
+import { ClearChoiceButton } from "../schedule-actor-connection-choice";
 
 /**
  * How the picker persists the actor's pick:
@@ -70,8 +71,9 @@ import { useCanReach } from "../../hooks/use-can-reach";
  *
  * Locks (admin pin, enforced org default) render read-only in both modes: a
  * member pin loses to them, and an override naming a connection outside the
- * locked set is refused (`override_outranked`). An override already stored
- * under a lock can only be cleared.
+ * locked set is refused (`override_outranked`). A stored override within the
+ * locked set narrows it and is shown as what binds; one reaching outside it is
+ * offered its only fix, being cleared.
  */
 type ConnectionPickerPersistence =
   | { mode: "pin" }
@@ -235,11 +237,15 @@ export function IntegrationConnectionPicker({
         )}`
       : ids.map((id) => byId(id)!.label).join(" · ");
 
-  // An admin force (pin or enforced org default) renders read-only: a member pin loses to it,
-  // and an override outside its set is refused (`override_outranked`) — so one stored before
-  // the lock is offered its only fix, being cleared.
+  // An admin force (pin or enforced org default) renders read-only: a member pin loses to it.
+  // A stored override within its set narrows it, so that subset is what binds; one reaching
+  // outside it is refused (`override_outranked`) and offered its only fix, being cleared.
   if (lockedConnectionIds.length > 0) {
-    const lockedUnavailableIds = unavailableConnectionIds(lockedConnectionIds, candidateIds);
+    const storedOverride = overrideMode ? persistence.value : [];
+    const outranked = storedOverride.some((id) => !lockedConnectionIds.includes(id));
+    const bindingIds =
+      storedOverride.length > 0 && !outranked ? storedOverride : lockedConnectionIds;
+    const lockedUnavailableIds = unavailableConnectionIds(bindingIds, candidateIds);
     return (
       <div data-testid={`member-picker-${integrationId}`}>
         <Button
@@ -250,24 +256,16 @@ export function IntegrationConnectionPicker({
           data-testid={`member-pick-locked-${integrationId}`}
         >
           {runBlocking ? <AlertTriangle className="size-3" /> : <Lock className="size-3" />}
-          <span className="truncate">{setLabel(lockedConnectionIds, lockedUnavailableIds)}</span>
+          <span className="truncate">{setLabel(bindingIds, lockedUnavailableIds)}</span>
           <Badge variant="secondary" className="ml-1 text-[0.6rem]">
-            {t("detail.integrationMemberPicker.adminLocked", {
-              count: lockedConnectionIds.length,
-            })}
+            {t("detail.integrationMemberPicker.adminLocked", { count: bindingIds.length })}
           </Badge>
         </Button>
-        {overrideMode && persistence.value.length > 0 && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="ml-1 h-7 text-xs"
+        {overrideMode && outranked && (
+          <ClearChoiceButton
             onClick={() => persistence.onChange([])}
-            data-testid={`member-pick-clear-${integrationId}`}
-          >
-            {t("schedule.connectionOverrides.clearChoice")}
-          </Button>
+            testId={`member-pick-clear-${integrationId}`}
+          />
         )}
         {lockedUnavailableIds.length > 0 && (
           <PickerWarning testId={`member-pick-unavailable-warning-${integrationId}`}>
