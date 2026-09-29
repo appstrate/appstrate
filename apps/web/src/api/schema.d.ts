@@ -12611,7 +12611,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of this integration in the space holds with 409 `connection_label_taken`. */
+                    /** @description A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, one starting or ending with whitespace, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of this integration in the space holds with 409 `connection_label_taken`. */
                     label?: string;
                     shared_with_org?: boolean;
                 };
