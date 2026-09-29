@@ -290,6 +290,9 @@ export function createCredentialProxyRouter() {
           result.headers,
           STREAM_CONTROL_HEADERS,
         );
+        // One URL serves every target and connection (they ride in headers), so an upstream
+        // cache policy must not let a client replay one connection's response for another.
+        responseHeaders.set("Cache-Control", "no-store");
 
         // Streaming upload on a 401: credentials may be stale but the body
         // cannot be replayed. Signal the client to refresh and retry itself.

@@ -436,6 +436,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The credential proxy answers `Cache-Control: no-store`.** It relayed the
+  upstream cache policy (GitHub sends `private, max-age=60`) although one URL
+  serves every target and connection, so an HTTP client could replay one
+  connection's response for another.
+- **Deleting a connection from a browser session is audited.** `/api/me/*`
+  carries no org context for a cookie session, so the event was dropped; it is
+  now recorded in the connection's org with the schedules the delete disabled.
 - **A member who loses access to a space stops sharing their connections
   there.** Leaving or being removed from the organization, losing a space
   membership, a demotion or a space that closes left the member's

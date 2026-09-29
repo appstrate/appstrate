@@ -252,6 +252,31 @@ describe("POST /api/credential-proxy/proxy — session-principal rebind guard", 
     expect(upstreamCalls).toBe(1);
   });
 
+  it("forbids caching a relayed response whatever the upstream allows", async () => {
+    const apiKey = await mintProxyKey(ctx);
+    mockUpstream(
+      async () =>
+        new Response("{}", {
+          status: 200,
+          headers: { "content-type": "application/json", "cache-control": "private, max-age=60" },
+        }),
+    );
+
+    const res = await app.request("/api/credential-proxy/proxy", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+        "X-Integration-Id": INTEGRATION_ID,
+        "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "X-Session-Id": uuidV4(),
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
   it("allows the same principal to reuse its own session id", async () => {
     const apiKey = await mintProxyKey(ctx);
     const sessionId = uuidV4();
