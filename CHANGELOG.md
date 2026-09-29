@@ -10,17 +10,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Two scripts run with the platform stopped, before the drizzle batch, in
   this order:**
-  1. `pg_dump` the platform database — `0032` has no rollback but restoring
-     that dump;
-  2. stop the platform;
+  1. stop the platform;
+  2. `pg_dump` the platform database — `0032` has no rollback but restoring
+     that dump, so it follows the stop: a write landing between a dump and the
+     stop would be lost on restore;
   3. from the release checkout, with the platform env loaded:
      `bun scripts/migration/0033-unshare-space-access-loss.ts --apply`
      (without `--apply` it is a dry run that rolls back);
   4. `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0032-connection-sets.sql`
      — every "after" count it prints must read 0;
   5. deploy: the new image applies drizzle **0077** at boot; it refuses a
-     scalar override or snapshot left by a skipped `0032` (the batch rolls
-     back whole), but cannot detect a skipped freeze or normalization;
+     scalar override or snapshot, or a label held twice, left by a skipped
+     `0032` (the batch rolls back whole, naming steps 3 and 4), but cannot
+     detect a skipped freeze or normalization;
   6. reopen.
 
   `0033` unshares every `shared_with_org` connection whose owner no longer
@@ -40,7 +42,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `psql -v ON_ERROR_STOP=1`, rolls back whole. In one transaction it:
   1. rewrites `runs.connection_overrides`, `runs.resolved_connections` and
      `package_schedules.connection_overrides` from one pick per integration to
-     a set — a shape only the new readers accept;
+     a set — a shape only the new readers accept; a value that is neither a
+     set nor the scalar it wraps (a string override, an object snapshot)
+     raises before any write;
   2. freezes, as member pins, the shared connections the old fallback bound
      implicitly (see `### Changed`): one pin per (space, agent, integration,
      user), taken from the most recent of the runs of the last 30 days and of
@@ -50,16 +54,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      member pin or reachable org default decides, the integration's current
      manifest still declares the connection's auth, and neither the agent's
      draft nor its `latest` manifest pins (`auth_key`) another auth;
-  3. normalizes every label the way a new one is minted (`toMintedLabel`): a
-     line break or tab becomes a space, any other control, invisible or
-     bidirectional-override character is dropped, whitespace runs collapse to
-     one space, both ends are trimmed and the result is cut to 80 characters.
-     A label left empty becomes `NULL`, so 0077 names it `Connexion N`. Such
-     characters used to reach the agent's model verbatim;
+  3. normalizes every label only as far as the label rule requires: a line
+     break or tab becomes a space, any other control, invisible or
+     bidirectional-override character is dropped, both ends are trimmed and
+     the result is cut to 80 UTF-16 code units (an emoji counts 2). A label
+     the API accepts is kept verbatim, inner whitespace included, so two
+     distinct labels are never merged. A label left empty becomes `NULL`, so
+     0077 names it `Connexion N`. Such characters used to reach the agent's
+     model verbatim;
   4. renames every row but the oldest of a group sharing a (normalized) label
      in its (space, integration) to `<base> (n)` — n the smallest numbers from
      2 no row holds, `<base>` the label cut so the whole stays within 80
-     characters.
+     UTF-16 code units.
 
   It writes the pins in the pre-0077 shape, and its label dedupe is the
   precondition of 0077's unique index, which is why it precedes the batch. It
@@ -187,8 +193,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     integration, on `POST /api/agents/{scope}/{name}/run`,
     `POST /api/runs/inline` (+ `/inline/validate`), schedule create/update and
     the platform MCP `run_and_wait` tool, and in the run and schedule responses.
-    An empty array, an empty id and a repeated id are `400` at the write, not a
-    shrug at the next fire (`apps/api/src/lib/launch-schemas.ts`).
+    An empty array, an id that is not a uuid and a repeated id are `400` at the
+    write, not a shrug at the next fire (`apps/api/src/lib/launch-schemas.ts`).
   - The run's `connections_used` carries one entry per BOUND connection, so an
     integration bound to several contributes several entries and
     `integration_id` is no longer unique in the list.
@@ -222,7 +228,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     supplies one — sanitised first: line breaks become spaces and the other
     refused characters are dropped — and suffixed ` (2)`, ` (3)`, … when that
     one is taken, the base cut so the whole, suffix included, stays within the
-    80-character label cap. A reconnect never changes a label. Existing
+    label cap of 80 UTF-16 code units. A reconnect never changes a label. Existing
     labels are normalized the same way, then deduplicated, by `0032`
     (`### Operators`).
   - Deleting a connection (`DELETE /api/me/connections/{id}`, or deleting the
@@ -307,6 +313,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   launch-override layer: admin pin → enforced org default → launch override →
   member pin → soft org default → fallback. Precedence is unchanged, and
   `source` still records `run_override` or `schedule_override`.
+- **BREAKING: a launch override an admin pin or an enforced org default
+  outranks is refused, not ignored.** A run's or schedule's
+  `connection_overrides` naming a connection outside the set of the admin pin
+  or enforced org default governing that integration was silently dropped for
+  that set, so the run used an account its caller had not chosen. It is now a
+  `409 missing_integration_connection` item with the new resolver code
+  `override_outranked` — at kickoff, and at the write of an enabled schedule.
+  An override naming a subset of the governing set binds that subset.
 - **BREAKING: a soft org default binds whole or fails, like every explicit
   layer.** A soft default naming a connection the actor cannot reach (unshared,
   its owner gone from the space) was skipped for the fallback, with a server
@@ -376,6 +390,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `PATCH /api/schedules/{id}` of any field, enabling and disabling included,
     and `DELETE /api/schedules/{id}` — decided before the body is read.
 
+  Either must come from the owner's or admin's own user session: an API key or
+  an OAuth / MCP client gets the same `403`, whoever it belongs to.
+
   A schedule running as the caller or as an end-user of the space still needs
   only `schedules:write` (`schedules:delete` to delete), and the member a
   schedule runs as still writes it. The schedule form's actor picker lists
@@ -406,7 +423,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   refresh included) and is bound to that run's snapshot: it reaches only the
   connections the run bound, one is used, several need an `X-Connection-Id`
   inside the set (`409 must_choose_connection` without,
-  `400 connection_not_in_run` for another id), none is a `404`.
+  `400 connection_not_in_run` for another id), none is a `404`; the bound
+  connection it uses is `409 needs_reconnection` when it needs reconnecting,
+  as without a run.
   Without `X-Run-Id` no agent is in play, so admin and member pins — set per
   agent — and an agent's `auth_key` apply to runs only, and the space-level
   rules pick, in the
@@ -426,7 +445,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   to another account; the name still passes the reach checks any named
   connection does (the run's set, an enforced default). `@appstrate/afps-runtime` drops an `api_call`'s own
   `x-run-id` header (any casing), like the other transport headers, so an
-  agent-supplied copy cannot collide with the platform's.
+  agent-supplied copy cannot collide with the platform's. The proxy's cookie
+  jar is keyed per connection, not per integration, so a cookie one account's
+  upstream set is never sent on a call through another.
 - **BREAKING: `appstrate run` exposes `api_call` only for the tools the agent
   selected.** The remote runtime (`@appstrate/runner-pi`'s
   `buildApiCallExtensionFactory`) offered `{ns}__api_call` for every
@@ -484,8 +505,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `globalThis`, keyed by data directory, and a reload reuses it.
 
 - **A connection an admin pin or the space default names says so before the
-  refusal.** The connection list carries `locked_by` (`admin_pin` |
-  `org_default` | null), from the same check that refuses unsharing or deleting
+  refusal.** The connection list — and each `GET /api/me/connections` row —
+  carries `locked_by` (`admin_pin` | `org_default` | null), from the same check that refuses unsharing or deleting
   it with `409 connection_pinned`; the integration page disables both with the
   reason instead of letting the click fail. The connection refusals are
   translated, in toasts and in the run-launch recovery modal, and the connection
