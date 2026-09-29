@@ -87,9 +87,10 @@ export type {
 
 /**
  * Invalidate every cached integrations read (list, detail, connections,
- * pins, org default, agent resolutions, OAuth clients). Typed keys are
- * `[method, "/api/integrations…", init]` — a key-prefix invalidation can't
- * span sibling path strings, so match on the path element instead.
+ * pins, org default, agent resolutions, OAuth clients) and the caller's
+ * cross-org connection list, whose `locked_by` moves with pins and defaults.
+ * Typed keys are `[method, "/api/integrations…", init]` — a key-prefix
+ * invalidation can't span sibling path strings, so match on the path element.
  */
 export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
   return qc.invalidateQueries({
@@ -103,6 +104,7 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
       if (query.queryKey[0] === "packages" && path === "integrations") return true;
       return (
         path.startsWith("/api/integrations") ||
+        path === "/api/me/connections" ||
         // The per-agent connection-readiness query lives under /api/agents but
         // is driven entirely by connection state, so refresh it here too.
         path === "/api/agents/{scope}/{name}/connection-readiness"
@@ -531,6 +533,7 @@ export function useUpsertIntegrationPin() {
       // Admin pins top the resolver cascade: every readiness verdict moves with them.
       void invalidateIntegrationQueries(qc);
     },
+    onError: onMutationError,
   });
 }
 
@@ -549,6 +552,7 @@ export function useDeleteIntegrationPin() {
       toast.success(t("integration.admin.pin.deleted"));
       void invalidateIntegrationQueries(qc);
     },
+    onError: onMutationError,
   });
 }
 
@@ -591,6 +595,7 @@ export function useUpsertIntegrationOrgDefault() {
       // invalidate every integrations read, not just the default itself.
       void invalidateIntegrationQueries(qc);
     },
+    onError: onMutationError,
   });
 }
 
@@ -607,6 +612,7 @@ export function useDeleteIntegrationOrgDefault() {
       toast.success(t("integration.admin.orgDefault.deleted"));
       void invalidateIntegrationQueries(qc);
     },
+    onError: onMutationError,
   });
 }
 

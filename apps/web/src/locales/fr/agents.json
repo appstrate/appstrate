@@ -490,8 +490,6 @@
   "schedule.connectionOverrides.unavailable": "La connexion choisie n'est plus accessible à cette identité : retirez ce choix puis enregistrez.",
   "schedule.connectionOverrides.otherActor": "Cette planification s'exécute sous une autre identité : ses connexions sont résolues pour elle, pas pour vous. Un enregistrement qui désigne une connexion que cette identité n'a pas partagée est refusé, de même que, tant que la planification est active, un enregistrement qui laisserait un choix de connexion ouvert ; le refus s'affiche ici.",
   "schedule.connectionOverrides.actorMustChoose": "Aucune connexion que vous pouvez choisir : cette identité doit choisir la sienne sur la page de l'agent, ou un administrateur doit en épingler une.",
-  "schedule.connectionOverrides.unserving": "La connexion choisie est sur une méthode d'authentification qui ne sert aucun outil sélectionné : retirez-la du choix puis enregistrez.",
-  "schedule.connectionOverrides.outranked": "La connexion choisie est hors de l'ensemble imposé par un admin pour cette intégration : retirez ce choix puis enregistrez.",
   "schedule.connectionOverrides.refusedTitle": "Enregistrement refusé : un choix de connexion reste à régler.",
   "schedule.connectionOverrides.sharedByOther": "partagée par un autre membre",
   "schedule.connectionOverrides.needsReconnection": "à reconnecter",

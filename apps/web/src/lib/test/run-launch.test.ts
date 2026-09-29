@@ -4,7 +4,7 @@
  * The launches the SPA builds before `useRunAgent` puts them on the wire.
  *
  * The retry of a launch refused with `409 missing_integration_connection` only
- * touches connection picks (adds the modal's, drops an outranked one); dropping
+ * touches connection picks (adds the modal's, drops a refused one); dropping
  * anything else changes the run — or gets it refused, as the input did (#1539).
  * A second 409 retries the first retry, not the original launch. "Lancer avec options…" sends an option
  * only when set, so an untouched modal launches what plain "Lancer" does.
@@ -57,17 +57,30 @@ describe("retryLaunch", () => {
     ).toEqual({ "@acme/crm": ["conn_new"], "@acme/mail": ["conn_mail"] });
   });
 
-  it("drops the launch's own pick refused as outranked: the lock leaves nothing to re-pick", () => {
+  it("drops the launch's own pick for every integration the 409 names: the modal reopens it empty", () => {
     expect(
       retryLaunch(
-        { connectionOverrides: { "@acme/crm": ["conn_outside"], "@acme/mail": ["conn_mail"] } },
+        {
+          connectionOverrides: {
+            "@acme/crm": ["conn_outside"],
+            "@acme/notion": ["conn_gone"],
+            "@acme/mail": ["conn_mail"],
+          },
+        },
         {},
-        [{ field: "integrations.@acme/crm", code: "override_outranked", message: "outranked" }],
+        [
+          { field: "integrations.@acme/crm", code: "override_outranked", message: "outranked" },
+          {
+            field: "integrations.@acme/notion",
+            code: "override_connection_unavailable",
+            message: "unavailable",
+          },
+        ],
       ).connectionOverrides,
     ).toEqual({ "@acme/mail": ["conn_mail"] });
   });
 
-  it("a second 409 builds on the first retry: a pick dropped as outranked stays dropped", () => {
+  it("a second 409 builds on the first retry: a dropped pick stays dropped", () => {
     // The launcher keeps each retried launch, so the next retry starts from it.
     const first = retryLaunch(
       { connectionOverrides: { "@acme/crm": ["conn_outside"], "@acme/mail": ["conn_mail"] } },
@@ -77,7 +90,7 @@ describe("retryLaunch", () => {
     // The second 409 names another integration, with nothing to pick: crm must not come back.
     expect(
       retryLaunch(first, {}, [
-        { field: "integrations.@acme/mail", code: "not_connected", message: "connect" },
+        { field: "integrations.@acme/drive", code: "not_connected", message: "connect" },
       ]).connectionOverrides,
     ).toEqual({ "@acme/mail": ["conn_mail"] });
   });

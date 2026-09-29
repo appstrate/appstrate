@@ -111,8 +111,8 @@ function useRunAgent(packageId: string) {
  * is a question, not a failure: the launcher keeps the refused launch and the
  * server's errors, `RunLaunchRecovery` renders them as the recovery modal, and
  * `retry` replays that launch with the user's picks. The retried launch becomes
- * the kept one, so a second 409 builds on it: a pick one 409 dropped as
- * outranked stays dropped.
+ * the kept one, so a second 409 builds on it: a pick one 409 dropped stays
+ * dropped.
  */
 export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);

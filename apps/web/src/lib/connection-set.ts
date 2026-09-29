@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import type { RunOverridesValue } from "./schedule-payload";
 import { sameSet } from "./strings";
 
 /** At the cap an addition is refused and `ids` comes back unchanged. */
-export function toggleCapped(ids: string[], id: string, max: number): string[] {
+export function toggleCapped(ids: string[], id: string): string[] {
   if (ids.includes(id)) return ids.filter((x) => x !== id);
-  if (ids.length >= max) return ids;
+  if (ids.length >= MAX_CONNECTIONS_PER_INTEGRATION) return ids;
   return [...ids, id];
 }
 
@@ -97,13 +98,12 @@ export function placeCreatedConnection(input: {
   explicitIds: string[];
   checkedIds: string[];
   createdId: string;
-  max: number;
 }): { persist: string[] } | { draft: string[] } {
   if (input.explicitIds.length === 0) return { persist: [input.createdId] };
-  const { checkedIds, createdId, max } = input;
+  const { checkedIds, createdId } = input;
   return {
     draft:
-      checkedIds.includes(createdId) || checkedIds.length >= max
+      checkedIds.includes(createdId) || checkedIds.length >= MAX_CONNECTIONS_PER_INTEGRATION
         ? checkedIds
         : [...checkedIds, createdId],
   };

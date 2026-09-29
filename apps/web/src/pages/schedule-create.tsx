@@ -49,11 +49,7 @@ export function ScheduleCreatePage() {
         mode="create"
         agents={agents?.map((f) => ({ id: f.id, displayName: f.display_name ?? f.id })) ?? []}
         selectedAgentId={effectiveAgentId}
-        onAgentChange={(agentId) => {
-          // A refusal names the previous agent's integrations.
-          createSchedule.reset();
-          setSelectedAgentId(agentId);
-        }}
+        onAgentChange={setSelectedAgentId}
         inputWrapper={deps?.inputWrapper}
         persistedModelId={deps?.persistedModelId ?? null}
         persistedGenerationConfig={deps?.persistedGenerationConfig ?? null}

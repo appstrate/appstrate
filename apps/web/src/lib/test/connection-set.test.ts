@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import {
   toggleCapped,
   keepAvailable,
@@ -20,20 +21,22 @@ import {
 } from "../connection-set";
 
 describe("toggleCapped", () => {
+  // A set one below the cap, and one at it.
+  const belowCap = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION - 1 }, (_, i) => `c${i}`);
+  const full = [...belowCap, "last"];
+
   it("adds an absent id", () => {
-    expect(toggleCapped(["a"], "b", 10)).toEqual(["a", "b"]);
+    expect(toggleCapped(["a"], "b")).toEqual(["a", "b"]);
   });
 
   it("removes a present id — even at the cap", () => {
-    const full = ["a", "b"];
-    expect(toggleCapped(full, "a", 2)).toEqual(["b"]);
+    expect(toggleCapped(full, "last")).toEqual(belowCap);
   });
 
   it("refuses to grow past the cap", () => {
     // Control: the same call one below the cap does add.
-    const full = ["a", "b"];
-    expect(toggleCapped(full, "c", 2)).toBe(full);
-    expect(toggleCapped(["a"], "c", 2)).toEqual(["a", "c"]);
+    expect(toggleCapped(full, "new")).toBe(full);
+    expect(toggleCapped(belowCap, "new")).toEqual([...belowCap, "new"]);
   });
 });
 
@@ -162,7 +165,6 @@ describe("placeCreatedConnection", () => {
         explicitIds: [],
         checkedIds: shown,
         createdId: "conn_new",
-        max: 10,
       }),
     ).toEqual({ persist: ["conn_new"] });
   });
@@ -173,7 +175,6 @@ describe("placeCreatedConnection", () => {
         explicitIds: ["conn_mine"],
         checkedIds: ["conn_mine"],
         createdId: "conn_new",
-        max: 10,
       }),
     ).toEqual({ draft: ["conn_mine", "conn_new"] });
   });
@@ -184,20 +185,15 @@ describe("placeCreatedConnection", () => {
         explicitIds: ["conn_mine"],
         checkedIds: ["conn_other"],
         createdId: "conn_new",
-        max: 10,
       }),
     ).toEqual({ draft: ["conn_other", "conn_new"] });
   });
 
   it("leaves the ticks as they are at the cap", () => {
+    const full = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, (_, i) => `c${i}`);
     expect(
-      placeCreatedConnection({
-        explicitIds: ["conn_mine"],
-        checkedIds: ["conn_mine"],
-        createdId: "conn_new",
-        max: 1,
-      }),
-    ).toEqual({ draft: ["conn_mine"] });
+      placeCreatedConnection({ explicitIds: ["c0"], checkedIds: full, createdId: "conn_new" }),
+    ).toEqual({ draft: full });
   });
 });
 

@@ -16,10 +16,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
+import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
 import { useAuth } from "../../hooks/use-auth";
 import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
-import { hasFullOrgAccess } from "../../lib/org-role";
-import type { ViewAsOrgRole } from "@appstrate/core/permissions";
 import { OrgInvitationForm } from "../../components/org-invitation-form";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -31,16 +30,10 @@ import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstr
 type OrgMember = components["schemas"]["OrgMember"];
 
 /**
- * Implicit space reach of every role without full org access — a member's, then a guest's none.
+ * Implicit space reach per role: a drop ends access, and the server then unshares connections.
  * Exhaustive, so a new role must be placed here rather than read as one that revokes access.
  */
-const PARTIAL_ROLE_REACH = { member: 1, guest: 0 } satisfies Record<ViewAsOrgRole, number>;
-
-/** Implicit space reach per role: a drop ends access, and the server then unshares connections. */
-function roleReach(role: OrgRole): number {
-  // `ViewAsOrgRole` is exactly the roles `hasFullOrgAccess` rejects.
-  return hasFullOrgAccess(role) ? 2 : PARTIAL_ROLE_REACH[role as ViewAsOrgRole];
-}
+const ROLE_REACH = { owner: 2, admin: 2, member: 1, guest: 0 } satisfies Record<OrgRole, number>;
 
 export function OrgSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -77,8 +70,10 @@ export function OrgSettingsMembersPage() {
 
   const members = orgData?.members ?? [];
   const invitations = orgData?.invitations ?? [];
+  // A removal or a role drop that ends space access unshares the member's connections.
   const invalidateOrg = () => {
     void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
+    void invalidateIntegrationQueries(queryClient);
   };
 
   const toastMemberError = (err: unknown) =>
@@ -305,5 +300,5 @@ export function OrgSettingsMembersPage() {
 }
 
 function revokesAccess(from: OrgRole, to: OrgRole): boolean {
-  return roleReach(to) < roleReach(from);
+  return ROLE_REACH[to] < ROLE_REACH[from];
 }

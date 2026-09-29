@@ -490,8 +490,6 @@
   "schedule.connectionOverrides.unavailable": "The chosen connection is no longer reachable for this identity: remove this choice, then save.",
   "schedule.connectionOverrides.otherActor": "This schedule runs as another identity: its connections are resolved for that identity, not for you. A save naming a connection that identity has not shared is refused, as is, while the schedule is enabled, a save that leaves a connection choice open; either refusal is shown here.",
   "schedule.connectionOverrides.actorMustChoose": "No connection you can choose: that identity must pick its own on the agent page, or an admin must pin one.",
-  "schedule.connectionOverrides.unserving": "The chosen connection is on an auth method that serves no selected tool: remove it from the choice, then save.",
-  "schedule.connectionOverrides.outranked": "The chosen connection is outside the set an admin imposes on this integration: remove this choice, then save.",
   "schedule.connectionOverrides.refusedTitle": "Save refused: a connection choice is still to settle.",
   "schedule.connectionOverrides.sharedByOther": "shared by another member",
   "schedule.connectionOverrides.needsReconnection": "needs reconnection",

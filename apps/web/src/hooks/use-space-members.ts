@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useQueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../api/client";
+import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { useInvalidateRoles } from "./use-roles";
 
@@ -35,7 +37,12 @@ export function useUpdateSpaceMember() {
 
 export function useRemoveSpaceMember() {
   const invalidate = useInvalidateRoles();
+  const qc = useQueryClient();
   return $api.useMutation("delete", "/api/spaces/{id}/members/{userId}", {
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      // The removal unshares the member's connections here once they lose access.
+      void invalidateIntegrationQueries(qc);
+    },
   });
 }

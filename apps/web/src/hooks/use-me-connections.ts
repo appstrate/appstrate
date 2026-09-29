@@ -55,13 +55,10 @@ export function useDisconnectIntegrationConnection() {
       await client.DELETE("/api/me/connections/{connectionId}", vars);
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
-      // The caller's own member pins and schedule overrides drop the connection; a
-      // colleague's keep its id and show it unavailable in their picker. Refresh both.
-      void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
+      // The caller's own schedule overrides drop the connection; a colleague's keep
+      // its id and show it unavailable in their picker.
       invalidateSchedules(qc);
-      // The agent page's reuse hints + accessible-connection lists live under
-      // the typed `/api/integrations…` keys — refresh the whole subtree.
+      // The connection list, the agent page's reuse hints and accessible-connection lists.
       void invalidateIntegrationQueries(qc);
     },
     // `connection_pinned` while an admin pin or the space default names it.
@@ -107,7 +104,6 @@ export function useUpdateMeIntegrationConnection() {
       return data;
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
       void invalidateIntegrationQueries(qc);
       toast.success(i18n.t("settings:integration.connection.updated"));
     },

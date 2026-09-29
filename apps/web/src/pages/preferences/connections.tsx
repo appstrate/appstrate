@@ -50,7 +50,8 @@ function LabelEditor({
 }: {
   current: string;
   saving: boolean;
-  onSave: (next: string) => void;
+  /** Calls `onSuccess` once saved: a refused label (e.g. already taken) stays open to fix. */
+  onSave: (next: string, onSuccess: () => void) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const [editing, setEditing] = useState(false);
@@ -75,8 +76,8 @@ function LabelEditor({
 
   const commit = () => {
     const trimmed = value.trim();
-    if (trimmed.length > 0) onSave(trimmed);
-    setEditing(false);
+    if (trimmed.length === 0 || trimmed === current) setEditing(false);
+    else onSave(trimmed, () => setEditing(false));
   };
 
   return (
@@ -123,7 +124,7 @@ function ConnectionRow({
 }: {
   conn: MeConnectionEntry;
   onDisconnect: () => void;
-  onUpdateLabel?: (label: string) => void;
+  onUpdateLabel?: (label: string, onSuccess: () => void) => void;
   onToggleShare?: (next: boolean) => void;
   disconnecting: boolean;
   updating: boolean;
@@ -399,14 +400,17 @@ export function PreferencesConnectionsPage() {
                         connectionId: conn.connection_id,
                       })
                     }
-                    onUpdateLabel={(label) =>
-                      updateIntegration.mutate({
-                        packageId: group.source_id,
-                        connectionId: conn.connection_id,
-                        orgId: conn.org.id,
-                        spaceId: conn.space.id,
-                        label,
-                      })
+                    onUpdateLabel={(label, onSuccess) =>
+                      updateIntegration.mutate(
+                        {
+                          packageId: group.source_id,
+                          connectionId: conn.connection_id,
+                          orgId: conn.org.id,
+                          spaceId: conn.space.id,
+                          label,
+                        },
+                        { onSuccess },
+                      )
                     }
                     onToggleShare={(next) =>
                       updateIntegration.mutate({

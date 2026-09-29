@@ -41,24 +41,17 @@ export interface RunLaunch {
 /**
  * The launch a `409 missing_integration_connection` refused, replayed with the
  * recovery modal's picks. Everything else the user chose rides along — the
- * input typed in the run modal above all (#1539). The picks answer the
- * integrations the 409 named, so they win over a per-run pick the launch
- * already carried for the same one; picks for other integrations are kept —
- * except one refused as `override_outranked`: the recovery picker renders the
- * admin's lock read-only, so that pick can only be dropped (replaying it would
- * only be refused again).
+ * input typed in the run modal above all (#1539). The launch's own pick for an
+ * integration the 409 names is dropped: the modal opens those on no pick, so
+ * replaying it would only be refused again. Picks for other integrations are kept.
  */
 export function retryLaunch(
   launch: RunLaunch,
   picks: Record<string, string[]>,
   errors: readonly MissingIntegrationFieldError[],
 ): RunLaunch {
-  const outranked = new Set(
-    errors.filter((e) => e.code === "override_outranked").map((e) => integrationIdOfField(e.field)),
-  );
-  const kept = Object.entries(launch.connectionOverrides ?? {}).filter(
-    ([id]) => !outranked.has(id),
-  );
+  const refused = new Set(errors.map((e) => integrationIdOfField(e.field)));
+  const kept = Object.entries(launch.connectionOverrides ?? {}).filter(([id]) => !refused.has(id));
   return { ...launch, connectionOverrides: { ...Object.fromEntries(kept), ...picks } };
 }
 

@@ -163,8 +163,8 @@ describe("refusalReasonKey", () => {
   it("tells each refusal apart", () => {
     expect(key("must_choose_connection")).toBe("schedule.connectionOverrides.mustChoose");
     expect(key("override_connection_unavailable")).toBe("schedule.connectionOverrides.unavailable");
-    expect(key("auth_serves_no_selected_tool")).toBe("schedule.connectionOverrides.unserving");
-    expect(key("override_outranked")).toBe("schedule.connectionOverrides.outranked");
+    expect(key("auth_serves_no_selected_tool")).toBe("error.authServesNoSelectedTool");
+    expect(key("override_outranked")).toBe("error.overrideOutranked");
   });
 
   it("an open choice with nothing the caller may name is the actor's (or an admin's) to make", () => {

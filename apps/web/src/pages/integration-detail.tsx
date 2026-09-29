@@ -1093,9 +1093,7 @@ function ConnectionSetChecklist({
               id={id}
               checked={isChecked}
               disabled={!isChecked && value.length >= MAX_CONNECTIONS_PER_INTEGRATION}
-              onCheckedChange={() =>
-                onChange(toggleCapped(value, c.id, MAX_CONNECTIONS_PER_INTEGRATION))
-              }
+              onCheckedChange={() => onChange(toggleCapped(value, c.id))}
               data-testid={id}
             />
             <label htmlFor={id}>{connectionOptionLabel(c)}</label>

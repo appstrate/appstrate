@@ -59,7 +59,7 @@ import { isVersioned } from "../../lib/version-selector";
 import { usePermissions } from "../../hooks/use-permissions";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { useCanReach } from "../../hooks/use-can-reach";
-import { ClearChoiceButton } from "../schedule-actor-connection-choice";
+import { ClearChoiceButton } from "./clear-choice-button";
 
 /**
  * How the picker persists the actor's pick:
@@ -79,23 +79,6 @@ type ConnectionPickerPersistence =
   | { mode: "pin" }
   | { mode: "override"; value: string[]; onChange: (connectionIds: string[]) => void };
 
-/**
- * Per-integration connection picker, rendered as a rich dropdown. Lists every
- * accessible connection (own + shared-with-org) with its name, auth type
- * (OAuth / API key …), and who created it, plus a reset entry and "add a
- * connection" entries (one per declared auth) that launch the connect flow
- * inline.
- *
- * Rows are checkboxes composing a draft set (up to
- * {@link MAX_CONNECTIONS_PER_INTEGRATION}) that "Valider" writes in one go;
- * with a single candidate, clicking its row binds it directly.
- *
- * Single source of truth for "which connections?" UX — shared by the agent
- * page (member pins) and the schedule editor (per-schedule overrides) via the
- * `persistence` prop. The candidate list, scope/lock verdicts and the connect
- * orchestration (hosted connect portal popup) are identical across both; only
- * where the pick lands differs.
- */
 const AMBER_TEXT = "text-amber-600 dark:text-amber-400";
 
 function PickerWarning({ testId, children }: { testId: string; children: ReactNode }) {
@@ -115,6 +98,23 @@ function PickerWarning({ testId, children }: { testId: string; children: ReactNo
 // render — react/no-object-type-as-default-prop).
 const DEFAULT_PERSISTENCE: ConnectionPickerPersistence = { mode: "pin" };
 
+/**
+ * Per-integration connection picker, rendered as a rich dropdown. Lists every
+ * accessible connection (own + shared-with-org) with its name, auth type
+ * (OAuth / API key …), and who created it, plus a reset entry and "add a
+ * connection" entries (one per declared auth) that launch the connect flow
+ * inline.
+ *
+ * Rows are checkboxes composing a draft set (up to
+ * {@link MAX_CONNECTIONS_PER_INTEGRATION}) that "Valider" writes in one go;
+ * with a single candidate, clicking its row binds it directly.
+ *
+ * Single source of truth for "which connections?" UX — shared by the agent
+ * page (member pins) and the schedule editor (per-schedule overrides) via the
+ * `persistence` prop. The candidate list, scope/lock verdicts and the connect
+ * orchestration (hosted connect portal popup) are identical across both; only
+ * where the pick lands differs.
+ */
 export function IntegrationConnectionPicker({
   integrationId,
   agentPackageId,
@@ -329,8 +329,7 @@ export function IntegrationConnectionPicker({
     return true;
   };
 
-  const toggle = (connectionId: string) =>
-    setDraft(toggleCapped(checkedIds, connectionId, MAX_CONNECTIONS_PER_INTEGRATION));
+  const toggle = (connectionId: string) => setDraft(toggleCapped(checkedIds, connectionId));
 
   const triggerConnect = async (authKey: string, opts?: { connectionId?: string }) => {
     if (!auths[authKey]) return;
@@ -379,7 +378,6 @@ export function IntegrationConnectionPicker({
       explicitIds,
       checkedIds,
       createdId: added.id,
-      max: MAX_CONNECTIONS_PER_INTEGRATION,
     });
     if ("persist" in placed) {
       await persist(placed.persist);
@@ -439,8 +437,9 @@ export function IntegrationConnectionPicker({
 
   // No existing connection AND no auth the actor can connect on (every
   // oauth2 auth lacks an admin-registered OAuth client) → point at the
-  // admin setup instead of an empty dropdown that would only 403.
-  if (!hasCandidates && authKeys.length === 0) {
+  // admin setup instead of an empty dropdown that would only 403 — unless a
+  // stored set is left to clear, as above.
+  if (!hasCandidates && authKeys.length === 0 && explicitIds.length === 0) {
     return (
       <div data-testid={`member-picker-${integrationId}`}>
         <span

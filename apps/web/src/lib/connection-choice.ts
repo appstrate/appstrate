@@ -13,9 +13,16 @@ export function integrationIdOfField(field: string): string {
 /** One `errors[]` item of a `409 missing_integration_connection`. */
 export type MissingIntegrationFieldError = components["schemas"]["ResolutionFieldError"];
 
-export type ConnectionChoiceCandidate = NonNullable<
+type ConnectionChoiceCandidate = NonNullable<
   MissingIntegrationFieldError["candidate_connections"]
 >[number];
+
+const SCHEDULE_CHOICE_CODES = [
+  "must_choose_connection",
+  "override_connection_unavailable",
+  "auth_serves_no_selected_tool",
+  "override_outranked",
+] as const;
 
 /**
  * An integration a schedule write was refused over. `candidates` are those the caller may
@@ -23,20 +30,13 @@ export type ConnectionChoiceCandidate = NonNullable<
  */
 export interface ConnectionChoice {
   integrationId: string;
-  code:
-    | "must_choose_connection"
-    | "override_connection_unavailable"
-    | "auth_serves_no_selected_tool"
-    | "override_outranked";
+  code: (typeof SCHEDULE_CHOICE_CODES)[number];
   candidates: ConnectionChoiceCandidate[];
 }
 
-const SCHEDULE_CHOICE_CODES: ReadonlySet<string> = new Set([
-  "must_choose_connection",
-  "override_connection_unavailable",
-  "auth_serves_no_selected_tool",
-  "override_outranked",
-]);
+function isScheduleChoiceCode(code: string): code is ConnectionChoice["code"] {
+  return SCHEDULE_CHOICE_CODES.some((c) => c === code);
+}
 
 /** The `errors[]` of a `409 missing_integration_connection`; `null` for any other error. */
 export function missingConnectionErrors(err: unknown): MissingIntegrationFieldError[] | null {
@@ -46,13 +46,17 @@ export function missingConnectionErrors(err: unknown): MissingIntegrationFieldEr
 }
 
 export function scheduleConnectionChoices(err: unknown): ConnectionChoice[] {
-  return (missingConnectionErrors(err) ?? [])
-    .filter((e) => SCHEDULE_CHOICE_CODES.has(e.code))
-    .map((e) => ({
-      integrationId: integrationIdOfField(e.field),
-      code: e.code as ConnectionChoice["code"],
-      candidates: e.candidate_connections ?? [],
-    }));
+  return (missingConnectionErrors(err) ?? []).flatMap((e) =>
+    isScheduleChoiceCode(e.code)
+      ? [
+          {
+            integrationId: integrationIdOfField(e.field),
+            code: e.code,
+            candidates: e.candidate_connections ?? [],
+          },
+        ]
+      : [],
+  );
 }
 
 /**
@@ -109,9 +113,9 @@ export function refusalReasonKey(choice: ConnectionChoice): string {
     case "override_connection_unavailable":
       return "schedule.connectionOverrides.unavailable";
     case "auth_serves_no_selected_tool":
-      return "schedule.connectionOverrides.unserving";
+      return "error.authServesNoSelectedTool";
     case "override_outranked":
-      return "schedule.connectionOverrides.outranked";
+      return "error.overrideOutranked";
     case "must_choose_connection":
       return choice.candidates.length > 0
         ? "schedule.connectionOverrides.mustChoose"

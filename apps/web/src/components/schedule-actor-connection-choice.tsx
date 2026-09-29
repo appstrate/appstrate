@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { useIntegrationConnections } from "../hooks/use-integrations";
 import type { ConnectionChoice } from "../lib/connection-choice";
 import { toggleCapped } from "../lib/connection-set";
+import { ClearChoiceButton } from "./integration-connect/clear-choice-button";
 
 /**
  * The connection section of a schedule running as someone other than the viewer, whose own
@@ -58,10 +58,7 @@ export function ScheduleActorConnectionChoice({
                     // A dead connection fails the fire it is picked for; unticking stays open.
                     disabled={(c.needs_reconnection || atCap) && !isPicked}
                     onCheckedChange={() =>
-                      onChange(
-                        choice.integrationId,
-                        toggleCapped(picked, c.id, MAX_CONNECTIONS_PER_INTEGRATION),
-                      )
+                      onChange(choice.integrationId, toggleCapped(picked, c.id))
                     }
                   />
                   <Label htmlFor={id} className="font-normal">
@@ -134,15 +131,5 @@ function StoredChoice({
       <p className="text-xs">{connectionIds.map(labelOf).join(" · ")}</p>
       <ClearChoiceButton onClick={onClear} />
     </div>
-  );
-}
-
-/** Drops a stored connection pick — here and in the picker, under a lock that outranks it. */
-export function ClearChoiceButton({ onClick, testId }: { onClick: () => void; testId?: string }) {
-  const { t } = useTranslation(["agents"]);
-  return (
-    <Button type="button" variant="outline" size="sm" onClick={onClick} data-testid={testId}>
-      {t("schedule.connectionOverrides.clearChoice")}
-    </Button>
   );
 }
