@@ -252,10 +252,10 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       const body = (await res.json()) as ProblemDetails;
       const err = body.errors!.find((e) => e.field === `connection_overrides.${INTEGRATION}[0]`);
       expect(err).toBeDefined();
-      // Pinned to the Zod `too_small` code so a `.min(1)` reverted to plain
-      // `z.string()` fails here rather than silently launching: with no
-      // integration declared there is no readiness error to take its place.
-      expect(err!.code).toBe("out_of_range");
+      // Pinned to the uuid check's code so a schema loosened to plain `z.string()`
+      // fails here rather than silently launching: with no integration declared
+      // there is no readiness error to take its place.
+      expect(err!.code).toBe("invalid_format");
 
       // No run row and no shadow package leaked from the rejected request.
       expect(await db.select().from(runs)).toHaveLength(0);
