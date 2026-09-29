@@ -3,7 +3,7 @@
 // Adapted from Vercel AI Elements (`packages/elements/src/artifact.tsx`,
 // https://github.com/vercel/ai-elements), Copyright 2023 Vercel, Inc., licensed
 // under the Apache License, Version 2.0. Changes: our tokens (the header is the
-// muted band of our tables), no close button, and a tooltip provider scoped to
+// muted band of our tables), close is an ordinary action passed by the caller, and a tooltip provider scoped to
 // the action rather than assumed at the root.
 
 import * as React from "react";

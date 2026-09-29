@@ -98,23 +98,21 @@ function PanelState({ children }: { children: ReactNode }) {
   );
 }
 
-function PreviewTab({ file }: { file: SidebarFile | null }) {
-  const { t } = useTranslation(["chat", "files"]);
-  const { data, isLoading, error } = useFile(file?.id ?? "");
-
-  if (!file) return <PanelState>{t("context.preview.empty", { ns: "chat" })}</PanelState>;
+/** The file's frame IS the panel: its header replaces the panel's, and closes it. */
+function PreviewTab({ file, onClose }: { file: SidebarFile; onClose: () => void }) {
+  const { t } = useTranslation("chat");
+  const { data, isLoading, error } = useFile(file.id);
 
   return (
-    <div className="flex h-full min-h-0 p-3">
-      <FileArtifact
-        fileId={file.id}
-        file={data}
-        isLoading={isLoading}
-        error={error}
-        fallbackName={file.name || t("context.file.untitled", { ns: "chat" })}
-        className="flex-1"
-      />
-    </div>
+    <FileArtifact
+      fileId={file.id}
+      file={data}
+      isLoading={isLoading}
+      error={error}
+      fallbackName={file.name || t("context.file.untitled")}
+      onClose={{ label: t("context.collapse"), onClick: onClose }}
+      className="h-full rounded-none border-0"
+    />
   );
 }
 
@@ -294,6 +292,8 @@ export function ConversationSidebar({
   const activeTab = tabs.find(({ id }) => id === state.activeTab) ?? tabs[0];
   const ActiveTabIcon = activeTab.Icon;
   const showFile = (file: SidebarFile) => dispatch({ type: "show-file", file });
+  const collapse = () => dispatch({ type: "toggle" });
+  const previewedFile = state.activeTab === "preview" ? state.selectedFile : null;
 
   return (
     <>
@@ -302,7 +302,7 @@ export function ConversationSidebar({
           type="button"
           className="absolute inset-0 z-20 bg-black/30 lg:hidden"
           aria-label={t("context.collapse")}
-          onClick={() => dispatch({ type: "toggle" })}
+          onClick={collapse}
         />
       ) : null}
       {state.expanded ? (
@@ -313,33 +313,41 @@ export function ConversationSidebar({
           aria-label={t("context.label")}
           className="bg-background absolute inset-y-0 right-0 z-30 flex h-full w-[min(92vw,36rem)] shrink-0 flex-col border-l shadow-xl lg:static lg:w-[42vw] lg:max-w-[42rem] lg:min-w-[28rem] lg:shadow-none"
         >
-          <div className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
-            <div className="flex min-w-0 flex-1 items-center gap-2 px-1 text-sm font-medium">
-              <ActiveTabIcon className="text-muted-foreground size-4 shrink-0" />
-              <span className="truncate">{activeTab.label}</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8 shrink-0"
-              aria-label={t("context.collapse")}
-              onClick={() => dispatch({ type: "toggle" })}
-            >
-              <ChevronRightIcon className="size-4" />
-            </Button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto">
-            {state.activeTab === "preview" ? <PreviewTab file={state.selectedFile} /> : null}
-            {state.activeTab === "runs" ? (
-              <ConversationRuns conversationId={conversationId} active />
-            ) : null}
-            {state.activeTab === "files" ? (
-              <ConversationFiles conversationId={conversationId} active onSelect={showFile} />
-            ) : null}
-            {state.activeTab === "info" ? (
-              <ConversationInfo conversationId={conversationId} active />
-            ) : null}
-          </div>
+          {previewedFile ? (
+            <PreviewTab file={previewedFile} onClose={collapse} />
+          ) : (
+            <>
+              <div className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
+                <div className="flex min-w-0 flex-1 items-center gap-2 px-1 text-sm font-medium">
+                  <ActiveTabIcon className="text-muted-foreground size-4 shrink-0" />
+                  <span className="truncate">{activeTab.label}</span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 shrink-0"
+                  aria-label={t("context.collapse")}
+                  onClick={collapse}
+                >
+                  <ChevronRightIcon className="size-4" />
+                </Button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto">
+                {state.activeTab === "preview" ? (
+                  <PanelState>{t("context.preview.empty")}</PanelState>
+                ) : null}
+                {state.activeTab === "runs" ? (
+                  <ConversationRuns conversationId={conversationId} active />
+                ) : null}
+                {state.activeTab === "files" ? (
+                  <ConversationFiles conversationId={conversationId} active onSelect={showFile} />
+                ) : null}
+                {state.activeTab === "info" ? (
+                  <ConversationInfo conversationId={conversationId} active />
+                ) : null}
+              </div>
+            </>
+          )}
         </aside>
       ) : null}
     </>

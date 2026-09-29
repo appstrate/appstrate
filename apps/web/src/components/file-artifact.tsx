@@ -17,7 +17,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CheckIcon, CopyIcon, DownloadIcon, Maximize2Icon, Minimize2Icon } from "lucide-react";
+import {
+  CheckIcon,
+  CopyIcon,
+  DownloadIcon,
+  Maximize2Icon,
+  Minimize2Icon,
+  XIcon,
+} from "lucide-react";
 import { formatBytes } from "@appstrate/core/format";
 import {
   Artifact,
@@ -42,6 +49,7 @@ export function FileArtifact({
   error,
   fallbackName = "",
   showName = true,
+  onClose,
   className,
 }: {
   fileId: string;
@@ -55,6 +63,8 @@ export function FileArtifact({
   fallbackName?: string;
   /** Off where the container already titles the file (the preview modal). */
   showName?: boolean;
+  /** Where the frame IS the container (the chat's side panel): closing it closes that. */
+  onClose?: { label: string; onClick: () => void };
   className?: string;
 }) {
   const { t } = useTranslation("files");
@@ -118,6 +128,9 @@ export function FileArtifact({
               void (fullscreen ? document.exitFullscreen() : frameRef.current?.requestFullscreen())
             }
           />
+          {onClose && (
+            <ArtifactAction icon={XIcon} label={onClose.label} onClick={onClose.onClick} />
+          )}
         </ArtifactActions>
       </ArtifactHeader>
       <ArtifactContent>
