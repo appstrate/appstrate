@@ -41,6 +41,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { replayJournal } from "../helpers/journal.ts";
 
 const MIGRATIONS_DIR = resolve(import.meta.dir, "../../../../packages/db/drizzle");
 
@@ -95,21 +96,6 @@ const REPLAY_THROUGH = "0068_packages_org_home_validate";
 
 const pg = new PGlite();
 
-/** Replay the journal up to and including `lastTag`, the way the Tier 0 runner does. */
-async function replayThrough(lastTag: string): Promise<void> {
-  const journal = (await Bun.file(`${MIGRATIONS_DIR}/meta/_journal.json`).json()) as {
-    entries: { tag: string }[];
-  };
-  for (const entry of journal.entries) {
-    const source = await Bun.file(`${MIGRATIONS_DIR}/${entry.tag}.sql`).text();
-    await pg.transaction(async (tx) => {
-      await tx.exec(source.replaceAll("--> statement-breakpoint", ""));
-    });
-    if (entry.tag === lastTag) return;
-  }
-  throw new Error(`journal has no entry tagged ${lastTag}`);
-}
-
 /** Run the migration the way the runner does — whole file, breakpoints stripped. */
 async function applyMigration(): Promise<void> {
   const sql = await Bun.file(MIGRATION).text();
@@ -150,8 +136,8 @@ async function columnNames(table: string): Promise<Set<string>> {
 }
 
 beforeAll(async () => {
-  await replayThrough(REPLAY_THROUGH);
-});
+  await replayJournal(pg, REPLAY_THROUGH);
+}, 300_000);
 
 afterAll(async () => {
   await pg.close();

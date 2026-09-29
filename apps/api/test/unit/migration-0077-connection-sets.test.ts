@@ -7,8 +7,9 @@
  * split as `migration-0059-drop-org-viewer.test.ts`: the replayed-journal
  * parity tests guard the shape, this file guards what the `.sql` does to rows.
  *
- * Duplicate labels are `scripts/migration/0032-connection-sets.sql`'s to
- * rename (`migration-script-0032-connection-sets.test.ts`); here, only that a
+ * Duplicate labels and scalar snapshot values are
+ * `scripts/migration/0032-connection-sets.sql`'s to rewrite
+ * (`migration-script-0032-connection-sets.test.ts`); here, only that a
  * database which skipped it is refused whole.
  */
 
@@ -32,14 +33,31 @@ const AGENT = "@acme0077/agent";
 const conn = (n: number) => `c0770000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 const pg = new PGlite();
+
+interface ApplyError {
+  code?: string;
+  message?: string;
+}
+/** What applying `0077` over each scalar snapshot or override value raised. */
+const scalarErrors: (ApplyError | null)[] = [];
 /** What applying `0077` over a duplicate label raised, before the real apply. */
-let skippedScriptError: { code?: string } | null = null;
+let skippedScriptError: ApplyError | null = null;
 
 async function applyMigration(): Promise<void> {
   const source = await Bun.file(MIGRATION).text();
   await pg.transaction(async (tx) => {
     await tx.exec(source.replaceAll("--> statement-breakpoint", ""));
   });
+}
+
+/** The error `0077` raises on the current rows; null if it applied. */
+async function applyError(): Promise<ApplyError | null> {
+  try {
+    await applyMigration();
+    return null;
+  } catch (error) {
+    return error as ApplyError;
+  }
 }
 
 async function labelOf(id: string): Promise<string | null> {
@@ -90,19 +108,42 @@ beforeAll(async () => {
              ('${SPACE}', '${AGENT}', '${GMAIL}', '${ALICE}', '${conn(5)}');
     INSERT INTO integration_org_defaults (space_id, integration_package_id, connection_id, enforce)
       VALUES ('${SPACE}', '${GMAIL}', '${conn(3)}', true);
+    -- Sets, as 0032 leaves them: the guard lets these through.
+    INSERT INTO runs
+      (id, package_id, user_id, space_id, org_id, status, started_at,
+       connection_overrides, resolved_connections)
+    VALUES ('run_0077_set', '${AGENT}', '${ALICE}', '${SPACE}', '${ORG}', 'success', now(),
+            '{"${GMAIL}": ["${conn(1)}"]}',
+            '{"${GMAIL}": [{"connectionId": "${conn(1)}", "source": "member_pin"}]}');
   `);
-  // A database that skipped 0032: one duplicate label refuses the whole batch.
+  // A database that skipped 0032's SHAPE section: each scalar column refuses the whole batch.
+  const scalarRun = (column: string, value: unknown) =>
+    `INSERT INTO runs (id, package_id, user_id, space_id, org_id, status, started_at, ${column})
+     VALUES ('run_0077_scalar', '${AGENT}', '${ALICE}', '${SPACE}', '${ORG}', 'success', now(),
+             '${JSON.stringify({ [GMAIL]: value })}')`;
+  for (const insert of [
+    scalarRun("connection_overrides", conn(1)),
+    scalarRun("resolved_connections", { connectionId: conn(1), source: "fallback_auto" }),
+    `INSERT INTO package_schedules
+       (id, package_id, user_id, org_id, space_id, cron_expression, enabled, connection_overrides)
+     VALUES ('sch_0077_scalar', '${AGENT}', '${ALICE}', '${ORG}', '${SPACE}', '0 * * * *', true,
+             '${JSON.stringify({ [GMAIL]: conn(1) })}')`,
+  ]) {
+    await pg.exec(insert);
+    scalarErrors.push(await applyError());
+    await pg.exec(`
+      DELETE FROM runs WHERE id = 'run_0077_scalar';
+      DELETE FROM package_schedules WHERE id = 'sch_0077_scalar';
+    `);
+  }
+  // A database that skipped 0032's DEDUPE section: one duplicate label refuses the whole batch.
   await pg.exec(`
     INSERT INTO integration_connections
       (id, integration_package_id, auth_key, account_id, space_id, user_id,
        credentials_encrypted, label, shared_with_org, created_at)
     VALUES ${connection(7, GMAIL, BOB, "prod", "2026-01-07")};
   `);
-  try {
-    await applyMigration();
-  } catch (error) {
-    skippedScriptError = error as { code?: string };
-  }
+  skippedScriptError = await applyError();
   await pg.exec(`DELETE FROM integration_connections WHERE id = '${conn(7)}'`);
   await applyMigration();
   // A journal replay runs past the 15s default in `bunfig.toml`.
@@ -137,6 +178,13 @@ describe("0077 — connection sets", () => {
     // Labels already set are untouched.
     expect(await labelOf(conn(1))).toBe("Connexion 2");
     expect(await labelOf(conn(5))).toBe("prod");
+  });
+
+  it("refuses, whole, a database that skipped 0032's shape rewrite, naming the script", () => {
+    expect(scalarErrors).toHaveLength(3);
+    for (const error of scalarErrors) {
+      expect(error?.message).toContain("Run scripts/migration/0032-connection-sets.sql first");
+    }
   });
 
   it("refuses, whole, a database that skipped 0032's label dedupe", async () => {

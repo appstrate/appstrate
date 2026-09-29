@@ -25,6 +25,18 @@
 --
 -- That index leads with `space_id`, so it also serves the space-only scans
 -- (FK cascade on space delete) `idx_integration_conn_space` existed for.
+--
+-- The read-only DO block first refuses a database where 0032's SHAPE section
+-- has not run: a scalar left where a set belongs, which no index here catches.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM "runs" r, jsonb_each(r."connection_overrides") e(k, v) WHERE jsonb_typeof(e.v) <> 'array')
+    OR EXISTS (SELECT 1 FROM "runs" r, jsonb_each(r."resolved_connections") e(k, v) WHERE jsonb_typeof(e.v) <> 'array')
+    OR EXISTS (SELECT 1 FROM "package_schedules" s, jsonb_each(s."connection_overrides") e(k, v) WHERE jsonb_typeof(e.v) <> 'array')
+  THEN
+    RAISE EXCEPTION 'runs.connection_overrides, runs.resolved_connections or package_schedules.connection_overrides still holds a scalar connection value. Run scripts/migration/0032-connection-sets.sql first, then redeploy.';
+  END IF;
+END $$;--> statement-breakpoint
 ALTER TABLE "integration_pins" ADD COLUMN "connection_ids" uuid[];--> statement-breakpoint
 UPDATE "integration_pins" SET "connection_ids" = ARRAY["connection_id"];--> statement-breakpoint
 ALTER TABLE "integration_pins" ALTER COLUMN "connection_ids" SET NOT NULL;--> statement-breakpoint

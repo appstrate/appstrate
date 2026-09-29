@@ -6,8 +6,9 @@
 -- no longer reaches the space) is then no longer shared, so it is never frozen. Before the batch
 -- because the freeze reads and writes the scalar `connection_id` columns `0077` folds and drops,
 -- and the dedupe is the precondition of `0077`'s unique index `idx_integration_conn_label`.
--- Skipped on a database holding a duplicate label, `0077` fails (23505) and the batch rolls back;
--- with none, the batch lands and the other three sections are simply missing.
+-- Skipped, `0077` refuses the batch on a scalar snapshot or override value (its first statement)
+-- or on a duplicate label (23505); with neither, it lands and the freeze and the normalization are
+-- simply missing.
 --
 -- Four sections in ONE transaction; each prints a "before" count and an "after" count that must
 -- read 0.

@@ -197,13 +197,13 @@ export const runs = pgTable(
     // Per-run integration connection overrides — the caller's explicit
     // choice at run kickoff (e.g. "for this run, use my Gmail-Boulot AND my
     // Gmail-Perso"). Shape: { "@scope/integration": ["<connection_id>", ...] }.
-    // Loses to admin pin. Resolution snapshot lives in resolvedConnections
-    // below. Flat (no per-authKey nesting): the chosen connections carry their
-    // own authKey.
+    // Loses to an admin pin and an enforced org default. Resolution snapshot
+    // lives in resolvedConnections below. Flat (no per-authKey nesting): the
+    // chosen connections carry their own authKey.
     connectionOverrides: jsonb("connection_overrides").$type<Record<string, string[]>>(),
     // Snapshot of the resolver output at run start — which connections were
-    // actually bound per integration, plus the source
-    // ("admin_pin" | "run_override" | "schedule_override" | "member_pin" | "fallback_*").
+    // actually bound per integration, plus the resolver layer that bound them
+    // (`ConnectionResolutionSource` in `@appstrate/core/integration`).
     // Audit trail: a run's identity in the upstream provider logs maps
     // back through this column even after pins/connections are mutated.
     resolvedConnections: jsonb("resolved_connections").$type<
@@ -798,7 +798,8 @@ export const schedules = pgTable(
     versionOverride: text("version_override"),
     // Per-schedule integration connection overrides — frozen at schedule
     // creation/edit (mirrors `dependencyOverrides` on runs). Same shape as
-    // `runs.connectionOverrides`. Loses to admin pin at fire time.
+    // `runs.connectionOverrides`. Loses to an admin pin and an enforced org
+    // default at fire time.
     connectionOverrides: jsonb("connection_overrides").$type<Record<string, string[]>>(),
     // Per-schedule dependency version overrides — frozen at schedule
     // creation/edit, forwarded to each fired run's `runs.dependencyOverrides`
