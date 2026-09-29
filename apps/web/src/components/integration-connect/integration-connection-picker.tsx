@@ -49,7 +49,7 @@ import {
   canApplyConnectionSet,
   checkedConnectionIds,
   displayedConnectionIds,
-  joinCreatedConnection,
+  placeCreatedConnection,
   toggleCapped,
   unavailableConnectionIds,
 } from "../../lib/connection-set";
@@ -310,16 +310,24 @@ export function IntegrationConnectionPicker({
     const freshCandidates = fresh?.integrations.find((i) => i.integration_id === integrationId)
       ?.resolution.candidates;
     const added = freshCandidates?.find((c) => !before.has(c.id));
-    const next = added
-      ? joinCreatedConnection({
-          explicitIds,
-          candidateIds,
-          createdId: added.id,
-          max: MAX_CONNECTIONS_PER_INTEGRATION,
-        })
-      : null;
-    if (next) await persist(next);
-    else await refresh();
+    if (!added) {
+      await refresh();
+      return;
+    }
+    const placed = placeCreatedConnection({
+      explicitIds,
+      checkedIds,
+      createdId: added.id,
+      max: MAX_CONNECTIONS_PER_INTEGRATION,
+    });
+    if ("persist" in placed) {
+      await persist(placed.persist);
+      return;
+    }
+    // The menu closed on the connect click; reopen it on the new tick so "Valider" is at hand.
+    await refresh();
+    setDraft(placed.draft);
+    setOpen(true);
   };
 
   const triggerLabel =

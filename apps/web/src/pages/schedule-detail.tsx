@@ -16,13 +16,8 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@appstrate/ui/components/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
 import { PageHeader } from "../components/page-header";
+import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { JsonView } from "../components/json-view";
 import { RunList } from "../components/run-list";
@@ -83,24 +78,16 @@ export function ScheduleDetailPage() {
             <>
               <LiveScheduleStatusBadge schedule={schedule} />
               {can("schedules:write") && !mayWrite && (
-                <TooltipProvider delayDuration={300}>
-                  <Tooltip>
-                    {/* A disabled button fires no pointer events: the span carries the tooltip. */}
-                    <TooltipTrigger asChild>
-                      <span tabIndex={0}>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          disabled
-                          aria-label={t("schedule.memberGoverned")}
-                        >
-                          <Lock size={16} />
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>{t("schedule.memberGoverned")}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <DisabledReasonTooltip reason={t("schedule.memberGoverned")}>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    disabled
+                    aria-label={t("schedule.memberGoverned")}
+                  >
+                    <Lock size={16} />
+                  </Button>
+                </DisabledReasonTooltip>
               )}
               {can("schedules:write") && mayWrite && (
                 <DropdownMenu>

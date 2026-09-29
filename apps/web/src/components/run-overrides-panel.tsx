@@ -19,7 +19,6 @@ import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { withConnectionOverride } from "../lib/connection-set";
-import { type ConnectionChoice, refusalReasonKey } from "../lib/connection-choice";
 import { ModelGenerationFields } from "./model-generation-fields";
 import {
   reconcileModelGenerationSettings,
@@ -78,8 +77,6 @@ interface RunOverridesPanelProps {
    * their per-integration readiness verdict judges the definition that runs.
    */
   version?: string;
-  /** Refused integrations whose pick has not moved since; each rendered row says why. */
-  refusals?: readonly ConnectionChoice[];
 }
 
 /**
@@ -107,7 +104,6 @@ export function RunOverridesPanel({
   value,
   onChange,
   version,
-  refusals,
 }: RunOverridesPanelProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: orgModels } = useModels();
@@ -255,7 +251,6 @@ export function RunOverridesPanel({
           agentPackageId={packageId}
           integrations={agentIntegrations}
           version={version}
-          refusals={refusals}
           value={value.connection_overrides ?? {}}
           onChange={(integrationId, connectionIds) =>
             onChange(withConnectionOverride(value, integrationId, connectionIds))
@@ -281,14 +276,12 @@ function ScheduleConnectionOverridesSection({
   agentPackageId,
   integrations,
   version,
-  refusals,
   value,
   onChange,
 }: {
   agentPackageId: string;
   integrations: AgentIntegrationRef[];
   version?: string;
-  refusals?: readonly ConnectionChoice[];
   value: Record<string, string[]>;
   onChange: (integrationId: string, connectionIds: string[]) => void;
 }) {
@@ -304,7 +297,6 @@ function ScheduleConnectionOverridesSection({
             agentPackageId={agentPackageId}
             integration={integ}
             version={version}
-            refusal={refusals?.find((r) => r.integrationId === integ.id)}
             value={value[integ.id] ?? []}
             onChange={(connIds) => onChange(integ.id, connIds)}
           />
@@ -318,19 +310,16 @@ function IntegrationOverrideRow({
   agentPackageId,
   integration,
   version,
-  refusal,
   value,
   onChange,
 }: {
   agentPackageId: string;
   integration: AgentIntegrationRef;
   version?: string;
-  refusal: ConnectionChoice | undefined;
   /** Currently-picked connection set; empty = inherit. */
   value: string[];
   onChange: (next: string[]) => void;
 }) {
-  const { t } = useTranslation(["agents"]);
   const { data: detail } = useIntegrationDetail(integration.id);
   const displayName = detail?.manifest.display_name ?? integration.id;
 
@@ -354,11 +343,6 @@ function IntegrationOverrideRow({
         persistence={{ mode: "override", value, onChange }}
         version={version}
       />
-      {refusal && (
-        <p className="text-destructive text-xs" role="alert">
-          {t(refusalReasonKey(refusal))}
-        </p>
-      )}
     </div>
   );
 }

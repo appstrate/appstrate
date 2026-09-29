@@ -283,7 +283,6 @@ export function ScheduleForm({
     submitted?.picks,
     overrides.connection_overrides,
   );
-  const pendingIds = pending.map((c) => c.integrationId);
   // Open while a refusal speaks for this actor, so answering it does not fold the pick away.
   const overridesShown = overridesOpen || refused.length > 0;
 
@@ -550,12 +549,10 @@ export function ScheduleForm({
                   value={overrides}
                   onChange={setOverrides}
                   version={firedVersion}
-                  refusals={pending}
                 />
                 {showActorChoice && (
                   <ScheduleActorConnectionChoice
                     choices={refused}
-                    pendingIds={pendingIds}
                     value={overrides.connection_overrides ?? {}}
                     onChange={setConnectionPick}
                   />

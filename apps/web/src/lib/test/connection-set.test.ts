@@ -13,7 +13,7 @@ import {
   canApplyConnectionSet,
   displayedConnectionIds,
   checkedConnectionIds,
-  joinCreatedConnection,
+  placeCreatedConnection,
   unavailableConnectionIds,
   withConnectionOverride,
   withConnectionPick,
@@ -146,9 +146,7 @@ describe("checkedConnectionIds", () => {
   });
 });
 
-describe("joinCreatedConnection", () => {
-  const candidateIds = ["conn_org_default", "conn_mine"];
-
+describe("placeCreatedConnection", () => {
   it("binds only the created connection when the actor had no pick of their own", () => {
     // Control: the picker DISPLAYS the org default as bound here. Joining onto
     // that displayed set would write ["conn_org_default", "conn_new"] as a
@@ -160,44 +158,46 @@ describe("joinCreatedConnection", () => {
     });
     expect(shown).toEqual(["conn_org_default"]);
     expect(
-      joinCreatedConnection({ explicitIds: [], candidateIds, createdId: "conn_new", max: 10 }),
-    ).toEqual(["conn_new"]);
-  });
-
-  it("joins the actor's own pick instead of replacing it", () => {
-    expect(
-      joinCreatedConnection({
-        explicitIds: ["conn_mine"],
-        candidateIds,
+      placeCreatedConnection({
+        explicitIds: [],
+        checkedIds: shown,
         createdId: "conn_new",
         max: 10,
       }),
-    ).toEqual(["conn_mine", "conn_new"]);
+    ).toEqual({ persist: ["conn_new"] });
   });
 
-  it("drops an unavailable id from the base rather than resending it", () => {
+  it("only ticks it beside an explicit pick: a pin never grows into a set unasked", () => {
     expect(
-      joinCreatedConnection({
-        explicitIds: ["conn_mine", "conn_unshared"],
-        candidateIds,
+      placeCreatedConnection({
+        explicitIds: ["conn_mine"],
+        checkedIds: ["conn_mine"],
         createdId: "conn_new",
         max: 10,
       }),
-    ).toEqual(["conn_mine", "conn_new"]);
+    ).toEqual({ draft: ["conn_mine", "conn_new"] });
   });
 
-  it("writes nothing when the cap is reached or the id is already bound", () => {
+  it("ticks onto the unsaved ticks, not the stored pick", () => {
     expect(
-      joinCreatedConnection({ explicitIds: ["conn_mine"], candidateIds, createdId: "x", max: 1 }),
-    ).toBeNull();
-    expect(
-      joinCreatedConnection({
+      placeCreatedConnection({
         explicitIds: ["conn_mine"],
-        candidateIds,
-        createdId: "conn_mine",
+        checkedIds: ["conn_other"],
+        createdId: "conn_new",
         max: 10,
       }),
-    ).toBeNull();
+    ).toEqual({ draft: ["conn_other", "conn_new"] });
+  });
+
+  it("leaves the ticks as they are at the cap", () => {
+    expect(
+      placeCreatedConnection({
+        explicitIds: ["conn_mine"],
+        checkedIds: ["conn_mine"],
+        createdId: "conn_new",
+        max: 1,
+      }),
+    ).toEqual({ draft: ["conn_mine"] });
   });
 });
 

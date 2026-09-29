@@ -88,16 +88,23 @@ export function unavailableConnectionIds(explicitIds: string[], candidateIds: st
 }
 
 /**
- * A new connection joins what the actor chose, never the cascade's fallback — that
- * would freeze an org default into a member pin. `null` = nothing to write.
+ * Where a connection created from the picker goes. With no pick of the actor's own it becomes
+ * the pick — never joined onto the cascade's fallback, which would freeze an org default into a
+ * member pin. Beside an explicit pick it is only ticked: binding several connections is always
+ * the actor's explicit "Valider".
  */
-export function joinCreatedConnection(input: {
+export function placeCreatedConnection(input: {
   explicitIds: string[];
-  candidateIds: string[];
+  checkedIds: string[];
   createdId: string;
   max: number;
-}): string[] | null {
-  const kept = keepAvailable(input.explicitIds, input.candidateIds);
-  if (kept.includes(input.createdId) || kept.length >= input.max) return null;
-  return [...kept, input.createdId];
+}): { persist: string[] } | { draft: string[] } {
+  if (input.explicitIds.length === 0) return { persist: [input.createdId] };
+  const { checkedIds, createdId, max } = input;
+  return {
+    draft:
+      checkedIds.includes(createdId) || checkedIds.length >= max
+        ? checkedIds
+        : [...checkedIds, createdId],
+  };
 }

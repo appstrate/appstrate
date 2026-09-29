@@ -5,25 +5,23 @@ import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
-import { type ConnectionChoice, refusalReasonKey } from "../lib/connection-choice";
+import type { ConnectionChoice } from "../lib/connection-choice";
 import { toggleCapped } from "../lib/connection-set";
 
 /**
  * The connection section of a schedule running as someone other than the viewer, whose own
  * pickers would judge the VIEWER's connections. A refused save's candidates are the pick
  * control instead — only connections the viewer reaches too, so the list can be empty: the
- * actor's private connections are theirs (or an admin's) to pin.
+ * actor's private connections are theirs (or an admin's) to pin. Why each was refused is said
+ * once, by the form-level `ScheduleConnectionRefusals`.
  */
 export function ScheduleActorConnectionChoice({
   choices,
-  pendingIds,
   value,
   onChange,
 }: {
   /** What the last save was refused over — kept on screen while it is answered. */
   choices: readonly ConnectionChoice[];
-  /** Among them, the integrations whose pick has not moved since the refusal. */
-  pendingIds: readonly string[];
   value: Readonly<Record<string, string[]>>;
   onChange: (integrationId: string, connectionIds: string[]) => void;
 }) {
@@ -43,11 +41,6 @@ export function ScheduleActorConnectionChoice({
             data-testid={`schedule-actor-choice-${choice.integrationId}`}
           >
             <div className="font-mono text-xs font-medium">{choice.integrationId}</div>
-            {pendingIds.includes(choice.integrationId) && (
-              <p className="text-destructive text-xs" role="alert">
-                {t(refusalReasonKey(choice))}
-              </p>
-            )}
             {choice.candidates.map((c) => {
               const id = `sched-choice-${choice.integrationId}-${c.id}`;
               return (

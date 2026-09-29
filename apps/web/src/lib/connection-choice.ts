@@ -96,8 +96,8 @@ export function picksAfterActorChange(args: {
 }
 
 /**
- * Why an integration was refused, as an `agents` key shared by the form-level alert and the
- * inline marks. An open choice with no candidate is one only the actor (or an admin pin) can make.
+ * Why an integration was refused, as an `agents` key. An open choice with no candidate is one
+ * only the actor (or an admin pin) can make.
  */
 export function refusalReasonKey(choice: ConnectionChoice): string {
   switch (choice.code) {

@@ -4,8 +4,8 @@ import { useTranslation } from "react-i18next";
 import { type ConnectionChoice, refusalReasonKey } from "../lib/connection-choice";
 
 /**
- * Every integration a schedule save is still refused over, with why — at form
- * level, because an inline mark needs a rendered row, and a row may be missing
+ * Every integration a schedule save is still refused over, with why — the one
+ * place a refusal is spoken: at form level, because a picker row may be missing
  * (version detail unreadable, no `integrations:read`, no connectable auth).
  */
 export function ScheduleConnectionRefusals({

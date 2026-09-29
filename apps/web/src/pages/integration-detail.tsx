@@ -36,7 +36,7 @@
  * detail to surface the new connection row.
  */
 
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { CopyBlock } from "../components/copy-block";
 import { ManifestOverview } from "../components/package-manifest/manifest-overview";
@@ -66,6 +66,7 @@ import {
   X,
   ChevronRight,
   ArrowUpFromLine,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -102,10 +103,11 @@ import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { ConnectionTeardownSteps } from "../components/integration-connect/connection-teardown-steps";
 import { ConnectionDeleteImpact } from "../components/integration-connect/connection-delete-impact";
-import { keepAvailable, toggleCapped } from "../lib/connection-set";
+import { keepAvailable, toggleCapped, unavailableConnectionIds } from "../lib/connection-set";
 import { Modal } from "../components/modal";
 import { SourceBadge } from "../components/source-badge";
 import { DefaultCell } from "../components/default-cell";
+import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { usePermissions, useHomeSpaceName, useCurrentSpaceGrant } from "../hooks/use-permissions";
 import { maySetPackageActive } from "../lib/package-permissions";
 import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
@@ -956,11 +958,11 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   const [connectionIds, setConnectionIds] = useState<string[]>([]);
   const [enforce, setEnforce] = useState(false);
 
-  // Seeded with only what is still shared, so the form shows what a save writes.
-  const seedIds = keepAvailable(
-    orgDefault?.connection_ids ?? [],
-    shared.map((c) => c.id),
-  );
+  // Seeded with only what is still shared, so the form shows what a save writes; the stored
+  // members no longer shared are named apart — every run falling back on them is refused.
+  const sharedIds = shared.map((c) => c.id);
+  const seedIds = keepAvailable(orgDefault?.connection_ids ?? [], sharedIds);
+  const unavailableIds = unavailableConnectionIds(orgDefault?.connection_ids ?? [], sharedIds);
   // Sorted: a server reordering of the set must not read as a change and wipe the edit.
   const seededFor = orgDefault ? [...seedIds].sort().join(",") : null;
   const [seeded, setSeeded] = useState<string | null>(null);
@@ -969,6 +971,18 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
     setConnectionIds(seedIds);
     setEnforce(orgDefault?.enforce ?? false);
   }
+
+  const clearButton = orgDefault ? (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={() => remove.mutate({ params: { path: { packageId } } })}
+      disabled={remove.isPending}
+      data-testid="org-default-clear"
+    >
+      {t("integration.admin.orgDefault.clear")}
+    </Button>
+  ) : null;
 
   return (
     <div
@@ -982,10 +996,27 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
         </p>
       </div>
 
+      {unavailableIds.length > 0 && (
+        <div
+          className="mb-3 flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
+          data-testid="org-default-unavailable-warning"
+        >
+          <AlertTriangle className="size-3 shrink-0" />
+          <span>
+            {t("integration.admin.orgDefault.unavailableWarning", {
+              count: unavailableIds.length,
+            })}
+          </span>
+        </div>
+      )}
+
       {shared.length === 0 ? (
-        <p className="text-muted-foreground text-xs italic">
-          {t("integration.admin.orgDefault.noPinnableConnections")}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="text-muted-foreground text-xs italic">
+            {t("integration.admin.orgDefault.noPinnableConnections")}
+          </p>
+          {clearButton}
+        </div>
       ) : (
         <div className="border-border bg-background flex flex-wrap items-end gap-3 rounded-md border p-3">
           <div className="min-w-[14rem] flex-1">
@@ -997,6 +1028,7 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
               value={connectionIds}
               onChange={setConnectionIds}
               idPrefix="org-default-connection"
+              unavailableIds={unavailableIds}
             />
           </div>
           <div className="flex items-center gap-2 pb-1 text-xs">
@@ -1021,35 +1053,31 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
           >
             {t("integration.admin.orgDefault.save")}
           </Button>
-          {orgDefault ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => remove.mutate({ params: { path: { packageId } } })}
-              disabled={remove.isPending}
-              data-testid="org-default-clear"
-            >
-              {t("integration.admin.orgDefault.clear")}
-            </Button>
-          ) : null}
+          {clearButton}
         </div>
       )}
     </div>
   );
 }
 
-/** Checkbox set capped at {@link MAX_CONNECTIONS_PER_INTEGRATION}. */
+/**
+ * Checkbox set capped at {@link MAX_CONNECTIONS_PER_INTEGRATION}. `unavailableIds` are stored
+ * members no longer offered: listed unticked, so a save visibly drops them.
+ */
 function ConnectionSetChecklist({
   connections,
   value,
   onChange,
   idPrefix,
+  unavailableIds,
 }: {
   connections: IntegrationConnection[];
   value: string[];
   onChange: (next: string[]) => void;
   idPrefix: string;
+  unavailableIds?: string[];
 }) {
+  const { t } = useTranslation("settings");
   return (
     <div className="flex flex-col gap-1" data-testid={`${idPrefix}s`}>
       {connections.map((c) => {
@@ -1070,6 +1098,18 @@ function ConnectionSetChecklist({
           </div>
         );
       })}
+      {unavailableIds?.map((id) => (
+        <div
+          key={id}
+          className="flex items-center gap-2 text-xs"
+          data-testid={`${idPrefix}-unavailable-${id}`}
+        >
+          <Checkbox checked={false} disabled aria-hidden />
+          <span className="text-muted-foreground line-through">
+            {t("integration.admin.unavailableConnection")}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1094,11 +1134,6 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   // Lookup helpers for the table
   const agentDisplayName = (id: string): string =>
     consumingAgents?.find((a) => a.packageId === id)?.display_name ?? id;
-  const connectionDisplay = (id: string): string => {
-    const c = (connections ?? []).find((x) => x.id === id);
-    if (!c) return id;
-    return connectionOptionLabel(c);
-  };
 
   const canAddPin = !!newAgent && newConnectionIds.length > 0;
 
@@ -1158,7 +1193,22 @@ function PinManagementSection({ packageId }: { packageId: string }) {
                 <TableRow key={p.packageId} data-testid={`pin-row-${p.packageId}`}>
                   <TableCell className="px-3 py-2">{agentDisplayName(p.packageId)}</TableCell>
                   <TableCell className="px-3 py-2">
-                    {p.connection_ids.map(connectionDisplay).join(" · ")}
+                    {p.connection_ids.map((id, i) => {
+                      const c = pinnableConnections.find((x) => x.id === id);
+                      return (
+                        <span key={id}>
+                          {i > 0 && " · "}
+                          {c ? (
+                            connectionOptionLabel(c)
+                          ) : (
+                            // No longer shared or deleted: every run of this agent is refused.
+                            <span className="text-amber-700 dark:text-amber-300">
+                              {t("integration.admin.unavailableConnection")}
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })}
                   </TableCell>
                   <TableCell className="px-3 py-2">
                     <Button
@@ -1291,26 +1341,6 @@ function ConnectionsTable({
         </TableBody>
       </Table>
     </div>
-  );
-}
-
-/**
- * Explains why a connection control is locked. A disabled control fires no
- * pointer events: the span carries the tooltip.
- */
-function LockTooltip({ hint, children }: { hint: string | null; children: ReactNode }) {
-  if (!hint) return children;
-  return (
-    <TooltipProvider delayDuration={300}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span tabIndex={0} className="inline-flex">
-            {children}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-xs">{hint}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
   );
 }
 
@@ -1534,7 +1564,7 @@ function ConnectionTableRow({
         {/* Org-share toggle — sharing is the owner's consent, a governor can only withdraw it */}
         <TableCell>
           {canToggleShare ? (
-            <LockTooltip hint={shareLocked ? lockHint : null}>
+            <DisabledReasonTooltip reason={shareLocked ? lockHint : null}>
               <label
                 className="flex items-center gap-1.5 text-xs"
                 title={
@@ -1561,7 +1591,7 @@ function ConnectionTableRow({
                 />
                 {t("integration.connection.shareWithOrg.label")}
               </label>
-            </LockTooltip>
+            </DisabledReasonTooltip>
           ) : (
             <span className="text-muted-foreground text-xs">
               {t("integration.connection.shareWithOrg.label")}
@@ -1572,7 +1602,7 @@ function ConnectionTableRow({
         {/* Disconnect — owner-only: the endpoint is `/api/me/connections` */}
         <TableCell className="text-right">
           {isOwn ? (
-            <LockTooltip hint={lockHint}>
+            <DisabledReasonTooltip reason={lockHint}>
               <Button
                 size="icon"
                 variant="ghost"
@@ -1584,7 +1614,7 @@ function ConnectionTableRow({
               >
                 <Trash2 className="text-destructive size-3.5" />
               </Button>
-            </LockTooltip>
+            </DisabledReasonTooltip>
           ) : (
             <span className="text-muted-foreground text-xs">—</span>
           )}
