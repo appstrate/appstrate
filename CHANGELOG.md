@@ -8,14 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
-- **Stop the platform, run `scripts/migration/0033-unshare-space-access-loss.ts`
-  with `--apply`, then `scripts/migration/0032-connection-sets.sql`, then
-  deploy.** Both run before the drizzle batch, in that order.
+- **Two scripts run with the platform stopped, before the drizzle batch, in
+  this order:**
+  1. `pg_dump` the platform database — `0032` has no rollback but restoring
+     that dump;
+  2. stop the platform;
+  3. from the release checkout, with the platform env loaded:
+     `bun scripts/migration/0033-unshare-space-access-loss.ts --apply`
+     (without `--apply` it is a dry run that rolls back);
+  4. `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0032-connection-sets.sql`
+     — every "after" count it prints must read 0;
+  5. deploy: the new image applies drizzle **0077** at boot, and 0077 refuses
+     to apply on a database `0032` has not run on (the batch rolls back whole);
+  6. reopen.
 
-  `0033` (dry run by default, `--apply` to commit, with the platform env
-  loaded, from the release checkout) unshares every `shared_with_org`
-  connection whose owner no longer reaches its space — whether they left the
-  organization or, still in it, were removed from a closed space, demoted, or
+  `0033` unshares every `shared_with_org` connection whose owner no longer
+  reaches its space — whether they left the organization or, still in it, were removed from a closed space, demoted, or
   the space closed — using the service's own access predicate (the platform
   now does it at the access change, see `### Fixed`), and prints each id. It
   touches no column 0077 changes, so it runs on the pre-0077 schema. An admin
@@ -53,32 +61,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      characters.
 
   It writes the pins in the pre-0077 shape, and its label dedupe is the
-  precondition of 0077's unique index, which is why it precedes the batch: a
-  database that skipped it and holds a duplicate label fails at that index
-  (23505) and the whole batch rolls back. One holding no duplicate boots and
-  misses the other three sections: the shape rewrite (its readers then raise on
-  the first old row), the freeze and the normalization.
-  The new image then applies drizzle **0077** at boot: it folds each pin's and org default's `connection_id` into
+  precondition of 0077's unique index, which is why it precedes the batch. It
+  is idempotent; after the batch it raises (the columns it reads are gone) and
+  rolls back.
+
+  **0077** folds each pin's and org default's `connection_id` into
   a one-element `connection_ids uuid[]` and drops the column (one row per key,
   a `CHECK` of 1..10 members, a GIN index for the reverse lookup); it numbers
   every NULL or empty `label` `Connexion N` counting on from the highest
   `Connexion <n>` of its (space, integration) across all owners, then sets the
   column `NOT NULL` with a `CHECK (label <> '')` and a unique index on
   (space, integration, label), which also serves the space-only scans, so it
-  drops `idx_integration_conn_space`. `0032` is idempotent and prints its counts
-  before and after; every "after" must read 0. Schedule job data held in
-  Redis needs no rewrite: a fire now reads only the job's `scheduleId` and
-  runs what the schedule row holds (see `### Fixed`). The runbook, with the control query that
-  tells "nothing to rewrite" apart from "nothing at all", is
-  `scripts/migration/README.md`. Existing pins and defaults stay valid: each
-  becomes a set of one.
+  drops `idx_integration_conn_space`. Existing pins and defaults stay valid:
+  each becomes a set of one. Schedule job data held in Redis needs no rewrite:
+  a fire now reads only the job's `scheduleId` and runs what the schedule row
+  holds (see `### Fixed`). The read-only counts that tell "nothing to rewrite"
+  apart from "nothing at all", and the end-user listing, close
+  `0032-connection-sets.sql`.
 
 - **Deploy the platform and the runtime images (`appstrate-pi` /
   `appstrate-sidecar`) at the same version.** The platform's internal
   credential routes now require the `connection_id` of a run-bound connection,
   which only this release's sidecar sends (one per member of a connection set):
   an older sidecar gets `400` and its integration tools fail. Docker-mode dev
-  hosts rebuild the pair with `bun run docker:build:runtime`.
+  hosts rebuild the pair with `bun run docker:build:runtime`. **Firecracker
+  hosts** run the sidecar and the agent from the guest rootfs
+  (`apps/api/src/modules/firecracker/scripts/build-rootfs.sh`), so they must
+  run the kernel and rootfs published with this release.
 
 - **Upgrade notes — who loses an implicit shared connection.**
   - End-users are not covered by the freeze: they own no member pins. An
@@ -528,6 +537,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   integrations booted in time** (#1548). The 30 s deadline was never disarmed,
   so every run that outlived it logged the warning operators are told to look
   for when an agent cannot see an integration.
+- **Unicode tag characters (U+E0000–U+E007F) are stripped from third-party MCP
+  tool descriptors** (`packages/mcp-transport/src/sanitize.ts`). They render
+  as nothing yet reach the model, and the hidden-character filter compared
+  UTF-16 units, so it could not match these surrogate pairs; it now walks code
+  points. Connection labels, which share that filter, refuse and drop them too.
 
 ## [1.0.0-beta.63] - 2026-09-26
 
