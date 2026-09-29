@@ -245,6 +245,7 @@ export function IntegrationConnectionPicker({
   // Warnings judge the set "Valider" would write, not the bound one.
   const verdictConns = dirty ? checkedConns : displayConns;
   const underScopedConns = verdictConns.filter((c) => c.missing_scopes.length > 0);
+  const deadConns = verdictConns.filter((c) => c.needs_reconnection);
   const hasCandidates = candidates.length > 0;
   const canApply = canApplyConnectionSet(checkedConns, explicitIds, dirty) && !upsertPin.isPending;
 
@@ -338,9 +339,9 @@ export function IntegrationConnectionPicker({
               : t("detail.integrationMemberPicker.connectLabel");
   // Amber on exactly the states that gate a run: pin mode reads the server's
   // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
-  // override mode an empty pick inherits, so only an under-scoped or unavailable set warns.
+  // override mode an empty pick inherits, so only an under-scoped, unavailable or dead set warns.
   const triggerWarn = overrideMode
-    ? underScopedConns.length > 0 || unavailableIds.length > 0
+    ? underScopedConns.length > 0 || unavailableIds.length > 0 || deadConns.length > 0
     : (runBlocking ?? false);
   const TriggerIcon = triggerWarn ? AlertTriangle : displayConns.length > 0 ? Users : Plus;
 
@@ -631,6 +632,20 @@ export function IntegrationConnectionPicker({
                 : "detail.integrationMemberPicker.unavailableWarning",
               { count: unavailableIds.length },
             )}
+          </span>
+        </div>
+      )}
+      {/* A dead member fails every run that binds it until its owner reconnects it. */}
+      {deadConns.length > 0 && (
+        <div
+          className="mt-1.5 flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
+          data-testid={`member-pick-dead-warning-${integrationId}`}
+        >
+          <AlertTriangle className="size-3 shrink-0" />
+          <span>
+            {t("detail.integrationMemberPicker.needsReconnectionWarning", {
+              count: deadConns.length,
+            })}
           </span>
         </div>
       )}

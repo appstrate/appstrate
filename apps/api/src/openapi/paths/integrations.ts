@@ -131,6 +131,12 @@ const integrationConnectionSchema = {
       description:
         "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own.",
     },
+    locked_by: {
+      type: ["string", "null"],
+      enum: ["admin_pin", "org_default", null],
+      description:
+        "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`.",
+    },
     label: {
       type: "string",
       description:

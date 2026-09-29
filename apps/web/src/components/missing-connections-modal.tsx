@@ -13,6 +13,7 @@ import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/us
 import { usePermissions } from "../hooks/use-permissions";
 import { integrationIdOfField, type ConnectionChoiceCandidate } from "../lib/connection-choice";
 import { withConnectionPick } from "../lib/connection-set";
+import { refusalMessage } from "../lib/mutation-error";
 
 /**
  * Recovery surface for the run-kickoff `409 missing_integration_connection`: one row per
@@ -199,6 +200,7 @@ function MissingRow({
   const loadingVerdict = pickable && (!detail || !resolution);
 
   const displayName = detail?.manifest.display_name ?? packageId;
+  const message = refusalMessage(err) ?? err.message;
   const Icon = resolved ? Check : isStructural ? XCircle : AlertTriangle;
   const colorClass = resolved
     ? "text-emerald-600"
@@ -219,8 +221,8 @@ function MissingRow({
                   carry the server's diagnosis (e.g. the manifest schema issues
                   behind `integration_invalid_manifest`), and a cause clipped at
                   the row width is a cause the user never reads. */}
-              <span className="truncate" title={resolved ? undefined : err.message}>
-                {resolved ? t("missingConnections.resolved") : err.message}
+              <span className="truncate" title={resolved ? undefined : message}>
+                {resolved ? t("missingConnections.resolved") : message}
               </span>
             </div>
           </div>

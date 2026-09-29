@@ -947,6 +947,8 @@
   "integration.connection.labelCancel": "Cancel",
   "integration.connection.labelPlaceholder": "Nickname (e.g. Work, Personal…)",
   "integration.connection.delete": "Delete this connection",
+  "integration.connection.lock.adminPin": "Pinned by an admin: remove it from the pin before deleting or unsharing it.",
+  "integration.connection.lock.orgDefault": "Space default: remove it from the default before deleting or unsharing it.",
   "integration.connection.deleteConfirm": "Permanently delete this connection? Any change to your own agents and schedules is listed below; your colleagues' agents and schedules that chose it will fail until they pick another one.",
   "integration.connection.statusConnected": "Connected",
   "integration.connection.col.account": "Account",

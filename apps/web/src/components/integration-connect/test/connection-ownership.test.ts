@@ -43,12 +43,19 @@ describe("isConnectionOwnedBy", () => {
 });
 
 describe("connectionRowGrants", () => {
-  const base = { isOwn: false, isShared: false, canConnect: true, canConfigure: false };
+  const base = {
+    isOwn: false,
+    isShared: false,
+    canConnect: true,
+    canConfigure: false,
+    locked: false,
+  };
 
   it("gives the owner rename and the share toggle", () => {
     expect(connectionRowGrants({ ...base, isOwn: true })).toEqual({
       canRename: true,
       canToggleShare: true,
+      shareLocked: false,
     });
   });
 
@@ -57,10 +64,12 @@ describe("connectionRowGrants", () => {
     expect(connectionRowGrants({ ...base, isShared: true, canConfigure: true })).toEqual({
       canRename: true,
       canToggleShare: true,
+      shareLocked: false,
     });
     expect(connectionRowGrants({ ...base, isShared: false, canConfigure: true })).toEqual({
       canRename: true,
       canToggleShare: false,
+      shareLocked: false,
     });
   });
 
@@ -68,12 +77,30 @@ describe("connectionRowGrants", () => {
     expect(connectionRowGrants({ ...base, isShared: true })).toEqual({
       canRename: false,
       canToggleShare: false,
+      shareLocked: false,
     });
   });
 
   it("gives nothing without integrations:connect, whoever owns the row", () => {
     expect(
-      connectionRowGrants({ isOwn: true, isShared: true, canConnect: false, canConfigure: true }),
-    ).toEqual({ canRename: false, canToggleShare: false });
+      connectionRowGrants({
+        ...base,
+        isOwn: true,
+        isShared: true,
+        canConnect: false,
+        canConfigure: true,
+      }),
+    ).toEqual({ canRename: false, canToggleShare: false, shareLocked: false });
+  });
+
+  it("locks unsharing a pinned row, never sharing one", () => {
+    // An admin pin or the space default binding the row refuses unsharing (409
+    // `connection_pinned`); sharing an unshared row breaks nothing.
+    expect(connectionRowGrants({ ...base, isOwn: true, isShared: true, locked: true })).toEqual({
+      canRename: true,
+      canToggleShare: true,
+      shareLocked: true,
+    });
+    expect(connectionRowGrants({ ...base, isOwn: true, locked: true }).shareLocked).toBe(false);
   });
 });

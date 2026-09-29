@@ -947,6 +947,8 @@
   "integration.connection.labelCancel": "Annuler",
   "integration.connection.labelPlaceholder": "Surnom (ex: Pro, Perso…)",
   "integration.connection.delete": "Supprimer cette connexion",
+  "integration.connection.lock.adminPin": "Épinglée par un admin : retirez-la de l'épinglage avant de la supprimer ou de cesser de la partager.",
+  "integration.connection.lock.orgDefault": "Défaut de l'espace : retirez-la du défaut avant de la supprimer ou de cesser de la partager.",
   "integration.connection.deleteConfirm": "Supprimer définitivement cette connexion ? Ce qui change pour vos agents et planifications est indiqué ci-dessous, le cas échéant ; ceux de vos collègues qui l'avaient choisie échoueront tant qu'ils n'en auront pas choisi une autre.",
   "integration.connection.statusConnected": "Connecté",
   "integration.connection.col.account": "Compte",

@@ -13,7 +13,6 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
 import i18n from "../i18n";
 import { $api, client } from "../api/client";
 import { onMutationError } from "../lib/mutation-error";
@@ -51,7 +50,10 @@ function scopedHeaders({ orgId, spaceId }: OrgSpaceHeaders) {
  */
 export function useDisconnectIntegrationConnection() {
   const qc = useQueryClient();
-  return $api.useMutation("delete", "/api/me/connections/{connectionId}", {
+  return useMutation({
+    mutationFn: async (vars: { params: { path: { connectionId: string } } }) => {
+      await client.DELETE("/api/me/connections/{connectionId}", vars);
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
       // The caller's own member pins and schedule overrides drop the connection; a
@@ -62,8 +64,8 @@ export function useDisconnectIntegrationConnection() {
       // the typed `/api/integrations…` keys — refresh the whole subtree.
       void invalidateIntegrationQueries(qc);
     },
-    onError: (err: unknown) =>
-      toast.error(i18n.t("error.prefix", { message: getErrorMessage(err) })),
+    // `connection_pinned` while an admin pin or the space default names it.
+    onError: onMutationError,
   });
 }
 

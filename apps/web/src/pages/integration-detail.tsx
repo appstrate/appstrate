@@ -36,7 +36,7 @@
  * detail to surface the new connection row.
  */
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { CopyBlock } from "../components/copy-block";
 import { ManifestOverview } from "../components/package-manifest/manifest-overview";
@@ -1294,6 +1294,26 @@ function ConnectionsTable({
   );
 }
 
+/**
+ * Explains why a connection control is locked. A disabled control fires no
+ * pointer events: the span carries the tooltip.
+ */
+function LockTooltip({ hint, children }: { hint: string | null; children: ReactNode }) {
+  if (!hint) return children;
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span tabIndex={0} className="inline-flex">
+            {children}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs">{hint}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 function ConnectionTableRow({
   connection,
   packageId,
@@ -1337,12 +1357,22 @@ function ConnectionTableRow({
   // Rename, share and reconnect all write the connection, which guards on
   // `integrations:connect` whoever owns it.
   const canConnect = can("integrations:connect");
-  const { canRename, canToggleShare } = connectionRowGrants({
+  const { canRename, canToggleShare, shareLocked } = connectionRowGrants({
     isOwn,
     isShared,
     canConnect,
     canConfigure: can("integrations:configure"),
+    locked: !!connection.locked_by,
   });
+  // An admin pin or the space default names the row: unsharing and deleting it
+  // are refused (409 `connection_pinned`) until it is removed from there.
+  const lockHint = connection.locked_by
+    ? t(
+        connection.locked_by === "admin_pin"
+          ? "integration.connection.lock.adminPin"
+          : "integration.connection.lock.orgDefault",
+      )
+    : null;
   const startEdit = () => {
     setDraftLabel(connection.label);
     setEditing(true);
@@ -1413,12 +1443,12 @@ function ConnectionTableRow({
               </Button>
             </div>
           ) : (
-            <div className="flex items-center gap-1">
-              <span className="truncate font-medium">{name}</span>
+            <div className="flex min-w-0 items-center gap-1">
+              <span className="min-w-0 truncate font-medium">{name}</span>
               {!isOwn && (
                 <Badge
                   variant="secondary"
-                  className="text-[0.6rem]"
+                  className="shrink-0 text-[0.6rem] whitespace-nowrap"
                   data-testid={`connection-owner-${connection.id}`}
                 >
                   {connection.owner_name
@@ -1504,28 +1534,34 @@ function ConnectionTableRow({
         {/* Org-share toggle — sharing is the owner's consent, a governor can only withdraw it */}
         <TableCell>
           {canToggleShare ? (
-            <label
-              className="flex items-center gap-1.5 text-xs"
-              title={t(
-                isOwn
-                  ? "integration.connection.shareWithOrg.help"
-                  : "integration.connection.shareWithOrg.unshareHelp",
-              )}
-            >
-              <input
-                type="checkbox"
-                checked={isShared}
-                disabled={updateConnection.isPending}
-                onChange={(e) =>
-                  updateConnection.mutate({
-                    params: { path: { packageId, connectionId: connection.id } },
-                    body: { shared_with_org: e.target.checked },
-                  })
+            <LockTooltip hint={shareLocked ? lockHint : null}>
+              <label
+                className="flex items-center gap-1.5 text-xs"
+                title={
+                  shareLocked
+                    ? undefined
+                    : t(
+                        isOwn
+                          ? "integration.connection.shareWithOrg.help"
+                          : "integration.connection.shareWithOrg.unshareHelp",
+                      )
                 }
-                data-testid={`share-toggle-${connection.id}`}
-              />
-              {t("integration.connection.shareWithOrg.label")}
-            </label>
+              >
+                <input
+                  type="checkbox"
+                  checked={isShared}
+                  disabled={updateConnection.isPending || shareLocked}
+                  onChange={(e) =>
+                    updateConnection.mutate({
+                      params: { path: { packageId, connectionId: connection.id } },
+                      body: { shared_with_org: e.target.checked },
+                    })
+                  }
+                  data-testid={`share-toggle-${connection.id}`}
+                />
+                {t("integration.connection.shareWithOrg.label")}
+              </label>
+            </LockTooltip>
           ) : (
             <span className="text-muted-foreground text-xs">
               {t("integration.connection.shareWithOrg.label")}
@@ -1536,17 +1572,19 @@ function ConnectionTableRow({
         {/* Disconnect — owner-only: the endpoint is `/api/me/connections` */}
         <TableCell className="text-right">
           {isOwn ? (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-7"
-              onClick={onDelete}
-              disabled={disconnect.isPending}
-              title={t("integration.connection.delete")}
-              data-testid={`connection-delete-${connection.id}`}
-            >
-              <Trash2 className="text-destructive size-3.5" />
-            </Button>
+            <LockTooltip hint={lockHint}>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7"
+                onClick={onDelete}
+                disabled={disconnect.isPending || !!lockHint}
+                title={lockHint ? undefined : t("integration.connection.delete")}
+                data-testid={`connection-delete-${connection.id}`}
+              >
+                <Trash2 className="text-destructive size-3.5" />
+              </Button>
+            </LockTooltip>
           ) : (
             <span className="text-muted-foreground text-xs">—</span>
           )}

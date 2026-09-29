@@ -25,17 +25,21 @@ export function isConnectionOwnedBy(c: ConnectionOwnerFields, userId: string | u
  * (every write also guards on `integrations:connect`, whoever owns the row):
  * rename is the owner's or a governor's (`integrations:configure`); sharing is
  * the owner's consent, and a governor can only WITHDRAW a share — so a
- * colleague's unshared row offers them no toggle.
+ * colleague's unshared row offers them no toggle. While an admin pin or the
+ * space default names the row (`locked`), unsharing it is refused (409
+ * `connection_pinned`): the toggle stays, disabled (`shareLocked`).
  */
 export function connectionRowGrants(args: {
   isOwn: boolean;
   isShared: boolean;
   canConnect: boolean;
   canConfigure: boolean;
-}): { canRename: boolean; canToggleShare: boolean } {
+  locked: boolean;
+}): { canRename: boolean; canToggleShare: boolean; shareLocked: boolean } {
   const canRename = args.canConnect && (args.isOwn || args.canConfigure);
   return {
     canRename,
     canToggleShare: (args.isOwn && args.canConnect) || (args.isShared && canRename),
+    shareLocked: args.locked && args.isShared,
   };
 }

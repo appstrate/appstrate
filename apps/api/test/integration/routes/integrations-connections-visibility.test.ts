@@ -30,7 +30,12 @@ import {
 } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import { integrationConnections, organizationMembers } from "@appstrate/db/schema";
+import {
+  integrationConnections,
+  integrationOrgDefaults,
+  integrationPins,
+  organizationMembers,
+} from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
@@ -47,6 +52,7 @@ interface ConnectionDTO {
   account_id: string;
   owner_id: string;
   owner_name?: string | null;
+  locked_by?: "admin_pin" | "org_default" | null;
   identity_claims: Record<string, unknown> | null;
   shared_with_org?: boolean;
 }
@@ -174,6 +180,31 @@ describe("GET /api/integrations/:packageId/connections — own ∪ org-shared", 
     const row = (await listAs(authHeaders(ctx))).find((c) => c.id === sharedId)!;
     expect(row.owner_id).toBe(other.id);
     expect(row.owner_name).toBe("Mike Shared");
+  });
+
+  it("reports which admin pin or org default locks each row", async () => {
+    const pinned = await seedConnection({ userId: other.id, accountId: "pinned", shared: true });
+    const defaulted = await seedConnection({ userId: other.id, accountId: "dflt", shared: true });
+    const free = await seedConnection({ userId: ctx.user.id, accountId: "free", shared: true });
+    const agent = await seedPackage({ id: "@visorg/agent", orgId: ctx.orgId });
+    await db.insert(integrationPins).values({
+      spaceId: ctx.defaultSpaceId,
+      packageId: agent.id,
+      integrationId: INTEGRATION,
+      userId: null,
+      connectionIds: [pinned],
+    });
+    // Named by both: the pin takes precedence.
+    await db.insert(integrationOrgDefaults).values({
+      spaceId: ctx.defaultSpaceId,
+      integrationId: INTEGRATION,
+      connectionIds: [pinned, defaulted],
+    });
+
+    const lockOf = new Map((await listAs(authHeaders(ctx))).map((c) => [c.id, c.locked_by]));
+    expect(lockOf.get(pinned)).toBe("admin_pin");
+    expect(lockOf.get(defaulted)).toBe("org_default");
+    expect(lockOf.get(free)).toBeNull();
   });
 
   it("redacts identity_claims on rows the caller does not own, keeps them on their own", async () => {

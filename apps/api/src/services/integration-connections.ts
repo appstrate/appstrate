@@ -2608,6 +2608,9 @@ export async function saveIntegrationConnection(
  * owner's OIDC claim bag (email, sub, …) to every member. `account_id`
  * and `owner_name` stay — the picker DTO already exposes both, and a
  * connection you can pick has to be identifiable.
+ *
+ * `locked_by` says up front which rows an unshare or delete would refuse
+ * (`assertConnectionsUnpinned`), so the UI need not learn it from a 409.
  */
 export async function listIntegrationConnections(
   scope: SpaceScope,
@@ -2626,6 +2629,10 @@ export async function listIntegrationConnections(
       ),
     );
   const ownerName = await resolveConnectionOwnerNames(rows);
+  const locks = await connectionLocks(
+    db,
+    rows.map((row) => row.id),
+  );
   return rows.map((row) => {
     const isOwn = actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
     const summary = serializeIntegrationConnection(row);
@@ -2633,6 +2640,7 @@ export async function listIntegrationConnections(
       ...summary,
       ...(isOwn ? {} : { identity_claims: null }),
       owner_name: ownerName(row),
+      locked_by: locks.get(row.id) ?? null,
     };
   });
 }
@@ -2744,36 +2752,54 @@ export async function listUsableIntegrationsForActor(
   });
 }
 
+type ConnectionLock = NonNullable<IntegrationConnectionSummary["locked_by"]>;
+
 /**
- * 409 `connection_pinned` while an admin pin or an org default names one of `ids`: each binds
- * whole for every member of the space, so removing a member would fail everyone's runs. A member
- * pin never blocks — its owner's next run reports `pinned_connection_unavailable`.
+ * Which of `ids` an admin pin or an org default names — the pin wins when both do. Each binds
+ * whole for every member of the space, so neither may lose a member. A member pin never locks —
+ * its owner's next run reports `pinned_connection_unavailable`.
  */
+async function connectionLocks(
+  executor: DbOrTx,
+  ids: readonly string[],
+): Promise<Map<string, ConnectionLock>> {
+  const locks = new Map<string, ConnectionLock>();
+  if (ids.length === 0) return locks;
+  const pins = await executor
+    .select({ connectionIds: integrationPins.connectionIds })
+    .from(integrationPins)
+    .where(
+      and(isNull(integrationPins.userId), arrayOverlaps(integrationPins.connectionIds, [...ids])),
+    );
+  const orgDefaults = await executor
+    .select({ connectionIds: integrationOrgDefaults.connectionIds })
+    .from(integrationOrgDefaults)
+    .where(arrayOverlaps(integrationOrgDefaults.connectionIds, [...ids]));
+  const wanted = new Set(ids);
+  // Pins last, so they overwrite a default naming the same id.
+  for (const row of orgDefaults) {
+    for (const id of row.connectionIds) if (wanted.has(id)) locks.set(id, "org_default");
+  }
+  for (const row of pins) {
+    for (const id of row.connectionIds) if (wanted.has(id)) locks.set(id, "admin_pin");
+  }
+  return locks;
+}
+
+/** 409 `connection_pinned` while {@link connectionLocks} locks one of `ids`. */
 export async function assertConnectionsUnpinned(
   tx: Tx,
   ids: readonly string[],
   refused: string,
 ): Promise<void> {
-  if (ids.length === 0) return;
-  const pins = await tx
-    .select({ id: integrationPins.id })
-    .from(integrationPins)
-    .where(
-      and(isNull(integrationPins.userId), arrayOverlaps(integrationPins.connectionIds, [...ids])),
-    )
-    .limit(1);
-  const orgDefaults = await tx
-    .select({ id: integrationOrgDefaults.id })
-    .from(integrationOrgDefaults)
-    .where(arrayOverlaps(integrationOrgDefaults.connectionIds, [...ids]))
-    .limit(1);
-  if (pins.length > 0) {
+  const locks = new Set((await connectionLocks(tx, ids)).values());
+  if (locks.has("admin_pin")) {
     throw conflict(
       "connection_pinned",
       `${refused} while an admin has pinned it to one or more agents. Remove it from the pin(s) first.`,
     );
   }
-  if (orgDefaults.length > 0) {
+  if (locks.has("org_default")) {
     throw conflict(
       "connection_pinned",
       `${refused} while an org default names it. Remove it from the default first.`,

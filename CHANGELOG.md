@@ -444,6 +444,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A connection an admin pin or the space default names says so before the
+  refusal.** The connection list carries `locked_by` (`admin_pin` |
+  `org_default` | null), from the same check that refuses unsharing or deleting
+  it with `409 connection_pinned`; the integration page disables both with the
+  reason instead of letting the click fail. The connection refusals are
+  translated, in toasts and in the run-launch recovery modal, and the connection
+  picker warns when a chosen connection needs reconnecting.
 - **The credential proxy answers `Cache-Control: no-store`.** It relayed the
   upstream cache policy (GitHub sends `private, max-age=60`) although one URL
   serves every target and connection, so an HTTP client could replay one

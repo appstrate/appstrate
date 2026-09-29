@@ -62,6 +62,13 @@ export interface IntegrationConnection {
    */
   owner_name?: string | null;
   /**
+   * What binds this connection for every member of the space — an admin pin
+   * (takes precedence) or an org default — or `null` when nothing does. While
+   * locked, unsharing or deleting it is refused with 409 `connection_pinned`.
+   * Present on the *list* surfaces only, like `owner_name`.
+   */
+  locked_by?: "admin_pin" | "org_default" | null;
+  /**
    * Display name, set at creation: the extracted identity (email/login) when
    * available, else "Connexion N". Stable for the connection's lifetime and
    * user-editable. The UI renders it verbatim.
