@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -33,8 +33,15 @@ export function OnboardingMembersStep() {
 
   const invitations = orgData?.invitations ?? [];
 
+  const [sending, setSending] = useState(false);
+
   // An email typed but never sent is still an invitation the user meant to make.
-  const goNext = () => inviteFormRef.current?.submitPending(() => nextRoute && navigate(nextRoute));
+  const goNext = async () => {
+    setSending(true);
+    const sent = (await inviteFormRef.current?.submitPending()) ?? true;
+    setSending(false);
+    if (sent && nextRoute) navigate(nextRoute);
+  };
 
   if (!orgId) return null;
 
@@ -43,7 +50,8 @@ export function OnboardingMembersStep() {
       step="members"
       title={t("onboarding.membersTitle")}
       subtitle={t("onboarding.membersSubtitle")}
-      onNext={goNext}
+      onNext={() => void goNext()}
+      nextPending={sending}
       onBack={prevRoute ? () => navigate(prevRoute) : undefined}
     >
       <div className="flex flex-col gap-4">
