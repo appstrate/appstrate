@@ -3,7 +3,6 @@
 
 import { describe, it, expect } from "bun:test";
 import { credentialUrlPolicy } from "../../src/resolvers/credential-guard.ts";
-import { matchesAuthorizedUri } from "../../src/resolvers/api-call-engine.ts";
 import { substituteVars } from "../../src/resolvers/template-vars.ts";
 
 const fields = { api_key: "SECRET" };
@@ -42,7 +41,7 @@ describe("credentialUrlPolicy — detection", () => {
 });
 
 describe("credentialUrlPolicy — downgrade and refusal", () => {
-  it("keeps the declared policy, unaugmented, when nothing is templated", () => {
+  it("keeps the declared policy when nothing is templated", () => {
     const policy = credentialUrlPolicy({
       templates: ["https://api.example.com/x"],
       fields: { site_url: "https://site.example.com" },
@@ -76,65 +75,27 @@ describe("credentialUrlPolicy — downgrade and refusal", () => {
   });
 });
 
-describe("credentialUrlPolicy — credential-field origins", () => {
-  const webhook = {
-    fields: { webhook_url: "https://hooks.example.com/x/y", secret_header_value: "S" },
-    allowAllUris: true,
-    authorizedUris: [] as string[],
-  };
+describe("credentialUrlPolicy — URL-valued credential fields", () => {
+  const fields = { webhook_url: "https://hooks.example.com/services/TVICTIM/x", secret: "S" };
 
-  it("adds the origin of a URL-valued field, which then matches the templated target", () => {
+  it("never widens the allowlist from a field's value (shared origins)", () => {
     const policy = credentialUrlPolicy({
-      ...webhook,
-      templates: ["{{webhook_url}}", "{{secret_header_value}}"],
+      fields,
+      allowAllUris: false,
+      authorizedUris: ["https://api.example.com/**"],
+      templates: ["{{webhook_url}}"],
     });
-    expect(policy.authorizedUris).toEqual(["https://hooks.example.com/**"]);
-    expect(policy.refuse).toBe(false);
-    const target = substituteVars("{{webhook_url}}", webhook.fields);
-    expect(matchesAuthorizedUri(target, policy.authorizedUris)).toBe(true);
+    expect(policy.authorizedUris).toEqual(["https://api.example.com/**"]);
   });
 
-  it("does not match a `{{site_url}}@evil.example` target (userinfo, real host evil)", () => {
-    const site = { site_url: "https://shop.example.com" };
+  it("refuses under allow_all_uris with no allowlist, the field's origin included", () => {
     const policy = credentialUrlPolicy({
-      fields: site,
+      fields,
       allowAllUris: true,
       authorizedUris: [],
-      templates: ["{{site_url}}@evil.example/wp-json"],
-    });
-    expect(policy.authorizedUris).toEqual(["https://shop.example.com/**"]);
-    const target = substituteVars("{{site_url}}@evil.example/wp-json", site);
-    expect(new URL(target).hostname).toBe("evil.example");
-    expect(matchesAuthorizedUri(target, policy.authorizedUris)).toBe(false);
-  });
-
-  it("ignores non-URL, relative and non-http(s) field values", () => {
-    const policy = credentialUrlPolicy({
-      fields: {
-        api_key: "SECRET",
-        path: "/wp-json/v2",
-        rel: "hooks.example.com/x",
-        js: "javascript:alert(1)",
-        ftp: "ftp://files.example.com/",
-      },
-      allowAllUris: true,
-      authorizedUris: [],
-      templates: ["{{api_key}}"],
+      templates: ["{{secret}}"],
     });
     expect(policy.authorizedUris).toEqual([]);
     expect(policy.refuse).toBe(true);
-  });
-
-  it("appends field origins to a declared allowlist without duplicates", () => {
-    const policy = credentialUrlPolicy({
-      fields: { a: "https://hooks.example.com/1", b: "https://hooks.example.com/2" },
-      allowAllUris: false,
-      authorizedUris: ["https://api.example.com/**"],
-      templates: ["{{a}}"],
-    });
-    expect(policy.authorizedUris).toEqual([
-      "https://api.example.com/**",
-      "https://hooks.example.com/**",
-    ]);
   });
 });

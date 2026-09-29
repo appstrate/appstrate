@@ -518,11 +518,10 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
           fetchFn: this.fetchImpl,
           authorizedUris: policy.authorizedUris,
           allowAllUris: policy.allowAllUris,
-          // Field origins are not operator host pins: they keep the SSRF net.
-          literalHostPins: meta.authorizedUris,
           injectedCredentialHeader: injectedCredentialHeader?.toLowerCase() ?? null,
           integrationId: meta.name,
           resolveHost: this.resolveHost,
+          credentialFields: fields,
         });
         res = result.response;
       } catch (err) {
@@ -532,6 +531,8 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         // CLI agent gets a clear, structured failure — the host is
         // redacted (a redirect target may carry `?token=…`).
         if (err instanceof PreflightError) {
+          // `details` carries the template, never the substituted URL (it may hold a secret).
+          const target = req.target;
           if (err.reason === "not_authorized") {
             throw new AuthorizedUrisError(
               "AUTHORIZED_URIS_MISMATCH",

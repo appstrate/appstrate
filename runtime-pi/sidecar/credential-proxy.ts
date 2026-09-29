@@ -47,7 +47,7 @@ import {
   credentialUrlPolicy,
   fetchFollowingRedirectsCapturingCookies,
   hostLiterallyAllowlisted,
-  redactHost,
+  redactCredentialHost,
   RedirectBlockedError,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
@@ -347,7 +347,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       error: `Call for integration "${integrationId}" substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`,
     };
   } else if (policy.allowAllUris) {
-    const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
+    const refusal = await refuseSsrfTarget(resolvedUrl, creds.credentials, deps.resolveHost);
     if (refusal) return refusal;
   } else if (policy.authorizedUris.length) {
     if (!matchesAuthorizedUri(resolvedUrl, policy.authorizedUris)) {
@@ -357,14 +357,13 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
         error: `URL not authorized for integration "${integrationId}". Allowed: ${policy.authorizedUris.join(", ")}`,
       };
     }
-    // Only an operator-declared host pins; credential-field origins keep the SSRF net.
-    if (!hostLiterallyAllowlisted(resolvedUrl, creds.authorizedUris ?? [])) {
-      const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
+    if (!hostLiterallyAllowlisted(resolvedUrl, policy.authorizedUris)) {
+      const refusal = await refuseSsrfTarget(resolvedUrl, creds.credentials, deps.resolveHost);
       if (refusal) return refusal;
     }
   } else {
     // No authorizedUris and no allowAllUris — apply the SSRF safety net.
-    const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
+    const refusal = await refuseSsrfTarget(resolvedUrl, creds.credentials, deps.resolveHost);
     if (refusal) return refusal;
   }
 
@@ -590,6 +589,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       ...(deps.resolveHost ? { resolveHost: deps.resolveHost } : {}),
       // Preserve the sidecar's structured per-hop refusal logging.
       logger,
+      credentialFields: activeCreds.credentials,
     });
     return {
       ...followed,
@@ -616,7 +616,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     requestHeaderNames = r.requestHeaderNames;
     credentialInjection = r.credentialInjection;
   } catch (err) {
-    return wrapRequestError(err, resolvedUrl);
+    return wrapRequestError(err, resolvedUrl, creds.credentials);
   }
 
   let authRefreshed = false;
@@ -646,7 +646,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
           requestHeaderNames = r.requestHeaderNames;
           credentialInjection = r.credentialInjection;
         } catch (err) {
-          return wrapRequestError(err, resolvedUrl);
+          return wrapRequestError(err, resolvedUrl, creds.credentials);
         }
       } else {
         // Body already consumed — surface the rotated-but-still-401 signal to
@@ -681,7 +681,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   logger.debug("integration api_call completed", {
     integrationId,
     method,
-    host: redactHost(upstreamFinalUrl),
+    host: redactCredentialHost(upstreamFinalUrl, creds.credentials),
     status: upstream.status,
     durationMs: Math.round(performance.now() - requestStartedAt),
     hops: upstreamHops,
@@ -727,6 +727,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
  */
 async function refuseSsrfTarget(
   url: string,
+  fields: Readonly<Record<string, unknown>>,
   resolveHost?: HostResolver,
 ): Promise<ApiCallFailure | null> {
   const blockedFailure: ApiCallFailure = {
@@ -747,21 +748,28 @@ async function refuseSsrfTarget(
     return {
       ok: false,
       status: 502,
-      error: `Target host could not be resolved (${redactHost(url)})`,
+      error: `Target host could not be resolved (${redactCredentialHost(url, fields)})`,
     };
   }
   logger.warn("api_call refused: target resolves into a blocked network range", {
-    host: redactHost(url),
+    host: redactCredentialHost(url, fields),
   });
   return blockedFailure;
 }
 
-function wrapFetchError(err: unknown, label: string, url: string): ApiCallFailure {
+function wrapFetchError(
+  err: unknown,
+  label: string,
+  url: string,
+  fields: Readonly<Record<string, unknown>>,
+): ApiCallFailure {
   const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
   const suffix = code ? `: ${code}` : "";
-  // Same host projection every sibling in this file uses, from the one helper —
-  // an inline `new URL(url).hostname` here was a second copy of `redactHost`.
-  return { ok: false, status: 502, error: `${label}${suffix} (${redactHost(url)})` };
+  return {
+    ok: false,
+    status: 502,
+    error: `${label}${suffix} (${redactCredentialHost(url, fields)})`,
+  };
 }
 
 /**
@@ -773,17 +781,21 @@ function wrapFetchError(err: unknown, label: string, url: string): ApiCallFailur
  *   - everything else (timeout, ECONNREFUSED, ENOTFOUND) → 502 via
  *     {@link wrapFetchError}.
  *
- * Redacts the target host into the error message; the full URL stays
- * out because a redirect target may itself encode capabilities
- * (`?token=…`) we don't want surfaced to the agent.
+ * Only the host reaches the message, credential values scrubbed from it
+ * (`https://{{api_key}}.vendor.example/`); the full URL stays out because a
+ * redirect target may itself encode capabilities (`?token=…`).
  */
-function wrapRequestError(err: unknown, resolvedUrl: string): ApiCallFailure {
+function wrapRequestError(
+  err: unknown,
+  resolvedUrl: string,
+  fields: Readonly<Record<string, unknown>>,
+): ApiCallFailure {
   if (err instanceof RedirectBlockedError) {
     return {
       ok: false,
       status: 403,
-      error: `Redirect blocked (${err.reason}): host=${redactHost(err.hopUrl)}`,
+      error: `Redirect blocked (${err.reason}): host=${redactCredentialHost(err.hopUrl, fields)}`,
     };
   }
-  return wrapFetchError(err, "Upstream request failed", resolvedUrl);
+  return wrapFetchError(err, "Upstream request failed", resolvedUrl, fields);
 }

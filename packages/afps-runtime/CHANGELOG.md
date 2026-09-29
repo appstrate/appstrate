@@ -14,17 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guard shared by the sidecar, the local resolver and the platform credential
   proxy. A templated credential drops `allow_all_uris`; `refuse` is set when no
   allowlist remains.
-- `guardedFetch` / `preflightUrl` take an optional `literalHostPins`: the entries
-  whose literal host exempts the target from the SSRF net (defaults to
-  `authorizedUris`).
-
-### Changed — URL-valued credential fields contribute their origin
-
-- When a call templates a credential, the origin of every credential field
-  holding an absolute `http(s)` URL joins the enforced allowlist as
-  `${origin}/**`, so integrations whose endpoint is a connection field
-  (`webhook_url`, `site_url`) work again under `allow_all_uris`. These origins
-  keep the SSRF net.
+- The allowlist is never widened from credential values: an integration whose
+  endpoint is a connection field (`webhook_url`, `site_url`) cannot template it
+  into an `api_call`.
+- `redactCredentialValues` and `redactCredentialHost` (the host with credential
+  values scrubbed, compared lowercased), shared by the sidecar and the platform
+  proxy for every host they echo. The redirect follower takes an optional
+  `credentialFields` to scrub the hosts it logs.
 
 ### Fixed — credential detection
 

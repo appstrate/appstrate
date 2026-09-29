@@ -157,16 +157,12 @@ interface PreflightOptions {
    */
   allowAllUris?: boolean;
   /**
-   * Entries whose literal host exempts the target from the SSRF net; defaults
-   * to `authorizedUris`. Pass the operator-declared list when `authorizedUris`
-   * was augmented (`credentialUrlPolicy`'s credential-field origins).
-   */
-  literalHostPins?: readonly string[];
-  /**
    * DNS resolver for the SSRF rebind check — injectable for tests.
    * Production callers omit it (system resolver via `node:dns`).
    */
   resolveHost?: HostResolver;
+  /** Credential values to scrub from the host echoed in a rejection (`https://{{api_key}}.x.com/`). */
+  credentialFields?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -192,7 +188,11 @@ interface PreflightOptions {
  * them injects a stub. Closing it means giving this module a real transport
  * seam first.
  */
-async function refuseSsrfUrl(url: string, resolveHost?: HostResolver): Promise<PreflightResult> {
+async function refuseSsrfUrl(
+  url: string,
+  resolveHost?: HostResolver,
+  credentialFields: Readonly<Record<string, unknown>> = {},
+): Promise<PreflightResult> {
   const blocked: PreflightResult = {
     ok: false,
     reason: "ssrf",
@@ -211,7 +211,7 @@ async function refuseSsrfUrl(url: string, resolveHost?: HostResolver): Promise<P
     return {
       ok: false,
       reason: "ssrf",
-      message: `Target host could not be resolved (${redactHost(url)})`,
+      message: `Target host could not be resolved (${redactCredentialHost(url, credentialFields)})`,
     };
   }
   return blocked;
@@ -232,7 +232,7 @@ async function refuseSsrfUrl(url: string, resolveHost?: HostResolver): Promise<P
 export async function preflightUrl(url: string, opts: PreflightOptions): Promise<PreflightResult> {
   const authorizedUris = opts.authorizedUris ?? undefined;
   if (opts.allowAllUris) {
-    return refuseSsrfUrl(url, opts.resolveHost);
+    return refuseSsrfUrl(url, opts.resolveHost, opts.credentialFields);
   }
   if (authorizedUris && authorizedUris.length) {
     if (!matchesAuthorizedUri(url, authorizedUris)) {
@@ -242,13 +242,13 @@ export async function preflightUrl(url: string, opts: PreflightOptions): Promise
         message: `URL not in authorized_uris allowlist. Allowed: ${authorizedUris.join(", ")}`,
       };
     }
-    if (!hostLiterallyAllowlisted(url, opts.literalHostPins ?? authorizedUris)) {
-      return refuseSsrfUrl(url, opts.resolveHost);
+    if (!hostLiterallyAllowlisted(url, authorizedUris)) {
+      return refuseSsrfUrl(url, opts.resolveHost, opts.credentialFields);
     }
     return { ok: true };
   }
   // No authorized_uris and no allowAllUris — apply the SSRF safety net.
-  return refuseSsrfUrl(url, opts.resolveHost);
+  return refuseSsrfUrl(url, opts.resolveHost, opts.credentialFields);
 }
 
 /** Extract hostname for audit logs, never throwing. */
@@ -258,6 +258,40 @@ export function redactHost(url: string): string {
   } catch {
     return "<unparseable>";
   }
+}
+
+/**
+ * Replace every credential value in `value` with its `{{field}}` placeholder,
+ * raw and percent-encoded (WHATWG parsing encodes reserved characters). No
+ * minimum length: even a 1-char credential fragment must not be echoed.
+ */
+export function redactCredentialValues(
+  value: string,
+  fields: Readonly<Record<string, unknown>>,
+): string {
+  let out = value;
+  for (const [name, fieldValue] of Object.entries(fields)) {
+    if (typeof fieldValue !== "string" || fieldValue.length === 0) continue;
+    out = out.split(fieldValue).join(`{{${name}}}`);
+    const encoded = encodeURIComponent(fieldValue);
+    if (encoded !== fieldValue) out = out.split(encoded).join(`{{${name}}}`);
+  }
+  return out;
+}
+
+/**
+ * {@link redactHost} for a URL that may carry a substituted credential
+ * (`https://{{api_key}}.api-us1.com/`). WHATWG lowercases the host, so values
+ * are compared lowercased.
+ */
+export function redactCredentialHost(
+  url: string,
+  fields: Readonly<Record<string, unknown>>,
+): string {
+  const lowered = Object.fromEntries(
+    Object.entries(fields).map(([name, v]) => [name, typeof v === "string" ? v.toLowerCase() : ""]),
+  );
+  return redactCredentialValues(redactHost(url), lowered);
 }
 
 /** Optional observability hook — callers pass a logger; defaults to no-op. */
@@ -292,6 +326,8 @@ interface RedirectFollowOptions {
   allowAllUris?: boolean;
   /** Optional logger for per-hop refusals. Defaults to a no-op. */
   logger?: RedirectLogger;
+  /** Credential values to scrub from the hosts it logs (a relative hop keeps a templated host). */
+  credentialFields?: Readonly<Record<string, unknown>>;
   /**
    * DNS resolver for the per-hop SSRF rebind check — injectable for tests.
    * Production callers omit it (system resolver via `node:dns`).
@@ -398,7 +434,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
       logger.warn("Redirect refused (SSRF blocklist)", {
         integrationId,
         hop,
-        host: redactHost(nextUrl),
+        host: redactCredentialHost(nextUrl, opts.credentialFields ?? {}),
       });
       throw new RedirectBlockedError("ssrf", nextUrl);
     }
@@ -414,7 +450,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
       logger.warn("Redirect refused (SSRF DNS-rebind)", {
         integrationId,
         hop,
-        host: redactHost(nextUrl),
+        host: redactCredentialHost(nextUrl, opts.credentialFields ?? {}),
       });
       throw new RedirectBlockedError("ssrf", nextUrl);
     }
@@ -422,7 +458,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
       logger.warn("Redirect refused (not in authorizedUris)", {
         integrationId,
         hop,
-        host: redactHost(nextUrl),
+        host: redactCredentialHost(nextUrl, opts.credentialFields ?? {}),
       });
       throw new RedirectBlockedError("unauthorized", nextUrl);
     }
@@ -489,14 +525,14 @@ interface GuardedFetchOptions {
   fetchFn?: typeof fetch;
   authorizedUris?: string[] | null;
   allowAllUris?: boolean;
-  /** See {@link PreflightOptions.literalHostPins}. */
-  literalHostPins?: readonly string[];
   /** Lowercased name of the credential header injected by the caller. */
   injectedCredentialHeader?: string | null;
   integrationId?: string;
   logger?: RedirectLogger;
   /** DNS resolver for the SSRF rebind preflight — injectable for tests. */
   resolveHost?: HostResolver;
+  /** Credential values scrubbed from the hosts preflight / redirect refusals echo. */
+  credentialFields?: Readonly<Record<string, unknown>>;
 }
 
 export class PreflightError extends Error {
@@ -516,8 +552,8 @@ export async function guardedFetch(
   const pre = await preflightUrl(opts.url, {
     authorizedUris: opts.authorizedUris,
     allowAllUris: opts.allowAllUris,
-    ...(opts.literalHostPins ? { literalHostPins: opts.literalHostPins } : {}),
     resolveHost: opts.resolveHost,
+    credentialFields: opts.credentialFields,
   });
   if (!pre.ok) {
     throw new PreflightError(pre.reason, pre.message);
@@ -552,5 +588,6 @@ export async function guardedFetch(
     allowAllUris: opts.allowAllUris,
     ...(opts.resolveHost ? { resolveHost: opts.resolveHost } : {}),
     ...(opts.logger ? { logger: opts.logger } : {}),
+    ...(opts.credentialFields ? { credentialFields: opts.credentialFields } : {}),
   });
 }

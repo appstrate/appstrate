@@ -95,6 +95,8 @@ export {
   matchesAuthorizedUri,
   stripUserInfoAndFragment,
   redactHost,
+  redactCredentialValues,
+  redactCredentialHost,
   fetchFollowingRedirectsCapturingCookies,
   guardedFetch,
   RedirectBlockedError,

