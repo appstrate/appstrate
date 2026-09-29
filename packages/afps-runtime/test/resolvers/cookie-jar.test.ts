@@ -30,7 +30,7 @@ describe("cookieScope.capture", () => {
     const scope = cookieScope(jar, "i", null);
     scope.capture(API, ["a=1; Path=/; HttpOnly", "  b = 2 ; Secure"]);
     scope.capture(API, ["a=3; SameSite=Lax"]);
-    expect(ownCookies(jar, API)).toBe("a=3; b=2");
+    expect(ownCookies(jar, API)).toBe("b=2; a=3");
   });
 
   it.each([
@@ -64,20 +64,35 @@ describe("cookieScope.capture", () => {
     expect(ownCookies(jar, API)).toBe("a=1");
   });
 
-  it("caps a bucket at 50 cookies, evicting the oldest-inserted names", () => {
+  it("caps a bucket at 50 cookies, evicting the least recently set names", () => {
     const jar: CookieJar = new Map();
     const scope = cookieScope(jar, "i", null);
     scope.capture(
       API,
       Array.from({ length: 50 }, (_, n) => `c${n}=${n}`),
     );
-    scope.capture(API, ["c0=updated", "c50=50"]);
+    scope.capture(API, ["c50=50"]);
     const names = ownCookies(jar, API)!
       .split("; ")
       .map((p) => p.split("=")[0]);
     expect(names).toHaveLength(50);
     expect(names).not.toContain("c0");
     expect(names.at(-1)).toBe("c50");
+  });
+
+  it("keeps a cookie re-set on every response over per-request names", () => {
+    const jar: CookieJar = new Map();
+    const scope = cookieScope(jar, "i", null);
+    scope.capture(API, ["PHPSESSID=v0"]);
+    scope.capture(
+      API,
+      Array.from({ length: 49 }, (_, n) => `nonce_${n + 1}=x`),
+    );
+    scope.capture(API, ["PHPSESSID=v1", "nonce_50=x"]);
+    const pairs = ownCookies(jar, API)!.split("; ");
+    expect(pairs).toHaveLength(50);
+    expect(pairs).toContain("PHPSESSID=v1");
+    expect(pairs.some((p) => p.startsWith("nonce_1="))).toBe(false);
   });
 
   it("drops the bucket once its last cookie is deleted", () => {

@@ -450,61 +450,69 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     }
   };
 
-  let res = await performFetch(fetchInit as RequestInit);
-
-  // Reactive 401-refresh-retry — mirror of the sidecar
-  // (`executeApiCall`, runtime-pi/sidecar/credential-proxy.ts). The public route is
-  // used by CLI / GitHub Action / self-hosted runners, which were silently
-  // 401-ing whenever the stored OAuth access_token expired because the
-  // refresh logic only fired on streaming bodies. Buffered bodies can be
-  // replayed safely → refresh + retry once. Streaming bodies fall through
-  // to the authRefreshed escape-hatch below (caller must re-issue with a
-  // fresh body stream).
-  if (res.status === 401 && !isStreamBody && credentialInjection.kind === "inject") {
-    try {
-      const refreshedResult = await forceRefreshIntegrationProxyCredentials({
-        integrationId: input.integrationId,
-        spaceId: input.spaceId,
-        actor: input.actor,
-        ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-      });
-      const refreshed = refreshedResult?.payload ?? null;
-      if (refreshed) {
-        // Rebuild the credential header from the rotated token. Drop the
-        // previous platform-injected value first so the refreshed delivery
-        // plan can install its current header name and value cleanly.
-        headers.delete(credentialInjection.header.name);
-        if (refreshed.credentialHeaderName) {
-          // Keep the strip set in sync — the refreshed payload may name a
-          // different header than the original resolution.
-          sensitiveHeaderNames.add(refreshed.credentialHeaderName);
-        }
-        credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, refreshed);
-        res = await performFetch({
-          ...fetchInit,
-          headers,
-        } as RequestInit);
-      }
-    } catch {
-      // Refresh itself failed transiently (network hiccup, upstream 5xx, …)
-      // — surface the original 401 as-is; the caller will
-      // handle re-authentication. `forceRefresh` flips `needsReconnection`
-      // on BOTH terminal shapes before it gets here: a revoked refresh token
-      // and an unrefreshable OAuth client. Both now return `null` rather
-      // than throwing (the dedicated error class had one throw site whose
-      // only catch was unreachable), so the flag is what separates TERMINAL
-      // from transient — not the two terminal shapes from each other.
-      // Transient failures deliberately leave the row untouched — nothing is
-      // marked, and the next call retries.
-    }
-  }
-
   // Re-read first: narrows (not closes) a concurrent lost update to one get/set round trip.
-  if (jarStore && jarSessionId && jarTtl && jarTtl > 0 && captured.length > 0) {
+  const persistJar = async () => {
+    if (!jarStore || !jarSessionId || !jarTtl || jarTtl <= 0 || captured.length === 0) return;
     const latest = await jarStore.get(jarSessionId, connectionId);
     const fresh = cookieScope(latest, input.integrationId, literalAllowlist);
     for (const [url, setCookies] of captured) fresh.capture(url, setCookies);
     await jarStore.set(jarSessionId, connectionId, latest, jarTtl);
+  };
+
+  // `finally`: hops received before a throw (off-allowlist redirect, SSRF, timeout) keep
+  // their Set-Cookie, as in the sidecar.
+  let res: Response;
+  try {
+    res = await performFetch(fetchInit as RequestInit);
+
+    // Reactive 401-refresh-retry — mirror of the sidecar
+    // (`executeApiCall`, runtime-pi/sidecar/credential-proxy.ts). The public route is
+    // used by CLI / GitHub Action / self-hosted runners, which were silently
+    // 401-ing whenever the stored OAuth access_token expired because the
+    // refresh logic only fired on streaming bodies. Buffered bodies can be
+    // replayed safely → refresh + retry once. Streaming bodies fall through
+    // to the authRefreshed escape-hatch below (caller must re-issue with a
+    // fresh body stream).
+    if (res.status === 401 && !isStreamBody && credentialInjection.kind === "inject") {
+      try {
+        const refreshedResult = await forceRefreshIntegrationProxyCredentials({
+          integrationId: input.integrationId,
+          spaceId: input.spaceId,
+          actor: input.actor,
+          ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+        });
+        const refreshed = refreshedResult?.payload ?? null;
+        if (refreshed) {
+          // Rebuild the credential header from the rotated token. Drop the
+          // previous platform-injected value first so the refreshed delivery
+          // plan can install its current header name and value cleanly.
+          headers.delete(credentialInjection.header.name);
+          if (refreshed.credentialHeaderName) {
+            // Keep the strip set in sync — the refreshed payload may name a
+            // different header than the original resolution.
+            sensitiveHeaderNames.add(refreshed.credentialHeaderName);
+          }
+          credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, refreshed);
+          res = await performFetch({
+            ...fetchInit,
+            headers,
+          } as RequestInit);
+        }
+      } catch {
+        // Refresh itself failed transiently (network hiccup, upstream 5xx, …)
+        // — surface the original 401 as-is; the caller will
+        // handle re-authentication. `forceRefresh` flips `needsReconnection`
+        // on BOTH terminal shapes before it gets here: a revoked refresh token
+        // and an unrefreshable OAuth client. Both now return `null` rather
+        // than throwing (the dedicated error class had one throw site whose
+        // only catch was unreachable), so the flag is what separates TERMINAL
+        // from transient — not the two terminal shapes from each other.
+        // Transient failures deliberately leave the row untouched — nothing is
+        // marked, and the next call retries.
+      }
+    }
+  } finally {
+    await persistJar();
   }
 
   // Streaming body on 401: credentials may be stale. Force-refresh them

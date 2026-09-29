@@ -298,6 +298,25 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     ]);
   });
 
+  it("keeps a redirect hop's session when the next hop is refused", async () => {
+    const packageId = "@cpcookieorg/shop";
+    await cookieCredential(packageId);
+    const upstream = recordingUpstream((url) =>
+      url.endsWith("/cart/add")
+        ? redirect("https://8.8.8.8/elsewhere", "PHPSESSID=new; Path=/")
+        : new Response("{}", { status: 200 }),
+    );
+
+    await expect(call(packageId, "https://1.1.1.1/cart/add", upstream.fetchImpl)).rejects.toThrow();
+    await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
+
+    expect(upstream.seen.map((s) => s.request)).toEqual([
+      "POST https://1.1.1.1/cart/add",
+      "POST https://1.1.1.1/cart",
+    ]);
+    expect(upstream.seen[1]?.cookie).toBe("PHPSESSID=new");
+  });
+
   it("falls back to the injected session on the hop after a redirect deletes the cookie", async () => {
     const packageId = "@cpcookieorg/shop";
     await cookieCredential(packageId);

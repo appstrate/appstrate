@@ -96,12 +96,12 @@ export function cookieScope(
         const eq = pair.indexOf("=");
         const name = pair.slice(0, eq).trim();
         if (eq < 0 || !name) continue;
-        if (isDeletion(attributes)) byName.delete(name);
-        else byName.set(name, `${name}=${pair.slice(eq + 1).trim()}`);
+        byName.delete(name); // re-set moves the name to the newest position
+        if (!isDeletion(attributes)) byName.set(name, `${name}=${pair.slice(eq + 1).trim()}`);
       }
       for (const name of byName.keys()) {
         if (byName.size <= MAX_COOKIES_PER_ORIGIN) break;
-        byName.delete(name); // oldest-inserted first
+        byName.delete(name); // least recently set first
       }
       if (byName.size) jar.set(k, [...byName.values()]);
       else jar.delete(k);
