@@ -21,7 +21,11 @@
  *   - URI restrictions: `authorized_uris`, `allow_all_uris`.
  */
 
-import { getApiCallConfigs, type IntegrationManifest } from "@appstrate/core/integration";
+import {
+  getApiCallConfigs,
+  selectedApiCallConfigs,
+  type IntegrationManifest,
+} from "@appstrate/core/integration";
 import { isToolsWildcard } from "@appstrate/core/dependencies";
 import type { IntegrationSpawnSpec, ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
 import type { TokenEndpointAuthMethod } from "@appstrate/connect";
@@ -323,30 +327,16 @@ export function authKeysServingSelection(
 ): ReadonlySet<string> | null {
   if (selection === undefined || selection.length === 0) return null;
   const kind = getIntegrationSourceKind(manifest);
-  const hasServer = kind === "local" || kind === "remote";
-  const apiCalls = getApiCallConfigs(manifest);
-  let serving: Set<string>;
-  if (isToolsWildcard(selection)) {
-    if (hasServer) return null;
-    serving = new Set(apiCalls.map((cfg) => cfg.authKey));
-  } else {
-    const picked = new Set(selection);
+  if (kind === "local" || kind === "remote") {
+    if (isToolsWildcard(selection)) return null;
     const apiCallNames = new Set(
-      apiCalls.flatMap((cfg) =>
+      getApiCallConfigs(manifest).flatMap((cfg) =>
         cfg.uploadToolName ? [cfg.toolName, cfg.uploadToolName] : [cfg.toolName],
       ),
     );
-    if (hasServer && selection.some((name) => !apiCallNames.has(name))) return null;
-    serving = new Set(
-      apiCalls
-        .filter(
-          (cfg) =>
-            picked.has(cfg.toolName) ||
-            (cfg.uploadToolName !== undefined && picked.has(cfg.uploadToolName)),
-        )
-        .map((cfg) => cfg.authKey),
-    );
+    if (selection.some((name) => !apiCallNames.has(name))) return null;
   }
+  const serving = new Set(selectedApiCallConfigs(manifest, selection).map((cfg) => cfg.authKey));
   return serving.size === 0 ? null : serving;
 }
 

@@ -330,14 +330,16 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
  * Project the internal `runs.resolved_connections` snapshot into the
  * display-safe `connections_used` wire shape. Drops the raw `connectionId`
  * (internal state) and keeps the denormalized label/account so the panel
- * renders even after the connection is renamed or deleted. Empty/absent → null.
+ * renders even after the connection is renamed or deleted. A stored snapshot
+ * may lack the label/account (the column's type allows it); those project as
+ * null. Empty/absent → null.
  */
 function projectConnectionsUsed(
   resolved: typeof runs.$inferSelect.resolvedConnections,
 ): RunConnectionUsed[] | null {
   if (!resolved || typeof resolved !== "object") return null;
   const used = Object.entries(resolved).flatMap(([integrationId, bound]) =>
-    (bound ?? []).map((v) => ({
+    bound.map((v) => ({
       integration_id: integrationId,
       label: v.label ?? null,
       account_id: v.accountId ?? null,

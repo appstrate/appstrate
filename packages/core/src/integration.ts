@@ -982,6 +982,26 @@ export function resolveEffectiveToolSelection(
 }
 
 /**
+ * The api_call capabilities a tool selection grants: every one under the `"*"` wildcard, else
+ * each whose `api_call` or `api_upload` companion the selection names — the pair is granted
+ * together, since an upload dispatches every chunk through its sibling api_call. `undefined`
+ * grants none. Pass the EFFECTIVE selection ({@link resolveEffectiveToolSelection}).
+ */
+export function selectedApiCallConfigs(
+  manifest: IntegrationManifest,
+  selection: readonly string[] | "*" | undefined,
+): ApiCallConfig[] {
+  const configs = getApiCallConfigs(manifest);
+  if (isToolsWildcard(selection)) return configs;
+  const picked = new Set(selection ?? []);
+  return configs.filter(
+    (cfg) =>
+      picked.has(cfg.toolName) ||
+      (cfg.uploadToolName !== undefined && picked.has(cfg.uploadToolName)),
+  );
+}
+
+/**
  * True when `name` is an api_call tool name — the bare `api_call` or a
  * per-auth `api_call__{authToken}` variant. Used to recognise api_call selections
  * that never appear in `tools_policy`.
@@ -1325,11 +1345,10 @@ export interface ResolvedConnection {
   /**
    * Connection label + account identifier, denormalized at run kickoff so the
    * run's "connexions utilisées" panel survives the connection being renamed
-   * or deleted (same rationale as `runs.agent_scope`/`agent_name`). Absent on
-   * runs created before this snapshot existed.
+   * or deleted (same rationale as `runs.agent_scope`/`agent_name`).
    */
-  label?: string | null;
-  accountId?: string | null;
+  label: string;
+  accountId: string;
 }
 
 /**

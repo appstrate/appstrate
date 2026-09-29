@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New export `selectedApiCallConfigs(manifest, selection)`
+  (`@appstrate/core/integration`)** — the `ApiCallConfig`s a tool selection
+  grants: all under `"*"`, else each whose `api_call` or `api_upload` companion
+  the selection names (the pair is granted together); `undefined` grants none.
+  Pass the effective selection (`resolveEffectiveToolSelection`).
 - **New export `MAX_CONNECTIONS_PER_INTEGRATION` (`@appstrate/core/integration`)** —
   the cap on how many connections one declared integration may bind in a single
   run (10). Enforced at every WRITE (pins, org defaults, run and schedule
@@ -90,8 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ConnectionOverrides` is `Record<string, string[]>` (was
     `Record<string, string>`), 1..`MAX_CONNECTIONS_PER_INTEGRATION` ids per key;
   - `ResolvedConnectionMap` is `Record<string, ResolvedConnection[]>` (was
-    `Record<string, ResolvedConnection>`); `ResolvedConnection` itself is
-    unchanged;
+    `Record<string, ResolvedConnection>`);
   - `InlineRunBody.connection_overrides` is `Record<string, string[]>` (was
     `Record<string, string>`);
   - `IntegrationSpawnSpec` gains an optional
@@ -123,6 +127,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`@appstrate/core/integration`) and `ResolutionFieldError.candidate_connections[].label`
   (`@appstrate/core/api-errors`) are `string` (were `string | null`):
   `integration_connections.label` is `NOT NULL` and never empty.
+  `ResolvedConnection.label` and `ResolvedConnection.accountId` are required
+  `string` (were optional `string | null`) for the same reason: the resolver
+  always sets both from `NOT NULL` columns.
 
 - **BREAKING: `ConnectionCandidate` gains a required `needsReconnection: boolean`**
   (`@appstrate/core/integration`), mirrored as `needs_reconnection` on

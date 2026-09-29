@@ -32,7 +32,7 @@ import {
   resolveAfpsHttpDelivery,
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
-import { getApiCallConfigs, resolveEffectiveToolSelection } from "@appstrate/core/integration";
+import { resolveEffectiveToolSelection, selectedApiCallConfigs } from "@appstrate/core/integration";
 import type {
   IntegrationManifest,
   ResolvedConnection,
@@ -312,28 +312,14 @@ async function resolveOne(
   // api_call is the generic credential-injecting tool, declared via the
   // `_meta["dev.appstrate/api"]` vendor extension (orthogonal to source kind —
   // a `local`/`remote`/`none` integration may all expose it). Each opted-in
-  // auth yields one tool; we keep only the ones the agent actually selected
-  // (least-privilege: the catch-all tool is never auto-granted). `authorized_uris`
-  // come from each api_call auth.
-  // AFPS §4.4 wildcard — when the agent opted into all upstream tools, the
-  // synthetic api_call tool(s) are auto-granted alongside the upstream surface.
-  // Otherwise filter to what the agent explicitly picked.
-  //
-  // `api_call` and its `api_upload` companion are granted as a pair: the upload
-  // orchestration dispatches every chunk through the sibling api_call tool, so
-  // selecting one without the other would either expose a broken upload tool or
-  // silently drop a selected capability. Picking either name grants both.
-  // Each api_call belongs to ONE auth: a spec keeps only its connection's (below).
+  // auth yields one tool; only those the selection grants are kept — all under
+  // the AFPS §4.4 wildcard, else each picked api_call/api_upload pair (least
+  // privilege: the catch-all tool is never auto-granted). `authorized_uris`
+  // come from each api_call auth. Each api_call belongs to ONE auth: a spec
+  // keeps only its connection's (below).
   const wildcardSelection = isToolsWildcard(effectiveSelection);
-  const selectedTools = wildcardSelection ? null : new Set(effectiveSelection ?? []);
-  const selectedApiCalls: ApiCallSpec[] = getApiCallConfigs(manifest)
-    .filter(
-      (cfg) =>
-        wildcardSelection ||
-        selectedTools!.has(cfg.toolName) ||
-        (cfg.uploadToolName !== undefined && selectedTools!.has(cfg.uploadToolName)),
-    )
-    .map((cfg) => {
+  const selectedApiCalls: ApiCallSpec[] = selectedApiCallConfigs(manifest, effectiveSelection).map(
+    (cfg) => {
       const auth = manifest.auths?.[cfg.authKey] as AfpsManifestAuth | undefined;
       return {
         authKey: cfg.authKey,
@@ -342,7 +328,8 @@ async function resolveOne(
         ...(auth?.allow_all_uris ? { allowAllUris: true } : {}),
         ...(cfg.uploadProtocols.length > 0 ? { uploadProtocols: cfg.uploadProtocols } : {}),
       } satisfies ApiCallSpec;
-    });
+    },
+  );
   const apiCallAuthKeys = new Set(selectedApiCalls.map((cfg) => cfg.authKey));
 
   // ── Resolve the sidecar server spec from the AFPS `source`
@@ -516,22 +503,13 @@ async function resolveOne(
 
   if (!boundConnections?.length) {
     // No verdict ⇔ the cascade judged it inert: no tool to expose, nothing to spawn.
-    if (!wildcardSelection && selectedTools!.size === 0) return { specs: [], drops: [] };
+    if (!wildcardSelection && !effectiveSelection?.length) return { specs: [], drops: [] };
     throw new Error(
       `integration '${integrationId}' exposes tools but the run's connection snapshot binds no connection to it`,
     );
   }
-  const picks = boundConnections.map((pick) => {
-    if (!pick.label) {
-      throw new Error(
-        `integration '${integrationId}': bound connection ${pick.connectionId} carries no label in the run's snapshot`,
-      );
-    }
-    return { pick, label: pick.label };
-  });
-
   const outcomes = await Promise.all(
-    picks.map(async ({ pick, label }): Promise<IntegrationSpawnSpec | IntegrationDrop> => {
+    boundConnections.map(async (pick): Promise<IntegrationSpawnSpec | IntegrationDrop> => {
       const deliveries = await resolveDeliveries(
         integrationId,
         spaceId,
@@ -542,7 +520,7 @@ async function resolveOne(
         referencedMcpServer,
         requiredAuthKey,
       );
-      if (!deliveries) return { reason: "no_delivery", connectionLabel: label };
+      if (!deliveries) return { reason: "no_delivery", connectionLabel: pick.label };
       const apiCalls = selectedApiCalls.filter((cfg) => cfg.authKey === deliveries.authKey);
 
       // Per connection: the login primitive belongs to the connection's AUTH.
@@ -568,7 +546,7 @@ async function resolveOne(
         namespace: integrationId,
         connection: {
           id: pick.connectionId,
-          label,
+          label: pick.label,
           accountId: displayAccountId(pick.accountId),
         },
         sourceKind: specSourceKind,

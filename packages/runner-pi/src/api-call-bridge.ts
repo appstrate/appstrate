@@ -26,10 +26,10 @@ import {
   type Tool as AfpsTool,
   type ToolContext as AfpsToolContext,
 } from "@appstrate/afps-runtime/resolvers";
-import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
+import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import {
-  getApiCallConfigs,
   resolveEffectiveToolSelection,
+  selectedApiCallConfigs,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 
@@ -104,10 +104,10 @@ export async function buildApiCallExtensionFactory(
 }
 
 /**
- * The api_call tools the platform grants this integration (its spawn resolver's rule): those
- * the EFFECTIVE selection names — the agent's `tools`, else the integration's `default_tools`;
- * `"*"` grants all, an `api_upload` pick grants its api_call. Anything else would expose a tool
- * whose integration the run's connection snapshot skipped as inert, which the proxy refuses.
+ * The api_call tools the platform grants this integration: those its EFFECTIVE selection (the
+ * agent's `tools`, else the integration's `default_tools`) grants, by the rule the spawn
+ * resolver applies. Anything else would expose a tool whose integration the run's connection
+ * snapshot skipped as inert, which the proxy refuses.
  */
 function selectedApiCallToolNames(
   manifest: unknown,
@@ -116,17 +116,7 @@ function selectedApiCallToolNames(
   if (!manifest || typeof manifest !== "object") return new Set();
   const integration = manifest as IntegrationManifest;
   const selection = resolveEffectiveToolSelection(agentTools, integration);
-  const picked = isToolsWildcard(selection) ? null : new Set(selection ?? []);
-  return new Set(
-    getApiCallConfigs(integration)
-      .filter(
-        (cfg) =>
-          picked === null ||
-          picked.has(cfg.toolName) ||
-          (cfg.uploadToolName !== undefined && picked.has(cfg.uploadToolName)),
-      )
-      .map((cfg) => cfg.toolName),
-  );
+  return new Set(selectedApiCallConfigs(integration, selection).map((cfg) => cfg.toolName));
 }
 
 function makeApiCallExtension(
