@@ -149,9 +149,6 @@ export const integrationConnections = pgTable(
     index("idx_integration_conn_end_user")
       .on(table.endUserId)
       .where(sql`${table.endUserId} IS NOT NULL`),
-    // spaceId-only scans (FK cascade on space delete) — not covered by
-    // the lookup index (which leads with integrationId).
-    index("idx_integration_conn_space").on(table.spaceId),
     // Hot path for the fallback resolution: when an actor has no pin
     // and no override, the resolver enumerates own + shared connections
     // for (space, integration, authKey). Partial index keeps the sharing
@@ -160,7 +157,9 @@ export const integrationConnections = pgTable(
       .on(table.spaceId, table.integrationId, table.authKey)
       .where(sql`${table.sharedWithOrg} = true`),
     // A bound set spans owners of one (space, integration) and a tool call
-    // names its connection by label, so no two rows there share one.
+    // names its connection by label, so no two rows there share one. Its
+    // leading spaceId also serves spaceId-only scans (FK cascade on space
+    // delete).
     uniqueIndex("idx_integration_conn_label").on(table.spaceId, table.integrationId, table.label),
     check(
       "integration_conn_exactly_one_owner",

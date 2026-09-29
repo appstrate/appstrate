@@ -22,6 +22,9 @@
 -- batch rolls back whole. The backfill above cannot make one: every label it
 -- mints is a "Connexion N" above every "Connexion <n>" of the group, and two
 -- minted labels differ in N.
+--
+-- That index leads with `space_id`, so it also serves the space-only scans
+-- (FK cascade on space delete) `idx_integration_conn_space` existed for.
 ALTER TABLE "integration_pins" ADD COLUMN "connection_ids" uuid[];--> statement-breakpoint
 UPDATE "integration_pins" SET "connection_ids" = ARRAY["connection_id"];--> statement-breakpoint
 ALTER TABLE "integration_pins" ALTER COLUMN "connection_ids" SET NOT NULL;--> statement-breakpoint
@@ -37,4 +40,5 @@ CREATE INDEX "idx_integration_org_defaults_connection_ids" ON "integration_org_d
 UPDATE "integration_connections" c SET "label" = 'Connexion ' || (g."base" + f."rank") FROM (SELECT "id", "space_id", "integration_package_id", row_number() OVER (PARTITION BY "space_id", "integration_package_id" ORDER BY "created_at", "id") AS "rank" FROM "integration_connections" WHERE "label" IS NULL OR "label" = '') f JOIN (SELECT "space_id", "integration_package_id", coalesce(max(substring("label" FROM '^Connexion ([0-9]+)$')::numeric), 0) AS "base" FROM "integration_connections" GROUP BY "space_id", "integration_package_id") g ON g."space_id" = f."space_id" AND g."integration_package_id" = f."integration_package_id" WHERE c."id" = f."id";--> statement-breakpoint
 ALTER TABLE "integration_connections" ALTER COLUMN "label" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "integration_connections" ADD CONSTRAINT "integration_connections_label_not_empty" CHECK (label <> '');--> statement-breakpoint
-CREATE UNIQUE INDEX "idx_integration_conn_label" ON "integration_connections" USING btree ("space_id","integration_package_id","label");
+CREATE UNIQUE INDEX "idx_integration_conn_label" ON "integration_connections" USING btree ("space_id","integration_package_id","label");--> statement-breakpoint
+DROP INDEX "idx_integration_conn_space";

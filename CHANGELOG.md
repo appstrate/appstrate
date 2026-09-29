@@ -64,13 +64,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   every NULL or empty `label` `Connexion N` counting on from the highest
   `Connexion <n>` of its (space, integration) across all owners, then sets the
   column `NOT NULL` with a `CHECK (label <> '')` and a unique index on
-  (space, integration, label). `0032` is idempotent and prints its counts
+  (space, integration, label), which also serves the space-only scans, so it
+  drops `idx_integration_conn_space`. `0032` is idempotent and prints its counts
   before and after; every "after" must read 0. Schedule job data held in
   Redis needs no rewrite: a fire now reads only the job's `scheduleId` and
   runs what the schedule row holds (see `### Fixed`). The runbook, with the control query that
   tells "nothing to rewrite" apart from "nothing at all", is
   `scripts/migration/README.md`. Existing pins and defaults stay valid: each
   becomes a set of one.
+
+- **Deploy the platform and the runtime images (`appstrate-pi` /
+  `appstrate-sidecar`) at the same version.** The platform's internal
+  credential routes now require the `connection_id` of a run-bound connection,
+  which only this release's sidecar sends (one per member of a connection set):
+  an older sidecar gets `400` and its integration tools fail. Docker-mode dev
+  hosts rebuild the pair with `bun run docker:build:runtime`.
 
 - **Upgrade notes — who loses an implicit shared connection.**
   - End-users are not covered by the freeze: they own no member pins. An
