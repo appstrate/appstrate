@@ -49,11 +49,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **A rejected API key no longer warns on every call.** The sidecar reports
-  an upstream `401` to the platform, which answers `502` on purpose for an auth
-  it cannot refresh while it counts the rejection toward flagging the
-  connection. The sidecar still sends that report, but no longer logs the
-  expected `502` as a warning; an OAuth refresh failure still warns.
+- **The sidecar no longer logs the expected `502` of a rejected API key as a
+  warning.** It reports an upstream `401` to the platform, which answers `502`
+  on purpose for an auth it cannot refresh while it counts the rejection
+  toward flagging the connection. The report is still sent; a failed OAuth
+  refresh still warns.
 
 - **Runs on an `openai-compatible` model that is not aliased reach
   `/chat/completions` again**. The agent installed its credential with
