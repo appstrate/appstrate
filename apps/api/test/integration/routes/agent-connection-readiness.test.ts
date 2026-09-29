@@ -90,7 +90,12 @@ interface ReadinessResolution {
 }
 interface ReadinessBody {
   blocks_run: boolean;
-  errors: Array<{ field: string; code: string; connection_id?: string }>;
+  errors: Array<{
+    field: string;
+    code: string;
+    connection_id?: string;
+    required_auth_key?: string;
+  }>;
   integrations: Array<{
     integration_id: string;
     run_blocking: boolean;
@@ -390,6 +395,67 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     expect(integ!.resolution.resolved_connection_ids).toEqual([]);
     // Candidates carry the resolver's serving-auth filter: the `backup` row serves nothing.
     expect(integ!.resolution.candidates).toEqual([]);
+  });
+
+  // The agent's own auth_key serving none of its selection is a configuration error, reported
+  // as such — not `auth_key_mismatch` against the actor's connection on the serving auth.
+  it("agent auth_key serving no selected tool → configuration error (parity)", async () => {
+    const auth = {
+      type: "api_key" as const,
+      authorizedUris: ["https://api.example.com/**"],
+      credentialFields: ["api_key"],
+    };
+    const manifest = apiIntegrationManifest({
+      name: INTEGRATION,
+      auths: { primary: auth, backup: auth },
+    });
+    (manifest as unknown as { _meta: unknown })._meta = {
+      "dev.appstrate/api": { auths: { primary: {}, backup: {} } },
+    };
+    await seedAgentWith({
+      ...buildAgentManifest([INTEGRATION], false),
+      integrations_configuration: {
+        [INTEGRATION]: { tools: ["api_call__primary"], auth_key: "backup" },
+      },
+    });
+    await seedPackage({
+      id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      draftManifest: manifest,
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    await db.insert(integrationConnections).values({
+      integrationId: INTEGRATION,
+      authKey: "primary",
+      accountId: "main",
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      endUserId: null,
+      credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+      scopesGranted: [],
+      label: "main",
+    });
+
+    const body = (await (await getReadiness()).json()) as ReadinessBody;
+    expect(body.blocks_run).toBe(true);
+    expect(body.errors.find((e) => e.field === `integrations.${INTEGRATION}`)).toMatchObject({
+      code: "auth_key_serves_no_selected_tool",
+      required_auth_key: "backup",
+    });
+    const integ = body.integrations.find((i) => i.integration_id === INTEGRATION);
+    expect(integ!.run_blocking).toBe(true);
+    expect(integ!.resolution).toMatchObject({
+      source: null,
+      error_code: "auth_key_serves_no_selected_tool",
+    });
+
+    const run = await postRun();
+    expect(run.status).toBe(409);
+    const problem = (await run.json()) as { errors: Array<{ field: string; code: string }> };
+    const item = problem.errors.find((e) => e.field === `integrations.${INTEGRATION}`);
+    expect(item!.code).toBe("auth_key_serves_no_selected_tool");
   });
 });
 

@@ -2,8 +2,12 @@
 
 import type { IntegrationAgentResolution } from "@appstrate/shared-types";
 
-/** A broken explicit set never reaches an empty trigger: the picker names that set whole. */
-type EmptyPickerPrompt = "choose" | "connect";
+/**
+ * A broken explicit set never reaches an empty trigger: the picker names that set whole.
+ * `reconfigure`: the agent's own `auth_key` serves none of its selected tools — no pick or
+ * connection clears it, so nothing is offered.
+ */
+type EmptyPickerPrompt = "choose" | "connect" | "reconfigure";
 
 interface ResolutionView {
   /** The admin pin, else an enforced org default — read off the stored configuration. */
@@ -30,6 +34,11 @@ export function describeResolution(resolution: IntegrationAgentResolution): Reso
     byDefault: source === "org_default" || source === "fallback_auto",
     softDefaultIds: source === "org_default" ? resolution.org_default_connection_ids : [],
     resolved: code === null && resolution.resolved_connection_ids.length > 0,
-    emptyPickerPrompt: code === "must_choose_connection" ? "choose" : "connect",
+    emptyPickerPrompt:
+      code === "must_choose_connection"
+        ? "choose"
+        : code === "auth_key_serves_no_selected_tool"
+          ? "reconfigure"
+          : "connect",
   };
 }

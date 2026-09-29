@@ -135,11 +135,14 @@ describe("describeResolution — soft default set", () => {
 });
 
 describe("describeResolution — empty picker prompt", () => {
-  it("asks for a pick or a connection", () => {
+  it("asks for a pick, a connection, or the agent's reconfiguration", () => {
     const cases = [
       ["must_choose_connection", "choose"],
       ["not_connected", "connect"],
       ["needs_reconnection", "connect"],
+      ["auth_key_mismatch", "connect"],
+      // The agent's own auth_key serves none of its selected tools: no connection clears it.
+      ["auth_key_serves_no_selected_tool", "reconfigure"],
       [null, "connect"],
     ] as const;
     for (const [error_code, prompt] of cases) {

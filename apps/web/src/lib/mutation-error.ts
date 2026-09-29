@@ -27,6 +27,7 @@ const REFUSAL_ERROR_KEYS: Record<string, string> = {
   insufficient_scopes: "error.insufficientScopes",
   auth_key_mismatch: "error.authKeyMismatch",
   auth_serves_no_selected_tool: "error.authServesNoSelectedTool",
+  auth_key_serves_no_selected_tool: "error.authKeyServesNoSelectedTool",
 };
 
 export function refusalMessage(err: { code: string; param?: string }): string | null {

@@ -68,8 +68,8 @@ const IN_PLACE_CODES: ReadonlySet<string> = new Set(["insufficient_scopes", "nee
  * colleague's credential.
  *
  * Everything else is refused: `must_choose_connection` is a choice, not a
- * missing connection, and `auth_key_mismatch` needs the user to change the
- * agent, not to connect.
+ * missing connection, and `auth_key_mismatch` and `auth_key_serves_no_selected_tool`
+ * need the user to change the agent, not to connect.
  */
 export function connectOfferTarget(e: ResolutionFieldError): ConnectOfferTarget | null {
   if (!e.field.startsWith(FIELD_PREFIX)) return null;

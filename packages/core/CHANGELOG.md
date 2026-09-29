@@ -78,8 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `insufficient_scopes`; now on `needs_reconnection`, `insufficient_scopes`,
   `auth_serves_no_selected_tool`, `pinned_connection_unavailable` and
   `override_connection_unavailable`. Still absent when no layer bound anything
-  (`not_connected`, `must_choose_connection`, `auth_key_mismatch`). The field's
-  type is unchanged.
+  (`not_connected`, `must_choose_connection`, `auth_key_mismatch`,
+  `auth_key_serves_no_selected_tool`). The field's type is unchanged.
 
 - **`RunOrchestrator.initialize()` may be called again after it rejects**
   (`@appstrate/core/platform-types`, #1129) — the platform retries it in the
@@ -114,14 +114,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first connection": the array is the only accepted shape, and a value left in
   the old one fails loudly. Wrap each existing value in an array.
 
-- **BREAKING: `ConnectionResolutionErrorCode` gains `auth_serves_no_selected_tool`**
-  (`@appstrate/core/integration`), raised when a connection an explicit layer
+- **BREAKING: `ConnectionResolutionErrorCode` gains `auth_serves_no_selected_tool`
+  and `auth_key_serves_no_selected_tool`** (`@appstrate/core/integration`).
+  `auth_serves_no_selected_tool` is raised when a connection an explicit layer
   binds (pin, org default, run or schedule override) is on an auth that exposes
   none of the agent's selected tools; it carries that `connectionId`. The
   fallback raises `not_connected` instead, its `authKey` restricted to auths
-  that serve the selection. Exhaustive `switch`es over the code must handle it.
-  A bound set needs no label check: labels are unique per (space, integration)
-  in the platform's schema.
+  that serve the selection. A bound set needs no label check: labels are unique
+  per (space, integration) in the platform's schema.
+  `auth_key_serves_no_selected_tool` is the agent's configuration, not a
+  connection: its own `auth_key` (AFPS §4.1) names a declared auth that exposes
+  none of its selected tools. It is raised before any connection is considered,
+  carries `requiredAuthKey` and no `connectionId`, and no connect flow clears it.
+  `ConnectionResolutionError.requiredAuthKey` and
+  `ResolutionFieldError.required_auth_key` (`@appstrate/core/api-errors`) are set
+  on it as well as on `auth_key_mismatch`. Exhaustive `switch`es over the code
+  must handle both.
 
 - **BREAKING: a connection label is never null.** `ConnectionCandidate.label`
   (`@appstrate/core/integration`) and `ResolutionFieldError.candidate_connections[].label`

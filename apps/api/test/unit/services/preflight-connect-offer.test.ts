@@ -148,6 +148,8 @@ describe("connectOfferTarget", () => {
       "must_choose_connection",
       "auth_key_mismatch",
       "auth_serves_no_selected_tool",
+      // The agent's own auth_key serves no selected tool: no consent clears it.
+      "auth_key_serves_no_selected_tool",
       "pinned_connection_unavailable",
       "override_connection_unavailable",
       "integration_not_active",

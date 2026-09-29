@@ -184,6 +184,25 @@ export function IntegrationConnectionPicker({
   const { lockedConnectionIds, byDefault, softDefaultIds, emptyPickerPrompt } =
     describeResolution(resolution);
 
+  // Nothing to pick or connect: the agent's configuration must change, whatever the lock.
+  if (emptyPickerPrompt === "reconfigure") {
+    return (
+      <div data-testid={`member-picker-${integrationId}`}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled
+          className="h-7 justify-start gap-1.5 text-xs text-amber-600 dark:text-amber-400"
+          title={t("error.authKeyServesNoSelectedTool")}
+          data-testid={`member-pick-reconfigure-${integrationId}`}
+        >
+          <AlertTriangle className="size-3" />
+          <span className="truncate">{t("detail.integrationMemberPicker.reconfigureLabel")}</span>
+        </Button>
+      </div>
+    );
+  }
+
   const byId = (id: string): IntegrationCandidate | undefined =>
     candidates.find((c) => c.id === id);
   const ownerLabel = (c: IntegrationCandidate): string =>

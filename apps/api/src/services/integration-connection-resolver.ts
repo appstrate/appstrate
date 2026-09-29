@@ -55,7 +55,10 @@ import type { Actor } from "../lib/actor.ts";
 import { actorOrSharedFilter } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
-import { authKeysServingSelection } from "./integration-manifest-helpers.ts";
+import {
+  authKeysServingSelection,
+  authKeyServingNoSelectedTool,
+} from "./integration-manifest-helpers.ts";
 import {
   listOrgDefaultsForResolver,
   type OrgDefaultPick,
@@ -150,6 +153,22 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
           );
     const liveIndex = new Map<string, ConnectionRow>();
     for (const c of liveConnections) liveIndex.set(c.id, c);
+
+    // The agent's configuration, not a connection: no connection, pin or override clears it.
+    const misfit = authKeyServingNoSelectedTool(
+      req.manifest,
+      req.requiredAuthKey,
+      req.effectiveTools,
+    );
+    if (misfit !== null) {
+      errors.push({
+        integrationId: req.integrationId,
+        code: "auth_key_serves_no_selected_tool",
+        requiredAuthKey: misfit.authKey,
+        message: `The agent requires auth '${misfit.authKey}' for ${req.integrationId}, which exposes none of its selected tools (auths that do: ${misfit.servingAuthKeys.join(", ")}) — the agent's auth_key or its tool selection must change.`,
+      });
+      continue;
+    }
 
     // AFPS §4.1 `auth_key`: pre-filtered so every layer honours it.
     const integrationCandidates = liveConnections.filter(
@@ -752,10 +771,9 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
           ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
         }
       : {}),
-    // AFPS §4.1 — surface the pinned `auth_key` (the agent dep's choice)
-    // and which auth_keys the actor's existing connections use, so the UI
-    // can guide the user to connect via the right auth method.
-    ...(e.code === "auth_key_mismatch"
+    // AFPS §4.1 — surface the agent dep's `auth_key` and, on a mismatch, which auth_keys the
+    // actor's existing connections use, so the UI can guide the user to the right auth method.
+    ...(e.code === "auth_key_mismatch" || e.code === "auth_key_serves_no_selected_tool"
       ? {
           ...(e.requiredAuthKey ? { required_auth_key: e.requiredAuthKey } : {}),
           ...(e.availableAuthKeys && e.availableAuthKeys.length > 0
@@ -775,6 +793,7 @@ const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
   insufficient_scopes: "Insufficient Permissions",
   auth_key_mismatch: "Connection Auth Method Mismatch",
   auth_serves_no_selected_tool: "Connection Auth Serves No Selected Tool",
+  auth_key_serves_no_selected_tool: "Required Auth Exposes No Selected Tool",
 };
 
 async function buildRequirement(

@@ -1366,7 +1366,8 @@ export type ConnectionResolutionErrorCode =
   | "must_choose_connection"
   | "insufficient_scopes"
   | "auth_key_mismatch"
-  | "auth_serves_no_selected_tool";
+  | "auth_serves_no_selected_tool"
+  | "auth_key_serves_no_selected_tool";
 
 /**
  * One connection carried by `must_choose_connection`.
@@ -1432,7 +1433,8 @@ export interface ConnectionResolutionError {
   authKey?: string;
   /**
    * The cascade layer whose set failed, on every layer-bound code; absent when no layer bound
-   * anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`).
+   * anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`,
+   * `auth_key_serves_no_selected_tool`).
    */
   source?: ConnectionResolutionSource;
   /** The failing layer's whole set, in its order. */
@@ -1445,8 +1447,9 @@ export interface ConnectionResolutionError {
    */
   ownedByActor?: boolean;
   /**
-   * AFPS §4.1 — agent dep's pinned `auth_key` when
-   * `code === "auth_key_mismatch"`.
+   * AFPS §4.1 — the agent dep's `auth_key`, on `auth_key_mismatch` and on
+   * `auth_key_serves_no_selected_tool` (an auth exposing none of the selected tools: the
+   * agent's configuration must change, no connection clears it).
    */
   requiredAuthKey?: string;
   /**

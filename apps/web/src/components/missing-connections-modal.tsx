@@ -33,6 +33,7 @@ export interface MissingIntegrationFieldError {
     | "must_choose_connection"
     | "auth_key_mismatch"
     | "auth_serves_no_selected_tool"
+    | "auth_key_serves_no_selected_tool"
     | "pinned_connection_unavailable"
     | "override_connection_unavailable"
     | "integration_not_found"
@@ -56,13 +57,17 @@ export interface MissingIntegrationFieldError {
 /** Per-run picks in the run route's `connection_overrides` shape (`launch-schemas.ts`). */
 type ConnectionOverridesMap = Record<string, string[]>;
 
-/** The package-level verdicts, raised before any account is looked at: no pick fixes them. */
+/**
+ * The package-level verdicts and the agent's own `auth_key` serving none of its selected tools,
+ * all raised before any account is looked at: no pick fixes them.
+ */
 function isStructuralCode(code: string): boolean {
   return (
     code === "integration_not_active" ||
     code === "integration_not_found" ||
     code === "integration_wrong_type" ||
-    code === "integration_invalid_manifest"
+    code === "integration_invalid_manifest" ||
+    code === "auth_key_serves_no_selected_tool"
   );
 }
 
@@ -174,7 +179,7 @@ function MissingRow({
   const { data: detail } = useIntegrationDetail(packageId);
   const readsIntegrations = usePermissions().can("integrations:read");
   // Structural failures can't be fixed by connecting — an admin must activate
-  // the integration or the agent must drop the dependency. No picker.
+  // the integration, or the agent's dependency or configuration must change. No picker.
   const isStructural = isStructuralCode(err.code);
 
   // Server-authoritative verdict — the SAME `IntegrationAgentResolution` the

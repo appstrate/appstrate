@@ -254,6 +254,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     connect flow. The fallback never picks such a connection: with none on a
     serving auth it reports `not_connected`, its `auth_key` naming an auth
     that does serve the selection (when one can be named).
+  - An agent whose own `integrations_configuration.<id>.auth_key` names an auth
+    that exposes none of its selected tools is an agent configuration error,
+    answered before any connection, pin or override is looked at: `errors[].code`
+    `auth_key_serves_no_selected_tool` (new), with `required_auth_key` and no
+    `connection_id`, where it used to surface as `auth_key_mismatch`,
+    `not_connected` or `auth_serves_no_selected_tool`. Readiness reports it as
+    the `error_code` with `source` `null`, the run-kickoff 409 offers no
+    `connect_url`, the run-kickoff modal shows the message with no connection
+    picker, and the agent page's picker offers no connect. Publishing or
+    importing such an agent is refused with `400 auth_key_serves_no_selected_tool`
+    on `integrations_configuration.<id>.auth_key`; a draft save is not, and an
+    inline run gets the 409.
   - `GET /internal/integration-credentials/{scope}/{name}` and its `/refresh`
     sibling REQUIRE `?connection_id=<uuid>`, and it must be one the run's
     snapshot bound — `400 connection_not_in_run` otherwise, naming the bound

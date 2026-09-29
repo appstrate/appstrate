@@ -290,4 +290,21 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(html).not.toContain(`member-pick-locked-${INTEGRATION}`);
     expect(html).toContain(`member-pick-${INTEGRATION}`);
   });
+
+  it("offers neither a pick nor a connect when the agent's auth_key serves no selected tool", () => {
+    const html = renderPicker(
+      resolution({
+        source: null,
+        error_code: "auth_key_serves_no_selected_tool",
+        admin_pinned_connection_ids: [WEB],
+        candidates: [],
+      }),
+      true,
+    );
+    expect(html).toContain(`member-pick-reconfigure-${INTEGRATION}`);
+    expect(html).toContain(t("reconfigureLabel"));
+    expect(html).not.toContain(t("connectLabel"));
+    expect(html).not.toContain(`member-pick-${INTEGRATION}`);
+    expect(html).not.toContain(`member-pick-locked-${INTEGRATION}`);
+  });
 });
