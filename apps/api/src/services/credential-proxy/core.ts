@@ -35,6 +35,8 @@ import {
 import {
   cookieScope,
   credentialUrlPolicy,
+  redactCredentialHost,
+  redactCredentialValues,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
@@ -198,59 +200,6 @@ export class ProxySubstitutionError extends Error {
 // it up. Local helpers removed in Phase A.4.
 
 /**
- * Restore `{{field}}` placeholders for every decrypted credential value that
- * appears in `value`. A caller-supplied template like
- * `https://{{access_token}}.evil.example` interpolates the DECRYPTED token
- * into the target before validation — any error message, log field or wrapped
- * transport error that echoes the substituted string would leak the secret to
- * the caller (the route reflects error messages in 403 bodies) and into logs.
- * This is the ONLY representation of a substituted string allowed to leave
- * this module other than on the wire to the validated upstream.
- *
- * Empty values are skipped (replacing `""` is meaningless), but there is
- * deliberately no minimum length: even a 1-char credential fragment must not
- * be echoed.
- */
-function redactCredentialValues(value: string, fields: Record<string, string>): string {
-  let out = value;
-  for (const [name, fieldValue] of Object.entries(fields)) {
-    if (typeof fieldValue !== "string" || fieldValue.length === 0) continue;
-    out = out.split(fieldValue).join(`{{${name}}}`);
-    // URL normalization (WHATWG parsing inside the egress guard / fetch)
-    // percent-encodes reserved characters — scrub the encoded form too, or a
-    // secret containing e.g. `/` or `+` would survive redaction inside a
-    // normalized URL echoed by a transport error.
-    const encoded = encodeURIComponent(fieldValue);
-    if (encoded !== fieldValue) {
-      out = out.split(encoded).join(`{{${name}}}`);
-    }
-  }
-  return out;
-}
-
-/**
- * The host of `url` for a message — never its path or query. A redirect hop is
- * WHATWG-normalised (percent-encoded path, decoded and lowercased host), so
- * {@link redactCredentialValues} cannot be trusted on the full URL; the host
- * is scrubbed against lowercased credential values instead.
- */
-function redactedHost(url: string, fields: Record<string, string>): string {
-  let host: string;
-  try {
-    host = new URL(url).host;
-  } catch {
-    return "(invalid URL)";
-  }
-  const lowered = Object.fromEntries(
-    Object.entries(fields).map(([name, value]) => [
-      name,
-      typeof value === "string" ? value.toLowerCase() : "",
-    ]),
-  );
-  return redactCredentialValues(host, lowered);
-}
-
-/**
  * Execute one authenticated proxy call. Credentials never leak into the
  * caller's response — the only thing that crosses the boundary is the
  * upstream response headers + body, streamed back as-is.
@@ -332,15 +281,15 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // target here AND — via `guardedFetch`'s `validateHop` — on EVERY redirect
   // hop, so a 302 cannot walk the request off the allowlist (cross-host OR a
   // same-host path escape like `/v1/me` → `/internal/dump`). The message names
-  // the hop's HOST only (see {@link redactedHost}): a hop URL can embed an
-  // interpolated credential (vendor puts the token in a path, or echoes it in
-  // a Location header) in a normalised form value-based redaction misses.
+  // the hop's HOST only (see {@link redactCredentialHost}): a hop URL can embed
+  // an interpolated credential (vendor puts the token in a path, or echoes it
+  // in a Location header) in a normalised form value-based redaction misses.
   const assertHopAuthorized = (hopTarget: string): void => {
     if (policy.allowAllUris) return;
     const ok = policy.authorizedUris.some((p) => matchesAuthorizedUriSpec(p, hopTarget));
     if (!ok) {
       throw new ProxyAuthorizationError(
-        `Target host ${redactedHost(hopTarget, fields)} is not in the authorized_uris allowlist for ${input.integrationId}`,
+        `Target host ${redactCredentialHost(hopTarget, fields)} is not in the authorized_uris allowlist for ${input.integrationId}`,
       );
     }
     // Note: an empty allowlist can never reach here — `allowlist.some(...)` is
@@ -487,7 +436,9 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         // Bun fetch errors carry the request URL — on a redirect hop a
         // normalised one — so every URL is cut down to its redacted host.
         const redacted = redactCredentialValues(
-          err.message.replace(/https?:\/\/[^\s"'<>]+/gi, (url) => redactedHost(url, fields)),
+          err.message.replace(/https?:\/\/[^\s"'<>]+/gi, (url) =>
+            redactCredentialHost(url, fields),
+          ),
           fields,
         );
         if (redacted !== err.message) {

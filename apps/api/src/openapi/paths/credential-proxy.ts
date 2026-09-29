@@ -55,9 +55,8 @@ const proxyParameters = [
       "Absolute URL of the upstream endpoint. Must match the integration manifest auth's " +
       "`authorized_uris` unless `allow_all_uris: true`. `allow_all_uris` is ignored when a " +
       "`{{credential_field}}` placeholder appears in this URL, a header, or a substituted " +
-      "body: the target and every redirect hop must then match `authorized_uris` (plus the " +
-      "origin of any credential field holding an absolute http(s) URL), and the call is " +
-      "refused when that list is empty.",
+      "body: the target and every redirect hop must then match `authorized_uris`, and the " +
+      "call is refused when that list is empty.",
     schema: { type: "string", format: "uri" },
   },
   {
