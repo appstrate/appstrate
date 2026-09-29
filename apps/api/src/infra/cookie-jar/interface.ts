@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Credential-proxy cookie jar — per-session storage of the cookies upstreams
- * set across successive `proxyCall()` invocations sharing one `X-Session-Id`.
+ * Credential-proxy cookie jar — per-session persistent cookie storage
+ * across successive `proxyCall()` invocations. Needed for multi-step OAuth
+ * flows where an integration's first response sets a session cookie that
+ * subsequent calls must carry back.
  *
  * Implementations: in-memory `Map` (single-instance, Tier 0/1) and a
  * Redis-backed store via the shared {@link KeyValueCache} (multi-instance,
- * Tier 2+). Both expose the exact same contract.
+ * Tier 2+ — no loss on round-robin load balancers during an in-progress
+ * OAuth flow). Both expose the exact same contract; callers cannot tell
+ * which backing store they are talking to.
  *
- * One entry per `(sessionId, connectionId)`: one API-key principal can drive
- * several connections (`X-Connection-Id`, `Appstrate-User`) on one session id,
- * and each must keep its own upstream session.
+ * Keyed by `(sessionId, connectionId)` since a single X-Session-Id can
+ * drive calls across multiple connections, each with its own cookie scope.
  */
 
 import type { CookieJar } from "@appstrate/afps-runtime/resolvers";

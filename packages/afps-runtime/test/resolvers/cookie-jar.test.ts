@@ -173,9 +173,25 @@ describe("fetchFollowingRedirectsCapturingCookies — cookie scope", () => {
       authorizedUris: ["https://api.example.com/**"],
     });
 
-    expect(seen).toEqual(["caller=c", "caller=c; stale=old; sess=1"]);
+    expect(seen).toEqual(["caller=c; stale=old", "caller=c; stale=old; sess=1"]);
     expect(ownCookies(jar, API)).toBe("sess=1; last=2");
     expect(jar.size).toBe(1);
+  });
+
+  it("falls back to the initial Cookie on the hop after a mid-chain deletion", async () => {
+    const { seen, fetchFn } = routedFetch({
+      "https://api.example.com/account": () =>
+        redirect("https://api.example.com/login", "PHPSESSID=; Max-Age=0"),
+    });
+    const jar: CookieJar = new Map();
+    cookieScope(jar, "i", null).capture(API, ["PHPSESSID=rotated"]);
+
+    await follow("https://api.example.com/account", "PHPSESSID=injected", fetchFn, jar, {
+      authorizedUris: ["https://api.example.com/**"],
+    });
+
+    expect(seen).toEqual(["PHPSESSID=rotated", "PHPSESSID=injected"]);
+    expect(jar.size).toBe(0);
   });
 
   it("captures a cross-origin hop's cookie under ITS origin, not the initial one", async () => {

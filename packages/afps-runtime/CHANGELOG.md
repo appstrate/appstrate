@@ -11,9 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `fetchFollowingRedirectsCapturingCookies` takes `cookies: CookieScope` in
   place of the `cookieJar` map. Each hop's `Set-Cookie` lands in the bucket of
-  THAT hop's origin (host-only), no longer in the initial target's. Once a
-  cross-origin credential strip fires, the initial `Cookie` header is dropped
-  for the rest of the chain.
+  THAT hop's origin (host-only), no longer in the initial target's, and every
+  hop's `Cookie` (the first included) is composed from `init`'s uncomposed
+  `Cookie`. Once a cross-origin credential strip fires, that `Cookie` is
+  dropped for the rest of the chain.
+- Cookies are host-only: `Domain` is ignored, so a cookie
+  `id.vendor.example` sets with `Domain=vendor.example` is not replayed to
+  `www.vendor.example` unless both hosts are literal `authorized_uris`
+  entries — list both to share it (honouring `Domain` safely would need the
+  Public Suffix List).
 - `mergeSetCookieIntoJar` is no longer exported: `CookieScope.capture`
   replaces it.
 - New `cookieScope(jar, integrationId, literalAllowlist)`, `CookieScope` and

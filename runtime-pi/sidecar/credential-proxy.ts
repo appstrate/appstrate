@@ -366,8 +366,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
       if (refusal) return refusal;
     } else {
-      // The predicate that exempts an operator-named host from the SSRF gate
-      // also lets its cookies be shared with the other literal hosts.
       literalAllowlist = creds.authorizedUris;
     }
   } else if (substitutesCredential) {
@@ -498,15 +496,11 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     }
     // Server-side credential injection (Authorization, X-Api-Key, …).
     const credentialInjection = applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
-    // ONE Cookie header: the injected credential / caller cookies under the
-    // target's own-origin jar cookies (a rotated session wins, a deleted one falls back).
+    // ONE Cookie header (injected credential + caller cookies): the jar's base.
     const cookieKeys = Object.keys(resolvedHeaders).filter((k) => k.toLowerCase() === "cookie");
-    const cookie = cookies.header(
-      resolvedUrl,
-      cookieKeys.map((k) => resolvedHeaders[k]).join("; "),
-    );
+    const baseCookie = cookieKeys.map((k) => resolvedHeaders[k]).join("; ");
     for (const k of cookieKeys) delete resolvedHeaders[k];
-    if (cookie) resolvedHeaders[cookieKeys[0] ?? "cookie"] = cookie;
+    if (baseCookie) resolvedHeaders[cookieKeys[0]!] = baseCookie;
 
     // For the FormData body shape, drop a caller-supplied *multipart*
     // Content-Type (matched case-insensitively on the header NAME) so Bun's
@@ -568,6 +562,9 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       // agent either — it never leaves this module.
       init.duplex = "half";
       init.redirect = "manual";
+      // No follower on this path, so the jar cookies are composed here.
+      const cookie = cookies.header(resolvedUrl, baseCookie);
+      if (cookie) resolvedHeaders[cookieKeys[0] ?? "cookie"] = cookie;
       const response = await fetchFn(resolvedUrl, init);
       // Streaming path issues a single unfollowed request — no manual hops.
       return {
@@ -666,9 +663,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     }
   }
 
-  // 8. Terminal-hop Set-Cookie capture, under the URL that served it. An
-  //    idempotent re-merge for buffered bodies (the follower captured every
-  //    hop); load-bearing for streaming (no follower).
+  // 8. Terminal-hop Set-Cookie capture (buffered: idempotent re-merge; streaming: no follower).
   cookies.capture(upstreamFinalUrl, upstream.headers.getSetCookie());
 
   // 9. Log a persistent auth failure once per integration per run. The flag is

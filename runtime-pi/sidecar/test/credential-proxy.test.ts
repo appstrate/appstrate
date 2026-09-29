@@ -2014,9 +2014,9 @@ describe("executeApiCall — injected Cookie credential meets the jar (#1613)", 
   function scriptedFetch(setCookie: (url: string, n: number) => string | undefined) {
     const sent: string[][] = [];
     const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
-      const headers = (init?.headers ?? {}) as Record<string, string>;
+      const headers = init?.headers ?? {};
       sent.push(
-        Object.entries(headers)
+        (headers instanceof Headers ? [...headers] : Object.entries(headers))
           .filter(([k]) => k.toLowerCase() === "cookie")
           .map(([, v]) => v),
       );
@@ -2025,6 +2025,12 @@ describe("executeApiCall — injected Cookie credential meets the jar (#1613)", 
         return new Response(null, {
           status: 302,
           headers: { location: "https://attacker.myshop.example/set" },
+        });
+      }
+      if (u.endsWith("/logout")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: PAGE, "set-cookie": "PHPSESSID=; Max-Age=0" },
         });
       }
       const value = setCookie(u, sent.length - 1);
@@ -2061,15 +2067,6 @@ describe("executeApiCall — injected Cookie credential meets the jar (#1613)", 
   }
   const PAGE = "https://api.example.com/page";
 
-  it("sends ONE Cookie header carrying the injected session and a captured cookie", async () => {
-    const { sent, fetchFn } = scriptedFetch(byCall("pref=1; Path=/"));
-    const deps = makeDeps({ fetchFn, fetchCredentials: apiCreds });
-    await callEach(deps, [PAGE, PAGE]);
-
-    expect(sent[0]).toEqual(["PHPSESSID=injected"]);
-    expect(sent[1]).toEqual(["PHPSESSID=injected; pref=1"]);
-  });
-
   it.each([
     ["buffered", buffered],
     ["streaming", streaming],
@@ -2091,6 +2088,14 @@ describe("executeApiCall — injected Cookie credential meets the jar (#1613)", 
     expect(sent[1]).toEqual(["PHPSESSID=rotated"]);
     expect(sent[2]).toEqual(["PHPSESSID=injected"]);
     expect(deps.cookieJar.size).toBe(0);
+  });
+
+  it("falls back to the injected session on the hop after a mid-chain deletion", async () => {
+    const { sent, fetchFn } = scriptedFetch(byCall("PHPSESSID=rotated"));
+    const deps = makeDeps({ fetchFn, fetchCredentials: apiCreds });
+    await callEach(deps, [PAGE, "https://api.example.com/logout"]);
+
+    expect(sent.slice(1)).toEqual([["PHPSESSID=rotated"], ["PHPSESSID=injected"]]);
   });
 
   it.each([

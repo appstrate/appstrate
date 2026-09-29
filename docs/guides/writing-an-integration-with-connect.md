@@ -612,9 +612,13 @@ when each run needs a fresh session from a stored secret.
 Cookies the upstream sets during a proxy session (one `X-Session-Id` and connection on
 the platform proxy, one run in the sidecar) are replayed alongside an injected cookie
 credential. A cookie set by the request's own origin wins on the same name, so a rotated
-session sticks and a deletion falls back to the injected value. Cookies from another
-host never override it, and reach it at all only when both hosts are literal
-`authorized_uris` entries.
+session sticks and a deletion falls back to the injected value. A replayed cookie is
+only sent to the origin that set it, or to another host when both are literal
+`authorized_uris` entries, and never overrides the injected value there. The injected
+credential itself still follows redirects inside the declared allowlist as before.
+Cookies are host-only: a cookie `id.vendor.example` sets with `Domain=vendor.example`
+does not reach `www.vendor.example` unless you list both hosts literally in
+`authorized_uris`.
 
 ---
 

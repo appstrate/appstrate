@@ -19,8 +19,8 @@
  *          checks and before re-issuing the fetch,
  *        - applies a hybrid credential-strip (forward credentials inside
  *          a declared allowlist; WHATWG origin-based strip otherwise),
- *        - captures `Set-Cookie` from every hop into that hop's origin
- *          bucket (Bun/Node native fetch only surface the final hop's cookies).
+ *        - captures each hop's `Set-Cookie` into the caller's cookie scope by
+ *          its origin (Bun/Node native fetch only surface the final hop's cookies).
  *
  * What this module deliberately does NOT own:
  *   - HOW credentials are obtained (the sidecar fetches them from the
@@ -70,8 +70,8 @@
  *     Folding the two would mean an option that disables the shared
  *     primitive's central safety property for one caller.
  *   - **Cookie continuity.** Every hop's `Set-Cookie` is captured into the
- *     caller's cookie scope and recomposed onto the next hop (#473). The
- *     shared primitive has no jar and no reason to grow one.
+ *     caller's cookie scope (per hop origin) and recomposed onto the next hop
+ *     (#473). The shared primitive has no jar and no reason to grow one.
  *
  * What the two DO share is now actually shared: the SSRF blocklist
  * (`@appstrate/afps-shared/ssrf`), the DNS-rebind check (`./ssrf-dns`) and the
@@ -265,9 +265,7 @@ interface RedirectFollowOptions {
   url: string;
   init: RequestInit;
   fetchFn: typeof fetch;
-  /** Captures each hop's `Set-Cookie` under its origin; composes each next hop's `Cookie`. */
   cookies: CookieScope;
-  /** Logging only. */
   integrationId: string;
   /** Lowercased name of the credential header server-injected by the caller. */
   injectedCredentialHeader: string | null;
@@ -322,10 +320,8 @@ interface RedirectFollowOptions {
  * native fetch — bodies can't be replayed across hops). The initial-URL
  * allowlist check still bounds the SSRF surface for that path.
  *
- * Each hop's `Set-Cookie` lands in THAT hop's origin bucket (RFC 6265
- * host-only). The initial `Cookie` header is carried to later hops under the
- * next hop's own-origin cookies, and dropped for the rest of the chain once
- * a credential strip has fired.
+ * Each hop's `Set-Cookie` lands in THAT hop's origin bucket; each hop's `Cookie`
+ * is composed over `init`'s, which is dropped for good once a strip fires.
  *
  * Returns the terminal `Response`, the URL it was served from (so
  * callers driving redirect-chain flows — OAuth code, CAS ticket,
@@ -350,10 +346,18 @@ export async function fetchFollowingRedirectsCapturingCookies(
   } = opts;
   const logger = opts.logger ?? NOOP_LOGGER;
   const hasAllowlist = !!authorizedUris && authorizedUris.length > 0;
-  let carried = new Headers(init.headers as RequestInit["headers"]).get("cookie");
+  // Uncomposed, so a cookie deleted mid-chain falls back to it instead of being re-sent.
+  let base = new Headers(init.headers as RequestInit["headers"]).get("cookie");
 
   let currentUrl = url;
   let currentInit: RequestInit = { ...init, redirect: "manual" };
+  const first = cookies.header(url, base);
+  if (first !== (base ?? undefined)) {
+    const headers = new Headers(init.headers as RequestInit["headers"]);
+    if (first) headers.set("cookie", first);
+    else headers.delete("cookie");
+    currentInit.headers = headers;
+  }
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     const response = await fetchFn(currentUrl, currentInit);
@@ -430,12 +434,10 @@ export async function fetchFollowingRedirectsCapturingCookies(
     if (stripCred) {
       headers.delete("authorization");
       if (injectedCredentialHeader) headers.delete(injectedCredentialHeader);
-      // Cookies are credentials too: the initial Cookie header never reaches
-      // any later hop once the chain has left the boundary.
-      carried = null;
+      base = null; // cookies are credentials too
     }
     headers.delete("cookie");
-    const cookie = cookies.header(nextUrl, carried);
+    const cookie = cookies.header(nextUrl, base);
     if (cookie) headers.set("cookie", cookie);
     if (dropBody) {
       headers.delete("content-length");
@@ -460,7 +462,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
  *
  * Runs the initial-URL preflight ({@link preflightUrl}), then dispatches
  * through {@link fetchFollowingRedirectsCapturingCookies} with a fresh
- * per-call cookie scope — gaining the per-hop SSRF + allowlist + credential-strip
+ * per-call jar — gaining the per-hop SSRF + allowlist + credential-strip
  * hardening the sidecar already had. The caller MUST have injected its
  * credential header into `init.headers` already.
  *

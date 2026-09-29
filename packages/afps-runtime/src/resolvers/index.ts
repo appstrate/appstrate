@@ -96,8 +96,7 @@ export {
   RedirectBlockedError,
 } from "./api-call-engine.ts";
 
-// Sticky-cookie jar shared by both credential proxies (sidecar + platform)
-// and the redirect follower above.
+// Sticky-cookie jar shared by both credential proxies and the redirect follower.
 export { cookieScope, type CookieJar, type CookieScope } from "./cookie-jar.ts";
 
 // Integration `api_call` surface — the portable equivalent of the platform's

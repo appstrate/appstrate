@@ -111,8 +111,7 @@ interface ProxyCallInput {
    */
   cookieJar?: CookieJarAdapter;
   /**
-   * Jar lookup key (usually `sessionId`). Combined with the resolved
-   * connection id to scope cookies per connection within one session.
+   * Jar lookup key (usually `sessionId`), combined with the connection id.
    */
   jarSessionId?: string;
   /** TTL applied on each write. Required when `cookieJar` is provided. */
@@ -366,8 +365,6 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     }
   }
 
-  // Cookie jar, scoped like the sidecar's (docs/architecture/SIDECAR.md,
-  // "Sticky-cookie jar scoping"), one per (session, connection).
   const jarStore = input.cookieJar;
   const jarSessionId = input.jarSessionId;
   const jarTtl = input.cookieJarTtlSeconds;
@@ -380,9 +377,6 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
           literalAllowlist,
         )
       : null;
-  // The target's own-origin jar cookies win by name over the injected
-  // credential / caller cookies: an upstream-rotated session must replace
-  // the injected one.
   const applyJarCookies = (): void => {
     const cookie = cookies?.header(target, headers.get("cookie"));
     if (cookie) headers.set("cookie", cookie);
@@ -400,8 +394,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     fetchInit.duplex = "half";
   }
 
-  // Logical URL of the returned response: the last hop `validateHop` passed
-  // (`Response.url` may carry the pinned IP). Set-Cookie is captured under it.
+  // Last hop `validateHop` passed (`Response.url` may be the pinned IP).
   let servedFrom = target;
 
   // Single outbound transport: the SSRF-guarded platform egress primitive.
@@ -459,8 +452,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
 
   let res = await performFetch(fetchInit as RequestInit);
 
-  // Reactive 401-refresh-retry — mirror of the sidecar's (`executeApiCall`,
-  // runtime-pi/sidecar/credential-proxy.ts). The public route is
+  // Reactive 401-refresh-retry — mirror of the sidecar
+  // (`executeApiCall`, runtime-pi/sidecar/credential-proxy.ts). The public route is
   // used by CLI / GitHub Action / self-hosted runners, which were silently
   // 401-ing whenever the stored OAuth access_token expired because the
   // refresh logic only fired on streaming bodies. Buffered bodies can be
@@ -507,8 +500,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     }
   }
 
-  // Capture into a fresh read so a concurrent call's deletion or rotation is
-  // not overwritten by this call's stale snapshot.
+  // Re-read first: narrows (not closes) a concurrent lost update to one get/set round trip.
   const setCookies = res.headers.getSetCookie();
   if (jarStore && jarSessionId && jarTtl && jarTtl > 0 && setCookies.length > 0) {
     const latest = await jarStore.get(jarSessionId, connectionId);

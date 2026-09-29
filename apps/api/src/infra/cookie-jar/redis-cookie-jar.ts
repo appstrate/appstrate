@@ -9,8 +9,8 @@ import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
  * {@link CookieJarStore} backed by the shared {@link KeyValueCache} (Redis
- * in Tier 2+). Keys are scoped under `cp:cookies:`; the jar is stored as the
- * JSON array of its entries. TTL is refreshed on every set.
+ * in Tier 2+). Keys are scoped under `cp:cookies:` (jar entries as JSON).
+ * TTL is refreshed on every set.
  *
  * The cache is resolved lazily through the injectable `getCache` seam so the
  * unit tests can supply a fake cache without `mock.module` (per the codebase

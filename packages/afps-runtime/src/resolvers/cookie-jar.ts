@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate
 
-/**
- * Sticky-cookie jar shared by the sidecar and platform credential proxies and
- * the redirect follower. Scoping rules and rationale: `docs/architecture/
- * SIDECAR.md`, "Sticky-cookie jar scoping".
- */
+// Sticky-cookie jar of both credential proxies; rules: SIDECAR.md "Sticky-cookie jar scoping".
 
 import { hostLiterallyAllowlisted } from "./http-call-core.ts";
 
@@ -14,12 +10,10 @@ export type CookieJar = Map<string, string[]>;
 
 /** One integration's view of a {@link CookieJar} under one call's URL policy. */
 export interface CookieScope {
-  /** One Cookie header value for a request to `url`, or undefined when empty.
-   *  Precedence by name: sibling-origin cookies (literal-allowlist buckets of OTHER origins)
-   *  < `base` (injected credential / caller cookies) < `url`'s own-origin cookies. */
+  /** One Cookie header for `url` (undefined when empty). By name: literal-allowlist sibling
+   *  origins < `base` (injected credential / caller cookies) < `url`'s own origin. */
   header(url: string, base: string | null | undefined): string | undefined;
-  /** Merge Set-Cookie values received from `url` into `url`'s own bucket (attributes stripped;
-   *  Max-Age<=0 / past Expires removes the name; an emptied bucket is dropped). */
+  /** Merge `url`'s Set-Cookie into its own bucket; an expired cookie deletes the name. */
   capture(url: string, setCookieHeaders: string[]): void;
 }
 
@@ -36,7 +30,6 @@ function originOf(url: string): string {
   }
 }
 
-/** Fold `name=value` pairs into `byName`; a later pair wins by name. */
 function fold(byName: Map<string, string>, pairs: Iterable<string>): void {
   for (const raw of pairs) {
     const pair = raw.trim();
@@ -63,8 +56,8 @@ function isDeletion(attributes: string[]): boolean {
   return expires !== undefined && expires <= Date.now();
 }
 
-/** `literalAllowlist`: the authorized_uris to test with hostLiterallyAllowlisted, or null when the
- *  call's policy is open (allow_all_uris, no allowlist, credential-substitution downgrade …). */
+/** `literalAllowlist`: the call's authorized_uris when they gated it, null under allow_all_uris
+ *  or without an allowlist. Only hosts it names literally share cookies across origins. */
 export function cookieScope(
   jar: CookieJar,
   integrationId: string,
