@@ -38,7 +38,7 @@ describe("ScheduleConnectionRefusals", () => {
     for (const c of choices) expect(html).toContain(c.integrationId);
     expect(html).toContain(t("mustChoose"));
     expect(html).toContain(t("unavailable"));
-    expect(html).toContain(t("unserving"));
+    expect(html).toContain(i18n.t("agents:error.authServesNoSelectedTool"));
     expect(html).toContain(t("actorMustChoose"));
   });
 
