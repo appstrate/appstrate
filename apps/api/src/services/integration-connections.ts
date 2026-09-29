@@ -79,7 +79,7 @@ import {
   parseJsonPath,
 } from "@appstrate/afps-shared/jsonpath";
 import type { ActorScope, OrgScope, SpaceScope } from "../lib/scope.ts";
-import { actorInsert, actorFilter, actorOrSharedFilter } from "../lib/actor.ts";
+import { actorFromIds, actorInsert, actorFilter, actorOrSharedFilter } from "../lib/actor.ts";
 import {
   getPackageDisplayName,
   notEphemeralFilter,
@@ -109,7 +109,7 @@ import {
   actorIdentityOf,
   candidateOf,
   resolveConnections,
-  runLaunchOverrides,
+  toLaunchOverrides,
   translateResolutionError,
 } from "./integration-connection-resolver.ts";
 import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.ts";
@@ -348,7 +348,7 @@ export async function selectAccessibleConnection(
     accessibleConnections: rows,
     pins: [],
     orgDefaults,
-    launchOverrides: runLaunchOverrides(named ? { [packageId]: [named] } : null),
+    launchOverrides: toLaunchOverrides(named ? { [packageId]: [named] } : null, "run_override"),
     ...identity,
   });
   const error = errors[0];
@@ -1960,7 +1960,7 @@ export async function deleteIntegrationOAuthClient(
   owner: ClientOwner,
   packageId: string,
   clientId: string,
-): Promise<{ deletedConnections: number }> {
+): Promise<{ deletedConnections: number; disabledScheduleIds: string[] }> {
   if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
   const connectionSpaces = isSpaceOwner(owner)
     ? eq(integrationConnections.spaceId, owner.spaceId)
@@ -2009,8 +2009,12 @@ export async function deleteIntegrationOAuthClient(
                 minted.map((c) => c.id),
               ),
             )
-            .returning({ id: integrationConnections.id });
-    return { deletedConnections: deletedConns.length };
+            .returning(deletedConnectionOwner);
+    const disabledScheduleIds: string[] = [];
+    for (const row of deletedConns) {
+      disabledScheduleIds.push(...(await forgetDeletedConnection(tx, row)));
+    }
+    return { deletedConnections: deletedConns.length, disabledScheduleIds };
   });
 }
 
@@ -2813,11 +2817,7 @@ export async function assertConnectionsUnpinned(
   }
 }
 
-/**
- * Delete one connection row and drop it from its OWNER's member pins and schedule overrides;
- * other members' keep the id and fail loudly. Returns the schedules it disabled, whose jobs the
- * caller removes once committed (importing the scheduler here would close a cycle).
- */
+/** Delete one connection row the caller owns ({@link forgetDeletedConnection}). */
 export async function deleteIntegrationConnection(
   scope: SpaceScope | ActorScope,
   connectionId: string,
@@ -2859,14 +2859,32 @@ export async function deleteIntegrationConnection(
           ownerPredicate,
         ),
       )
-      .returning({ id: integrationConnections.id });
+      .returning(deletedConnectionOwner);
     if (deleted.length === 0) {
       throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
     }
-    const id = deleted[0]!.id;
-    if (actor.type === "user") await dropFromOwnMemberPins(tx, id, actor.id);
-    return { disabledScheduleIds: await dropConnectionFromOwnSchedules(tx, id, actor) };
+    return { disabledScheduleIds: await forgetDeletedConnection(tx, deleted[0]!) };
   });
+}
+
+const deletedConnectionOwner = {
+  id: integrationConnections.id,
+  userId: integrationConnections.userId,
+  endUserId: integrationConnections.endUserId,
+};
+
+/**
+ * Drop a deleted connection from its OWNER's member pins and schedule overrides; other members'
+ * keep the id and fail loudly. Returns the schedules it disabled, whose jobs the caller removes
+ * once committed (importing the scheduler here would close a cycle).
+ */
+async function forgetDeletedConnection(
+  tx: Tx,
+  row: { id: string; userId: string | null; endUserId: string | null },
+): Promise<string[]> {
+  if (row.userId) await dropFromOwnMemberPins(tx, row.id, row.userId);
+  // `integration_connections` holds exactly one owner id.
+  return dropConnectionFromOwnSchedules(tx, row.id, actorFromIds(row.userId, row.endUserId)!);
 }
 
 async function dropFromOwnMemberPins(tx: Tx, connectionId: string, userId: string): Promise<void> {

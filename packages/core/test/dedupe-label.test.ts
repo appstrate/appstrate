@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { dedupeLabel, truncateLabel } from "../src/dedupe-label.ts";
+import { dedupeLabel } from "../src/dedupe-label.ts";
 
 describe("dedupeLabel", () => {
   it("returns the base when free, else its first free ' (n)' form", () => {
@@ -19,15 +19,13 @@ describe("dedupeLabel", () => {
   it("with maxLength, cuts an over-long base on its own", () => {
     expect(dedupeLabel("abcdef", [], { maxLength: 4 })).toBe("abcd");
   });
-});
 
-describe("truncateLabel", () => {
-  it("keeps a label that fits, trailing whitespace included", () => {
-    expect(truncateLabel("ab ", 3)).toBe("ab ");
+  it("with maxLength, keeps a base that fits, trailing whitespace included", () => {
+    expect(dedupeLabel("ab ", [], { maxLength: 3 })).toBe("ab ");
   });
 
-  it("cuts on a code-point boundary and trims the trailing space", () => {
-    expect(truncateLabel("ab 😀", 4)).toBe("ab");
-    expect(truncateLabel("abc😀", 5)).toBe("abc😀");
+  it("with maxLength, cuts on a code-point boundary and trims the trailing space", () => {
+    expect(dedupeLabel("ab 😀", [], { maxLength: 4 })).toBe("ab");
+    expect(dedupeLabel("abc😀", [], { maxLength: 5 })).toBe("abc😀");
   });
 });

@@ -477,6 +477,7 @@ describe("org-level integration OAuth clients", () => {
       }
       expect(await deleteIntegrationOAuthClient(spaceA, INTEGRATION, spaceRow)).toEqual({
         deletedConnections: 0,
+        disabledScheduleIds: [],
       });
     });
 
@@ -487,6 +488,7 @@ describe("org-level integration OAuth clients", () => {
       await seedConnection(otherSpace.spaceId, other.user.id, orgRow);
       expect(await deleteIntegrationOAuthClient(org, INTEGRATION, orgRow)).toEqual({
         deletedConnections: 2,
+        disabledScheduleIds: [],
       });
       const left = await db
         .select({ spaceId: integrationConnections.spaceId })

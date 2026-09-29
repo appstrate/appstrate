@@ -51,7 +51,7 @@ import {
   type ResolvedConnection,
   type ResolvedConnectionMap,
 } from "@appstrate/core/integration";
-import type { ApiError, ResolutionFieldError } from "../lib/errors.ts";
+import { ApiError, type ResolutionFieldError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import { actorOrSharedFilter } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -65,7 +65,6 @@ import {
   type OrgDefaultPick,
 } from "./integration-org-defaults-service.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
-import { missingIntegrationConnection } from "./agent-readiness.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
 
@@ -75,16 +74,11 @@ export interface LaunchOverrides {
   source: Extract<ConnectionResolutionSource, "run_override" | "schedule_override">;
 }
 
-export function runLaunchOverrides(
+export function toLaunchOverrides(
   ids: ConnectionOverrides | null | undefined,
+  source: LaunchOverrides["source"],
 ): LaunchOverrides | null {
-  return ids ? { ids, source: "run_override" } : null;
-}
-
-export function scheduleLaunchOverrides(
-  ids: ConnectionOverrides | null | undefined,
-): LaunchOverrides | null {
-  return ids ? { ids, source: "schedule_override" } : null;
+  return ids ? { ids, source } : null;
 }
 
 export interface IntegrationRequirement {
@@ -143,18 +137,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
     )
       continue;
 
-    // Orphaned-auth guard: a row on an auth the CURRENT manifest no longer declares can never
-    // produce a delivery plan, so it is no candidate at any layer.
     const auth = authFilterOf(req);
-    const liveAuthKeys = auth.live;
-    const liveConnections =
-      liveAuthKeys === null
-        ? input.accessibleConnections
-        : input.accessibleConnections.filter(
-            (c) => c.integrationId !== req.integrationId || liveAuthKeys.has(c.authKey),
-          );
-    const liveIndex = new Map<string, ConnectionRow>();
-    for (const c of liveConnections) liveIndex.set(c.id, c);
 
     // The agent's configuration, not a connection: no connection, pin or override clears it.
     const misfit = authKeyServingNoSelectedTool(
@@ -172,33 +155,28 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       continue;
     }
 
-    // AFPS §4.1 `auth_key`: pre-filtered so every layer honours it.
-    const integrationCandidates = liveConnections.filter(
-      (c) => c.integrationId === req.integrationId,
+    // Orphaned-auth guard: a row on an auth the CURRENT manifest no longer declares can never
+    // produce a delivery plan, so it is no candidate at any layer.
+    const live = input.accessibleConnections.filter(
+      (c) =>
+        c.integrationId === req.integrationId && (auth.live === null || auth.live.has(c.authKey)),
     );
-    let filteredConnections = liveConnections;
-    let filteredIndex = liveIndex;
-    if (req.requiredAuthKey !== undefined) {
-      const matchingOnAuth = integrationCandidates.filter((c) => c.authKey === req.requiredAuthKey);
-      if (matchingOnAuth.length === 0 && integrationCandidates.length > 0) {
-        // Not `not_connected`: that would hide the real cause.
-        errors.push({
-          integrationId: req.integrationId,
-          code: "auth_key_mismatch",
-          requiredAuthKey: req.requiredAuthKey,
-          availableAuthKeys: [...new Set(integrationCandidates.map((c) => c.authKey))],
-          message: `Integration '${req.integrationId}' requires auth '${req.requiredAuthKey}' but the actor's accessible connections use [${[
-            ...new Set(integrationCandidates.map((c) => c.authKey)),
-          ].join(", ")}].`,
-        });
-        continue;
-      }
-      const otherRows = input.accessibleConnections.filter(
-        (c) => c.integrationId !== req.integrationId,
-      );
-      filteredConnections = [...otherRows, ...matchingOnAuth];
-      filteredIndex = new Map<string, ConnectionRow>();
-      for (const c of filteredConnections) filteredIndex.set(c.id, c);
+    // AFPS §4.1 `auth_key`: pre-filtered so every layer honours it.
+    const candidates =
+      req.requiredAuthKey === undefined
+        ? live
+        : live.filter((c) => c.authKey === req.requiredAuthKey);
+    if (req.requiredAuthKey !== undefined && candidates.length === 0 && live.length > 0) {
+      // Not `not_connected`: that would hide the real cause.
+      const availableAuthKeys = [...new Set(live.map((c) => c.authKey))];
+      errors.push({
+        integrationId: req.integrationId,
+        code: "auth_key_mismatch",
+        requiredAuthKey: req.requiredAuthKey,
+        availableAuthKeys,
+        message: `Integration '${req.integrationId}' requires auth '${req.requiredAuthKey}' but the actor's accessible connections use [${availableAuthKeys.join(", ")}].`,
+      });
+      continue;
     }
 
     const result = resolveOne({
@@ -210,8 +188,8 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       orgDefault: input.orgDefaults?.[req.integrationId] ?? null,
       launchOverride: launchOverrideFor(input.launchOverrides, req.integrationId),
       memberPinIds: actorUserId === null ? null : pinIds(req.integrationId, actorUserId),
-      accessibleConnections: filteredConnections,
-      connectionIndex: filteredIndex,
+      candidates,
+      candidateIndex: new Map(candidates.map((c) => [c.id, c])),
       accessibleIndex,
       actorUserId,
       actorEndUserId: input.actorEndUserId ?? null,
@@ -252,8 +230,9 @@ interface ResolveOneArgs {
   orgDefault: OrgDefaultPick | null;
   launchOverride: { ids: readonly string[]; source: LaunchOverrides["source"] } | null;
   memberPinIds: readonly string[] | null;
-  accessibleConnections: ConnectionRow[];
-  connectionIndex: Map<string, ConnectionRow>;
+  /** This integration's rows that survived the auth filters. */
+  candidates: ConnectionRow[];
+  candidateIndex: ReadonlyMap<string, ConnectionRow>;
   /** Before the auth filters: tells a row they dropped from one the actor cannot reach. */
   accessibleIndex: ReadonlyMap<string, ConnectionRow>;
   actorUserId: string | null;
@@ -267,8 +246,8 @@ type ResolveOneResult =
   | { kind: "error"; error: ConnectionResolutionError };
 
 /**
- * A layer's rows, or its first id not found — a row of ANOTHER integration counting as not
- * found, else its credentials would be injected under this integration's auth.
+ * A layer's rows, or its first id not a candidate — a row of ANOTHER integration included, else
+ * its credentials would be injected under this integration's auth.
  */
 function ownedConns(
   args: ResolveOneArgs,
@@ -276,8 +255,8 @@ function ownedConns(
 ): { rows: ConnectionRow[] } | { missingId: string; offAuthKey?: string } {
   const rows: ConnectionRow[] = [];
   for (const id of ids) {
-    const conn = args.connectionIndex.get(id);
-    if (!conn || conn.integrationId !== args.integrationId) {
+    const conn = args.candidateIndex.get(id);
+    if (!conn) {
       const dropped = args.accessibleIndex.get(id);
       return dropped?.integrationId === args.integrationId
         ? { missingId: id, offAuthKey: dropped.authKey }
@@ -318,13 +297,7 @@ interface ExplicitLayerRef {
   noun: string;
 }
 
-interface ExplicitLayer extends ExplicitLayerRef {
-  ids: readonly string[] | null;
-}
-
-interface BoundLayer extends ExplicitLayer {
-  ids: readonly string[];
-}
+type ExplicitLayer<Ids = readonly string[] | null> = ExplicitLayerRef & { ids: Ids };
 
 function orgDefaultLayer(enforce: boolean): ExplicitLayerRef {
   return {
@@ -361,7 +334,7 @@ export function unavailableMemberError(
 function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   const orgDefaultIds = nonEmpty(args.orgDefault?.connectionIds);
   const enforced = args.orgDefault?.enforce === true;
-  const governing: BoundLayer | null = args.adminPinIds
+  const governing: ExplicitLayer<readonly string[]> | null = args.adminPinIds
     ? {
         ids: args.adminPinIds,
         source: "admin_pin",
@@ -371,7 +344,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     : enforced && orgDefaultIds
       ? { ids: orgDefaultIds, ...orgDefaultLayer(true) }
       : null;
-  const override: BoundLayer | null = args.launchOverride
+  const override: ExplicitLayer<readonly string[]> | null = args.launchOverride
     ? { ids: args.launchOverride.ids, ...launchOverrideLayer(args.launchOverride.source) }
     : null;
   if (governing && override && override.ids.some((id) => !governing.ids.includes(id))) {
@@ -411,11 +384,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   }
 
   // 6. Fallback.
-  const candidates = args.accessibleConnections.filter(
-    (c) => c.integrationId === args.integrationId,
-  );
-
-  const serving = candidates.filter((c) => servesSelection(args.auth, c.authKey));
+  const serving = args.candidates.filter((c) => servesSelection(args.auth, c.authKey));
   if (serving.length === 0) {
     // The auth and scopes a connect flow needs, so its consent clears the next resolution.
     const authKey = connectTargetAuthKey(args);
@@ -425,7 +394,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
       ...(authKey !== null ? { authKey } : {}),
       ...(requiredScopes.length > 0 ? { requiredScopes } : {}),
       message:
-        candidates.length === 0
+        args.candidates.length === 0
           ? `Integration '${args.integrationId}' has no connection accessible to this actor.`
           : `Integration '${args.integrationId}' has no connection accessible to this actor on an auth that exposes the agent's selected tools.`,
     });
@@ -680,6 +649,16 @@ export async function resolveConnectionsForRun(
     actorUserId,
     actorEndUserId,
     includeInert: input.includeInert ?? false,
+  });
+}
+
+export function missingIntegrationConnection(errors: ValidationFieldError[]): ApiError {
+  return new ApiError({
+    status: 409,
+    code: "missing_integration_connection",
+    title: "Missing Integration Connection",
+    detail: errors[0]!.message,
+    errors,
   });
 }
 

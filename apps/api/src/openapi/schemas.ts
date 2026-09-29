@@ -12,6 +12,7 @@ import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { connectionIdSetJsonSchema } from "./paths/integrations.ts";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
@@ -1292,12 +1293,7 @@ export const schemas = {
       connection_overrides: {
         type: ["object", "null"],
         description: `Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback.`,
-        additionalProperties: {
-          type: "array",
-          items: { type: "string" },
-          minItems: 1,
-          maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
-        },
+        additionalProperties: connectionIdSetJsonSchema,
       },
       dependency_overrides: {
         type: ["object", "null"],
@@ -1315,8 +1311,7 @@ export const schemas = {
           properties: {
             integration_id: { type: "string" },
             // Nullable although the column is NOT NULL: this is a kickoff-time
-            // audit copy, and snapshots taken before the denormalisation carry
-            // none.
+            // audit copy, and a snapshot need not carry it.
             label: { type: ["string", "null"] },
             account_id: { type: ["string", "null"] },
             source: { type: "string" },
@@ -1396,7 +1391,7 @@ export const schemas = {
       name: { type: ["string", "null"] },
       enabled: { type: "boolean" },
       cron_expression: { type: "string" },
-      timezone: { type: ["string", "null"] },
+      timezone: { type: "string" },
       input: { type: ["object", "null"], additionalProperties: true },
       generation_config_override: {
         oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
@@ -1407,12 +1402,7 @@ export const schemas = {
       connection_overrides: {
         type: ["object", "null"],
         description: `Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.`,
-        additionalProperties: {
-          type: "array",
-          items: { type: "string" },
-          minItems: 1,
-          maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
-        },
+        additionalProperties: connectionIdSetJsonSchema,
       },
       dependency_overrides: {
         type: ["object", "null"],
@@ -2058,10 +2048,7 @@ export const schemas = {
       packageId: { type: "string" },
       integration_package_id: { type: "string" },
       connection_ids: {
-        type: "array",
-        items: { type: "string", format: "uuid" },
-        minItems: 1,
-        maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+        ...connectionIdSetJsonSchema,
         description: "The whole pinned set, in the order it was written. A write replaces it.",
       },
       createdAt: { type: "string", format: "date-time" },

@@ -9,15 +9,15 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationConnections } from "@appstrate/db/schema";
 import type { ConnectionOverrides, ConnectionResolutionError } from "@appstrate/core/integration";
-import { collectAgentReadiness, missingIntegrationConnection } from "./agent-readiness.ts";
+import { collectAgentReadiness } from "./agent-readiness.ts";
 import {
   launchOverrideLayer,
-  scheduleLaunchOverrides,
+  missingIntegrationConnection,
+  toLaunchOverrides,
   translateResolutionError,
   unavailableMemberError,
 } from "./integration-connection-resolver.ts";
 import { seedPinnedIntegrationManifests } from "./run-pipeline.ts";
-import { isUuid } from "../lib/db-helpers.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -90,18 +90,14 @@ export async function assertScheduleOverridesReachable(params: {
 }
 
 /** Connections among `ids` shared in `spaceId`: id → integration id. */
-async function sharedConnections(
-  spaceId: string,
-  ids: readonly string[],
-): Promise<Map<string, string>> {
-  const uuids = ids.filter(isUuid);
-  if (uuids.length === 0) return new Map();
+async function sharedConnections(spaceId: string, ids: string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
   const rows = await db
     .select({ id: integrationConnections.id, integrationId: integrationConnections.integrationId })
     .from(integrationConnections)
     .where(
       and(
-        inArray(integrationConnections.id, uuids),
+        inArray(integrationConnections.id, ids),
         eq(integrationConnections.spaceId, spaceId),
         eq(integrationConnections.sharedWithOrg, true),
       ),
@@ -139,7 +135,7 @@ export async function assertScheduleConnectionsChosen(params: {
     orgId: params.orgId,
     spaceId: params.spaceId,
     actor: params.actor,
-    launchOverrides: scheduleLaunchOverrides(params.connectionOverrides),
+    launchOverrides: toLaunchOverrides(params.connectionOverrides, "schedule_override"),
     manifestCache,
   });
   const unchosen = resolutionErrors.filter(isScheduleOwned);

@@ -49,7 +49,7 @@ import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.
 import { getInlineRunLimits } from "./run-limits.ts";
 import { validateAgentReadiness, collectAgentReadinessErrors } from "./agent-readiness.ts";
 import type { InlineRunBody } from "@appstrate/core/platform-types";
-import { runLaunchOverrides, type LaunchOverrides } from "./integration-connection-resolver.ts";
+import { toLaunchOverrides, type LaunchOverrides } from "./integration-connection-resolver.ts";
 
 export interface InlineRunPreflightResult {
   manifest: AgentManifest;
@@ -199,7 +199,7 @@ export async function runInlinePreflight(params: {
 
   const modelIdOverride = body.modelId ?? null;
   const proxyIdOverride = body.proxyId ?? null;
-  const launchOverrides = runLaunchOverrides(body.connection_overrides);
+  const launchOverrides = toLaunchOverrides(body.connection_overrides, "run_override");
 
   // ----- 2. input against manifest schema (AJV) -----
   // Prompt validation is delegated entirely to agent readiness (stage 3).

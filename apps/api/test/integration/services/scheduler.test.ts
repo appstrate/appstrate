@@ -908,7 +908,7 @@ describeRequiresRedis("scheduler service", () => {
       expect((await jobOf(schedule.id))?.template?.data).toEqual({ scheduleId: schedule.id });
       await db.update(schedules).set({ enabled: false }).where(eq(schedules.id, schedule.id));
 
-      expect(await triggerScheduledRun(schedule.id)).toBe(false);
+      expect(await triggerScheduledRun(schedule.id)).toBeNull();
       expect(await db.select().from(runs).where(eq(runs.scheduleId, schedule.id))).toHaveLength(0);
       expect(await jobOf(schedule.id)).toBeUndefined();
     });
@@ -919,7 +919,7 @@ describeRequiresRedis("scheduler service", () => {
       });
       await db.delete(schedules).where(eq(schedules.id, schedule.id));
 
-      expect(await triggerScheduledRun(schedule.id)).toBe(false);
+      expect(await triggerScheduledRun(schedule.id)).toBeNull();
       expect(await jobOf(schedule.id)).toBeUndefined();
     });
 
@@ -935,7 +935,7 @@ describeRequiresRedis("scheduler service", () => {
         .set({ userId: null, endUserId: foreign.id })
         .where(eq(schedules.id, schedule.id));
 
-      expect(await triggerScheduledRun(schedule.id)).toBe(true);
+      expect(await triggerScheduledRun(schedule.id)).not.toBeNull();
       const [fired] = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
       expect(fired!.endUserId).toBe(foreign.id);
       expect((fired!.error ?? "").toLowerCase()).toContain("end-user");

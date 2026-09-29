@@ -7,6 +7,7 @@
 
 import type { LoadedPackage } from "../types/index.ts";
 import {
+  missingIntegrationConnection,
   resolveConnectionsForRun,
   translateResolutionError,
   type LaunchOverrides,
@@ -271,16 +272,6 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
   }
 
   return { errors, resolutionErrors };
-}
-
-export function missingIntegrationConnection(errors: ValidationFieldError[]): ApiError {
-  return new ApiError({
-    status: 409,
-    code: "missing_integration_connection",
-    title: "Missing Integration Connection",
-    detail: errors[0]!.message,
-    errors,
-  });
 }
 
 /**

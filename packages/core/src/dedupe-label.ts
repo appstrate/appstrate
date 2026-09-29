@@ -2,7 +2,8 @@
 
 /**
  * `base` when it is not taken, else its first free ` (2)`, ` (3)`, … form — the one collision
- * rule for every label. With `maxLength`, the base is cut ({@link truncateLabel}) to fit.
+ * rule for every label. With `maxLength`, the base is cut to fit: in UTF-16 units, on a code-point
+ * boundary, trailing whitespace trimmed when cut.
  */
 export function dedupeLabel(
   base: string,
@@ -17,11 +18,7 @@ export function dedupeLabel(
   return candidate;
 }
 
-/**
- * `label` cut to `max` UTF-16 units on a code-point boundary, trailing whitespace trimmed when cut
- * (a label within `max` is returned as is).
- */
-export function truncateLabel(label: string, max: number): string {
+function truncateLabel(label: string, max: number): string {
   if (label.length <= max) return label;
   let out = "";
   for (const ch of label) {

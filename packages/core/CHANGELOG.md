@@ -57,11 +57,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   space, while the caller holds `chat:write` there, and serves a draft only at
   the `lockVersion` injected (409 `injected_draft_changed` once it moved).
 
-- **`dedupeLabel` takes an optional `{ maxLength }`**, and **`truncateLabel`** is
-  new (`@appstrate/core/dedupe-label`) — with `maxLength` every candidate fits it,
-  the base cut to leave room for its ` (n)` suffix; `truncateLabel` is that cut
-  (UTF-16 units, on a code-point boundary, trailing whitespace trimmed when
-  cut; a label within the limit is returned as is). Without
+- **`dedupeLabel` takes an optional `{ maxLength }`** (`@appstrate/core/dedupe-label`)
+  — with `maxLength` every candidate fits it, the base cut to leave room for its
+  ` (n)` suffix (UTF-16 units, on a code-point boundary, trailing whitespace
+  trimmed when cut; a label within the limit is returned as is). Without
   the option `dedupeLabel` behaves as before.
 
 - **`org-integrations:configure`** (`@appstrate/core/permissions`, #1264) — a new

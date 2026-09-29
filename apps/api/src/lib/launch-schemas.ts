@@ -46,8 +46,8 @@ import { isValidDependencyOverride } from "../services/input-parser.ts";
 /**
  * Per-integration connection picks: `{ "@scope/integration": ["<connection_id>", ...] }`.
  *
- * The uuid gate is load-bearing, most of all on schedules: a malformed id resolves
- * to no row, so a frozen map would answer 200 once and be refused at every fire.
+ * The uuid gate keeps a malformed id off the uuid column, where Postgres would
+ * reject the query instead of the resolver refusing the pick.
  *
  * It is also owned here rather than delegated to `parseRequestInput`:
  * `POST /api/runs/inline/validate` never calls the parser, so the guard would

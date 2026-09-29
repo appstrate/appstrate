@@ -3,6 +3,7 @@
 import { packageSourceValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { CONNECTION_LABEL_MAX } from "../../lib/connection-label.ts";
 
 /**
  * OpenAPI paths for the AFPS integration marketplace.
@@ -52,6 +53,24 @@ const agentPackageIdParam = {
   schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
 } as const;
 
+/** A connection set as every write takes it and every pin or default returns it. */
+export const connectionIdSetJsonSchema = {
+  type: "array",
+  items: { type: "string", format: "uuid" },
+  minItems: 1,
+  maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+} as const;
+
+/** The refusals every connection-set write shares, beyond the per-connection checks. */
+export const connectionSetRefusals = `an empty set, more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
+
+export const lockedBySchema = {
+  type: ["string", "null"],
+  enum: ["admin_pin", "org_default", null],
+  description:
+    "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default.",
+} as const;
+
 // The org default is keyed by (space, integration) ONLY — one set per
 // integration, NOT one per (integration, auth_key): a set may mix auths, and
 // PUT replaces it wholesale.
@@ -60,20 +79,12 @@ const integrationOrgDefaultSchema = {
   required: ["integration_package_id", "connection_ids", "enforce", "createdAt", "updatedAt"],
   properties: {
     integration_package_id: { type: "string" },
-    connection_ids: {
-      type: "array",
-      items: { type: "string", format: "uuid" },
-      minItems: 1,
-      maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
-    },
+    connection_ids: connectionIdSetJsonSchema,
     enforce: { type: "boolean" },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
   },
 } as const;
-
-/** The refusals every connection-set write shares, beyond the per-connection checks. */
-export const connectionSetRefusals = `an empty set, more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, a repeated id (compared case-insensitively), or connections whose labels are not distinct (the agent addresses each bound connection by its label)`;
 
 const integrationSummarySchema = {
   type: "object",
@@ -132,10 +143,8 @@ const integrationConnectionSchema = {
         "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own.",
     },
     locked_by: {
-      type: ["string", "null"],
-      enum: ["admin_pin", "org_default", null],
-      description:
-        "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`.",
+      ...lockedBySchema,
+      description: `${lockedBySchema.description} Returned by the list surfaces only, like \`owner_name\`.`,
     },
     label: {
       type: "string",
@@ -1193,7 +1202,7 @@ export const integrationsPaths = {
                 label: {
                   type: "string",
                   minLength: 1,
-                  maxLength: 80,
+                  maxLength: CONNECTION_LABEL_MAX,
                   description:
                     "A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, one starting or ending with whitespace, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of this integration in the space holds with 409 `connection_label_taken`.",
                 },
@@ -1375,10 +1384,7 @@ export const integrationsPaths = {
               required: ["connection_ids"],
               properties: {
                 connection_ids: {
-                  type: "array",
-                  items: { type: "string", format: "uuid" },
-                  minItems: 1,
-                  maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+                  ...connectionIdSetJsonSchema,
                   description:
                     "The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org`.",
                 },
@@ -1404,7 +1410,7 @@ export const integrationsPaths = {
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
-            "A connection id that is unknown, not shared, or of another integration or space — one answer for all, so an id cannot be probed.",
+            "A connection id that is unknown, not shared, or of another integration or space — one answer for all, so an id cannot be probed — or the agent is not active in this space.",
         },
       },
     },
@@ -1485,10 +1491,7 @@ export const integrationsPaths = {
               required: ["connection_ids"],
               properties: {
                 connection_ids: {
-                  type: "array",
-                  items: { type: "string", format: "uuid" },
-                  minItems: 1,
-                  maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+                  ...connectionIdSetJsonSchema,
                   description: "The WHOLE default set — this write replaces it.",
                 },
                 enforce: { type: "boolean", default: false },

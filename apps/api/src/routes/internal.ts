@@ -422,7 +422,7 @@ export function createInternalRouter() {
     return requireRunBoundMember({
       runId,
       packageId,
-      connectionId: parsed.data,
+      connectionId: parsed.data.toLowerCase(),
       bound: run.resolvedConnections?.[packageId] ?? [],
       param: "connection_id",
     });

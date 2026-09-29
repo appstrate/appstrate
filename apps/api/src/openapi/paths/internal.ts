@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+
 /**
  * The `409` shared by BOTH `/internal/integration-credentials/{scope}/{name}`
  * operations. Module-local const, NOT a `#/components/responses/*` $ref: the same
@@ -32,7 +34,9 @@ const connectionIdParam = {
   in: "query",
   required: false,
   description:
-    'Which of the connections this run bound to the integration the credentials are for. REQUIRED on an agent run (a connect run omits it): a run may bind up to 10 connections per integration and each has its own credential surface, so there is no "the connection of this integration" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run\'s cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload.',
+    "Which of the connections this run bound to the integration the credentials are for. REQUIRED on an agent run (a connect run omits it): a run may bind up to " +
+    MAX_CONNECTIONS_PER_INTEGRATION +
+    ' connections per integration and each has its own credential surface, so there is no "the connection of this integration" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run\'s cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload.',
   schema: { type: "string", format: "uuid" },
 } as const;
 

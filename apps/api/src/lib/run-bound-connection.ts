@@ -5,7 +5,8 @@ import { logger } from "./logger.ts";
 
 /**
  * The member of a run's snapshot (`runs.resolved_connections[packageId]`) that `connectionId`
- * names, else 400 `connection_not_in_run`: a run reaches only the connections it bound.
+ * (lowercase, as the snapshot holds it) names, else 400 `connection_not_in_run`: a run reaches
+ * only the connections it bound.
  */
 export function requireRunBoundMember<T extends { connectionId: string }>(args: {
   runId: string;
@@ -16,10 +17,9 @@ export function requireRunBoundMember<T extends { connectionId: string }>(args: 
   param: string;
 }): T {
   const { runId, packageId, connectionId, bound, param } = args;
-  const wanted = connectionId.toLowerCase();
-  const entry = bound.find((member) => member.connectionId === wanted);
+  const entry = bound.find((member) => member.connectionId === connectionId);
   if (entry) return entry;
-  logger.warn("Integration credentials request rejected — connection not bound by this run", {
+  logger.warn("Connection refused — not bound by this run", {
     runId,
     packageId,
     connectionId,

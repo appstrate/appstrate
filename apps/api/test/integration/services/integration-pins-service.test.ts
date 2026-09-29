@@ -141,7 +141,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       });
       const ids = [crypto.randomUUID(), inOtherSpace, ofOtherIntegration, privateRow];
 
-      for (const opts of [{ requireShared: true }, { allowOwnedBy: ctx.user.id }]) {
+      for (const opts of [{}, { allowOwnedBy: ctx.user.id }]) {
         const answers = await Promise.all(ids.map((id) => refusal([id], id, opts)));
         expect(answers[0]).toMatchObject({ status: 404, code: "not_found" });
         for (const answer of answers) expect(answer).toEqual(answers[0]!);
@@ -155,24 +155,22 @@ describe("integration-pins-service — DB access/ownership", () => {
         sharedWithOrg: true,
       });
       const unknown = crypto.randomUUID();
-      const answer = await refusal([shared, unknown], unknown, { requireShared: true });
-      expect(answer).toEqual(await refusal([unknown], unknown, { requireShared: true }));
+      const answer = await refusal([shared, unknown], unknown, {});
+      expect(answer).toEqual(await refusal([unknown], unknown, {}));
     });
 
-    it("accepts a set of shared connections under requireShared", async () => {
+    it("accepts a set of shared connections under the shared-only default", async () => {
       const ids = [
         await seedConnection({ spaceId: scope.spaceId, userId: memberId, sharedWithOrg: true }),
         await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id, sharedWithOrg: true }),
       ];
-      await validatePinTargets(scope, INTEGRATION, ids, { requireShared: true });
+      await validatePinTargets(scope, INTEGRATION, ids, {});
     });
 
-    it("refuses the caller's own private row under requireShared, with the same answer", async () => {
+    it("refuses the caller's own private row under the shared-only default, with the same answer", async () => {
       const own = await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id });
       const unknown = crypto.randomUUID();
-      expect(await refusal([own], own, { requireShared: true })).toEqual(
-        await refusal([unknown], unknown, { requireShared: true }),
-      );
+      expect(await refusal([own], own, {})).toEqual(await refusal([unknown], unknown, {}));
     });
 
     it("accepts allowOwnedBy for the caller's own row beside a shared one", async () => {

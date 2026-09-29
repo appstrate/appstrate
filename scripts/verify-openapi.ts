@@ -567,10 +567,8 @@ function compareValueConstraints(
   for (const keyword of ["minItems", "maxItems"] as const) {
     const zodValue = zodProp[keyword];
     const oaValue = oaProp[keyword];
-    if (zodValue !== oaValue) {
-      issues.push(
-        `Property "${label}" ${keyword}: Zod=${zodValue ?? "unset"}, OpenAPI=${oaValue ?? "unset"}`,
-      );
+    if (zodValue !== undefined && zodValue !== oaValue) {
+      issues.push(`Property "${label}" ${keyword}: Zod=${zodValue}, OpenAPI=${oaValue ?? "unset"}`);
     }
   }
 

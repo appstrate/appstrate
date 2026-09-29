@@ -10,8 +10,8 @@
  * `packages/db/src/schema/integration-org-defaults.ts` and the resolver
  * cascade in `integration-connection-resolver.ts`).
  *
- * Same target validation as admin pins (`validatePinTargets` with
- * `requireShared`): the connection must exist, belong to this space,
+ * Same target validation as admin pins (`validatePinTargets`, shared-only):
+ * the connection must exist, belong to this space,
  * reference this integration, and be `sharedWithOrg = true` — an admin
  * can't coerce a member's personal connection.
  */
@@ -91,7 +91,7 @@ export async function upsertOrgDefault(
   integrationId: string,
   input: UpsertOrgDefaultInput,
 ): Promise<OrgDefaultSummary> {
-  await validatePinTargets(scope, integrationId, input.connectionIds, { requireShared: true });
+  await validatePinTargets(scope, integrationId, input.connectionIds);
   const now = new Date();
   // Atomic upsert on the (space, integration) unique index: two concurrent first writers cannot
   // both miss a SELECT and have the loser's INSERT throw a raw unique violation.

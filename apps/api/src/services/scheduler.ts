@@ -26,7 +26,7 @@ import { resolveAndValidateScheduleInput } from "./input-resolution.ts";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
-import { scheduleLaunchOverrides } from "./integration-connection-resolver.ts";
+import { toLaunchOverrides } from "./integration-connection-resolver.ts";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
@@ -103,7 +103,7 @@ async function upsertScheduleJob(row: typeof schedules.$inferSelect): Promise<vo
     await getQueue()
   ).upsertScheduler(
     row.id,
-    { pattern: row.cronExpression, tz: row.timezone ?? "UTC" },
+    { pattern: row.cronExpression, tz: row.timezone },
     { name: "execute-agent", data: { scheduleId: row.id } },
   );
 }
@@ -255,27 +255,22 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
       });
       return false;
     };
-    if (!(await triggerScheduledRun(scheduleId, claim))) return;
+    const fired = await triggerScheduledRun(scheduleId, claim);
+    if (!fired) return;
 
-    // The trigger may have disabled the schedule (invalid actor), and a write may land after the
-    // read below, so the UPDATE itself decides: a nextRunAt only onto a row still enabled on the
-    // cron it was computed from, else the concurrent writer's value stands.
-    const [schedule] = await db
-      .select({ cronExpression: schedules.cronExpression, timezone: schedules.timezone })
-      .from(schedules)
-      .where(eq(schedules.id, scheduleId));
-    if (!schedule) return;
-    const nextRun = computeNextRun(schedule.cronExpression, schedule.timezone);
-    const now = new Date();
+    // The trigger may have disabled the schedule (invalid actor), and a write may land after its
+    // read, so the UPDATE itself decides: a nextRunAt only onto a row still enabled on the cron it
+    // was computed from, else the concurrent writer's value stands. Bookkeeping only: `updatedAt`
+    // is the write token of `updateSchedule`, so bumping it would 409 an overlapping PATCH.
+    const nextRun = computeNextRun(fired.cronExpression, fired.timezone);
     await db
       .update(schedules)
       .set({
-        lastRunAt: now,
+        lastRunAt: new Date(),
         nextRunAt: sql`CASE WHEN ${schedules.enabled}
-          AND ${schedules.cronExpression} = ${schedule.cronExpression}
-          AND ${schedules.timezone} = ${schedule.timezone}
+          AND ${schedules.cronExpression} = ${fired.cronExpression}
+          AND ${schedules.timezone} = ${fired.timezone}
           THEN ${nextRun?.toISOString() ?? null}::timestamptz ELSE ${schedules.nextRunAt} END`,
-        updatedAt: now,
       })
       .where(eq(schedules.id, scheduleId));
   } finally {
@@ -349,25 +344,24 @@ export async function shutdownScheduleWorker(): Promise<void> {
 
 /**
  * Fire one scheduled run from the schedule row, read now; any `ApiError` becomes a visible failed
- * run (`failSchedule()`). Returns `false` when the row is gone or disabled (its job is removed) or
- * `claim` refuses the occurrence. A failed read throws before `claim`, leaving the occurrence
- * unconsumed for the job's failure to report.
+ * run (`failSchedule()`). Returns the cron the fire read, or `null` when the row is gone or
+ * disabled (its job is removed) or `claim` refuses the occurrence. A failed read throws before
+ * `claim`, leaving the occurrence unconsumed for the job's failure to report.
  */
 export async function triggerScheduledRun(
   scheduleId: string,
   claim: () => Promise<boolean> = async () => true,
-): Promise<boolean> {
-  const [found] = await db.select().from(schedules).where(eq(schedules.id, scheduleId)).limit(1);
-  if (!found?.enabled) {
+): Promise<Pick<typeof schedules.$inferSelect, "cronExpression" | "timezone"> | null> {
+  const [row] = await db.select().from(schedules).where(eq(schedules.id, scheduleId)).limit(1);
+  if (!row?.enabled) {
     logger.info("Schedule deleted or disabled since its job was armed, removing the job", {
       scheduleId,
     });
     await removeScheduleJobs([scheduleId]);
-    return false;
+    return null;
   }
-  if (!(await claim())) return false;
+  if (!(await claim())) return null;
 
-  const row = found;
   const { packageId, orgId, spaceId } = row;
   // `package_schedules_exactly_one_actor` guarantees exactly one of the two ids.
   const actor = actorFromIds(row.userId, row.endUserId)!;
@@ -422,16 +416,16 @@ export async function triggerScheduledRun(
       });
       await disableScheduleForInvalidActor(scheduleId);
       await failSchedule(`Schedule disabled: ${invalidScheduleActorReason(actor)}`);
-      return true;
+      return row;
     }
 
-    const launchOverrides = scheduleLaunchOverrides(row.connectionOverrides);
+    const launchOverrides = toLaunchOverrides(row.connectionOverrides, "schedule_override");
 
     const draftAgent = await getPackage(packageId, orgId);
     if (!draftAgent) {
       logger.warn("Package not found, skipping schedule", { packageId, scheduleId });
       await failSchedule(`Package '${packageId}' not found`);
-      return true;
+      return row;
     }
     agentDenorm = extractRunAgentDenorm(draftAgent);
 
@@ -472,7 +466,7 @@ export async function triggerScheduledRun(
           : `Agent '${packageId}' is not active in space '${spaceId}'. ` +
               `Activate it via POST /api/spaces/${spaceId}/packages to resume this schedule.`,
       );
-      return true;
+      return row;
     }
 
     // Same resolver as a manual run: the schedule's own `version_override`, or
@@ -496,7 +490,7 @@ export async function triggerScheduledRun(
           detail: err.message,
         });
         await failSchedule(err.message);
-        return true;
+        return row;
       }
       // Storage/SDK/programming error text stays in the log: the run row is user-visible.
       logger.error("Schedule version resolution threw, recording a failed run", {
@@ -505,7 +499,7 @@ export async function triggerScheduledRun(
         error: getErrorMessage(err),
       });
       await failSchedule("The scheduled version could not be loaded (internal error)");
-      return true;
+      return row;
     }
 
     // Per-space settings: editor defaults + locked fields for the input
@@ -540,7 +534,7 @@ export async function triggerScheduledRun(
           detail: err.message,
         });
         await failSchedule(err.message);
-        return true;
+        return row;
       }
       logger.error("Unexpected error during schedule preflight", {
         scheduleId,
@@ -548,7 +542,7 @@ export async function triggerScheduledRun(
         error: getErrorMessage(err),
       });
       await failSchedule(`Preflight error: ${getErrorMessage(err)}`);
-      return true;
+      return row;
     }
 
     // Resolve this fire's input through the same layers as a request run —
@@ -581,7 +575,7 @@ export async function triggerScheduledRun(
         await failSchedule(
           `Input validation failed: ${resolution.errors.map((e) => e.message).join(", ")}`,
         );
-        return true;
+        return row;
       }
       resolvedInput = resolution.resolved;
     } catch (err) {
@@ -594,7 +588,7 @@ export async function triggerScheduledRun(
           detail: err.message,
         });
         await failSchedule(err.message);
-        return true;
+        return row;
       }
       throw err;
     }
@@ -631,7 +625,7 @@ export async function triggerScheduledRun(
           detail: err.message,
         });
         await failSchedule(err.message);
-        return true;
+        return row;
       }
       throw err;
     }
@@ -649,7 +643,7 @@ export async function triggerScheduledRun(
       error: getErrorMessage(err),
     });
   }
-  return true;
+  return row;
 }
 
 // ---------------------------------------------------------------------------
@@ -983,11 +977,11 @@ export async function updateSchedule(
   visibility: SQL | undefined,
 ): Promise<EnrichedSchedule> {
   const cronExpr = data.cronExpression ?? expected.cron_expression;
-  const tz = data.timezone ?? expected.timezone ?? "UTC";
+  const tz = data.timezone ?? expected.timezone;
   const enabled = data.enabled ?? expected.enabled;
 
   // Compute next run (cron parsing only)
-  const nextRun = enabled ? computeNextRun(cronExpr, tz ?? "UTC") : null;
+  const nextRun = enabled ? computeNextRun(cronExpr, tz) : null;
 
   const payload: Record<string, unknown> = {
     cronExpression: cronExpr,
@@ -1051,16 +1045,14 @@ export async function updateSchedule(
  * Drop the locked input fields from every schedule of one agent in one space when its lock set is
  * written, else each tick fails `locked_input_field` ({@link withoutLockedFields}: the field
  * re-resolves from the editor value). Bumps `updated_at`, so a concurrent schedule write gets a 409.
- *
- * @returns the ids of the schedules that were rewritten.
  */
 export async function dropLockedFieldsFromSchedules(
   tx: Tx,
   scope: SpaceScope,
   packageId: string,
   lockedFields: readonly string[],
-): Promise<string[]> {
-  if (lockedFields.length === 0) return [];
+): Promise<void> {
+  if (lockedFields.length === 0) return;
 
   const rows = await tx
     .select({ id: schedules.id, input: schedules.input })
@@ -1074,7 +1066,6 @@ export async function dropLockedFieldsFromSchedules(
     )
     .for("update");
 
-  const rewritten: string[] = [];
   for (const row of rows) {
     const input = asRecordOrNull(row.input);
     if (!input) continue;
@@ -1086,9 +1077,7 @@ export async function dropLockedFieldsFromSchedules(
       .update(schedules)
       .set({ input: stripped, updatedAt: new Date() })
       .where(eq(schedules.id, row.id));
-    rewritten.push(row.id);
   }
-  return rewritten;
 }
 
 export async function deleteSchedule(scope: SpaceScope, id: string): Promise<boolean> {

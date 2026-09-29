@@ -104,6 +104,7 @@ import {
 import { createConnectRunExecutor } from "../services/connect/connect-run-launcher.ts";
 import { getCurrentScopesGranted } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
+import { removeScheduleJobs } from "../services/scheduler.ts";
 import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
@@ -428,16 +429,17 @@ export function oauthClientHandlers(
     async remove(c: Context<AppEnv>) {
       const packageId = packageIdOf(c);
       const clientId = assertOAuthClientRowId(c.req.param("clientId")!);
-      const { deletedConnections } = await deleteIntegrationOAuthClient(
+      const { deletedConnections, disabledScheduleIds } = await deleteIntegrationOAuthClient(
         scopeOf(c),
         packageId,
         clientId,
       );
+      await removeScheduleJobs(disabledScheduleIds);
       await recordAuditFromContext(c, {
         action: "integration.oauth_client.deleted",
         resourceType: "integration",
         resourceId: `${packageId}#${clientId}`,
-        after: { deletedConnections },
+        after: { deletedConnections, disabledScheduleIds },
       });
       return c.body(null, 204);
     },

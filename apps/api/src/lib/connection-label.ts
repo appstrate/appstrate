@@ -3,7 +3,6 @@
 // A label reaches the model verbatim (the tools' `connection` enum), so it
 // carries no line break, control, invisible or bidi character.
 
-import { truncateLabel } from "@appstrate/core/dedupe-label";
 import { isHiddenCodePoint } from "@appstrate/mcp-transport";
 
 export const CONNECTION_LABEL_MAX = 80;
@@ -25,9 +24,6 @@ function isForbidden(cp: number): boolean {
 
 export function connectionLabelProblem(label: string): string | null {
   if (label.trim() === "") return "must not be empty";
-  if (label.length > CONNECTION_LABEL_MAX) {
-    return `must be at most ${CONNECTION_LABEL_MAX} characters`;
-  }
   for (const ch of label) {
     if (isForbidden(ch.codePointAt(0)!)) {
       return "must not contain control, invisible or bidirectional-override characters";
@@ -38,7 +34,10 @@ export function connectionLabelProblem(label: string): string | null {
   return null;
 }
 
-/** A provider identity made storable, cut to the max; empty → the caller mints "Connexion N". */
+/**
+ * A provider identity made storable, except its length (`dedupeLabel`'s `maxLength` cuts it);
+ * empty → the caller mints "Connexion N".
+ */
 export function toMintedLabel(raw: string): string {
   let cleaned = "";
   for (const ch of raw) {
@@ -46,5 +45,5 @@ export function toMintedLabel(raw: string): string {
     if (isLineOrTab(cp)) cleaned += " ";
     else if (!isForbidden(cp)) cleaned += ch;
   }
-  return truncateLabel(cleaned.replace(/\s+/g, " ").trim(), CONNECTION_LABEL_MAX);
+  return cleaned.replace(/\s+/g, " ").trim();
 }

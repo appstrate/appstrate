@@ -322,7 +322,7 @@ export interface ScheduleWireDto {
   name: string | null;
   enabled: boolean;
   cron_expression: string;
-  timezone: string | null;
+  timezone: string;
   input: Record<string, unknown> | null;
   generation_config_override: ModelGenerationSettings | null;
   model_id_override: string | null;

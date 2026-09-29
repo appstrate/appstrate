@@ -2,8 +2,11 @@
 
 import { packageSourceValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
-import { connectionSetRefusals } from "./integrations.ts";
+import {
+  connectionIdSetJsonSchema,
+  connectionSetRefusals,
+  lockedBySchema,
+} from "./integrations.ts";
 
 /**
  * User-scoped identity routes (`/api/me/*`).
@@ -166,12 +169,7 @@ export const mePaths = {
                               reused_by_agents: { type: "integer" },
                               auth_key: { type: "string" },
                               shared_with_org: { type: "boolean" },
-                              locked_by: {
-                                type: ["string", "null"],
-                                enum: ["admin_pin", "org_default", null],
-                                description:
-                                  "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default.",
-                              },
+                              locked_by: lockedBySchema,
                               org: {
                                 type: "object",
                                 required: ["id", "name"],
@@ -242,19 +240,14 @@ export const mePaths = {
                   data: {
                     type: "array",
                     // `listMemberPinsForAgent` projects to exactly these two
-                    // fields (NOT the 6-field IntegrationPin the PUT route
-                    // emits) — keep the list item minimal.
+                    // fields (NOT the IntegrationPin the PUT route emits) —
+                    // keep the list item minimal.
                     items: {
                       type: "object",
                       required: ["integration_package_id", "connection_ids"],
                       properties: {
                         integration_package_id: { type: "string" },
-                        connection_ids: {
-                          type: "array",
-                          items: { type: "string", format: "uuid" },
-                          minItems: 1,
-                          maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
-                        },
+                        connection_ids: connectionIdSetJsonSchema,
                       },
                     },
                   },
@@ -294,12 +287,7 @@ export const mePaths = {
               properties: {
                 agent_package_id: { type: "string", minLength: 1 },
                 integration_package_id: { type: "string", minLength: 1 },
-                connection_ids: {
-                  type: "array",
-                  items: { type: "string", format: "uuid" },
-                  minItems: 1,
-                  maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
-                },
+                connection_ids: connectionIdSetJsonSchema,
               },
               additionalProperties: false,
             },
@@ -323,7 +311,7 @@ export const mePaths = {
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
-            "A connection id that is unknown, of another integration or space, or neither owned by the caller nor shared — one answer for all, so an id cannot be probed.",
+            "A connection id that is unknown, of another integration or space, or neither owned by the caller nor shared — one answer for all, so an id cannot be probed — or the agent is not active in this space.",
         },
       },
     },

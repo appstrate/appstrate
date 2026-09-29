@@ -2,6 +2,7 @@
 
 import { REQUEST_ID_ONLY_HEADERS, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { connectionIdSetJsonSchema } from "./integrations.ts";
 
 /** The 409 both schedule writes answer when an armed schedule leaves a connection choice open. */
 const scheduleConnectionNotChosen = {
@@ -138,13 +139,8 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  description: `Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (\`override_outranked\` otherwise, see 409). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Empty arrays and ids that are not uuids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write.`,
-                  additionalProperties: {
-                    type: "array",
-                    items: { type: "string", format: "uuid" },
-                    minItems: 1,
-                    maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
-                  },
+                  description: `Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (\`override_outranked\` otherwise, see 409). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Empty arrays and ids that are not uuids are refused here.`,
+                  additionalProperties: connectionIdSetJsonSchema,
                 },
                 dependency_overrides: {
                   type: "object",
@@ -339,13 +335,8 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: ["object", "null"],
-                  description: `Per-integration connection sets frozen on the schedule, one array of 1..${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per integration. Pass \`null\` to clear. Same array shape, same bounds and same cascade layer as on create; label distinctness is likewise checked at each fire, not here.`,
-                  additionalProperties: {
-                    type: "array",
-                    items: { type: "string", format: "uuid" },
-                    minItems: 1,
-                    maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
-                  },
+                  description: `Per-integration connection sets frozen on the schedule, one array of 1..${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per integration. Pass \`null\` to clear. Same array shape, same bounds and same cascade layer as on create.`,
+                  additionalProperties: connectionIdSetJsonSchema,
                 },
                 dependency_overrides: {
                   type: ["object", "null"],
