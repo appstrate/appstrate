@@ -73,11 +73,16 @@ async function labelOf(id: string): Promise<string | null> {
 }
 
 async function rejects(sql: string): Promise<boolean> {
+  return (await errorCode(sql)) !== null;
+}
+
+/** The SQLSTATE `sql` fails with; null if it lands. */
+async function errorCode(sql: string): Promise<string | null> {
   try {
     await pg.exec(sql);
-    return false;
-  } catch {
-    return true;
+    return null;
+  } catch (error) {
+    return (error as ApplyError).code ?? "unknown";
   }
 }
 
@@ -246,11 +251,12 @@ describe("0077 — connection sets", () => {
          AND column_name = 'connection_id'`,
     );
     expect(rows).toEqual([]);
-    expect(
-      await rejects(
-        `INSERT INTO integration_pins (space_id, package_id, integration_package_id, connection_ids)
-         VALUES ('${SPACE}', '${AGENT}', '${GMAIL}', ARRAY['${conn(2)}']::uuid[])`,
-      ),
-    ).toBe(true);
+    const adminPin = (integration: string) =>
+      `INSERT INTO integration_pins (space_id, package_id, integration_package_id, connection_ids)
+       VALUES ('${SPACE}', '${AGENT}', '${integration}', ARRAY['${conn(2)}']::uuid[])`;
+    // A second admin pin on GMAIL's key is a unique violation …
+    expect(await errorCode(adminPin(GMAIL))).toBe("23505");
+    // … while the same row on a key nothing pins yet lands.
+    expect(await errorCode(adminPin(SLACK))).toBeNull();
   });
 });

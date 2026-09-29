@@ -10,12 +10,16 @@
  * exercises one clause of the freeze: deleting that clause makes a pin appear
  * or vanish, or moves the counts the script prints. The `GOV_*` fixtures do the
  * same for the outranked drop.
+ *
+ * PGlite runs the SQL after the file's psql fence (`\if :{?ran_0033}`), which it
+ * cannot parse; the fence itself is psql's, not exercised here.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { replayJournal } from "../helpers/journal.ts";
+import { CONNECTION_LABEL_MAX, connectionLabelProblem } from "../../src/lib/connection-label.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
 const SCRIPT = `${REPO_ROOT}/scripts/migration/0032-connection-sets.sql`;
@@ -50,6 +54,9 @@ const AUTH_KEPT = "@acme0032/authkept";
 const AUTH_PIN = "@acme0032/authpin";
 const AUTH_LATEST = "@acme0032/authlatest";
 const OVERRIDDEN = "@acme0032/overridden";
+const UNSHARED = "@acme0032/unshared";
+const LEAVER = "@acme0032/leaver";
+const STALE = "@acme0032/stale";
 const LABELS = "@acme0032/labels";
 /** Outranked drop: an admin pin (and an enforced default below it), an enforced default, a soft one. */
 const GOV_PIN = "@acme0032/gov-pin";
@@ -65,6 +72,16 @@ const LONG_AB = `${"x".repeat(78)}AB`;
 const LONG_CD = `${"x".repeat(78)}CD`;
 /** 40 code points, 80 UTF-16 units — the unit `CONNECTION_LABEL_MAX` counts in. */
 const EMOJI = "😀".repeat(40);
+/** Every code point `connectionLabelProblem` forbids, NUL aside (a `text` cannot hold it). */
+const FORBIDDEN = (() => {
+  let out = "";
+  for (let cp = 1; cp <= 0x10ffff; cp++) {
+    if (cp >= 0xd800 && cp <= 0xdfff) continue;
+    const ch = String.fromCodePoint(cp);
+    if (connectionLabelProblem(`a${ch}a`)?.includes("control")) out += ch;
+  }
+  return out;
+})();
 
 const pg = new PGlite();
 let afterFirstRun = "";
@@ -74,6 +91,14 @@ let secondRunCounts: Record<string, number> = {};
 
 const sqlText = (value: string | null) =>
   value === null ? "NULL" : `'${value.replaceAll("'", "''")}'`;
+
+/** The file past its psql fence — which must be there, first. */
+async function scriptSql(): Promise<string> {
+  const fence = /^\\set ON_ERROR_STOP on\n\\if :\{\?ran_0033\}\n\\else\n[\s\S]*?\n\\endif\n/m;
+  const file = await Bun.file(SCRIPT).text();
+  expect(file).toMatch(fence);
+  return file.replace(fence, "");
+}
 
 /** Every one-row result the script prints, merged: `{ implicit_shared_picks_before: 4, … }`. */
 async function runScript(script: string): Promise<Record<string, number>> {
@@ -194,6 +219,7 @@ beforeAll(async () => {
       ('${DEFAULTED}', 'integration'), ('${UNREACH}', 'integration'), ('${EU}', 'integration'),
       ('${INLINE}', 'integration'), ('${AUTH_PIN}', 'integration'),
       ('${AUTH_LATEST}', 'integration'), ('${OVERRIDDEN}', 'integration'), ('${LABELS}', 'integration'),
+      ('${UNSHARED}', 'integration'), ('${LEAVER}', 'integration'), ('${STALE}', 'integration'),
       ('${GOV_PIN}', 'integration'), ('${GOV_ENF}', 'integration'), ('${GOV_SOFT}', 'integration'),
       ('${GOV_OTHER}', 'integration');
     INSERT INTO packages (id, type, draft_manifest) VALUES
@@ -250,6 +276,9 @@ beforeAll(async () => {
       ${bobShared(44, AUTH_PIN)},
       ${bobShared(45, AUTH_LATEST)},
       ${bobShared(46, OVERRIDDEN)},
+      ${connection(47, UNSHARED, BOB, "c47", { healthy: true })},
+      ${bobShared(48, LEAVER)},
+      ${connection(49, STALE, BOB, "c49", { shared: true })},
       ${bobShared(70, GOV_PIN)},
       ${bobShared(71, GOV_PIN)},
       ${bobShared(73, GOV_ENF)},
@@ -273,7 +302,8 @@ beforeAll(async () => {
       ${label(62, "Two  spaces")},
       ${label(63, "Two spaces")},
       ${label(64, "No\u00A0break")},
-      ${label(65, "No break")};
+      ${label(65, "No break")},
+      ${label(66, `Hid${FORBIDDEN}den`)};
     INSERT INTO package_schedules
       (id, package_id, user_id, org_id, space_id, cron_expression, enabled, connection_overrides)
     VALUES
@@ -339,12 +369,15 @@ beforeAll(async () => {
         [AUTH_KEPT]: pick(43),
         [AUTH_PIN]: pick(44),
         [AUTH_LATEST]: pick(45),
+        [UNSHARED]: pick(47),
+        [STALE]: pick(49),
       })},
+      ${run("run_0032_leaver", 3, null, { [LEAVER]: pick(48) }, { user: CAROL })},
       ${run("run_0032_end_user", 3, null, { [EU]: pick(40) }, { user: null, endUser: END_USER })},
       ${run("run_0032_inline", 3, null, { [INLINE]: pick(41) }, { agent: SHADOW })};
   `);
 
-  const script = await Bun.file(SCRIPT).text();
+  const script = await scriptSql();
   firstRunCounts = await runScript(script);
   afterFirstRun = await snapshot();
   secondRunCounts = await runScript(script);
@@ -362,11 +395,11 @@ describe("scripts/migration/0032 — connection sets", () => {
       schedules_outranked_before: 3,
       schedules_outranked_emptied_before: 2,
       runs_overrides_before: 1,
-      runs_resolved_before: 8,
+      runs_resolved_before: 9,
       schedules_overrides_before: 2,
       implicit_shared_picks_before: 4,
       implicit_shared_picks_unpinned_after: 0,
-      labels_to_normalize_before: 10,
+      labels_to_normalize_before: 11,
       labels_emptied_before: 1,
       labels_to_normalize_after: 0,
       duplicate_labels_before: 6,
@@ -425,7 +458,9 @@ describe("scripts/migration/0032 — connection sets", () => {
     // (the manifest no longer declares its auth), AUTH_PIN / AUTH_LATEST (the
     // agent's draft / `latest` manifest pins another auth), OVERRIDDEN (the
     // schedule's latest run bound it through its override; only an OLDER run
-    // of that schedule leaned on the fallback).
+    // of that schedule leaned on the fallback), UNSHARED (Bob's healthy
+    // connection, not shared), LEAVER (the run's actor, Carol, left the
+    // organization), STALE (the shared connection needs reconnecting).
     expect(await memberPins()).toEqual([
       { integration: AUTH_KEPT, user: ALICE, connection: conn(43) },
       { integration: GMAIL, user: ALICE, connection: conn(1) },
@@ -496,6 +531,18 @@ describe("scripts/migration/0032 — connection sets", () => {
     expect(await labelOf(conn(65))).toBe("No break");
   });
 
+  it("leaves every label one the label rule accepts, whichever forbidden code point it held", async () => {
+    // the eight line breaks became spaces, every other forbidden code point dropped
+    expect(await labelOf(conn(66))).toBe(`Hid${" ".repeat(8)}den`);
+    const { rows } = await pg.query<{ label: string }>(
+      "SELECT label FROM integration_connections WHERE label IS NOT NULL AND label <> ''",
+    );
+    expect(rows.length).toBeGreaterThan(50);
+    const problem = (label: string) =>
+      connectionLabelProblem(label) ?? (label.length > CONNECTION_LABEL_MAX ? "too long" : null);
+    expect(rows.map((r) => [r.label, problem(r.label)]).filter(([, p]) => p !== null)).toEqual([]);
+  });
+
   it("empties a whitespace-only label to NULL, and dedupes labels normalization made equal", async () => {
     expect(await labelOf(conn(54))).toBeNull();
     expect(await labelOf(conn(56))).toBe("Prod");
@@ -540,7 +587,10 @@ describe("scripts/migration/0032 — connection sets", () => {
     expect(Object.entries(secondRunCounts).filter(([, n]) => n !== 0)).toEqual([]);
   });
 
-  it("refuses, writing nothing, a value SHAPE would wrap that is neither a string override nor an object snapshot", async () => {
+  // "Nothing was written" is the one transaction's to guarantee: PGlite runs the
+  // whole string as one block, so this test cannot tell it apart from its own
+  // ROLLBACK. It proves the refusal, and restores the rows for the tests after it.
+  it("refuses a value SHAPE would wrap that is neither a string override nor an object snapshot", async () => {
     await pg.exec(`BEGIN;
       UPDATE runs SET connection_overrides = '{"${GMAIL}": 42}', resolved_connections = '{"${GMAIL}": null}'
         WHERE id = 'run_0032_empty';
@@ -548,7 +598,7 @@ describe("scripts/migration/0032 — connection sets", () => {
         WHERE id = 'sch_0032_empty';`);
     let refusal: unknown;
     try {
-      await pg.exec(await Bun.file(SCRIPT).text());
+      await pg.exec(await scriptSql());
     } catch (error) {
       refusal = error;
     } finally {

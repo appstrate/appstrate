@@ -3,8 +3,8 @@
 /**
  * Migration `0033` against the test database: an owner who lost access before the deploy — still
  * in the organization but out of a closed space, or out of the organization — stops sharing there,
- * and only there. The predicate itself is `unshareConnectionsOfOwnersWithoutAccess`'s, covered by
- * `shared-connection-access-loss.test.ts`.
+ * and only there, in every organization. The predicate itself is
+ * `unshareConnectionsOfOwnersWithoutAccess`'s, covered by `shared-connection-access-loss.test.ts`.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -17,11 +17,19 @@ import {
   createTestContext,
   createTestUser,
 } from "../../apps/api/test/helpers/auth.ts";
-import { seedPackage, seedSpace } from "../../apps/api/test/helpers/seed.ts";
+import {
+  seedEndUser,
+  seedPackage,
+  seedSpace,
+  seedSpaceMember,
+} from "../../apps/api/test/helpers/seed.ts";
 
 const INTEGRATION = "@mig0033/svc";
 
-async function seedSharedConnection(spaceId: string, userId: string): Promise<string> {
+async function seedSharedConnection(
+  spaceId: string,
+  owner: { userId: string } | { endUserId: string },
+): Promise<string> {
   const [row] = await db
     .insert(integrationConnections)
     .values({
@@ -29,7 +37,7 @@ async function seedSharedConnection(spaceId: string, userId: string): Promise<st
       authKey: "primary",
       accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
       spaceId,
-      userId,
+      ...owner,
       credentialsEncrypted: "x",
       scopesGranted: [],
       sharedWithOrg: true,
@@ -52,7 +60,9 @@ async function stillShared(ids: string[]): Promise<string[]> {
 describe("runUnshareSpaceAccessLoss", () => {
   let lost: string;
   let departed: string;
-  let kept: string;
+  let otherOrgDeparted: string;
+  /** Still reached by their owner, or owned by an end-user: shared after every run. */
+  let kept: string[];
   const lines: string[] = [];
   const run = (apply: boolean) =>
     runUnshareSpaceAccessLoss({ apply, out: (line) => lines.push(line) });
@@ -66,22 +76,43 @@ describe("runUnshareSpaceAccessLoss", () => {
     await addOrgMember(ctx.orgId, member.id, "member");
     // Shared in a closed space the member holds no row in: access lost before the deploy.
     const closed = await seedSpace({ orgId: ctx.orgId, visibility: "closed" });
-    lost = await seedSharedConnection(closed.id, member.id);
-    kept = await seedSharedConnection(ctx.defaultSpaceId, member.id);
+    lost = await seedSharedConnection(closed.id, { userId: member.id });
+    // An explicit member of the same closed space still reaches it.
+    const insider = await createTestUser();
+    await addOrgMember(ctx.orgId, insider.id, "member");
+    await seedSpaceMember({ spaceId: closed.id, userId: insider.id });
+    // An end-user's connection is not a member's: no access loss applies to it.
+    const endUser = await seedEndUser({ spaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
+    kept = [
+      await seedSharedConnection(ctx.defaultSpaceId, { userId: member.id }),
+      await seedSharedConnection(closed.id, { userId: insider.id }),
+      await seedSharedConnection(ctx.defaultSpaceId, { endUserId: endUser.id }),
+    ];
     // Shared by a user who left the organization: a `user` row, no `org_members` row.
     const leaver = await createTestUser();
-    departed = await seedSharedConnection(ctx.defaultSpaceId, leaver.id);
+    departed = await seedSharedConnection(ctx.defaultSpaceId, { userId: leaver.id });
+    // A second organization with its own leaver: the per-org loop reaches it too.
+    const other = await createTestContext({ orgSlug: "mig0033b" });
+    otherOrgDeparted = await seedSharedConnection(other.defaultSpaceId, {
+      userId: (await createTestUser()).id,
+    });
   });
 
-  it("writes nothing on a dry run", async () => {
-    expect((await run(false)).sort()).toEqual([lost, departed].sort());
-    expect(await stillShared([lost, departed, kept])).toEqual([lost, departed, kept].sort());
+  it("names the database first, and writes nothing on a dry run", async () => {
+    const all = [lost, departed, otherOrgDeparted, ...kept];
+    expect((await run(false)).sort()).toEqual([lost, departed, otherOrgDeparted].sort());
+    expect(await stillShared(all)).toEqual(all.sort());
+    expect(lines[0]).toStartWith("database: ");
     expect(lines.at(-1)).toContain("DRY RUN");
   });
 
-  it("unshares only where the owner lost the space, and finds nothing on a second run", async () => {
-    expect((await run(true)).sort()).toEqual([lost, departed].sort());
-    expect(await stillShared([lost, departed, kept])).toEqual([kept]);
+  it("unshares only where the owner lost the space, in every organization, and finds nothing on a second run", async () => {
+    const all = [lost, departed, otherOrgDeparted, ...kept];
+    expect((await run(true)).sort()).toEqual([lost, departed, otherOrgDeparted].sort());
+    expect(await stillShared(all)).toEqual(kept.sort());
+    expect(lines.at(-1)).toBe(
+      '  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v ran_0033=1 -f scripts/migration/0032-connection-sets.sql',
+    );
     expect(await run(true)).toEqual([]);
   });
 });

@@ -2,11 +2,19 @@
 --
 -- Run with the platform STOPPED: stop → `pg_dump` → `0033-unshare-space-access-loss.ts --apply` →
 -- run this file → deploy the new image (`0077` applies at boot) → reopen. The dump follows the stop:
--- it is the only rollback, so no write may land after it. After `0033`, because the freeze
--- turns a colleague's shared connection into a member pin: a connection `0033` unshares (its owner
--- no longer reaches the space) is then no longer shared, so it is never frozen. Before the batch
--- because the freeze reads and writes the scalar `connection_id` columns `0077` folds and drops,
--- and the dedupe is the precondition of `0077`'s unique index `idx_integration_conn_label`.
+-- it is the only rollback, so no write may land after it. psql only (`\if`), PostgreSQL 16+ (the
+-- `0x…` integer literals), a UTF8 database (NORMALIZE reads code points with `ascii()`):
+--
+--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v ran_0033=1 -f scripts/migration/0032-connection-sets.sql
+--
+-- `-v ran_0033=1` says `0033 --apply` ran first, which prints this line; without it the file
+-- refuses before its transaction opens.
+--
+-- After `0033`, because the freeze turns a colleague's shared connection into a member pin: a
+-- connection `0033` unshares (its owner no longer reaches the space) is then no longer shared, so
+-- it is never frozen. Before the batch because the freeze reads and writes the scalar
+-- `connection_id` columns `0077` folds and drops, and the dedupe is the precondition of `0077`'s
+-- unique index `idx_integration_conn_label`.
 -- Skipped, `0077`'s first statement refuses the batch on a scalar snapshot or override value or
 -- on a label held twice, naming these steps; with neither, it lands and the outranked drop, the
 -- freeze and the normalization are simply missing.
@@ -50,13 +58,13 @@
 --    own no member pins: list their triples with the standalone query at the end, before the
 --    window.
 --
--- 4. NORMALIZE — every non-empty label is brought within what `connectionLabelProblem`
---    (`apps/api/src/lib/connection-label.ts`) accepts, and no further: line breaks → space, the
---    code points it forbids (C0/DEL/C1, `isHiddenCodePoint`) dropped, both ends trimmed of what
---    JS `trim()` strips, cut to 80 UTF-16 units and right-trimmed again; emptied → NULL (`0077`
---    backfills it). A label the API accepts is left verbatim — inner whitespace runs and NBSP
---    included — so two distinct legal labels are never merged into a needless " (2)". Runs before
---    the dedupe, which must compare what the index will.
+-- 4. NORMALIZE — every non-empty label is brought within what `connectionLabelProblem` and
+--    `CONNECTION_LABEL_MAX` (`apps/api/src/lib/connection-label.ts`) accept, and no further: line
+--    breaks → space, the code points it forbids (C0/DEL/C1, `isHiddenCodePoint`) dropped, both
+--    ends trimmed of what JS `trim()` strips, cut to 80 UTF-16 units and right-trimmed again;
+--    emptied → NULL (`0077` backfills it). A label the API accepts is left verbatim — inner
+--    whitespace runs and NBSP included — so two distinct legal labels are never merged into a
+--    needless " (2)". Runs before the dedupe, which must compare what the index will.
 --
 -- 5. DEDUPE — within a (space, integration), every holder of a label after the oldest
 --    (`created_at`, `id`) becomes "<base> (n)", n the smallest ≥ 2 the group does not hold, `base`
@@ -72,6 +80,14 @@
 --
 -- Rollback: none (collapsing a set is lossy, a dropped override is gone); restore the pre-run
 -- `pg_dump`. Frozen pins and renamed labels are ordinary rows their owners edit.
+
+\set ON_ERROR_STOP on
+\if :{?ran_0033}
+\else
+DO $$ BEGIN
+  RAISE EXCEPTION '0032: refused, nothing written — run bun scripts/migration/0033-unshare-space-access-loss.ts --apply first, then this file with -v ran_0033=1.';
+END $$;
+\endif
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -130,7 +146,8 @@ SELECT
       AND EXISTS (SELECT 1 FROM jsonb_each(s.connection_overrides) AS e(k, v)
                    WHERE jsonb_typeof(v) <> 'array'))            AS schedules_overrides_before;
 
--- REFUSE — a non-array value SHAPE would wrap that is not the scalar it expects
+-- REFUSE — a database that is not UTF8, and a non-array value SHAPE would wrap that is not the
+-- scalar it expects
 DO $$
 DECLARE
   overrides bigint := (SELECT count(*) FROM runs r, jsonb_each(r.connection_overrides) AS e(k, v)
@@ -140,6 +157,10 @@ DECLARE
   schedules bigint := (SELECT count(*) FROM package_schedules s, jsonb_each(s.connection_overrides) AS e(k, v)
                         WHERE jsonb_typeof(v) NOT IN ('array', 'string'));
 BEGIN
+  IF current_setting('server_encoding') <> 'UTF8' THEN
+    RAISE EXCEPTION '0032: server_encoding is %, not UTF8 — NORMALIZE reads code points with ascii(). Nothing was written.',
+      current_setting('server_encoding');
+  END IF;
   IF overrides + resolved + schedules > 0 THEN
     RAISE EXCEPTION '0032: % runs.connection_overrides, % runs.resolved_connections and % package_schedules.connection_overrides value(s) are neither a set nor the scalar SHAPE wraps (a string override, an object snapshot). Nothing was written; inspect them.',
       overrides, resolved, schedules;
