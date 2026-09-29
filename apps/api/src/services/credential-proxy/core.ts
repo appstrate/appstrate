@@ -32,7 +32,11 @@ import {
   applyInjectedCredentialHeaderToHeaders,
   normalizeAuthSchemeTemplate,
 } from "@appstrate/connect";
-import { cookieScope, type CookieJar } from "@appstrate/afps-runtime/resolvers";
+import {
+  cookieScope,
+  credentialUrlPolicy,
+  type CookieJar,
+} from "@appstrate/afps-runtime/resolvers";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import type { Actor } from "../../lib/actor.ts";
@@ -225,6 +229,28 @@ function redactCredentialValues(value: string, fields: Record<string, string>): 
 }
 
 /**
+ * The host of `url` for a message — never its path or query. A redirect hop is
+ * WHATWG-normalised (percent-encoded path, decoded and lowercased host), so
+ * {@link redactCredentialValues} cannot be trusted on the full URL; the host
+ * is scrubbed against lowercased credential values instead.
+ */
+function redactedHost(url: string, fields: Record<string, string>): string {
+  let host: string;
+  try {
+    host = new URL(url).host;
+  } catch {
+    return "(invalid URL)";
+  }
+  const lowered = Object.fromEntries(
+    Object.entries(fields).map(([name, value]) => [
+      name,
+      typeof value === "string" ? value.toLowerCase() : "",
+    ]),
+  );
+  return redactCredentialValues(host, lowered);
+}
+
+/**
  * Execute one authenticated proxy call. Credentials never leak into the
  * caller's response — the only thing that crosses the boundary is the
  * upstream response headers + body, streamed back as-is.
@@ -265,22 +291,31 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // `redactedTarget` instead.
   const redactedTarget = redactCredentialValues(target, fields);
 
-  // Credential-exfiltration guard — mirror of the sidecar's `executeApiCall`
-  // and the local resolver. A caller templating a decrypted field into the
-  // target, a header, or a substituted (string) body loses `allow_all_uris`:
-  // the whole chain is gated by `authorized_uris`, refused when there is none.
-  const referencesCredential = (s: string) =>
-    findUnresolvedPlaceholders(s).some((k) => k in fields);
-  const substitutesCredential =
-    referencesCredential(input.target) ||
-    Object.values(input.headers ?? {}).some(referencesCredential) ||
-    (input.substituteBody === true &&
-      typeof input.body === "string" &&
-      referencesCredential(input.body));
-  const allowAllUris = resolved.allowAllUris && !substitutesCredential;
-  if (substitutesCredential && !resolved.authorizedUris?.length) {
+  // Header and body templates exactly as substituted below. `Bearer{{token}}`
+  // → `Bearer {{token}}` is repaired on the TEMPLATE, never on the resolved
+  // value: a raw secret starting with a scheme name must reach the upstream
+  // byte-identical (#988).
+  const headerTemplates = Object.entries(input.headers ?? {}).map(
+    ([k, v]) => [k, normalizeAuthSchemeTemplate(k, v)] as const,
+  );
+  const bodyTemplate = typeof input.body === "string" && input.substituteBody ? input.body : null;
+
+  // Credential-exfiltration guard, shared with the sidecar and the local
+  // resolver: a call templating a decrypted field loses `allow_all_uris`, its
+  // whole chain is gated by `policy.authorizedUris`, refused when that is empty.
+  const policy = credentialUrlPolicy({
+    templates: [
+      input.target,
+      ...headerTemplates.map(([, template]) => template),
+      ...(bodyTemplate !== null ? [bodyTemplate] : []),
+    ],
+    fields,
+    allowAllUris: resolved.allowAllUris,
+    authorizedUris: resolved.authorizedUris ?? [],
+  });
+  if (policy.refuse) {
     throw new ProxyAuthorizationError(
-      `Call for integration "${input.integrationId}" substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`,
+      `Call for integration "${input.integrationId}" substitutes a credential into an agent-controlled URL, header, or body but no authorized_uris allowlist applies to it; refusing to prevent credential exfiltration.`,
     );
   }
 
@@ -296,17 +331,16 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // ONE matcher for the whole chain: the same assertion runs on the initial
   // target here AND — via `guardedFetch`'s `validateHop` — on EVERY redirect
   // hop, so a 302 cannot walk the request off the allowlist (cross-host OR a
-  // same-host path escape like `/v1/me` → `/internal/dump`). The message is
-  // built from the REDACTED form only: a hop URL can itself embed an
-  // interpolated credential (vendor puts the token in a path, or echoes it
-  // in a Location header).
+  // same-host path escape like `/v1/me` → `/internal/dump`). The message names
+  // the hop's HOST only (see {@link redactedHost}): a hop URL can embed an
+  // interpolated credential (vendor puts the token in a path, or echoes it in
+  // a Location header) in a normalised form value-based redaction misses.
   const assertHopAuthorized = (hopTarget: string): void => {
-    if (allowAllUris) return;
-    const allowlist = resolved.authorizedUris ?? [];
-    const ok = allowlist.some((p) => matchesAuthorizedUriSpec(p, hopTarget));
+    if (policy.allowAllUris) return;
+    const ok = policy.authorizedUris.some((p) => matchesAuthorizedUriSpec(p, hopTarget));
     if (!ok) {
       throw new ProxyAuthorizationError(
-        `Target ${redactCredentialValues(hopTarget, fields)} is not in the authorized_uris allowlist for ${input.integrationId}`,
+        `Target host ${redactedHost(hopTarget, fields)} is not in the authorized_uris allowlist for ${input.integrationId}`,
       );
     }
     // Note: an empty allowlist can never reach here — `allowlist.some(...)` is
@@ -340,11 +374,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // cross-origin redirect strips these exactly like `Authorization`.
   const sensitiveHeaderNames = new Set<string>();
   const headers = new Headers();
-  for (const [k, v] of Object.entries(input.headers ?? {})) {
-    // Repair `Bearer{{token}}` → `Bearer {{token}}` on the TEMPLATE, never on
-    // the resolved value: a raw secret starting with a scheme name must reach
-    // the upstream byte-identical (#988).
-    const template = normalizeAuthSchemeTemplate(k, v);
+  for (const [k, template] of headerTemplates) {
     const substituted = substituteVars(template, fields);
     const unresolved = findUnresolvedPlaceholders(substituted);
     if (unresolved.length > 0) {
@@ -370,8 +400,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   if (input.body !== undefined && input.body !== null) {
     if (isStreamBody) {
       body = input.body as ReadableStream<Uint8Array>;
-    } else if (typeof input.body === "string" && input.substituteBody) {
-      const substituted = substituteVars(input.body, fields);
+    } else if (bodyTemplate !== null) {
+      const substituted = substituteVars(bodyTemplate, fields);
       const unresolved = findUnresolvedPlaceholders(substituted);
       if (unresolved.length > 0) {
         throw new ProxySubstitutionError(
@@ -387,7 +417,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const jarStore = input.cookieJar;
   const jarSessionId = input.jarSessionId;
   const jarTtl = input.cookieJarTtlSeconds;
-  const literalAllowlist = allowAllUris ? null : (resolved.authorizedUris ?? []);
+  const literalAllowlist = policy.allowAllUris ? null : policy.authorizedUris;
   // guardedFetch composes every hop's Cookie from this snapshot and captures every hop's
   // Set-Cookie into it; `captured` is replayed over a fresh read at the end.
   const captured: Array<[string, string[]]> = [];
@@ -454,12 +484,16 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         );
       }
       if (err instanceof Error) {
-        const redacted = redactCredentialValues(err.message, fields);
+        // Bun fetch errors carry the request URL — on a redirect hop a
+        // normalised one — so every URL is cut down to its redacted host.
+        const redacted = redactCredentialValues(
+          err.message.replace(/https?:\/\/[^\s"'<>]+/gi, (url) => redactedHost(url, fields)),
+          fields,
+        );
         if (redacted !== err.message) {
-          // The message embedded a credential value (Bun fetch errors carry
-          // the request URL). Re-wrap with the scrubbed message; keep the
-          // name so callers can still discriminate (e.g. TimeoutError). The
-          // original error is deliberately NOT chained as `cause`.
+          // Re-wrap with the scrubbed message; keep the name so callers can
+          // still discriminate (e.g. TimeoutError). The original error is
+          // deliberately NOT chained as `cause`.
           const clean = new Error(redacted);
           clean.name = err.name;
           throw clean;

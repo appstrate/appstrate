@@ -680,6 +680,13 @@ Consumers MUST NOT send credentials to URIs outside the authorized set unless
 `allow_all_uris` is explicitly `true`. URL-encoding bypass, fragment injection, and
 open-redirect chains MUST NOT cross the allowlist (§8.6).
 
+A caller that templates a credential field (`{{field}}`) into the target, a header or
+a substituted body loses `allow_all_uris`: the target and every redirect hop must
+match `authorized_uris`, plus the origin of each credential field whose value is an
+absolute `http(s)` URL (the endpoint the connection owner entered, e.g. a
+`webhook_url` or `site_url`). With nothing to match, the call is refused. The
+sidecar, the CLI resolver and the platform proxy share this rule (`credentialUrlPolicy`).
+
 The runtime layer (sidecar MITM) enforces this on the wire, including across redirect
 hops (per-hop allowlist check, per-hop SSRF blocklist, hybrid credential-strip on
 cross-host hops). For a `source.kind: "local"` integration run in Docker, the same list is also the
