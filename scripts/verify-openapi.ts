@@ -564,7 +564,8 @@ function compareValueConstraints(
     }
   }
 
-  // Both-sides-set only: two bodies still omit a Zod array bound from the spec.
+  // Both-sides-set only: the webhook bodies (`POST /api/webhooks`, `PATCH /api/webhooks/{id}`)
+  // omit `events`' Zod `minItems: 1` from the spec.
   for (const keyword of ["minItems", "maxItems"] as const) {
     const zodValue = zodProp[keyword];
     const oaValue = oaProp[keyword];

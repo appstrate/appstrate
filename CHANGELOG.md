@@ -8,39 +8,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
-- **Stop the platform, run `scripts/migration/0032-connection-sets.sql`, then
-  deploy.** It must run before the drizzle batch, on **PostgreSQL 16 or
-  later**: its label normalization writes code points as hexadecimal integer
-  literals (`0x2028`), which older servers do not parse — the file then stops
-  on a syntax error and, under `psql -v ON_ERROR_STOP=1`, rolls back whole. In
-  one transaction it:
+- **Stop the platform, run `scripts/migration/0033-unshare-space-access-loss.ts`
+  with `--apply`, then `scripts/migration/0032-connection-sets.sql`, then
+  deploy.** Both run before the drizzle batch, in that order.
+
+  `0033` (dry run by default, `--apply` to commit, with the platform env
+  loaded, from the release checkout) unshares every `shared_with_org`
+  connection whose owner no longer reaches its space — whether they left the
+  organization or, still in it, were removed from a closed space, demoted, or
+  the space closed — using the service's own access predicate (the platform
+  now does it at the access change, see `### Fixed`), and prints each id. It
+  touches no column 0077 changes, so it runs on the pre-0077 schema. An admin
+  pin or an org default naming an unshared connection is left as it is and
+  fails its runs with `pinned_connection_unavailable` until an admin changes
+  it. It runs first because `0032`'s freeze (below) turns a colleague's
+  still-shared connection into a member pin: run after it, `0033` would unshare
+  connections just frozen, failing members on pins they never set. Idempotent.
+
+  `0032` runs on **PostgreSQL 16 or later**: its label normalization writes
+  code points as hexadecimal integer literals (`0x2028`), which older servers
+  do not parse — the file then stops on a syntax error and, under
+  `psql -v ON_ERROR_STOP=1`, rolls back whole. In one transaction it:
   1. rewrites `runs.connection_overrides`, `runs.resolved_connections` and
      `package_schedules.connection_overrides` from one pick per integration to
      a set — a shape only the new readers accept;
-  2. unshares the `shared_with_org` connections of owners who left the
-     organization before the deploy (the platform now does it at departure,
-     see `### Fixed`). An owner still in the organization who lost a SPACE
-     before the deploy is not covered: that connection stays shared there
-     until a write touching that member or that space runs. An admin pin or an
-     org default naming an unshared connection fails its runs with
-     `pinned_connection_unavailable`; the section's
-     `departed_shared_named_by_admin` "before" count sizes that;
-  3. freezes, as member pins, the shared connections the old fallback bound
+  2. freezes, as member pins, the shared connections the old fallback bound
      implicitly (see `### Changed`): one pin per (space, agent, integration,
      user), taken from the most recent of the runs of the last 30 days and of
      the latest run that recorded a resolution of each enabled schedule,
-     whatever its age — only where that connection is still the user's one
-     healthy candidate, no admin pin, member pin or reachable org default
-     decides, the integration's current manifest still declares the
-     connection's auth, and neither the agent's draft nor its `latest`
-     manifest pins (`auth_key`) another auth;
-  4. normalizes every label the way a new one is minted (`toMintedLabel`): a
+     whatever its age — only where that connection is still shared (so not one
+     `0033` unshared) and still the user's one healthy candidate, no admin pin,
+     member pin or reachable org default decides, the integration's current
+     manifest still declares the connection's auth, and neither the agent's
+     draft nor its `latest` manifest pins (`auth_key`) another auth;
+  3. normalizes every label the way a new one is minted (`toMintedLabel`): a
      line break or tab becomes a space, any other control, invisible or
      bidirectional-override character is dropped, whitespace runs collapse to
      one space, both ends are trimmed and the result is cut to 80 characters.
      A label left empty becomes `NULL`, so 0077 names it `Connexion N`. Such
      characters used to reach the agent's model verbatim;
-  5. renames every row but the oldest of a group sharing a (normalized) label
+  4. renames every row but the oldest of a group sharing a (normalized) label
      in its (space, integration) to `<base> (n)` — n the smallest numbers from
      2 no row holds, `<base>` the label cut so the whole stays within 80
      characters.
@@ -49,9 +56,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   precondition of 0077's unique index, which is why it precedes the batch: a
   database that skipped it and holds a duplicate label fails at that index
   (23505) and the whole batch rolls back. One holding no duplicate boots and
-  misses the other four sections: the shape rewrite (its readers then raise on
-  the first old row), the freeze, the normalization, and the departed-owner
-  unshare, which leaves those connections usable by the members who stayed.
+  misses the other three sections: the shape rewrite (its readers then raise on
+  the first old row), the freeze and the normalization.
   The new image then applies drizzle **0077** at boot: it folds each pin's and org default's `connection_id` into
   a one-element `connection_ids uuid[]` and drops the column (one row per key,
   a `CHECK` of 1..10 members, a GIN index for the reverse lookup); it numbers
@@ -61,10 +67,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (space, integration, label). `0032` is idempotent and prints its counts
   before and after; every "after" must read 0. Schedule job data held in
   Redis needs no rewrite: a fire now reads only the job's `scheduleId` and
-  runs what the schedule row holds (see `### Fixed`), and the scheduler
-  re-syncs every enabled schedule's job from its row before starting its
-  worker. A row whose `connection_overrides` still has the old shape (0032
-  skipped) records a visible failed run instead of launching. The runbook, with the control query that
+  runs what the schedule row holds (see `### Fixed`). The runbook, with the control query that
   tells "nothing to rewrite" apart from "nothing at all", is
   `scripts/migration/README.md`. Existing pins and defaults stay valid: each
   becomes a set of one.
@@ -82,13 +85,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     or every member without a frozen pin is asked to choose.
   - A soft org default naming a connection the actor can no longer reach
     (its owner lost access to the space, so it was unshared — live, or by
-    `0032`) was skipped; it now fails the runs it serves with
+    `0033`) was skipped; it now fails the runs it serves with
     `pinned_connection_unavailable` until an admin fixes the default (see
     `### Changed`).
   - A credential-proxy caller that names neither a run nor a connection gets
     the integration's org default when one is set, else its own single
     connection; one holding only colleagues' shared connections gets
-    `409 must_choose_connection` (see `### Changed`).
+    `409 must_choose_connection`, and a bound connection that needs
+    reconnecting — the lone own one, or any member of the org default's set —
+    `409 needs_reconnection` (see `### Changed`).
   - An enabled schedule whose actor can no longer run agents in its space
     (disabled at its next fire anyway) cannot be updated while enabled: the
     write answers `400` on `actor` until it is disabled or given another
@@ -380,7 +385,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the named connection, own or shared; else a SOFT org default's set; else the
   caller's single own connection. A default set of one is used, several are a
   `409 must_choose_connection` over the set, and a member the caller cannot
-  reach is `409 pinned_connection_unavailable`. With no default and no name,
+  reach is `409 pinned_connection_unavailable`. A bound connection that needs
+  reconnecting — the caller's lone own one, the named one, or any member of
+  the default's set — is `409 needs_reconnection`. With no default and no name,
   several own connections, or none while colleagues share some, are a
   `409 must_choose_connection` listing the candidates to name; nothing
   accessible at all is a `404`. A `401` answered upstream is retried after a
@@ -438,21 +445,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `org.member_role_updated` name them in `unsharedConnectionIds`), and an admin
   pin or org default — enforced or soft — still naming one fails the run with
   `pinned_connection_unavailable`: the access change is never blocked by them.
-  The upgrade applies this to owners who left the organization before the
-  deploy (`0032`, `### Operators`); a space-level loss before the deploy is not
-  covered. A holder of `integrations:configure` may now also unshare a
+  The upgrade applies it to owners who lost access before the deploy, whether
+  they left the organization or lost a space (`0033`, `### Operators`). A holder of `integrations:configure` may now also unshare a
   colleague's connection (`PATCH …/connections/{id}` with
   `shared_with_org: false`), refused like the owner's own unshare with
   `409 connection_pinned` while an admin pin or an org default names it;
   sharing stays the owner's consent.
-- **An unshare or a delete can no longer race a pin or an org default.** The
-  `connection_pinned` guard read the pins and defaults before the unshare or
-  delete it protected, outside its transaction, and a pin or default write
-  validated its connections before its own upsert, so the two could
-  interleave and commit a set naming a connection just unshared or deleted.
-  Each now runs in one transaction under a row lock on the connections —
-  exclusive for the unshare or delete, shared for the pin (member or admin)
-  or org-default write — so one waits for the other and sees its outcome.
 - **A share can no longer race the access loss that would unshare it.** The
   unshare ran by an access change and a concurrent share (or two concurrent
   access changes — a space closing while a member is removed from it or

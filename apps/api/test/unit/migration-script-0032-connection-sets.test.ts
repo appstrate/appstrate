@@ -308,9 +308,6 @@ describe("scripts/migration/0032 — connection sets", () => {
       runs_overrides_before: 1,
       runs_resolved_before: 8,
       schedules_overrides_before: 1,
-      departed_shared_before: 1,
-      departed_shared_named_by_admin: 1,
-      departed_shared_after: 0,
       implicit_shared_picks_before: 4,
       implicit_shared_picks_unpinned_after: 0,
       labels_to_normalize_before: 10,
@@ -353,17 +350,6 @@ describe("scripts/migration/0032 — connection sets", () => {
       { id: "sch_0032_array", overrides: { [GMAIL]: [conn(1)] } },
       { id: "sch_0032_empty", overrides: {} },
       { id: "sch_0032_scalar", overrides: { [GMAIL]: [conn(1)] } },
-    ]);
-  });
-
-  it("unshares the connections of an owner who left the organization, and only those", async () => {
-    const { rows } = await pg.query<{ id: string; shared: boolean }>(
-      `SELECT id::text, shared_with_org AS shared FROM integration_connections
-       WHERE id IN ('${conn(1)}', '${conn(4)}') ORDER BY id`,
-    );
-    expect(rows).toEqual([
-      { id: conn(1), shared: true },
-      { id: conn(4), shared: false },
     ]);
   });
 
