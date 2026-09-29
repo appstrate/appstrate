@@ -67,8 +67,10 @@ function resolution(overrides: Partial<Resolution>): Resolution {
   };
 }
 
+type Persistence = Parameters<typeof IntegrationConnectionPicker>[0]["persistence"];
+
 /** Seed the one readiness query the picker reads, under the key it builds. */
-function renderPicker(res: Resolution, runBlocking: boolean): string {
+function renderPicker(res: Resolution, runBlocking: boolean, persistence?: Persistence): string {
   const qc = new QueryClient();
   const { queryKey } = $api.queryOptions("get", "/api/agents/{scope}/{name}/connection-readiness", {
     params: {
@@ -89,6 +91,7 @@ function renderPicker(res: Resolution, runBlocking: boolean): string {
       authStatuses={[]}
       agentTools={undefined}
       agentScopes={undefined}
+      {...(persistence ? { persistence } : {})}
     />,
     { queryClient: qc },
   );
@@ -296,6 +299,23 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(html).toContain(t("unavailableCount", { count: 1 }));
     expect(html).toContain(WARNING);
     expect(html).toContain("text-amber-600");
+  });
+
+  it("offers to clear an override stored under a lock, the server's only way out of it", () => {
+    const locked = resolution({ source: "admin_pin", admin_pinned_connection_ids: [WEB] });
+    const clear = `member-pick-clear-${INTEGRATION}`;
+    const withOverride = renderPicker(locked, false, {
+      mode: "override",
+      value: [DB],
+      onChange: () => {},
+    });
+    expect(withOverride).toContain(`member-pick-locked-${INTEGRATION}`);
+    expect(withOverride).toContain(clear);
+    expect(withOverride).toContain(i18n.t("agents:schedule.connectionOverrides.clearChoice"));
+    expect(
+      renderPicker(locked, false, { mode: "override", value: [], onChange: () => {} }),
+    ).not.toContain(clear);
+    expect(renderPicker(locked, false)).not.toContain(clear);
   });
 
   it("a soft org default leaves the dropdown open", () => {

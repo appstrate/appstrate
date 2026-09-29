@@ -2,6 +2,7 @@
 
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { RunWithOptionsSubmit } from "../components/run-with-options-modal";
+import { integrationIdOfField, type MissingIntegrationFieldError } from "./connection-choice";
 
 /** One run launch, as the launch surfaces build it — `useRunAgent` maps it onto the wire. */
 export interface RunLaunch {
@@ -42,10 +43,22 @@ export interface RunLaunch {
  * recovery modal's picks. Everything else the user chose rides along — the
  * input typed in the run modal above all (#1539). The picks answer the
  * integrations the 409 named, so they win over a per-run pick the launch
- * already carried for the same one; picks for other integrations are kept.
+ * already carried for the same one; picks for other integrations are kept —
+ * except one refused as `override_outranked`, which the admin's lock forbids
+ * re-picking, so replaying it would only be refused again.
  */
-export function retryLaunch(launch: RunLaunch, picks: Record<string, string[]>): RunLaunch {
-  return { ...launch, connectionOverrides: { ...launch.connectionOverrides, ...picks } };
+export function retryLaunch(
+  launch: RunLaunch,
+  picks: Record<string, string[]>,
+  errors: readonly MissingIntegrationFieldError[],
+): RunLaunch {
+  const outranked = new Set(
+    errors.filter((e) => e.code === "override_outranked").map((e) => integrationIdOfField(e.field)),
+  );
+  const kept = Object.entries(launch.connectionOverrides ?? {}).filter(
+    ([id]) => !outranked.has(id),
+  );
+  return { ...launch, connectionOverrides: { ...Object.fromEntries(kept), ...picks } };
 }
 
 /**

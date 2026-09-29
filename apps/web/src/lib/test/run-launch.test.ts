@@ -4,8 +4,8 @@
  * The launches the SPA builds before `useRunAgent` puts them on the wire.
  *
  * The retry of a launch refused with `409 missing_integration_connection` only
- * adds connection picks; dropping anything else changes the run — or gets it
- * refused, as the input did (#1539). "Lancer avec options…" sends an option
+ * touches connection picks (adds the modal's, drops an outranked one); dropping
+ * anything else changes the run — or gets it refused, as the input did (#1539). "Lancer avec options…" sends an option
  * only when set, so an untouched modal launches what plain "Lancer" does.
  */
 
@@ -15,7 +15,11 @@ import { launchFromOptions, retryLaunch } from "../run-launch.ts";
 describe("retryLaunch", () => {
   it("replays the input typed in the run modal", () => {
     expect(
-      retryLaunch({ input: { prompt: "bonjour" }, version: "draft" }, { "@acme/crm": ["conn_1"] }),
+      retryLaunch(
+        { input: { prompt: "bonjour" }, version: "draft" },
+        { "@acme/crm": ["conn_1"] },
+        [],
+      ),
     ).toEqual({
       input: { prompt: "bonjour" },
       version: "draft",
@@ -24,7 +28,7 @@ describe("retryLaunch", () => {
   });
 
   it("replays a rerun_from launch without inventing an input", () => {
-    expect(retryLaunch({ rerun_from: "run_1", version: "1.0.0" }, {})).toEqual({
+    expect(retryLaunch({ rerun_from: "run_1", version: "1.0.0" }, {}, [])).toEqual({
       rerun_from: "run_1",
       version: "1.0.0",
       connectionOverrides: {},
@@ -39,7 +43,7 @@ describe("retryLaunch", () => {
       generation: { temperature: 0.2 },
       dependencyOverrides: { "@acme/skill": "draft" },
     };
-    expect(retryLaunch(launch, {})).toEqual({ ...launch, connectionOverrides: {} });
+    expect(retryLaunch(launch, {}, [])).toEqual({ ...launch, connectionOverrides: {} });
   });
 
   it("merges the picks over the launch's own connection picks", () => {
@@ -47,8 +51,19 @@ describe("retryLaunch", () => {
       retryLaunch(
         { connectionOverrides: { "@acme/crm": ["conn_old"], "@acme/mail": ["conn_mail"] } },
         { "@acme/crm": ["conn_new"] },
+        [],
       ).connectionOverrides,
     ).toEqual({ "@acme/crm": ["conn_new"], "@acme/mail": ["conn_mail"] });
+  });
+
+  it("drops the launch's own pick refused as outranked: the lock leaves nothing to re-pick", () => {
+    expect(
+      retryLaunch(
+        { connectionOverrides: { "@acme/crm": ["conn_outside"], "@acme/mail": ["conn_mail"] } },
+        {},
+        [{ field: "integrations.@acme/crm", code: "override_outranked", message: "outranked" }],
+      ).connectionOverrides,
+    ).toEqual({ "@acme/mail": ["conn_mail"] });
   });
 });
 

@@ -18,6 +18,7 @@ import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
+import { hasFullOrgAccess } from "../../lib/org-role";
 import { OrgInvitationForm } from "../../components/org-invitation-form";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -28,8 +29,14 @@ import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstr
 
 type OrgMember = components["schemas"]["OrgMember"];
 
-/** Implicit space reach per role: a drop ends access, and the server then unshares connections. */
-const ROLE_REACH: Record<OrgRole, number> = { owner: 2, admin: 2, member: 1, guest: 0 };
+/**
+ * Implicit space reach per role — full org access, then a member's, then a guest's none: a drop
+ * ends access, and the server then unshares connections.
+ */
+function roleReach(role: OrgRole): number {
+  return hasFullOrgAccess(role) ? 2 : role === "member" ? 1 : 0;
+}
+
 export function OrgSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { currentOrg } = useOrg();
@@ -293,5 +300,5 @@ export function OrgSettingsMembersPage() {
 }
 
 function revokesAccess(from: OrgRole, to: OrgRole): boolean {
-  return ROLE_REACH[to] < ROLE_REACH[from];
+  return roleReach(to) < roleReach(from);
 }

@@ -68,10 +68,10 @@ import { useCanReach } from "../../hooks/use-can-reach";
  *  - `override` — controlled form value (schedule editor, per-run modal);
  *                 nothing is persisted until the form is. Empty = inherit.
  *
- * Locks (admin pin, enforced org default) apply identically in both modes:
- * they sit above the launch override in the resolver cascade, so a locked
- * set would beat a schedule pick anyway — surfacing the lock here is
- * the honest signal that the override would be ignored.
+ * Locks (admin pin, enforced org default) render read-only in both modes: a
+ * member pin loses to them, and an override naming a connection outside the
+ * locked set is refused (`override_outranked`). An override already stored
+ * under a lock can only be cleared.
  */
 type ConnectionPickerPersistence =
   | { mode: "pin" }
@@ -235,8 +235,9 @@ export function IntegrationConnectionPicker({
         )}`
       : ids.map((id) => byId(id)!.label).join(" · ");
 
-  // An admin force (pin or enforced org default) renders read-only: a member pin or a launch
-  // override would lose to it at run time.
+  // An admin force (pin or enforced org default) renders read-only: a member pin loses to it,
+  // and an override outside its set is refused (`override_outranked`) — so one stored before
+  // the lock is offered its only fix, being cleared.
   if (lockedConnectionIds.length > 0) {
     const lockedUnavailableIds = unavailableConnectionIds(lockedConnectionIds, candidateIds);
     return (
@@ -256,6 +257,18 @@ export function IntegrationConnectionPicker({
             })}
           </Badge>
         </Button>
+        {overrideMode && persistence.value.length > 0 && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="ml-1 h-7 text-xs"
+            onClick={() => persistence.onChange([])}
+            data-testid={`member-pick-clear-${integrationId}`}
+          >
+            {t("schedule.connectionOverrides.clearChoice")}
+          </Button>
+        )}
         {lockedUnavailableIds.length > 0 && (
           <PickerWarning testId={`member-pick-unavailable-warning-${integrationId}`}>
             {t("detail.integrationMemberPicker.lockedUnavailableWarning", {

@@ -16,9 +16,10 @@ export interface RunOverridesValue {
   /** Per-run proxy id override. */
   proxy_id_override?: string;
   /**
-   * Per-integration connection picks — frozen at schedule create/edit so
-   * every fire uses the same rows. Loses to admin pins; beats
-   * schedule-less fallback + per-run overrides on the actor.
+   * Per-integration connection sets — the launch-override layer: a run's picks, or a
+   * schedule's, replayed on every fire (a fire carries no run override). Beats member pins
+   * and the soft default; under an admin pin or an enforced org default it may only name a
+   * subset of that set, else the server refuses it (`override_outranked`).
    */
   connection_overrides?: Record<string, string[]>;
 }

@@ -132,7 +132,7 @@ export function useRunLauncher(packageId: string) {
     },
     retry: (picks: Record<string, string[]>) => {
       const { launch, onSuccess } = lastLaunch.current;
-      runAgent.mutate(retryLaunch(launch, picks), {
+      runAgent.mutate(retryLaunch(launch, picks, missingErrors ?? []), {
         onSuccess: () => {
           setMissingErrors(null);
           onSuccess?.();
