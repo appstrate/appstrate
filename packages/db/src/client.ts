@@ -20,15 +20,26 @@ export type { ListenClient };
 // Initialization
 // ---------------------------------------------------------------------------
 
+type PGliteClient = import("@electric-sql/pglite").PGlite;
+
 let _closeDb: (() => Promise<void>) | null = null;
 let _listenClient: ListenClient | null = null;
-let _pgliteClient: import("@electric-sql/pglite").PGlite | null = null;
+let _pgliteClient: PGliteClient | null = null;
 let _pgQueryClient: import("postgres").Sql | null = null;
 
 /** Access the raw PGlite client (for exec() multi-statement support). Only available in embedded mode. */
-export function getPGliteClient(): import("@electric-sql/pglite").PGlite | null {
+export function getPGliteClient(): PGliteClient | null {
   return _pgliteClient;
 }
+
+// `bun --hot` (the dev server) re-evaluates this module without restarting the
+// process. A second PGlite opened on a data directory the first still holds
+// corrupts it (the next boot aborts inside the core migrations), so instances
+// live on `globalThis`, which survives re-evaluation, keyed by data directory.
+const PGLITE_INSTANCES = Symbol.for("appstrate.db.pgliteInstances");
+const pgliteInstances = ((globalThis as { [PGLITE_INSTANCES]?: Map<string, PGliteClient> })[
+  PGLITE_INSTANCES
+] ??= new Map());
 
 async function initPGlite(): Promise<Db> {
   const { PGlite } = await import("@electric-sql/pglite");
@@ -38,10 +49,14 @@ async function initPGlite(): Promise<Db> {
 
   const dataDir = resolve(env.PGLITE_DATA_DIR);
   mkdirSync(dataDir, { recursive: true });
-  const client = new PGlite(dataDir);
+  const client = pgliteInstances.get(dataDir) ?? new PGlite(dataDir);
+  pgliteInstances.set(dataDir, client);
 
   _pgliteClient = client;
-  _closeDb = () => client.close();
+  _closeDb = () => {
+    pgliteInstances.delete(dataDir);
+    return client.close();
+  };
   _listenClient = {
     listen: async (channel, handler) => {
       await client.listen(channel, handler);
