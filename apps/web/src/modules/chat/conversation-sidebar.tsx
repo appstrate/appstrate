@@ -9,6 +9,7 @@ import {
   FileIcon,
   FilesIcon,
   InfoIcon,
+  XIcon,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -329,7 +330,7 @@ export function ConversationSidebar({
                   aria-label={t("context.collapse")}
                   onClick={collapse}
                 >
-                  <ChevronRightIcon className="size-4" />
+                  <XIcon className="size-4" />
                 </Button>
               </div>
               <div className="min-h-0 flex-1 overflow-auto">

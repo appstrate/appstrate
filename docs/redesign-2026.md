@@ -4102,7 +4102,8 @@ next step.
    card. With a file shown, the panel header is gone, the frame fills the
    panel edge to edge, and its header carries a fourth action, an X that
    closes the panel (`onClose`, passed by the caller; the other places keep
-   none). The empty Preview tab and the other tabs keep the panel header.
+   none). The empty Preview tab and the other tabs keep the panel header, whose
+   close button is the same X (it was a right chevron).
 2. **Highlighted code with copy, in both markdown renderers and the text
    preview.** Anchor: AI Elements `CodeBlock` (shiki, lazy per language,
    copy); in the chat through `MarkdownTextPrimitive`'s `components` (`pre` /
