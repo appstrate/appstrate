@@ -962,7 +962,10 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   // members no longer shared are named apart — every run falling back on them is refused.
   const sharedIds = shared.map((c) => c.id);
   const seedIds = keepAvailable(orgDefault?.connection_ids ?? [], sharedIds);
-  const unavailableIds = unavailableConnectionIds(orgDefault?.connection_ids ?? [], sharedIds);
+  // Until the list loads, every stored member would read as unavailable.
+  const unavailableIds = connections
+    ? unavailableConnectionIds(orgDefault?.connection_ids ?? [], sharedIds)
+    : [];
   // Sorted: a server reordering of the set must not read as a change and wipe the edit.
   const seededFor = orgDefault ? [...seedIds].sort().join(",") : null;
   const [seeded, setSeeded] = useState<string | null>(null);
@@ -1200,7 +1203,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
                           {i > 0 && " · "}
                           {c ? (
                             connectionOptionLabel(c)
-                          ) : (
+                          ) : connections === undefined ? null : (
                             // No longer shared or deleted: every run of this agent is refused.
                             <span className="text-amber-700 dark:text-amber-300">
                               {t("integration.admin.unavailableConnection")}

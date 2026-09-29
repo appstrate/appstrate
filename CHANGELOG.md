@@ -18,8 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      (without `--apply` it is a dry run that rolls back);
   4. `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0032-connection-sets.sql`
      — every "after" count it prints must read 0;
-  5. deploy: the new image applies drizzle **0077** at boot, and 0077 refuses
-     to apply on a database `0032` has not run on (the batch rolls back whole);
+  5. deploy: the new image applies drizzle **0077** at boot; it refuses a
+     scalar override or snapshot left by a skipped `0032` (the batch rolls
+     back whole), but cannot detect a skipped freeze or normalization;
   6. reopen.
 
   `0033` unshares every `shared_with_org` connection whose owner no longer
@@ -123,13 +124,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   connections per declared integration. **The tools do not change**: no suffixed
   namespace, no duplicated tool, no second agent. When a namespace receives more
   than one connection the sidecar injects a **required `connection` parameter**
-  on each of its tools — a string enum of the bound connections' labels, its
-  description pairing each label with that connection's account id — and strips
+  on each of its tools — a string enum of the labels of the connections serving
+  that tool (one label when only one does), its description pairing each label with that connection's account id — and strips
   it again before forwarding (`runtime-pi/sidecar/mcp-host.ts`). A namespace
   with a single connection is untouched: the advertised schema is byte-identical
   to the one before this release, so an existing agent sees exactly what it saw.
-  A tool that already declares a `connection` property of its own cannot be
-  served by more than one connection — the sidecar fails boot with
+  No tool of a namespace holding several connections may declare a
+  `connection` property of its own — the sidecar fails boot with
   `connection_param_conflict` rather than shadowing the upstream's parameter.
   **Isolation is per connection, not per integration**: the platform emits one
   spawn spec per bound connection (same integration, same namespace) and the
@@ -212,7 +213,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     check. `PATCH /api/integrations/{packageId}/connections/{connectionId}`
     refuses with `409 connection_label_taken` a `label` another connection of
     the same integration in the space holds, and with `400` one that is
-    `null`, empty, whitespace-only, or holds a control character (line breaks
+    `null`, empty, whitespace-only, starts or ends with whitespace, or holds a control character (line breaks
     and tabs included), a zero-width/invisible character or a
     bidirectional-override character: the label reaches the agent's model
     verbatim. A minted label is `Connexion N`, N one past the highest
