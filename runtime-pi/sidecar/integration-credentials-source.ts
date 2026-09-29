@@ -134,8 +134,11 @@ function connectionQuery(connectionId: string | undefined): string {
 interface CreateIntegrationCredentialsSourceOptions {
   /** Package id (e.g. `@vendor/integration`). */
   integrationId: string;
-  /** Bound connection this source serves, sent as `?connection_id=` on every call. */
-  connectionId?: string;
+  /**
+   * Bound connection this source serves, sent as `?connection_id=` on every call.
+   * `undefined` only for a connect run, which has no connection yet.
+   */
+  connectionId: string | undefined;
   /** Platform base URL (e.g. `http://appstrate-api:3000`). */
   platformApiUrl: string;
   /** Run token used as `Bearer` for both endpoints. */

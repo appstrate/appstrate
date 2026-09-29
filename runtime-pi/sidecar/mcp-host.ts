@@ -36,7 +36,6 @@ import {
   normaliseMcpToolBody,
   normaliseMcpToolNamespace,
 } from "@appstrate/core/naming";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import {
   MAX_PARAMETER_DESCRIPTION_BYTES,
@@ -126,18 +125,8 @@ interface McpHostOptions {
 const CONNECTION_PARAM = "connection";
 
 const CONNECTION_DESCRIPTION_PREFIX = "Connection to use for this call. ";
-/** 80 UTF-16 units (the platform's label cap), each at most 3 UTF-8 bytes. */
-const CONNECTION_LABEL_MAX_BYTES = 80 * 3;
-/** An email address. A longer account id truncates the description's tail, never an enum value. */
-const CONNECTION_ACCOUNT_ID_MAX_BYTES = 254;
-const utf8Bytes = (text: string): number => new TextEncoder().encode(text).byteLength;
-const CONNECTION_DESCRIPTION_MAX_BYTES =
-  utf8Bytes(CONNECTION_DESCRIPTION_PREFIX) +
-  MAX_CONNECTIONS_PER_INTEGRATION *
-    (CONNECTION_LABEL_MAX_BYTES +
-      utf8Bytes(" → ") +
-      CONNECTION_ACCOUNT_ID_MAX_BYTES +
-      utf8Bytes("; "));
+/** Above the longest legitimate list (10 connections × 80-unit label + 254-byte account id ≈ 5 KiB). */
+const CONNECTION_DESCRIPTION_MAX_BYTES = 6 * 1024;
 
 /** `null` keys only a connect run's sole upstream, which never gains a sibling route. */
 type ConnectionKey = string | null;

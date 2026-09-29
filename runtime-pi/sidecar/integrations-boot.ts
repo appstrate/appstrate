@@ -1873,6 +1873,7 @@ export async function runConnectOnce(
     // `setSessionOutputs` on this same source.
     const source = createIntegrationCredentialsSource({
       integrationId: spec.integrationId,
+      connectionId: undefined,
       platformApiUrl: bundleFetchOpts.platformApiUrl,
       runToken: bundleFetchOpts.runToken,
       initialPayload: await fetchInitialIntegrationCredentials(

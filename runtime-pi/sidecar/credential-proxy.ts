@@ -829,7 +829,10 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     !reportedAuthFailures.has(scope)
   ) {
     reportedAuthFailures.add(scope);
-    logger.warn("Upstream returned 401 after refresh attempt", { integrationId });
+    logger.warn("Upstream returned 401 after refresh attempt", {
+      integrationId,
+      connectionId: args.connectionId,
+    });
   }
 
   // 10. Success-path diagnostic envelope (#404). One structured line per
