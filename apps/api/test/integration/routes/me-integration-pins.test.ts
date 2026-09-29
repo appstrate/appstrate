@@ -109,7 +109,7 @@ describe("/api/me/integration-pins", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "pinorg" });
 
-    // Agent + integration must exist + be installed for validatePinTarget.
+    // Agent + integration must exist + be installed for validatePinTargets.
     await seedPackage({
       id: AGENT,
       homeSpaceId: ctx.defaultSpaceId,

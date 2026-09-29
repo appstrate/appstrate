@@ -509,7 +509,7 @@ export function createSpacesRouter() {
 
       try {
         const { default_role, ...rest } = data;
-        const space = await updateSpace(
+        const { space, unsharedConnectionIds } = await updateSpace(
           orgId,
           spaceId,
           { ...rest, defaultRole: default_role },
@@ -524,6 +524,7 @@ export function createSpacesRouter() {
             settings: data.settings,
             visibility: data.visibility,
             defaultRole: default_role,
+            unsharedConnectionIds,
           },
         });
         return c.json(spaceWireForCaller(c, space, c.get("spaceRole") ?? null));

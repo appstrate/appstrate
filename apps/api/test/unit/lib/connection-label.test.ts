@@ -19,6 +19,15 @@ describe("connectionLabelProblem", () => {
     expect(connectionLabelProblem("    ")).toMatch(/empty/);
   });
 
+  it.each([
+    ["a leading space", " Work"],
+    ["a trailing space", "Work "],
+    ["a trailing no-break space", "Work\u00a0"],
+    ["a leading ideographic space", "\u3000Work"],
+  ])("refuses %s", (_name, label) => {
+    expect(connectionLabelProblem(label)).toMatch(/start or end with whitespace/);
+  });
+
   it("refuses a label past the max", () => {
     expect(connectionLabelProblem("x".repeat(CONNECTION_LABEL_MAX + 1))).toMatch(/at most/);
   });

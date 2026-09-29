@@ -10,7 +10,7 @@
  * `packages/db/src/schema/integration-org-defaults.ts` and the resolver
  * cascade in `integration-connection-resolver.ts`).
  *
- * Same target validation as admin pins (`validatePinTarget` with
+ * Same target validation as admin pins (`validatePinTargets` with
  * `requireShared`): the connection must exist, belong to this space,
  * reference this integration, and be `sharedWithOrg = true` — an admin
  * can't coerce a member's personal connection.
@@ -21,7 +21,7 @@ import { db } from "@appstrate/db/client";
 import { integrationOrgDefaults } from "@appstrate/db/schema";
 import type { IntegrationOrgDefault } from "@appstrate/shared-types";
 import type { SpaceScope } from "../lib/scope.ts";
-import { validatePinTarget } from "./integration-pins-service.ts";
+import { validatePinTargets } from "./integration-pins-service.ts";
 
 /** Identical wire shape to {@link IntegrationOrgDefault}; aliased for the canonical pattern (cf. `PinSummary`). */
 type OrgDefaultSummary = IntegrationOrgDefault;
@@ -91,9 +91,7 @@ export async function upsertOrgDefault(
   integrationId: string,
   input: UpsertOrgDefaultInput,
 ): Promise<OrgDefaultSummary> {
-  for (const connectionId of input.connectionIds) {
-    await validatePinTarget(scope, integrationId, connectionId, { requireShared: true });
-  }
+  await validatePinTargets(scope, integrationId, input.connectionIds, { requireShared: true });
   const now = new Date();
   // Atomic upsert on the (space, integration) unique index: two concurrent first writers cannot
   // both miss a SELECT and have the loser's INSERT throw a raw unique violation.

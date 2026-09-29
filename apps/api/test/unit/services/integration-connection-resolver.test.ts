@@ -1137,6 +1137,10 @@ describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
     // as `pinned_connection_unavailable`.
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]!.code).toBe("pinned_connection_unavailable");
+    expect(result.errors[0]!.message).toContain(
+      "is on auth 'oauth', not the auth 'pat' this agent requires",
+    );
+    expect(result.errors[0]!.message).not.toContain("deleted or unshared");
   });
 });
 
@@ -1168,6 +1172,30 @@ describe("resolveConnections — orphaned-auth guard", () => {
     // Single live candidate → auto; the orphan never competes (no must_choose).
     expect(result.errors).toEqual([]);
     expect(result.resolved[INTEG]?.[0]?.connectionId).toBe(live.id);
+  });
+
+  it("names the orphaned auth when a pin binds the dropped row, not a deletion", () => {
+    const live = conn({ authKey: "oauth" });
+    const orphan = conn({ authKey: "legacy_primary" });
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [live, orphan],
+      pins: [pin(orphan.id)],
+    });
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]!.code).toBe("pinned_connection_unavailable");
+    expect(result.errors[0]!.message).toContain(
+      "is on auth 'legacy_primary', which the integration no longer declares",
+    );
+  });
+
+  it("keeps the deletion hint for a pin naming a row the actor cannot reach", () => {
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [conn({ authKey: "oauth" })],
+      pins: [pin(crypto.randomUUID())],
+    });
+    expect(result.errors[0]!.message).toContain("may have been deleted or unshared");
   });
 });
 

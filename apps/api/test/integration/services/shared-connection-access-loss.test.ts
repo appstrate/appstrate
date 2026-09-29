@@ -236,8 +236,14 @@ describe("unsharing on access loss", () => {
     const implicitConn = await seedConnection({ spaceId: space.id, userId: implicit });
     const explicitConn = await seedConnection({ spaceId: space.id, userId: explicit });
 
-    await updateSpace(ctx.orgId, space.id, { visibility: "closed" }, space);
+    const { unsharedConnectionIds } = await updateSpace(
+      ctx.orgId,
+      space.id,
+      { visibility: "closed" },
+      space,
+    );
 
+    expect(unsharedConnectionIds).toEqual([implicitConn]);
     expect(await stillShared([implicitConn, explicitConn])).toEqual([explicitConn]);
   });
 

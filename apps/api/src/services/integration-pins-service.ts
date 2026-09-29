@@ -14,7 +14,7 @@
  * caller already holds it.
  */
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db, toRows } from "@appstrate/db/client";
 import {
   spacePackages,
@@ -255,9 +255,7 @@ async function upsertPin(args: {
     connectionIds.map((id) => sql`${id}`),
     sql`, `,
   )}]::uuid[]`;
-  for (const id of connectionIds) {
-    await validatePinTarget(scope, integrationId, id, args.validateOpts);
-  }
+  await validatePinTargets(scope, integrationId, connectionIds, args.validateOpts);
   const [row] = toRows<{
     connection_ids: string | unknown[];
     created_at: string | Date;
@@ -323,40 +321,43 @@ async function assertAgentActiveHere(scope: SpaceScope, agentPackageId: string):
 }
 
 /**
- * The connection `connectionId` names, when the caller may pin it for `integrationId` here. Every
- * refusal — unknown id, another space or integration, a row neither shared nor (for a member
- * pin) the caller's own — is the SAME 404, so a pin write cannot tell a colleague's private
- * uuid from a made-up one. The message depends only on `opts`, i.e. on the caller.
+ * Asserts, in one query, that the caller may pin every one of `connectionIds` for `integrationId`
+ * here. Every refusal — unknown id, another space or integration, a row neither shared nor (for a
+ * member pin) the caller's own — is the SAME 404 naming the first refused id, so a pin write cannot
+ * tell a colleague's private uuid from a made-up one. The message depends only on `opts`.
  */
-export async function validatePinTarget(
+export async function validatePinTargets(
   scope: SpaceScope,
   integrationId: string,
-  connectionId: string,
+  connectionIds: string[],
   opts: { requireShared?: boolean; allowOwnedBy?: string },
-): Promise<ConnectionRow> {
-  const [conn] = await db
-    .select()
-    .from(integrationConnections)
-    .where(eq(integrationConnections.id, connectionId))
-    .limit(1);
-  const reachable =
-    conn !== undefined &&
-    conn.spaceId === scope.spaceId &&
-    conn.integrationId === integrationId &&
-    (opts.requireShared
-      ? conn.sharedWithOrg
-      : opts.allowOwnedBy === undefined || conn.userId === opts.allowOwnedBy || conn.sharedWithOrg);
-  if (!conn || !reachable) {
-    const wanted = opts.requireShared
-      ? "a shared connection"
-      : opts.allowOwnedBy !== undefined
-        ? "one of your connections or a shared one"
-        : "a connection";
-    throw notFound(
-      `Connection '${connectionId}' is not ${wanted} of ${integrationId} in this space`,
+): Promise<void> {
+  const c = integrationConnections;
+  const reachable = await db
+    .select({ id: c.id })
+    .from(c)
+    .where(
+      and(
+        inArray(c.id, connectionIds),
+        eq(c.spaceId, scope.spaceId),
+        eq(c.integrationId, integrationId),
+        opts.requireShared
+          ? eq(c.sharedWithOrg, true)
+          : opts.allowOwnedBy !== undefined
+            ? or(eq(c.userId, opts.allowOwnedBy), eq(c.sharedWithOrg, true))
+            : undefined,
+      ),
     );
-  }
-  return conn;
+  // Postgres compares uuids case-insensitively; the ids it returns are lowercase.
+  const found = new Set(reachable.map((r) => r.id));
+  const refused = connectionIds.find((id) => !found.has(id.toLowerCase()));
+  if (refused === undefined) return;
+  const wanted = opts.requireShared
+    ? "a shared connection"
+    : opts.allowOwnedBy !== undefined
+      ? "one of your connections or a shared one"
+      : "a connection";
+  throw notFound(`Connection '${refused}' is not ${wanted} of ${integrationId} in this space`);
 }
 
 // ─────────────────────────── Member-pin CRUD ─────────────────────────────────

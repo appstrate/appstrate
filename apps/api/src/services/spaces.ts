@@ -226,7 +226,7 @@ export async function assertSpaceInScope(scope: SpaceScope): Promise<void> {
  * Update a space. Throws 404 if not found. `judged` is the row the request was
  * authorized on (`c.get("space")`): a `visibility` / `default_role` change is
  * written only while the row still holds both, else 409 `space_access_changed`
- * (RBAC spec §4.4).
+ * (RBAC spec §4.4). Returns the connections a close unshared, for the audit.
  */
 export async function updateSpace(
   orgId: string,
@@ -259,7 +259,7 @@ export async function updateSpace(
       );
     }
   }
-  const space = await db.transaction(async (tx) => {
+  const { space, unsharedConnectionIds } = await db.transaction(async (tx) => {
     const [updated] = await tx
       .update(spaces)
       .set({
@@ -282,13 +282,14 @@ export async function updateSpace(
       .returning();
     // Closing an open space ends every implicit member's access. The UPDATE above holds the
     // space row lock a removal or a share waits on (`lockSpaceRow`, space-members.ts).
-    if (updated && changesAccess) {
-      await unshareConnectionsOfOwnersWithoutAccess(tx, { orgId, spaceId });
-    }
-    return updated;
+    const unshared =
+      updated && changesAccess
+        ? await unshareConnectionsOfOwnersWithoutAccess(tx, { orgId, spaceId })
+        : [];
+    return { space: updated, unsharedConnectionIds: unshared };
   });
 
-  if (space) return space;
+  if (space) return { space, unsharedConnectionIds };
   if (changesAccess) {
     await getSpace(orgId, spaceId); // 404 when it is gone rather than changed
     throw conflict(

@@ -811,7 +811,9 @@ describeRequiresRedis("scheduler service", () => {
       const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
       expect(fired).toHaveLength(1);
       expect(fired[0]!.status).toBe("failed");
-      expect((fired[0]!.error ?? "").toLowerCase()).toContain("no longer a member");
+      expect((fired[0]!.error ?? "").toLowerCase()).toContain(
+        "is not a member of this organization",
+      );
 
       // The schedule is disabled so the revoked identity never fires again.
       const [row] = await db
@@ -864,7 +866,9 @@ describeRequiresRedis("scheduler service", () => {
 
       const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
       expect(fired).toHaveLength(1);
-      expect((fired[0]!.error ?? "").toLowerCase()).not.toContain("no longer a member");
+      expect((fired[0]!.error ?? "").toLowerCase()).not.toContain(
+        "is not a member of this organization",
+      );
       // …and it failed on the version, POSITIVELY: a control that only names
       // the cause it rules out passes on any other refusal — including the
       // execution gate two steps later — and would have reported "the actor

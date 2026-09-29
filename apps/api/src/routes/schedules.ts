@@ -48,7 +48,7 @@ import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import {
   assertScheduleConnectionsChosen,
   assertScheduleOverridesReachable,
-} from "../services/run-pipeline.ts";
+} from "../services/schedule-connections.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import {
@@ -235,11 +235,8 @@ async function assertScheduleTargetValid(args: {
 }
 
 /**
- * The agent definition a stored schedule fires, for a patch that did not
- * already resolve it. `null` when that version cannot be resolved (say, an
- * agent never published): the row is already failing every tick for that
- * cause, which a rename must not be refused over — the version gates above
- * judge it whenever the patch moves it.
+ * The agent definition a stored schedule fires, when the patch did not resolve it. `null` when that
+ * version cannot resolve: the row already fails every tick for it, which must not block a rename.
  */
 async function scheduledDefinition(
   resolved: LoadedPackage | null,
@@ -296,8 +293,7 @@ const actorSchema = z
 
 /**
  * A schedule running as ANOTHER member fires with that member's reach, so naming such an actor and
- * writing such a schedule is an org owner/admin act (#738). `memberId`: the member actor, `null`
- * for an end user.
+ * writing such a schedule is an org owner/admin act. `memberId` is `null` for an end-user actor.
  */
 function mayGovernMemberSchedule(c: Context<AppEnv>, memberId: string | null | undefined): boolean {
   if (!memberId) return true;
@@ -311,10 +307,7 @@ const CHOOSE_MEMBER_ACTOR =
 const WRITE_MEMBER_SCHEDULE =
   "Only an organization owner or admin can change a schedule that runs as another member.";
 
-/**
- * 403 unless {@link mayGovernMemberSchedule}. Choosing the actor is checked before the membership
- * lookup, so a refused caller cannot probe who is a member either.
- */
+/** 403 unless {@link mayGovernMemberSchedule}. */
 function assertMayGovern(
   c: Context<AppEnv>,
   memberId: string | null | undefined,
@@ -483,8 +476,7 @@ export function createSchedulesRouter() {
         effectiveAgent.manifest as unknown as Record<string, unknown>,
       );
 
-      // #738: actor defaults to the caller; an admin may name another member (validated against
-      // this org/space scope).
+      // Before resolving the actor, so a refused caller cannot probe who is a member.
       assertMayGovern(c, data.actor?.userId, CHOOSE_MEMBER_ACTOR, "actor");
       const actor = await resolveScheduleActor(scope, data.actor, getActor(c));
 
@@ -507,8 +499,7 @@ export function createSchedulesRouter() {
         );
       }
 
-      // A new schedule is armed: its actor must be able to fire it, and its connection choice is
-      // made now.
+      // Armed: its actor must be able to fire it, and its connection choice is made now.
       await assertScheduleActorValid(actor, scope.orgId, scope.spaceId);
       await assertScheduleOverridesReachable({
         spaceId: scope.spaceId,
@@ -763,13 +754,10 @@ export function createSchedulesRouter() {
     const connectionOverrides =
       actorChanged && data.connection_overrides === undefined ? null : data.connection_overrides;
 
-    // An armed schedule must fire without asking which connection to use: re-judged on every
-    // write that leaves it armed (a new connection can make it ambiguous); disabling skips it.
     const nextActor = actor ?? existingActor;
     const nextOverrides =
       connectionOverrides !== undefined ? connectionOverrides : existing.connection_overrides;
-    // On EVERY write, armed or not: a disabled row must not store what arming it later would
-    // then take for an already-judged pick.
+    // On EVERY write: a disabled row must not store a pick that arming it later would trust.
     if (nextActor) {
       await assertScheduleOverridesReachable({
         spaceId: scope.spaceId,
@@ -779,6 +767,7 @@ export function createSchedulesRouter() {
         storedOverrides: actorChanged ? null : existing.connection_overrides,
       });
     }
+    // Armed: re-judged on every write, since a new connection can make the choice ambiguous.
     if ((data.enabled ?? existing.enabled) && nextActor) {
       await assertScheduleActorValid(nextActor, scope.orgId, scope.spaceId);
       const fired = await scheduledDefinition(
@@ -800,8 +789,7 @@ export function createSchedulesRouter() {
       }
     }
 
-    // snake_case wire → camelCase service fields; the write applies only while the row still
-    // matches `existing` (409 `schedule_modified_concurrently`).
+    // Translate snake_case wire fields to internal camelCase for the service.
     const schedule = await updateSchedule(
       scope,
       existing,

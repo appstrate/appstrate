@@ -6,7 +6,7 @@
  * integration-connection-resolver with hand-built candidate arrays; this
  * file exercises the real Drizzle queries those candidates come from:
  *
- *   - validatePinTarget — cross-space / cross-integration / sharing /
+ *   - validatePinTargets — cross-space / cross-integration / sharing /
  *     ownership rejection (the gate every pin write passes through)
  *   - listAccessibleConnections — own ∪ sharedWithOrg, deduped, scoped
  *     to (space, integration), filtered by actor
@@ -37,7 +37,7 @@ import {
 } from "@appstrate/db/schema";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 import {
-  validatePinTarget,
+  validatePinTargets,
   listAccessibleConnections,
   listAgentsConsumingIntegration,
   loadConnectionOwnership,
@@ -104,19 +104,20 @@ describe("integration-pins-service — DB access/ownership", () => {
     await addOrgMember(ctx.orgId, member.id);
   });
 
-  describe("validatePinTarget", () => {
+  describe("validatePinTargets", () => {
     /** The refusal with the probed id masked — what a caller could compare across ids. */
     async function refusal(
-      id: string,
-      opts: Parameters<typeof validatePinTarget>[3],
+      ids: string[],
+      probed: string,
+      opts: Parameters<typeof validatePinTargets>[3],
     ): Promise<{ status: number; code: string; message: string }> {
       try {
-        await validatePinTarget(scope, INTEGRATION, id, opts);
+        await validatePinTargets(scope, INTEGRATION, ids, opts);
       } catch (err) {
         const e = err as { status: number; code: string; message: string };
-        return { status: e.status, code: e.code, message: e.message.replace(id, "<id>") };
+        return { status: e.status, code: e.code, message: e.message.replace(probed, "<id>") };
       }
-      throw new Error(`validatePinTarget accepted ${id}`);
+      throw new Error(`validatePinTargets accepted ${ids.join(",")}`);
     }
 
     // One answer for every id the caller may not pin, so a uuid cannot be probed.
@@ -141,36 +142,45 @@ describe("integration-pins-service — DB access/ownership", () => {
       const ids = [crypto.randomUUID(), inOtherSpace, ofOtherIntegration, privateRow];
 
       for (const opts of [{ requireShared: true }, { allowOwnedBy: ctx.user.id }]) {
-        const answers = await Promise.all(ids.map((id) => refusal(id, opts)));
+        const answers = await Promise.all(ids.map((id) => refusal([id], id, opts)));
         expect(answers[0]).toMatchObject({ status: 404, code: "not_found" });
         for (const answer of answers) expect(answer).toEqual(answers[0]!);
       }
     });
 
-    it("accepts a shared connection under requireShared", async () => {
-      const id = await seedConnection({
+    it("names the refused id of a set whose other ids are pinnable", async () => {
+      const shared = await seedConnection({
         spaceId: scope.spaceId,
         userId: memberId,
         sharedWithOrg: true,
       });
-      const conn = await validatePinTarget(scope, INTEGRATION, id, { requireShared: true });
-      expect(conn.id).toBe(id);
+      const unknown = crypto.randomUUID();
+      const answer = await refusal([shared, unknown], unknown, { requireShared: true });
+      expect(answer).toEqual(await refusal([unknown], unknown, { requireShared: true }));
+    });
+
+    it("accepts a set of shared connections under requireShared", async () => {
+      const ids = [
+        await seedConnection({ spaceId: scope.spaceId, userId: memberId, sharedWithOrg: true }),
+        await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id, sharedWithOrg: true }),
+      ];
+      await validatePinTargets(scope, INTEGRATION, ids, { requireShared: true });
     });
 
     it("refuses the caller's own private row under requireShared, with the same answer", async () => {
       const own = await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id });
-      expect(await refusal(own, { requireShared: true })).toEqual(
-        await refusal(crypto.randomUUID(), { requireShared: true }),
+      const unknown = crypto.randomUUID();
+      expect(await refusal([own], own, { requireShared: true })).toEqual(
+        await refusal([unknown], unknown, { requireShared: true }),
       );
     });
 
-    it("accepts allowOwnedBy when the caller owns the connection", async () => {
-      const id = await seedConnection({
-        spaceId: scope.spaceId,
-        userId: ctx.user.id,
-      });
-      const conn = await validatePinTarget(scope, INTEGRATION, id, { allowOwnedBy: ctx.user.id });
-      expect(conn.id).toBe(id);
+    it("accepts allowOwnedBy for the caller's own row beside a shared one", async () => {
+      const ids = [
+        await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id }),
+        await seedConnection({ spaceId: scope.spaceId, userId: memberId, sharedWithOrg: true }),
+      ];
+      await validatePinTargets(scope, INTEGRATION, ids, { allowOwnedBy: ctx.user.id });
     });
   });
 

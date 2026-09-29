@@ -33,6 +33,8 @@ export function connectionLabelProblem(label: string): string | null {
       return "must not contain control, invisible or bidirectional-override characters";
     }
   }
+  // Tools address a connection by its label: "Work" and "Work " must not be two.
+  if (label !== label.trim()) return "must not start or end with whitespace";
   return null;
 }
 

@@ -121,6 +121,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
   const errors: ConnectionResolutionError[] = [];
 
   const actorUserId = input.actorUserId ?? null;
+  const accessibleIndex = new Map(input.accessibleConnections.map((c) => [c.id, c]));
   const pinIds = (integrationId: string, userId: string | null) =>
     nonEmpty(
       input.pins.find((p) => p.integrationId === integrationId && p.userId === userId)
@@ -190,6 +191,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       memberPinIds: actorUserId === null ? null : pinIds(req.integrationId, actorUserId),
       accessibleConnections: filteredConnections,
       connectionIndex: filteredIndex,
+      accessibleIndex,
       actorUserId,
       actorEndUserId: input.actorEndUserId ?? null,
       auth,
@@ -231,6 +233,8 @@ interface ResolveOneArgs {
   memberPinIds: readonly string[] | null;
   accessibleConnections: ConnectionRow[];
   connectionIndex: Map<string, ConnectionRow>;
+  /** Before the auth filters: tells a row they dropped from one the actor cannot reach. */
+  accessibleIndex: ReadonlyMap<string, ConnectionRow>;
   actorUserId: string | null;
   actorEndUserId: string | null;
   /** Already applied to the candidates; kept to name the connect target on `not_connected`. */
@@ -248,14 +252,26 @@ type ResolveOneResult =
 function ownedConns(
   args: ResolveOneArgs,
   ids: readonly string[],
-): { rows: ConnectionRow[] } | { missingId: string } {
+): { rows: ConnectionRow[] } | { missingId: string; offAuthKey?: string } {
   const rows: ConnectionRow[] = [];
   for (const id of ids) {
     const conn = args.connectionIndex.get(id);
-    if (!conn || conn.integrationId !== args.integrationId) return { missingId: id };
+    if (!conn || conn.integrationId !== args.integrationId) {
+      const dropped = args.accessibleIndex.get(id);
+      return dropped?.integrationId === args.integrationId
+        ? { missingId: id, offAuthKey: dropped.authKey }
+        : { missingId: id };
+    }
     rows.push(conn);
   }
   return { rows };
+}
+
+/** Why the auth filters dropped a reachable row: an orphaned auth, or not the dep's `auth_key`. */
+function offAuthReason(auth: AuthFilter, authKey: string): string {
+  return auth.live !== null && !auth.live.has(authKey)
+    ? `is on auth '${authKey}', which the integration no longer declares`
+    : `is on auth '${authKey}', not the auth '${auth.requiredAuthKey}' this agent requires`;
 }
 
 function bindSet(
@@ -305,6 +321,7 @@ export function unavailableMemberError(
   integrationId: string,
   layer: ExplicitLayerRef,
   missingId: string,
+  reason?: string,
 ): ConnectionResolutionError {
   const deleted = " — it may have been deleted or unshared";
   const hint = layer.code === "pinned_connection_unavailable" ? deleted : "";
@@ -312,7 +329,7 @@ export function unavailableMemberError(
     integrationId,
     code: layer.code,
     source: layer.source,
-    message: `${layer.noun} '${missingId}' for ${integrationId} is not accessible${hint}.`,
+    message: `${layer.noun} '${missingId}' for ${integrationId} ${reason ?? `is not accessible${hint}`}.`,
   };
 }
 
@@ -349,7 +366,12 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     if ("missingId" in owned) {
       return {
         kind: "error",
-        error: unavailableMemberError(args.integrationId, layer, owned.missingId),
+        error: unavailableMemberError(
+          args.integrationId,
+          layer,
+          owned.missingId,
+          owned.offAuthKey === undefined ? undefined : offAuthReason(args.auth, owned.offAuthKey),
+        ),
       };
     }
     return bindSet(args, owned.rows, layer.source);

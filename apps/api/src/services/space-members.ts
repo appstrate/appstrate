@@ -277,9 +277,8 @@ export interface SpaceMemberRemoval {
  * so re-reading it here would judge the bound against a space the permission
  * that admitted the request was never checked against. A concurrent
  * `PATCH /api/spaces/{id}` widening `default_role` is therefore NOT serialized
- * against this removal's authority bound: the request-scoped window RBAC spec §4.4
- * states and §13.8 declines to lock. The space row IS share-locked, but only for
- * the connection unshare ({@link lockSpaceRow}).
+ * against this removal: the request-scoped window RBAC spec §4.4 states and
+ * §13.8 declines to lock. ({@link lockSpaceRow} below serves the connection unshare only.)
  *
  * @throws 403 when the caller could not have granted the standing left behind,
  *   or the one being dropped.
@@ -359,12 +358,9 @@ export async function deleteSpaceMembershipsInOrg(
 }
 
 /**
- * Unshare every user-owned shared connection in `scope` whose owner no longer reaches its space
- * ({@link resolveSpaceRole}; no org membership, no access) — in the SAME transaction as any write
- * that can take access away. Not guarded by `assertConnectionsUnpinned`: a pin or default naming
- * one fails loudly at resolution (`pinned_connection_unavailable`) instead.
- *
- * @returns the ids unshared, for the caller's audit.
+ * Unshare, and return, every user-owned shared connection in `scope` whose owner no longer
+ * reaches its space — in the SAME transaction as the access loss. No `assertConnectionsUnpinned`:
+ * a pin or default naming one fails loudly at resolution (`pinned_connection_unavailable`).
  */
 export async function unshareConnectionsOfOwnersWithoutAccess(
   tx: Tx,
@@ -388,12 +384,9 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
 }
 
 /**
- * Refuse sharing a connection whose owner no longer reaches its space — the share-side twin of
- * {@link unshareConnectionsOfOwnersWithoutAccess}, same predicate. Call it in the sharing
- * transaction, before the write (locks: {@link lockSpaceRow}). No-op for a connection an end
- * user owns: membership does not govern those.
- *
- * @throws 409 `connection_owner_without_access`.
+ * 409 `connection_owner_without_access` when sharing a connection whose owner no longer reaches its
+ * space — the share-side twin of {@link unshareConnectionsOfOwnersWithoutAccess}. Call it in the
+ * sharing transaction, before the write. No-op for an end user's connection.
  */
 export async function assertOwnerReachesSpaceForShare(tx: Tx, connectionId: string): Promise<void> {
   const [conn] = await tx
@@ -422,9 +415,8 @@ export async function assertOwnerReachesSpaceForShare(tx: Tx, connectionId: stri
 }
 
 /**
- * Share-lock, in id order, every space of `orgId` where `userId` owns a shared connection — the
- * org role change's side of {@link lockSpaceRow}. The caller holds the member lock, so no share
- * can grow the set meanwhile.
+ * Share-lock, in id order, every space of `orgId` where `userId` shares a connection — the org
+ * role change's side of {@link lockSpaceRow}; the caller's member lock keeps that set fixed.
  */
 export async function lockSpacesOfSharedConnections(
   tx: Tx,
@@ -449,17 +441,15 @@ export async function lockSpacesOfSharedConnections(
 }
 
 /**
- * Share-lock a space row: conflicts with the UPDATE that closes the space, not with other
- * share-lockers. Share vs access loss: a share, a member removal, an org role change and a space
- * close each first lock the owner's `org_members` row (`lockOrgMember`) and/or the space row, so
- * whichever commits second sees the others and no connection stays shared by an owner without
- * access.
+ * Share-lock a space row (conflicts with the UPDATE closing it). A share, a member removal, an org
+ * role change and a close each lock the owner's `org_members` row and/or this row, so whichever
+ * commits second sees the others: no connection stays shared by an owner without access.
  */
 async function lockSpaceRow(tx: Tx, spaceId: string): Promise<void> {
   await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.id, spaceId)).for("share");
 }
 
-/** User-owned connections matching `filter` whose owner no longer reaches the connection's space. */
+/** User-owned connections matching `filter` whose owner no longer reaches their space. */
 async function connectionsOfOwnersWithoutAccess(
   tx: Tx,
   filter: SQL | undefined,

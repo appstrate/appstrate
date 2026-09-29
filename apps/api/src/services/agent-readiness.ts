@@ -38,13 +38,7 @@ interface AgentReadinessParams {
    * that resolve the actor from request context may not have one.
    */
   actor: Actor | null;
-  /**
-   * The launch's connection picks — the run body's, or the firing schedule's
-   * (layer 3 of the resolver cascade). Threaded into the readiness check so the
-   * must_choose-retry UX loop in `MissingConnectionsModal` actually completes:
-   * without it, readiness re-fires must_choose on >1 candidates even when the
-   * caller already disambiguated via `connection_overrides`.
-   */
+  /** Layer 3 picks, so readiness honours a disambiguation instead of re-firing must_choose. */
   launchOverrides?: LaunchOverrides | null;
   /**
    * Per-call-graph memo for integration manifest fetches. The run kickoff
@@ -119,11 +113,7 @@ export async function collectAgentReadinessErrors(
   return (await collectAgentReadiness(params)).errors;
 }
 
-/**
- * {@link collectAgentReadinessErrors} plus the untranslated resolver errors behind its
- * `integrations.*` connection entries — for a caller that must read what the wire entry drops
- * (the cascade layer, `source`).
- */
+/** {@link collectAgentReadinessErrors} plus the resolver errors, whose `source` the wire drops. */
 export async function collectAgentReadiness(params: AgentReadinessParams): Promise<{
   errors: ValidationFieldError[];
   resolutionErrors: ConnectionResolutionError[];
@@ -253,16 +243,11 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
     }
   }
 
-  // Resolver enumerates own + shared connections, applies
-  // the cascade (pins, launch override, defaults, fallback), and surfaces
+  // Resolver enumerates own + shared connections, applies the cascade, and surfaces
   // structured errors per (integration, authKey). Skipped when the caller
   // has no actor context (integration gating only applies to run kickoff).
   //
-  // `launchOverrides` is threaded so the must_choose
-  // recovery loop in `MissingConnectionsModal` can complete: the user
-  // picks a candidate, the modal POSTs `connection_overrides`, readiness
-  // honours the pick instead of re-firing must_choose on the same N>1
-  // candidate set. run-pipeline.ts re-runs the resolver after readiness
+  // run-pipeline.ts re-runs the resolver after readiness
   // (with the same overrides) to produce the persisted snapshot. The two
   // passes cannot disagree even though only this one passes
   // `skipIntegrationIds`: a non-empty set means an error was pushed above, and
@@ -288,11 +273,6 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
   return { errors, resolutionErrors };
 }
 
-/**
- * The `409 missing_integration_connection` envelope, one `errors[]` item per
- * integration. Shared by the run kickoff and the schedule write so a client
- * reads a refusal the same way whichever door raised it.
- */
 export function missingIntegrationConnection(errors: ValidationFieldError[]): ApiError {
   return new ApiError({
     status: 409,

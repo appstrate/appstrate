@@ -43,7 +43,6 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 // Types
 // ---------------------------------------------------------------------------
 
-/** A job names its schedule only: the fire reads the row ({@link triggerScheduledRun}). */
 interface ScheduleJobData {
   scheduleId: string;
 }
@@ -98,7 +97,7 @@ async function getQueue(): Promise<JobQueue<ScheduleJobData>> {
   return scheduleQueue;
 }
 
-/** Upsert a repeatable job scheduler for a schedule row: its cron pair, and its id as payload. */
+/** Upsert a repeatable job scheduler for a schedule row. */
 async function upsertScheduleJob(row: typeof schedules.$inferSelect): Promise<void> {
   await (
     await getQueue()
@@ -114,10 +113,7 @@ async function removeScheduleJob(scheduleId: string): Promise<void> {
   await (await getQueue()).removeScheduler(scheduleId);
 }
 
-/**
- * Remove the jobs of schedules whose rows were just disabled. Best-effort: an error is logged, and
- * a surviving job's fire finds the row disabled and removes itself ({@link triggerScheduledRun}).
- */
+/** Remove disabled schedules' jobs. Best-effort: a surviving job's fire removes itself. */
 export async function removeScheduleJobs(scheduleIds: readonly string[]): Promise<void> {
   for (const scheduleId of scheduleIds) {
     try {
@@ -165,7 +161,6 @@ async function isScheduleActorValid(
   return row !== undefined;
 }
 
-/** Why {@link isScheduleActorValid} refused — one wording for the fire and the write. */
 function invalidScheduleActorReason(actor: Actor): string {
   return actor.type === "user"
     ? "its actor is not a member of this organization or cannot run agents in this space"
@@ -186,7 +181,6 @@ export async function assertScheduleActorValid(
   }
 }
 
-/** Disable a schedule whose actor failed fire-time revalidation: the row first, then its job. */
 async function disableScheduleForInvalidActor(scheduleId: string): Promise<void> {
   await db
     .update(schedules)
@@ -262,7 +256,6 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
       return;
     }
 
-    // A skipped fire (row gone or disabled) ran nothing: no timestamps to record.
     if (!(await triggerScheduledRun(scheduleId))) return;
 
     // Update schedule timestamps. `enabled` is re-read here because the
@@ -310,7 +303,6 @@ export async function initScheduleWorker(): Promise<void> {
   let synced = 0;
   let failed = 0;
   for (const row of rows) {
-    // One failing row is logged and skipped, never aborting the sync of the others.
     try {
       if (!(await packageExists(row.packageId))) {
         logger.warn("Schedule references missing package, skipping", {
@@ -359,10 +351,8 @@ export async function shutdownScheduleWorker(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Fire one scheduled run from the schedule row, read now: version (#636), readiness + preflight
- * gates, then execution; any `ApiError` becomes a visible failed run (`failSchedule()`).
- *
- * @returns `false` when the row is gone or disabled (its job is removed), else `true`.
+ * Fire one scheduled run from the schedule row, read now; any `ApiError` becomes a visible failed
+ * run (`failSchedule()`). Returns `false` when the row is gone or disabled (its job is removed).
  */
 export async function triggerScheduledRun(scheduleId: string): Promise<boolean> {
   let found: typeof schedules.$inferSelect | undefined;
@@ -426,8 +416,7 @@ export async function triggerScheduledRun(scheduleId: string): Promise<boolean> 
   }
 
   try {
-    // Revalidate the actor BEFORE any preflight (CRIT-13): on failure the schedule is disabled
-    // and a VISIBLE failed run recorded — never a silent skip (#735).
+    // Revalidate the actor BEFORE any preflight (CRIT-13); a refusal is a visible failed run (#735).
     if (!(await isScheduleActorValid(actor, orgId, spaceId))) {
       logger.warn("Schedule actor is no longer valid — disabling schedule", {
         scheduleId,
@@ -442,7 +431,6 @@ export async function triggerScheduledRun(scheduleId: string): Promise<boolean> 
       return true;
     }
 
-    // The resolver's launch-override layer, recorded as `schedule_override`.
     const launchOverrides = scheduleLaunchOverrides(row.connectionOverrides);
 
     const draftAgent = await getPackage(packageId, orgId);
@@ -971,9 +959,8 @@ export type ScheduleWriteSnapshot = Pick<
 >;
 
 /**
- * Merge-update a schedule as a compare-and-set on `expected.updatedAt` (409
- * `schedule_modified_concurrently` otherwise) — not a held lock, which PGlite's single connection
- * would deadlock the caller's `db` checks on.
+ * Merge-update a schedule as a compare-and-set on `expected.updatedAt` (409 otherwise) — not a
+ * held lock, which PGlite's single connection would deadlock the caller's `db` checks on.
  */
 export async function updateSchedule(
   scope: SpaceScope,
@@ -1067,10 +1054,9 @@ export async function updateSchedule(
 }
 
 /**
- * Drop the locked input fields from every schedule of one agent in one space, when its lock set is
- * written — else each tick fails `locked_input_field`. The `rerun_from` rule
- * ({@link withoutLockedFields}): the field re-resolves from the editor value. A direct UPDATE in
- * the lock write's transaction, no compare-and-set, but it bumps `updated_at`.
+ * Drop the locked input fields from every schedule of one agent in one space when its lock set is
+ * written, else each tick fails `locked_input_field` ({@link withoutLockedFields}: the field
+ * re-resolves from the editor value). Bumps `updated_at`, so a concurrent schedule write gets a 409.
  *
  * @returns the ids of the schedules that were rewritten.
  */

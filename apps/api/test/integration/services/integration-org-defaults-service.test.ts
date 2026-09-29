@@ -6,7 +6,7 @@
  * Org-wide default connection per (space, integration): the cross-agent
  * governance baseline. CRUD round-trip + org isolation.
  *
- * `upsertOrgDefault` delegates target validation to `validatePinTarget` with
+ * `upsertOrgDefault` delegates target validation to `validatePinTargets` with
  * `requireShared: true`, so the seeded connection must be `sharedWithOrg=true`,
  * belong to the space, and reference the integration.
  */
