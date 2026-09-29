@@ -1,196 +1,213 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for the sticky-cookie jar shared by the sidecar and platform
+ * Tests for the sticky-cookie scope shared by the sidecar and platform
  * credential proxies, and for the redirect follower's use of it.
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import {
-  composeCookieHeader,
-  cookieBucketKey,
-  eligibleCookies,
-  mergeSetCookieIntoJar,
-  originOf,
-  type CookieJar,
-} from "../../src/resolvers/cookie-jar.ts";
+import { cookieScope, type CookieJar } from "../../src/resolvers/cookie-jar.ts";
 import { fetchFollowingRedirectsCapturingCookies } from "../../src/resolvers/api-call-engine.ts";
 
-const NOW = Date.parse("2026-09-29T12:00:00Z");
-const KEY = "bucket";
+const API = "https://api.example.com/x";
+const CONTENT = "https://content.example.com/x";
+const LITERAL = [
+  "https://api.example.com/**",
+  "https://content.example.com/**",
+  "https://*.glob.example/**",
+];
 
-function merge(jar: CookieJar, ...headers: string[]): CookieJar {
-  mergeSetCookieIntoJar(headers, jar, KEY, NOW);
-  return jar;
-}
+/** Own-origin cookies of `url` (open policy: no sibling fold, no base). */
+const ownCookies = (jar: CookieJar, url: string, id = "i") =>
+  cookieScope(jar, id, null).header(url, null);
 
-describe("mergeSetCookieIntoJar", () => {
-  it("strips attributes and upserts by name", () => {
-    const jar = merge(new Map(), "a=1; Path=/; HttpOnly", "b=2; Secure");
-    expect(jar.get(KEY)).toEqual(["a=1", "b=2"]);
-    merge(jar, "a=3; SameSite=Lax");
-    expect(jar.get(KEY)).toEqual(["a=3", "b=2"]);
+describe("cookieScope.capture", () => {
+  it("strips attributes, trims, and upserts by name", () => {
+    const jar: CookieJar = new Map();
+    const scope = cookieScope(jar, "i", null);
+    scope.capture(API, ["a=1; Path=/; HttpOnly", "  b = 2 ; Secure"]);
+    scope.capture(API, ["a=3; SameSite=Lax"]);
+    expect(ownCookies(jar, API)).toBe("a=3; b=2");
   });
 
-  it("trims the name and the value", () => {
-    expect(merge(new Map(), "  a = 1 ; Path=/").get(KEY)).toEqual(["a=1"]);
+  it.each([
+    ["Max-Age=0, attribute matched case-insensitively", "a=; max-AGE=0"],
+    ["a negative Max-Age", "a=x; Max-Age=-1"],
+    ["an Expires in the past", "a=; Expires=Thu, 01 Jan 1970 00:00:00 GMT"],
+  ])("deletes on %s", (_label, deletion) => {
+    const jar: CookieJar = new Map();
+    const scope = cookieScope(jar, "i", null);
+    scope.capture(API, ["a=1", "b=2"]);
+    scope.capture(API, [deletion]);
+    expect(ownCookies(jar, API)).toBe("b=2");
   });
 
-  it("deletes on Max-Age=0, matching the attribute case-insensitively", () => {
-    const jar = merge(new Map(), "a=1", "b=2");
-    merge(jar, "a=; max-AGE=0");
-    expect(jar.get(KEY)).toEqual(["b=2"]);
-  });
-
-  it("deletes on a negative Max-Age", () => {
-    expect(merge(merge(new Map(), "a=1", "b=2"), "a=x; Max-Age=-1").get(KEY)).toEqual(["b=2"]);
-  });
-
-  it("deletes on an Expires in the past", () => {
-    const jar = merge(new Map(), "a=1", "b=2");
-    merge(jar, "a=; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
-    expect(jar.get(KEY)).toEqual(["b=2"]);
-  });
-
-  it("keeps a cookie whose Expires is in the future", () => {
-    const jar = merge(new Map(), "a=1; Expires=Wed, 01 Jan 2031 00:00:00 GMT");
-    expect(jar.get(KEY)).toEqual(["a=1"]);
-  });
-
-  it("lets Max-Age take precedence over a past Expires", () => {
-    const jar = merge(new Map(), "a=1; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=3600");
-    expect(jar.get(KEY)).toEqual(["a=1"]);
-  });
-
-  it("ignores an unparseable Max-Age and Expires", () => {
-    const jar = merge(new Map(), "a=1; Max-Age=soon; Expires=never");
-    expect(jar.get(KEY)).toEqual(["a=1"]);
+  it.each([
+    ["a future Expires", "a=1; Expires=Fri, 01 Jan 2999 00:00:00 GMT"],
+    [
+      "a positive Max-Age over a past Expires",
+      "a=1; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=3600",
+    ],
+    ["an unparseable Max-Age and Expires", "a=1; Max-Age=soon; Expires=never"],
+  ])("keeps a cookie with %s", (_label, header) => {
+    const jar: CookieJar = new Map();
+    cookieScope(jar, "i", null).capture(API, [header]);
+    expect(ownCookies(jar, API)).toBe("a=1");
   });
 
   it("ignores a header without `=` or with an empty name", () => {
-    const jar = merge(new Map(), "a=1");
-    merge(jar, "garbage; Path=/", "=value", "  =x");
-    expect(jar.get(KEY)).toEqual(["a=1"]);
-    expect(merge(new Map(), "garbage").has(KEY)).toBe(false);
+    const jar: CookieJar = new Map();
+    cookieScope(jar, "i", null).capture(API, ["a=1", "garbage; Path=/", "=value", "  =x"]);
+    expect(ownCookies(jar, API)).toBe("a=1");
   });
 
-  it("drops the bucket key once its last cookie is deleted", () => {
-    const jar = merge(new Map(), "a=1");
-    merge(jar, "a=; Max-Age=0");
-    expect(jar.has(KEY)).toBe(false);
-  });
-
-  it("never creates a bucket for a deletion of an unknown cookie", () => {
-    expect(merge(new Map(), "a=; Max-Age=0").has(KEY)).toBe(false);
-  });
-
-  it("leaves other buckets untouched", () => {
-    const jar: CookieJar = new Map([["other", ["a=1"]]]);
-    merge(jar, "a=2");
-    expect(jar.get("other")).toEqual(["a=1"]);
+  it("drops the bucket once its last cookie is deleted", () => {
+    const jar: CookieJar = new Map();
+    const scope = cookieScope(jar, "i", null);
+    scope.capture(API, ["a=1"]);
+    scope.capture(API, ["a=; Max-Age=0"]);
+    expect(jar.size).toBe(0);
   });
 });
 
-describe("composeCookieHeader", () => {
-  it("overlay wins by name and other base names are kept", () => {
-    expect(
-      composeCookieHeader("PHPSESSID=injected; theme=dark", ["PHPSESSID=rotated", "p=1"]),
-    ).toBe("PHPSESSID=rotated; theme=dark; p=1");
+describe("cookieScope.header", () => {
+  it("lets an own-origin cookie win by name over the base and keeps the other base names", () => {
+    const jar: CookieJar = new Map();
+    const scope = cookieScope(jar, "i", null);
+    scope.capture(API, ["PHPSESSID=rotated", "p=1"]);
+    expect(scope.header(API, "PHPSESSID=injected; theme=dark")).toBe(
+      "PHPSESSID=rotated; theme=dark; p=1",
+    );
   });
 
-  it("returns the base alone when the overlay is empty", () => {
-    expect(composeCookieHeader("a=1;  b=2 ;", [])).toBe("a=1; b=2");
+  it("normalises the base and returns undefined when nothing is left", () => {
+    const scope = cookieScope(new Map(), "i", null);
+    expect(scope.header(API, "a=1;  b=2 ;")).toBe("a=1; b=2");
+    expect(scope.header(API, " ; ")).toBeUndefined();
+    expect(scope.header(API, undefined)).toBeUndefined();
   });
 
-  it("returns the overlay alone when the base is empty", () => {
-    expect(composeCookieHeader(null, ["a=1"])).toBe("a=1");
-    expect(composeCookieHeader("  ", ["a=1", " "])).toBe("a=1");
+  it("never lends a cookie to another origin under an open policy", () => {
+    const jar: CookieJar = new Map();
+    cookieScope(jar, "i", null).capture(CONTENT, ["a=1"]);
+    expect(cookieScope(jar, "i", null).header(API, null)).toBeUndefined();
+    expect(cookieScope(jar, "i", LITERAL).header(API, null)).toBeUndefined();
   });
 
-  it("returns undefined when both are empty", () => {
-    expect(composeCookieHeader(undefined, [])).toBeUndefined();
-    expect(composeCookieHeader(" ; ", [""])).toBeUndefined();
-  });
-});
-
-describe("originOf", () => {
-  it("returns the WHATWG origin, or the opaque origin when unparseable", () => {
-    expect(originOf("https://api.example.com:443/x?y")).toBe("https://api.example.com");
-    expect(originOf("not a url")).toBe("null");
-  });
-});
-
-describe("eligibleCookies", () => {
-  const API = "https://api.example.com";
-  const CONTENT = "https://content.example.com";
-
-  it("returns a same-origin bucket whatever the gate", () => {
-    const jar: CookieJar = new Map([[cookieBucketKey("i", "open", API), ["a=1"]]]);
-    expect([...eligibleCookies(jar, "i", "open", API).values()]).toEqual(["a=1"]);
-    expect([...eligibleCookies(jar, "i", "allowlist", API).values()]).toEqual(["a=1"]);
+  it("folds a literal sibling's cookies under the base, and the own origin over both", () => {
+    const jar: CookieJar = new Map();
+    const scope = cookieScope(jar, "i", LITERAL);
+    scope.capture(CONTENT, ["PHPSESSID=anon", "cdn=1"]);
+    expect(scope.header(API, null)).toBe("PHPSESSID=anon; cdn=1");
+    expect(scope.header(API, "PHPSESSID=injected")).toBe("PHPSESSID=injected; cdn=1");
+    scope.capture(API, ["PHPSESSID=rotated"]);
+    expect(scope.header(API, "PHPSESSID=injected")).toBe("PHPSESSID=rotated; cdn=1");
   });
 
-  it("folds sibling allowlist buckets only into an allowlist-gated call", () => {
-    const jar: CookieJar = new Map([[cookieBucketKey("i", "allowlist", CONTENT), ["a=1"]]]);
-    expect([...eligibleCookies(jar, "i", "allowlist", API).values()]).toEqual(["a=1"]);
-    expect(eligibleCookies(jar, "i", "open", API).size).toBe(0);
-  });
-
-  it("never lends an open bucket to another origin", () => {
-    const jar: CookieJar = new Map([[cookieBucketKey("i", "open", CONTENT), ["a=1"]]]);
-    expect(eligibleCookies(jar, "i", "allowlist", API).size).toBe(0);
+  it("does not share cookies across hosts a glob entry matched", () => {
+    const jar: CookieJar = new Map();
+    const scope = cookieScope(jar, "i", LITERAL);
+    scope.capture("https://victim.glob.example/", ["s=victim"]);
+    expect(scope.header("https://attacker.glob.example/", null)).toBeUndefined();
+    expect(scope.header(API, null)).toBeUndefined();
+    expect(scope.header("https://victim.glob.example/y", null)).toBe("s=victim");
   });
 
   it("never reads another integration's buckets", () => {
-    const jar: CookieJar = new Map([[cookieBucketKey("other", "allowlist", API), ["a=1"]]]);
-    expect(eligibleCookies(jar, "i", "allowlist", API).size).toBe(0);
-  });
-
-  it("lets the same-origin value win over a sibling of the same name", () => {
-    const jar: CookieJar = new Map([
-      [cookieBucketKey("i", "allowlist", API), ["s=fresh"]],
-      [cookieBucketKey("i", "allowlist", CONTENT), ["s=stale"]],
-    ]);
-    expect(eligibleCookies(jar, "i", "allowlist", API).get("s")).toBe("s=fresh");
+    const jar: CookieJar = new Map();
+    cookieScope(jar, "other", LITERAL).capture(API, ["a=1"]);
+    cookieScope(jar, "other", LITERAL).capture(CONTENT, ["b=1"]);
+    expect(cookieScope(jar, "i", LITERAL).header(API, null)).toBeUndefined();
   });
 });
 
-describe("fetchFollowingRedirectsCapturingCookies — jar bucket", () => {
-  it("writes every hop under cookieJarKey and applies a hop's deletion", async () => {
-    const cookiesSeen: (string | null)[] = [];
+describe("fetchFollowingRedirectsCapturingCookies — cookie scope", () => {
+  /** Records the `Cookie` header of every hop; `routes` maps a URL to its response. */
+  function routedFetch(routes: Record<string, () => Response>) {
+    const seen: (string | null)[] = [];
     const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
-      cookiesSeen.push(new Headers(init?.headers).get("cookie"));
-      const u = String(url);
-      if (u.endsWith("/a")) {
-        return new Response(null, {
-          status: 302,
-          headers: { location: "https://api.example.com/b", "set-cookie": "sess=1" },
-        });
-      }
-      return new Response("ok", {
-        status: 200,
-        headers: [
-          ["set-cookie", "stale=; Max-Age=0"],
-          ["set-cookie", "last=2"],
-        ],
-      });
+      seen.push(new Headers(init?.headers).get("cookie"));
+      return (routes[String(url)] ?? (() => new Response("ok")))();
     });
-    const jar: CookieJar = new Map([["call-key", ["stale=old"]]]);
-
-    await fetchFollowingRedirectsCapturingCookies({
-      url: "https://api.example.com/a",
-      init: { method: "GET", headers: { cookie: "caller=c" } },
-      fetchFn: fetchFn as unknown as typeof fetch,
-      cookieJar: jar,
-      cookieJarKey: "call-key",
-      integrationId: "demo",
-      injectedCredentialHeader: null,
-      authorizedUris: ["https://api.example.com/**"],
+    return { seen, fetchFn: fetchFn as unknown as typeof fetch };
+  }
+  const redirect = (location: string, setCookie?: string) =>
+    new Response(null, {
+      status: 302,
+      headers: { location, ...(setCookie ? { "set-cookie": setCookie } : {}) },
+    });
+  function follow(
+    url: string,
+    cookie: string,
+    fetchFn: typeof fetch,
+    jar: CookieJar,
+    policy: { authorizedUris?: string[]; allowAllUris?: boolean },
+  ) {
+    return fetchFollowingRedirectsCapturingCookies({
+      url,
+      init: { method: "GET", headers: { cookie } },
+      fetchFn,
+      cookies: cookieScope(jar, "i", null),
+      integrationId: "i",
+      injectedCredentialHeader: "cookie",
+      ...policy,
       resolveHost: async () => ["203.0.113.7"],
     });
+  }
 
-    expect(cookiesSeen).toEqual(["caller=c", "caller=c; stale=old; sess=1"]);
-    expect(jar.get("call-key")).toEqual(["sess=1", "last=2"]);
-    expect([...jar.keys()]).toEqual(["call-key"]);
+  it("captures every same-origin hop, applies a hop's deletion, and carries the initial Cookie", async () => {
+    const { seen, fetchFn } = routedFetch({
+      "https://api.example.com/a": () => redirect("https://api.example.com/b", "sess=1"),
+      "https://api.example.com/b": () =>
+        new Response("ok", {
+          headers: [
+            ["set-cookie", "stale=; Max-Age=0"],
+            ["set-cookie", "last=2"],
+          ],
+        }),
+    });
+    const jar: CookieJar = new Map();
+    cookieScope(jar, "i", null).capture(API, ["stale=old"]);
+
+    await follow("https://api.example.com/a", "caller=c", fetchFn, jar, {
+      authorizedUris: ["https://api.example.com/**"],
+    });
+
+    expect(seen).toEqual(["caller=c", "caller=c; stale=old; sess=1"]);
+    expect(ownCookies(jar, API)).toBe("sess=1; last=2");
+    expect(jar.size).toBe(1);
+  });
+
+  it("captures a cross-origin hop's cookie under ITS origin, not the initial one", async () => {
+    const { fetchFn } = routedFetch({
+      "https://victim.example/go": () => redirect("https://attacker.example/set"),
+      "https://attacker.example/set": () =>
+        new Response("ok", { headers: { "set-cookie": "PHPSESSID=attacker" } }),
+    });
+    const jar: CookieJar = new Map();
+
+    await follow("https://victim.example/go", "PHPSESSID=victim", fetchFn, jar, {
+      allowAllUris: true,
+    });
+
+    const scope = cookieScope(jar, "i", null);
+    expect(scope.header("https://victim.example/next", "PHPSESSID=victim")).toBe(
+      "PHPSESSID=victim",
+    );
+    expect(ownCookies(jar, "https://attacker.example/")).toBe("PHPSESSID=attacker");
+  });
+
+  it("never re-sends the initial Cookie once a cross-origin strip has fired", async () => {
+    const { seen, fetchFn } = routedFetch({
+      "https://a.example/start": () => redirect("https://evil.example/1"),
+      "https://evil.example/1": () => redirect("https://evil.example/2", "e=1"),
+    });
+
+    await follow("https://a.example/start", "PHPSESSID=victim", fetchFn, new Map(), {
+      allowAllUris: true,
+    });
+
+    // evil/2 gets evil's own cookie only, never the stripped session.
+    expect(seen).toEqual(["PHPSESSID=victim", null, "e=1"]);
   });
 });

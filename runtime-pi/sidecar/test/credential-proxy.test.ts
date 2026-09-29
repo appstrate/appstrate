@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import { cookieBucketKey } from "@appstrate/afps-runtime/resolvers";
+import { cookieScope } from "@appstrate/afps-runtime/resolvers";
 import { executeApiCall, type ApiCallDeps, type ApiCallRequestBody } from "../credential-proxy.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
@@ -39,6 +39,11 @@ function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
     resolveHost: async () => ["203.0.113.7"],
     ...overrides,
   };
+}
+
+/** Cookies the run-wide jar holds for `url`'s own origin. */
+function jarCookies(deps: ApiCallDeps, integrationId: string, url: string): string | undefined {
+  return cookieScope(deps.cookieJar, integrationId, null).header(url, null);
 }
 
 describe("executeApiCall — structured failures", () => {
@@ -126,11 +131,7 @@ describe("executeApiCall — happy path", () => {
       expect(text).toBe('{"data":42}');
       expect(result.authRefreshed).toBe(false);
     }
-    // Bucketed by (integration, gate, capture origin) — the default creds
-    // declare an allowlist, so this call was allowlist-gated.
-    expect(
-      deps.cookieJar.get(cookieBucketKey("gmail", "allowlist", "https://api.example.com")),
-    ).toEqual(["sess=abc"]);
+    expect(jarCookies(deps, "gmail", "https://api.example.com/")).toBe("sess=abc");
     // Verify Authorization was server-side injected.
     const callArgs = fetchFn.mock.calls[0]!;
     const init = callArgs[1] as RequestInit & { headers: Record<string, string> };
@@ -422,10 +423,8 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.response.status).toBe(200);
     expect(calls).toBe(3);
-    // The whole chain lands in the bucket of the INITIAL target's origin.
-    const jar = deps.cookieJar.get(
-      cookieBucketKey("kijiji", "allowlist", "https://api.example.com"),
-    );
+    // Every hop is same-origin, so the whole chain lands in that origin's bucket.
+    const jar = jarCookies(deps, "kijiji", "https://api.example.com/");
     // Pre-fix: ["step1=A", "last=Z"] — session=XYZ is missing.
     // Post-fix: all three cookies merged into the jar.
     expect(jar).toContain("step1=A");
@@ -690,9 +689,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     // credential header into a cross-origin redirect.
     const init = fetchFn.mock.calls[0]![1] as RequestInit;
     expect(init.redirect).toBe("manual");
-    expect(
-      deps.cookieJar.get(cookieBucketKey("demo", "allowlist", "https://api.example.com")),
-    ).toEqual(["final=F"]);
+    expect(jarCookies(deps, "demo", "https://api.example.com/")).toBe("final=F");
   });
 
   it("propagates caller-supplied Cookie header across all hops (jar wins on dup)", async () => {
@@ -1782,9 +1779,9 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     expect(cookiesSeen[1] ?? "").not.toContain("PROVIDER-SESSION");
     // The cookie is still held for its own origin — this is scoping, not a
     // disabled jar.
-    expect(
-      deps.cookieJar.get(cookieBucketKey("kijiji", "open", "https://provider.example.com")),
-    ).toEqual(["sess=PROVIDER-SESSION"]);
+    expect(jarCookies(deps, "kijiji", "https://provider.example.com/")).toBe(
+      "sess=PROVIDER-SESSION",
+    );
   });
 
   it("still replays it on the same origin (sticky sessions keep working)", async () => {
@@ -1913,9 +1910,9 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     );
     expect(cookiesSeen[1] ?? "").not.toContain("VICTIM-SESSION");
     // Still sticky for the origin that captured it.
-    expect(
-      deps.cookieJar.get(cookieBucketKey("shopify", "open", "https://victim.myshopify.com")),
-    ).toEqual(["sess=VICTIM-SESSION"]);
+    expect(jarCookies(deps, "shopify", "https://victim.myshopify.com/")).toBe(
+      "sess=VICTIM-SESSION",
+    );
   });
 
   it("does not replay a cookie across hosts under a `https://**` allowlist", async () => {
@@ -1997,94 +1994,152 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
 });
 
 describe("executeApiCall — injected Cookie credential meets the jar (#1613)", () => {
-  // A session integration delivering its credential as a `Cookie` header.
-  const sessionCreds = mock(async (): Promise<CredentialsResponse> => ({
-    credentials: { session: "injected" },
-    authorizedUris: ["https://api.example.com/**"],
-    allowAllUris: false,
-    credentialHeaderName: "Cookie",
-    credentialHeaderPrefix: "PHPSESSID=",
-    credentialFieldName: "session",
-  }));
+  /** A session integration delivering its credential as a `Cookie` header. */
+  function sessionCreds(authorizedUris: string[] | null, allowAllUris = false) {
+    return mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { session: "injected" },
+      authorizedUris,
+      allowAllUris,
+      credentialHeaderName: "Cookie",
+      credentialHeaderPrefix: "PHPSESSID=",
+      credentialFieldName: "session",
+    }));
+  }
+  const apiCreds = sessionCreds(["https://api.example.com/**"]);
 
-  /** Answers call N with `setCookies[N]` and records every `Cookie` header sent. */
-  function scriptedFetch(setCookies: (string | undefined)[]) {
+  /**
+   * Answers each request with `setCookie(url, n)` (n = request index) and
+   * records every `Cookie` header sent, per request.
+   */
+  function scriptedFetch(setCookie: (url: string, n: number) => string | undefined) {
     const sent: string[][] = [];
-    let call = 0;
-    const fetchFn = mock(async (_url: string | URL, init?: RequestInit) => {
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
       const headers = (init?.headers ?? {}) as Record<string, string>;
       sent.push(
         Object.entries(headers)
           .filter(([k]) => k.toLowerCase() === "cookie")
           .map(([, v]) => v),
       );
-      const setCookie = setCookies[call++];
-      return new Response("{}", {
-        status: 200,
-        headers: setCookie ? { "Set-Cookie": setCookie } : {},
-      });
+      const u = String(url);
+      if (u.endsWith("/go")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://attacker.myshop.example/set" },
+        });
+      }
+      const value = setCookie(u, sent.length - 1);
+      return new Response("{}", { status: 200, headers: value ? { "Set-Cookie": value } : {} });
     });
     return { sent, fetchFn: fetchFn as unknown as typeof fetch };
   }
+  const byCall =
+    (...values: (string | undefined)[]) =>
+    (_url: string, n: number) =>
+      values[n];
 
-  const bodies = {
-    buffered: (): ApiCallRequestBody => ({ kind: "none" }),
-    streaming: (): ApiCallRequestBody => ({
-      kind: "streaming",
-      stream: new ReadableStream({
-        start(c) {
-          c.enqueue(new Uint8Array([1]));
-          c.close();
-        },
-      }),
+  const buffered = (): ApiCallRequestBody => ({ kind: "none" });
+  const streaming = (): ApiCallRequestBody => ({
+    kind: "streaming",
+    stream: new ReadableStream({
+      start(c) {
+        c.enqueue(new Uint8Array([1]));
+        c.close();
+      },
     }),
-  };
-  async function callTimes(deps: ApiCallDeps, n: number, body: () => ApiCallRequestBody) {
-    for (let i = 0; i < n; i++) {
+  });
+  async function callEach(
+    deps: ApiCallDeps,
+    targets: string[],
+    body: () => ApiCallRequestBody = buffered,
+  ) {
+    for (const targetUrl of targets) {
       await executeApiCall(
-        {
-          integrationId: "legacy",
-          targetUrl: "https://api.example.com/page",
-          method: "POST",
-          callerHeaders: {},
-          body: body(),
-        },
+        { integrationId: "shop", targetUrl, method: "POST", callerHeaders: {}, body: body() },
         deps,
       );
     }
   }
+  const PAGE = "https://api.example.com/page";
 
   it("sends ONE Cookie header carrying the injected session and a captured cookie", async () => {
-    const { sent, fetchFn } = scriptedFetch(["pref=1; Path=/"]);
-    const deps = makeDeps({ fetchFn, fetchCredentials: sessionCreds });
-    await callTimes(deps, 2, bodies.buffered);
+    const { sent, fetchFn } = scriptedFetch(byCall("pref=1; Path=/"));
+    const deps = makeDeps({ fetchFn, fetchCredentials: apiCreds });
+    await callEach(deps, [PAGE, PAGE]);
 
     expect(sent[0]).toEqual(["PHPSESSID=injected"]);
     expect(sent[1]).toEqual(["PHPSESSID=injected; pref=1"]);
   });
 
-  for (const [kind, body] of Object.entries(bodies)) {
-    it(`replays a rotated session once, without a duplicate name (${kind})`, async () => {
-      const { sent, fetchFn } = scriptedFetch(["PHPSESSID=rotated; HttpOnly"]);
-      const deps = makeDeps({ fetchFn, fetchCredentials: sessionCreds });
-      await callTimes(deps, 2, body);
+  it.each([
+    ["buffered", buffered],
+    ["streaming", streaming],
+  ])("replays a rotated session once, without a duplicate name (%s)", async (_kind, body) => {
+    const { sent, fetchFn } = scriptedFetch(byCall("PHPSESSID=rotated; HttpOnly"));
+    const deps = makeDeps({ fetchFn, fetchCredentials: apiCreds });
+    await callEach(deps, [PAGE, PAGE], body);
 
-      expect(sent[1]).toEqual(["PHPSESSID=rotated"]);
-    });
+    expect(sent[1]).toEqual(["PHPSESSID=rotated"]);
+  });
 
-    it(`falls back to the injected session once upstream deletes it (${kind})`, async () => {
-      const { sent, fetchFn } = scriptedFetch([
-        "PHPSESSID=rotated",
-        "PHPSESSID=; Max-Age=0; Path=/",
+  it("falls back to the injected session once upstream deletes it", async () => {
+    const { sent, fetchFn } = scriptedFetch(
+      byCall("PHPSESSID=rotated", "PHPSESSID=; Max-Age=0; Path=/"),
+    );
+    const deps = makeDeps({ fetchFn, fetchCredentials: apiCreds });
+    await callEach(deps, [PAGE, PAGE, PAGE]);
+
+    expect(sent[1]).toEqual(["PHPSESSID=rotated"]);
+    expect(sent[2]).toEqual(["PHPSESSID=injected"]);
+    expect(deps.cookieJar.size).toBe(0);
+  });
+
+  it.each([
+    ["allow_all_uris", sessionCreds(null, true)],
+    ["a glob allowlist", sessionCreds(["https://*.myshop.example/**"])],
+  ])(
+    "a redirect hop's cookie cannot replace the session of the initial origin (%s)",
+    async (_label, fetchCredentials) => {
+      // victim/go → 302 → attacker/set, which plants its own PHPSESSID.
+      const { sent, fetchFn } = scriptedFetch((url) =>
+        url.endsWith("/set") ? "PHPSESSID=attacker; Path=/" : undefined,
+      );
+      const deps = makeDeps({ fetchFn, fetchCredentials });
+      await callEach(deps, [
+        "https://victim.myshop.example/go",
+        "https://victim.myshop.example/account",
       ]);
-      const deps = makeDeps({ fetchFn, fetchCredentials: sessionCreds });
-      await callTimes(deps, 3, body);
 
-      expect(sent[1]).toEqual(["PHPSESSID=rotated"]);
-      expect(sent[2]).toEqual(["PHPSESSID=injected"]);
-      expect(
-        deps.cookieJar.has(cookieBucketKey("legacy", "allowlist", "https://api.example.com")),
-      ).toBe(false);
+      expect(sent.at(-1)).toEqual(["PHPSESSID=injected"]);
+      expect(jarCookies(deps, "shop", "https://attacker.myshop.example/")).toBe(
+        "PHPSESSID=attacker",
+      );
+    },
+  );
+
+  it("a literal sibling host's cookie of the same name does not override the session", async () => {
+    const { sent, fetchFn } = scriptedFetch((url, n) =>
+      url.startsWith("https://static.")
+        ? "PHPSESSID=anon; Path=/"
+        : n === 2
+          ? "PHPSESSID=rotated"
+          : undefined,
+    );
+    const deps = makeDeps({
+      fetchFn,
+      fetchCredentials: sessionCreds([
+        "https://www.shop.example/**",
+        "https://static.shop.example/**",
+      ]),
     });
-  }
+    await callEach(deps, [
+      "https://static.shop.example/img",
+      "https://www.shop.example/cart",
+      "https://www.shop.example/cart",
+      "https://www.shop.example/cart",
+    ]);
+
+    expect(sent[1]).toEqual(["PHPSESSID=injected"]);
+    // An own-origin rotation still wins over the injected session.
+    expect(sent[3]).toEqual(["PHPSESSID=rotated"]);
+  });
 });

@@ -10,11 +10,8 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { DEFAULT_MAX_REDIRECTS } from "@appstrate/afps-shared/guarded-fetch";
-import {
-  MAX_REDIRECTS,
-  preflightUrl,
-  hostLiterallyAllowlisted,
-} from "../../src/resolvers/api-call-engine.ts";
+import { MAX_REDIRECTS, preflightUrl } from "../../src/resolvers/api-call-engine.ts";
+import { hostLiterallyAllowlisted } from "../../src/resolvers/http-call-core.ts";
 
 const publicResolver = async () => ["203.0.113.7"];
 const internalResolver = async () => ["10.0.0.5"];

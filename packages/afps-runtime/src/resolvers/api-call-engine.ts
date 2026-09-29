@@ -19,8 +19,8 @@
  *          checks and before re-issuing the fetch,
  *        - applies a hybrid credential-strip (forward credentials inside
  *          a declared allowlist; WHATWG origin-based strip otherwise),
- *        - captures `Set-Cookie` from intermediate hops into a jar
- *          (Bun/Node native fetch only surface the final hop's cookies).
+ *        - captures `Set-Cookie` from every hop into that hop's origin
+ *          bucket (Bun/Node native fetch only surface the final hop's cookies).
  *
  * What this module deliberately does NOT own:
  *   - HOW credentials are obtained (the sidecar fetches them from the
@@ -69,9 +69,9 @@
  *     that is what makes multi-host APIs (Dropbox `api.` ⇄ `content.`) work.
  *     Folding the two would mean an option that disables the shared
  *     primitive's central safety property for one caller.
- *   - **Cookie continuity.** Every hop's `Set-Cookie` is merged into the
- *     caller's jar bucket and recomposed onto the next hop (#473). The shared
- *     primitive has no jar and no reason to grow one.
+ *   - **Cookie continuity.** Every hop's `Set-Cookie` is captured into the
+ *     caller's cookie scope and recomposed onto the next hop (#473). The
+ *     shared primitive has no jar and no reason to grow one.
  *
  * What the two DO share is now actually shared: the SSRF blocklist
  * (`@appstrate/afps-shared/ssrf`), the DNS-rebind check (`./ssrf-dns`) and the
@@ -83,8 +83,12 @@
 import { isBlockedUrl } from "@appstrate/afps-shared/ssrf";
 import { DEFAULT_MAX_REDIRECTS } from "@appstrate/afps-shared/guarded-fetch";
 import { resolveAndCheckHost, type HostResolver } from "@appstrate/afps-shared/ssrf-dns";
-import { matchesAuthorizedUriSpec, stripUserInfoAndFragment } from "./http-call-core.ts";
-import { composeCookieHeader, mergeSetCookieIntoJar, type CookieJar } from "./cookie-jar.ts";
+import {
+  hostLiterallyAllowlisted,
+  matchesAuthorizedUriSpec,
+  stripUserInfoAndFragment,
+} from "./http-call-core.ts";
+import { cookieScope, type CookieScope } from "./cookie-jar.ts";
 
 // Re-exported from its new home in `http-call-core.ts`, where the
 // `authorized_uris` matcher itself needs it (see
@@ -157,40 +161,6 @@ interface PreflightOptions {
    * Production callers omit it (system resolver via `node:dns`).
    */
   resolveHost?: HostResolver;
-}
-
-/**
- * True when some allowlist entry names the URL's host with a literal
- * (wildcard-free) host component. Only then is the allowlist a
- * host-level trust declaration that exempts the target from the SSRF
- * gate: the operator wrote that exact host down, so an internal address
- * behind it is their declared topology (on-prem APIs are legitimate
- * allowlist targets). Entries whose host segment contains a glob
- * (`https://**`, `https://*.example.com/…`) never pin — the concrete
- * host is then chosen by the agent at call time, and the SSRF gate must
- * still apply.
- *
- * The host comparison is authority-only and case-insensitive: userinfo
- * and the port are stripped, a globbed scheme (`**://`, `*://`) and a
- * globbed port (`:*`) are tolerated — a glob there doesn't make the HOST
- * agent-chosen, and refusing to pin would wrongly re-gate a literal
- * on-prem host the operator explicitly named.
- */
-export function hostLiterallyAllowlisted(url: string, specs: string[]): boolean {
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    return false;
-  }
-  for (const spec of specs) {
-    const m = /^(?:[a-zA-Z][a-zA-Z0-9+.-]*|\*{1,2}):\/\/([^/?#]+)/.exec(spec.trim());
-    if (!m) continue;
-    const hostPart = m[1]!.replace(/^[^@]*@/, "").replace(/:(\d+|\*)$/, "");
-    if (hostPart.includes("*")) continue;
-    if (hostPart.toLowerCase() === host) return true;
-  }
-  return false;
 }
 
 /**
@@ -295,9 +265,8 @@ interface RedirectFollowOptions {
   url: string;
   init: RequestInit;
   fetchFn: typeof fetch;
-  cookieJar: CookieJar;
-  /** Jar bucket every hop's `Set-Cookie` is merged under and replayed from. */
-  cookieJarKey: string;
+  /** Captures each hop's `Set-Cookie` under its origin; composes each next hop's `Cookie`. */
+  cookies: CookieScope;
   /** Logging only. */
   integrationId: string;
   /** Lowercased name of the credential header server-injected by the caller. */
@@ -328,7 +297,7 @@ interface RedirectFollowOptions {
 
 /**
  * Manually follow 3xx redirects so we can capture `Set-Cookie` from
- * **every** hop into `cookieJar[cookieJarKey]` — Bun's / undici's native
+ * **every** hop into `cookies` — Bun's / undici's native
  * fetch only surfaces the final hop's `Set-Cookie`, which breaks
  * multi-step OAuth/CAS flows where the session cookie lands on an
  * intermediate 302 (see #473).
@@ -353,8 +322,10 @@ interface RedirectFollowOptions {
  * native fetch — bodies can't be replayed across hops). The initial-URL
  * allowlist check still bounds the SSRF surface for that path.
  *
- * The initial `Cookie` header is preserved across hops (the jar bucket wins
- * on name conflict so server-rotated values replace stale initial ones).
+ * Each hop's `Set-Cookie` lands in THAT hop's origin bucket (RFC 6265
+ * host-only). The initial `Cookie` header is carried to later hops under the
+ * next hop's own-origin cookies, and dropped for the rest of the chain once
+ * a credential strip has fired.
  *
  * Returns the terminal `Response`, the URL it was served from (so
  * callers driving redirect-chain flows — OAuth code, CAS ticket,
@@ -371,8 +342,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
     url,
     init,
     fetchFn,
-    cookieJar,
-    cookieJarKey,
+    cookies,
     integrationId,
     injectedCredentialHeader,
     authorizedUris,
@@ -380,14 +350,14 @@ export async function fetchFollowingRedirectsCapturingCookies(
   } = opts;
   const logger = opts.logger ?? NOOP_LOGGER;
   const hasAllowlist = !!authorizedUris && authorizedUris.length > 0;
-  const initialCookie = new Headers(init.headers as RequestInit["headers"]).get("cookie");
+  let carried = new Headers(init.headers as RequestInit["headers"]).get("cookie");
 
   let currentUrl = url;
   let currentInit: RequestInit = { ...init, redirect: "manual" };
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     const response = await fetchFn(currentUrl, currentInit);
-    mergeSetCookieIntoJar(response.headers.getSetCookie(), cookieJar, cookieJarKey);
+    cookies.capture(currentUrl, response.headers.getSetCookie());
 
     if (response.status < 300 || response.status >= 400) {
       return { response, finalUrl: currentUrl, hops: hop };
@@ -457,21 +427,19 @@ export async function fetchFollowingRedirectsCapturingCookies(
     const stripCred = (!hasAllowlist || !!allowAllUris) && crossOrigin;
 
     const headers = new Headers(currentInit.headers as RequestInit["headers"]);
+    if (stripCred) {
+      headers.delete("authorization");
+      if (injectedCredentialHeader) headers.delete(injectedCredentialHeader);
+      // Cookies are credentials too: the initial Cookie header never reaches
+      // any later hop once the chain has left the boundary.
+      carried = null;
+    }
     headers.delete("cookie");
-    const cookie = composeCookieHeader(initialCookie, cookieJar.get(cookieJarKey) ?? []);
+    const cookie = cookies.header(nextUrl, carried);
     if (cookie) headers.set("cookie", cookie);
     if (dropBody) {
       headers.delete("content-length");
       headers.delete("content-type");
-    }
-    if (stripCred) {
-      headers.delete("authorization");
-      if (injectedCredentialHeader) headers.delete(injectedCredentialHeader);
-      // Cookies are credentials too. The jar/caller cookies were composed
-      // above unconditionally (to follow intra-allowlist multi-host flows);
-      // strip them on an out-of-boundary cross-origin hop so an
-      // upstream-controlled redirect can't exfiltrate the session jar.
-      headers.delete("cookie");
     }
 
     currentInit = {
@@ -492,7 +460,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
  *
  * Runs the initial-URL preflight ({@link preflightUrl}), then dispatches
  * through {@link fetchFollowingRedirectsCapturingCookies} with a fresh
- * per-call jar — gaining the per-hop SSRF + allowlist + credential-strip
+ * per-call cookie scope — gaining the per-hop SSRF + allowlist + credential-strip
  * hardening the sidecar already had. The caller MUST have injected its
  * credential header into `init.headers` already.
  *
@@ -562,9 +530,7 @@ export async function guardedFetch(
     url: opts.url,
     init,
     fetchFn,
-    // Fresh per-call jar: the bucket key only has to be stable within it.
-    cookieJar: new Map(),
-    cookieJarKey: integrationId,
+    cookies: cookieScope(new Map(), integrationId, null),
     integrationId,
     injectedCredentialHeader: opts.injectedCredentialHeader ?? null,
     authorizedUris: opts.authorizedUris ?? undefined,

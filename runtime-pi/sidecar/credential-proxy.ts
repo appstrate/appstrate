@@ -43,16 +43,11 @@ import {
   type SidecarConfig,
 } from "./helpers.ts";
 import {
-  composeCookieHeader,
-  cookieBucketKey,
-  eligibleCookies,
+  cookieScope,
   fetchFollowingRedirectsCapturingCookies,
   hostLiterallyAllowlisted,
-  mergeSetCookieIntoJar,
-  originOf,
   redactHost,
   RedirectBlockedError,
-  type CookieGate,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -171,11 +166,7 @@ type ApiCallResult = ApiCallSuccess | ApiCallFailure;
  */
 export interface ApiCallBaseDeps {
   config: SidecarConfig;
-  /**
-   * Run-wide sticky-cookie store. Bucketed by `cookieBucketKey`
-   * (`@appstrate/afps-runtime/resolvers`) — NOT by bare integration id; see
-   * that helper for why the capture origin is part of a cookie's identity.
-   */
+  /** Run-wide sticky-cookie store, read and written through `cookieScope`. */
   cookieJar: CookieJar;
   fetchFn: typeof fetch;
   /**
@@ -357,12 +348,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 
   const effectiveAllowAll = creds.allowAllUris && !substitutesCredential;
 
-  /**
-   * Cookie scope for this call — see `CookieGate`. Assigned by whichever
-   * branch below admits the call, so the recorded gate and the policy that
-   * actually ran can never disagree.
-   */
-  let cookieGate: CookieGate = "open";
+  /** Set only by the literal-host allowlist branch below: the cookie scope's sibling gate. */
+  let literalAllowlist: string[] | null = null;
 
   if (effectiveAllowAll) {
     const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
@@ -379,13 +366,9 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
       if (refusal) return refusal;
     } else {
-      // The SAME predicate that decides whether the allowlist is a host-level
-      // operator declaration for the SSRF gate decides it for cookies: only a
-      // wildcard-free host entry names this host, and only then is the
-      // cross-host fold in `eligibleCookies` a statement the operator made.
-      // A glob-matched host is agent-chosen, so the call keeps the
-      // origin-scoped `open` bucket.
-      cookieGate = "allowlist";
+      // The predicate that exempts an operator-named host from the SSRF gate
+      // also lets its cookies be shared with the other literal hosts.
+      literalAllowlist = creds.authorizedUris;
     }
   } else if (substitutesCredential) {
     // allow_all_uris was the only permission but the call would exfiltrate a
@@ -401,12 +384,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     if (refusal) return refusal;
   }
 
-  // 4b. Where this call is going. Together with `cookieGate` above it names
-  //     the jar bucket this call writes to (every redirect hop included, so a
-  //     chain lands in the bucket of the INITIAL target — #473) and, through
-  //     `eligibleCookies`, the buckets it may read from.
-  const targetOrigin = originOf(resolvedUrl);
-  const cookieJarKey = cookieBucketKey(integrationId, cookieGate, targetOrigin);
+  // 4b. This call's view of the run-wide jar (docs/architecture/SIDECAR.md).
+  const cookies = cookieScope(cookieJar, integrationId, literalAllowlist);
 
   // 5b. Pre-substitute headers with the *initial* creds so we can
   //     fail fast on unresolved placeholders. Re-substituted on each
@@ -519,15 +498,12 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     }
     // Server-side credential injection (Authorization, X-Api-Key, …).
     const credentialInjection = applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
-    // Sticky cookies this call's origin is entitled to, composed into ONE
-    // Cookie header over the injected credential / caller cookie: the jar wins
-    // by name (a server-rotated session replaces the injected one) and a
-    // deleted cookie falls back to it. The same-origin bucket already holds a
-    // first attempt's `Set-Cookie` when a 401 retry replays.
+    // ONE Cookie header: the injected credential / caller cookies under the
+    // target's own-origin jar cookies (a rotated session wins, a deleted one falls back).
     const cookieKeys = Object.keys(resolvedHeaders).filter((k) => k.toLowerCase() === "cookie");
-    const cookie = composeCookieHeader(
+    const cookie = cookies.header(
+      resolvedUrl,
       cookieKeys.map((k) => resolvedHeaders[k]).join("; "),
-      eligibleCookies(cookieJar, integrationId, cookieGate, targetOrigin).values(),
     );
     for (const k of cookieKeys) delete resolvedHeaders[k];
     if (cookie) resolvedHeaders[cookieKeys[0] ?? "cookie"] = cookie;
@@ -606,8 +582,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       url: resolvedUrl,
       init,
       fetchFn,
-      cookieJar,
-      cookieJarKey,
+      cookies,
       integrationId,
       injectedCredentialHeader:
         credentialInjection.kind === "inject"
@@ -691,10 +666,10 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     }
   }
 
-  // 8. Terminal-hop Set-Cookie capture. An idempotent re-merge for buffered
-  //    bodies (the follower already merged every hop); load-bearing for
-  //    streaming (final hop only — bodies can't be replayed).
-  mergeSetCookieIntoJar(upstream.headers.getSetCookie(), cookieJar, cookieJarKey);
+  // 8. Terminal-hop Set-Cookie capture, under the URL that served it. An
+  //    idempotent re-merge for buffered bodies (the follower captured every
+  //    hop); load-bearing for streaming (no follower).
+  cookies.capture(upstreamFinalUrl, upstream.headers.getSetCookie());
 
   // 9. Log a persistent auth failure once per integration per run. The flag is
   //    set platform-side by the `/refresh` call above (which returns null on a
