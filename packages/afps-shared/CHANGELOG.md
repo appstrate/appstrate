@@ -12,6 +12,17 @@ consumer that raises its range — `scripts/verify-package-resolves.ts` installs
 the real tarball outside the monorepo, so an unpublished leaf fails the
 consumer's publish rather than the first user's `npm install`.
 
+## [Unreleased]
+
+### Added
+
+- **`GuardedFetchOptions.cookies`** — optional per-hop cookie state for
+  `guardedFetch`: `capture(url, setCookies)` receives every hop's `Set-Cookie`,
+  and each hop's `Cookie` is `header(url, base)`, where `base` is the caller's
+  `Cookie` header until a cross-origin hop strips it, then `null`. Both get the
+  logical URL, never the pinned one. A session an upstream rotates on a
+  redirect response now reaches the next hop. Without the option nothing changes.
+
 ## [0.9.1] — unreleased
 
 Additive only. `@appstrate/core` declares `^0.9.1`, so tag `afps-shared@0.9.1`

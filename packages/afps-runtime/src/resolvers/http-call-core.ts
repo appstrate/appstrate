@@ -1826,6 +1826,40 @@ export function stripUserInfoAndFragment(url: string): string | undefined {
   }
 }
 
+/**
+ * True when some allowlist entry names the URL's host with a literal
+ * (wildcard-free) host component. Only then is the allowlist a
+ * host-level trust declaration that exempts the target from the SSRF
+ * gate: the operator wrote that exact host down, so an internal address
+ * behind it is their declared topology (on-prem APIs are legitimate
+ * allowlist targets). Entries whose host segment contains a glob
+ * (`https://**`, `https://*.example.com/…`) never pin — the concrete
+ * host is then chosen by the agent at call time, and the SSRF gate must
+ * still apply.
+ *
+ * The host comparison is authority-only and case-insensitive: userinfo
+ * and the port are stripped, a globbed scheme (`**://`, `*://`) and a
+ * globbed port (`:*`) are tolerated — a glob there doesn't make the HOST
+ * agent-chosen, and refusing to pin would wrongly re-gate a literal
+ * on-prem host the operator explicitly named.
+ */
+export function hostLiterallyAllowlisted(url: string, specs: readonly string[]): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  for (const spec of specs) {
+    const m = /^(?:[a-zA-Z][a-zA-Z0-9+.-]*|\*{1,2}):\/\/([^/?#]+)/.exec(spec.trim());
+    if (!m) continue;
+    const hostPart = m[1]!.replace(/^[^@]*@/, "").replace(/:(\d+|\*)$/, "");
+    if (hostPart.includes("*")) continue;
+    if (hostPart.toLowerCase() === host) return true;
+  }
+  return false;
+}
+
 /** Escape regex metacharacters, leaving the `*` wildcard chars intact. */
 function escapeUriLiteral(part: string): string {
   return part.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
