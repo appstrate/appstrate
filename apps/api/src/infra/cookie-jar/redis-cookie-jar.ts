@@ -22,14 +22,14 @@ export class RedisCookieJarStore implements CookieJarStore {
     this.getCache = deps?.getCache ?? getCache;
   }
 
-  private cacheKey(sessionId: string, integrationKey: string): string {
-    return `cp:jar:${sessionId}:${integrationKey}`;
+  private cacheKey(sessionId: string, connectionId: string): string {
+    return `cp:jar:${sessionId}:${connectionId}`;
   }
 
-  async get(sessionId: string, integrationKey: string): Promise<string[]> {
+  async get(sessionId: string, connectionId: string): Promise<string[]> {
     try {
       const cache = await this.getCache();
-      const raw = await cache.get(this.cacheKey(sessionId, integrationKey));
+      const raw = await cache.get(this.cacheKey(sessionId, connectionId));
       if (!raw) return [];
       const parsed: unknown = JSON.parse(raw);
       return Array.isArray(parsed) ? (parsed as string[]) : [];
@@ -43,13 +43,13 @@ export class RedisCookieJarStore implements CookieJarStore {
 
   async set(
     sessionId: string,
-    integrationKey: string,
+    connectionId: string,
     cookies: string[],
     ttlSeconds: number,
   ): Promise<void> {
     try {
       const cache = await this.getCache();
-      await cache.set(this.cacheKey(sessionId, integrationKey), JSON.stringify(cookies), {
+      await cache.set(this.cacheKey(sessionId, connectionId), JSON.stringify(cookies), {
         ttlSeconds,
       });
     } catch (err) {

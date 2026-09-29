@@ -12,17 +12,17 @@
  * OAuth flow). Both expose the exact same contract; callers cannot tell
  * which backing store they are talking to.
  *
- * Keyed by `(sessionId, integrationKey)` since a single X-Session-Id can
- * drive calls across multiple integrations, each with its own cookie scope.
+ * Keyed by `(sessionId, connectionId)` since a single X-Session-Id can drive
+ * calls across several connections, each with its own cookie scope.
  */
 
 export interface CookieJarStore {
-  /** Read cookies for an integration within a session. Returns [] when absent. */
-  get(sessionId: string, integrationKey: string): Promise<string[]>;
-  /** Replace cookies for an integration within a session. Resets the TTL. */
+  /** Read cookies for a connection within a session. Returns [] when absent. */
+  get(sessionId: string, connectionId: string): Promise<string[]>;
+  /** Replace cookies for a connection within a session. Resets the TTL. */
   set(
     sessionId: string,
-    integrationKey: string,
+    connectionId: string,
     cookies: string[],
     ttlSeconds: number,
   ): Promise<void>;

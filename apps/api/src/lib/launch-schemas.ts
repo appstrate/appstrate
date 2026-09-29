@@ -40,13 +40,13 @@
 import { z } from "zod";
 import { collectOverridableDependencyIds } from "@appstrate/core/dependencies";
 import { ApiError } from "./errors.ts";
-import { connectionSetSchema } from "./connection-set.ts";
+import { connectionIdSetSchema } from "./connection-set.ts";
 import { isValidDependencyOverride } from "../services/input-parser.ts";
 
 /**
  * Per-integration connection picks: `{ "@scope/integration": ["<connection_id>", ...] }`.
  *
- * `.min(1)` on the id is load-bearing, most of all on schedules: an empty id resolves
+ * The uuid gate is load-bearing, most of all on schedules: a malformed id resolves
  * to no row, so a frozen map would answer 200 once and be refused at every fire.
  *
  * It is also owned here rather than delegated to `parseRequestInput`:
@@ -54,10 +54,7 @@ import { isValidDependencyOverride } from "../services/input-parser.ts";
  * have no owner there and the validator would disagree with the launch on the
  * same body.
  */
-export const connectionOverridesSchema = z.record(
-  z.string(),
-  connectionSetSchema(z.string().min(1)),
-);
+export const connectionOverridesSchema = z.record(z.string(), connectionIdSetSchema);
 
 /**
  * Per-dependency version overrides: `{ "@scope/dep": "draft" | "<spec>" }`.

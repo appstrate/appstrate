@@ -1363,6 +1363,7 @@ export type ConnectionResolutionErrorCode =
   | "needs_reconnection"
   | "pinned_connection_unavailable"
   | "override_connection_unavailable"
+  | "override_outranked"
   | "must_choose_connection"
   | "insufficient_scopes"
   | "auth_key_mismatch"

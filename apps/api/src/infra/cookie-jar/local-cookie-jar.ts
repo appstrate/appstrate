@@ -15,15 +15,15 @@ export class LocalCookieJarStore implements CookieJarStore {
     this.softLimit = opts?.softLimit ?? 1024;
   }
 
-  private cacheKey(sessionId: string, integrationKey: string): string {
-    return `${sessionId}::${integrationKey}`;
+  private cacheKey(sessionId: string, connectionId: string): string {
+    return `${sessionId}::${connectionId}`;
   }
 
-  async get(sessionId: string, integrationKey: string): Promise<string[]> {
-    const entry = this.store.get(this.cacheKey(sessionId, integrationKey));
+  async get(sessionId: string, connectionId: string): Promise<string[]> {
+    const entry = this.store.get(this.cacheKey(sessionId, connectionId));
     if (!entry) return [];
     if (entry.expiresAt <= Date.now()) {
-      this.store.delete(this.cacheKey(sessionId, integrationKey));
+      this.store.delete(this.cacheKey(sessionId, connectionId));
       return [];
     }
     return entry.cookies;
@@ -31,12 +31,12 @@ export class LocalCookieJarStore implements CookieJarStore {
 
   async set(
     sessionId: string,
-    integrationKey: string,
+    connectionId: string,
     cookies: string[],
     ttlSeconds: number,
   ): Promise<void> {
     const now = Date.now();
-    this.store.set(this.cacheKey(sessionId, integrationKey), {
+    this.store.set(this.cacheKey(sessionId, connectionId), {
       cookies,
       expiresAt: now + ttlSeconds * 1000,
     });

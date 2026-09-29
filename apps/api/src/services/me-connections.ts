@@ -39,7 +39,7 @@ import {
 } from "../lib/package-helpers.ts";
 import { activeHereSql } from "./package-activation.ts";
 import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
-import { scheduleOverridesName } from "./integration-connections.ts";
+import { connectionLocks, scheduleOverridesName } from "./integration-connections.ts";
 
 /**
  * The authority boundary of the credential presented on `/api/me/connections`.
@@ -205,6 +205,11 @@ async function listAllActorIntegrationConnections(
     }
   }
 
+  const locks = await connectionLocks(
+    db,
+    rows.map((r) => r.connectionId),
+  );
+
   // Group by integration package
   const groups = new Map<string, MeConnectionSourceGroup>();
   for (const row of rows) {
@@ -246,6 +251,7 @@ async function listAllActorIntegrationConnections(
       identity,
       auth_key: row.authKey,
       shared_with_org: row.sharedWithOrg,
+      locked_by: locks.get(row.connectionId) ?? null,
       reused_by_agents: reuseCount.get(`${row.spaceId}|${row.packageId}`) ?? 0,
       org: { id: row.orgId, name: orgName },
       space: { id: row.spaceId, name: row.spaceName },

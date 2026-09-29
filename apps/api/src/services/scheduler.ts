@@ -247,38 +247,35 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     // A duplicate delivery or a retry after the run was already triggered must
     // NOT create a second run (triggerScheduledRun swallows its own errors, so
     // a later failure in this handler would otherwise re-fire on retry).
-    const claimed = await claimScheduleFire(fireKey);
-    if (!claimed) {
+    const claim = async () => {
+      if (await claimScheduleFire(fireKey)) return true;
       logger.warn("Schedule fire already claimed, skipping duplicate", {
         scheduleId,
         jobId: job.id,
       });
-      return;
-    }
+      return false;
+    };
+    if (!(await triggerScheduledRun(scheduleId, claim))) return;
 
-    if (!(await triggerScheduledRun(scheduleId))) return;
-
-    // Update schedule timestamps. `enabled` is re-read here because the
-    // trigger may have just disabled the schedule (invalid actor) — a
-    // disabled schedule must not get a fresh nextRunAt re-armed onto it.
+    // The trigger may have disabled the schedule (invalid actor), and a write may land after the
+    // read below, so the UPDATE itself decides: a nextRunAt only onto a row still enabled on the
+    // cron it was computed from, else the concurrent writer's value stands.
     const [schedule] = await db
-      .select({
-        enabled: schedules.enabled,
-        cronExpression: schedules.cronExpression,
-        timezone: schedules.timezone,
-      })
+      .select({ cronExpression: schedules.cronExpression, timezone: schedules.timezone })
       .from(schedules)
       .where(eq(schedules.id, scheduleId));
-    const nextRun = schedule?.enabled
-      ? computeNextRun(schedule.cronExpression, schedule.timezone)
-      : null;
-
+    if (!schedule) return;
+    const nextRun = computeNextRun(schedule.cronExpression, schedule.timezone);
+    const now = new Date();
     await db
       .update(schedules)
       .set({
-        lastRunAt: new Date(),
-        nextRunAt: nextRun ?? null,
-        updatedAt: new Date(),
+        lastRunAt: now,
+        nextRunAt: sql`CASE WHEN ${schedules.enabled}
+          AND ${schedules.cronExpression} = ${schedule.cronExpression}
+          AND ${schedules.timezone} = ${schedule.timezone}
+          THEN ${nextRun?.toISOString() ?? null}::timestamptz ELSE ${schedules.nextRunAt} END`,
+        updatedAt: now,
       })
       .where(eq(schedules.id, scheduleId));
   } finally {
@@ -352,19 +349,15 @@ export async function shutdownScheduleWorker(): Promise<void> {
 
 /**
  * Fire one scheduled run from the schedule row, read now; any `ApiError` becomes a visible failed
- * run (`failSchedule()`). Returns `false` when the row is gone or disabled (its job is removed).
+ * run (`failSchedule()`). Returns `false` when the row is gone or disabled (its job is removed) or
+ * `claim` refuses the occurrence. A failed read throws before `claim`, leaving the occurrence
+ * unconsumed for the job's failure to report.
  */
-export async function triggerScheduledRun(scheduleId: string): Promise<boolean> {
-  let found: typeof schedules.$inferSelect | undefined;
-  try {
-    [found] = await db.select().from(schedules).where(eq(schedules.id, scheduleId)).limit(1);
-  } catch (err) {
-    logger.error("Failed to read schedule at fire time", {
-      scheduleId,
-      error: getErrorMessage(err),
-    });
-    return false;
-  }
+export async function triggerScheduledRun(
+  scheduleId: string,
+  claim: () => Promise<boolean> = async () => true,
+): Promise<boolean> {
+  const [found] = await db.select().from(schedules).where(eq(schedules.id, scheduleId)).limit(1);
   if (!found?.enabled) {
     logger.info("Schedule deleted or disabled since its job was armed, removing the job", {
       scheduleId,
@@ -372,6 +365,7 @@ export async function triggerScheduledRun(scheduleId: string): Promise<boolean> 
     await removeScheduleJobs([scheduleId]);
     return false;
   }
+  if (!(await claim())) return false;
 
   const row = found;
   const { packageId, orgId, spaceId } = row;

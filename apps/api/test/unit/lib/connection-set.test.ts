@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { z } from "zod";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
-import { connectionIdSetSchema, connectionSetSchema } from "../../../src/lib/connection-set.ts";
+import { connectionIdSetSchema } from "../../../src/lib/connection-set.ts";
 
 const uuid = () => crypto.randomUUID();
 
@@ -32,14 +31,5 @@ describe("connectionIdSetSchema", () => {
 
   it("refuses a non-uuid id", () => {
     expect(connectionIdSetSchema.safeParse(["conn_1"]).success).toBe(false);
-  });
-});
-
-describe("connectionSetSchema with a free-form id", () => {
-  const overrideSet = connectionSetSchema(z.string().min(1));
-
-  it("accepts any non-empty id and refuses an empty one", () => {
-    expect(overrideSet.safeParse(["conn_1", "conn_2"]).data).toEqual(["conn_1", "conn_2"]);
-    expect(overrideSet.safeParse([""]).success).toBe(false);
   });
 });

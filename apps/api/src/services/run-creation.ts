@@ -210,7 +210,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
         ok: false,
         error: {
           code: "agent_not_ready",
-          message: outcome.error.detail,
+          message: outcome.error.message,
           status: outcome.error.status,
         },
       };

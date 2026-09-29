@@ -473,15 +473,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         }),
     );
     connectionsMs = Date.now() - connectionsStart;
-    if (!outcome.ok) {
-      throw new ApiError({
-        status: outcome.error.status,
-        code: outcome.error.code,
-        title: outcome.error.title,
-        detail: outcome.error.detail,
-        errors: outcome.error.errors,
-      });
-    }
+    if (!outcome.ok) throw outcome.error;
     resolvedConnections = outcome.resolved;
   }
 

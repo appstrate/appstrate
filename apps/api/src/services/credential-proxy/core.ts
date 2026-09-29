@@ -56,10 +56,10 @@ const OUTBOUND_TIMEOUT_MS = 30_000;
  * narrow contract here so the core stays free of infra imports.
  */
 interface CookieJarAdapter {
-  get(sessionId: string, integrationKey: string): Promise<string[]>;
+  get(sessionId: string, connectionId: string): Promise<string[]>;
   set(
     sessionId: string,
-    integrationKey: string,
+    connectionId: string,
     cookies: string[],
     ttlSeconds: number,
   ): Promise<void>;
@@ -118,8 +118,8 @@ interface ProxyCallInput {
    */
   cookieJar?: CookieJarAdapter;
   /**
-   * Jar lookup key (usually `sessionId`). Combined with `integrationId` to
-   * scope cookies per-integration within one session.
+   * Jar lookup key (usually `sessionId`). Combined with the resolved connection id, so two
+   * connections driven by one session never share cookies.
    */
   jarSessionId?: string;
   /** TTL applied on each write. Required when `cookieJar` is provided. */
@@ -381,7 +381,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const jarSessionId = input.jarSessionId;
   const jarTtl = input.cookieJarTtlSeconds;
   if (jar && jarSessionId) {
-    const cookies = await jar.get(jarSessionId, input.integrationId);
+    const cookies = await jar.get(jarSessionId, refreshSelection.connectionId);
     if (cookies.length > 0) {
       headers.set("Cookie", cookies.join("; "));
     }
@@ -495,7 +495,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   if (jar && jarSessionId && jarTtl && jarTtl > 0) {
     const setCookies = res.headers.getSetCookie?.();
     if (setCookies && setCookies.length > 0) {
-      await jar.set(jarSessionId, input.integrationId, setCookies, jarTtl);
+      await jar.set(jarSessionId, refreshSelection.connectionId, setCookies, jarTtl);
     }
   }
 

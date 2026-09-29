@@ -275,10 +275,10 @@ export interface SpaceMemberRemoval {
  * pipeline's (`c.get("space")`), pinned for the request like everywhere else —
  * `applySpacePermissions` resolved the caller's own ceiling from that same row,
  * so re-reading it here would judge the bound against a space the permission
- * that admitted the request was never checked against. A concurrent
- * `PATCH /api/spaces/{id}` widening `default_role` is therefore NOT serialized
- * against this removal: the request-scoped window RBAC spec §4.4 states and
- * §13.8 declines to lock. ({@link lockSpaceRow} below serves the connection unshare only.)
+ * that admitted the request was never checked against. The row is share-locked
+ * ({@link lockSpaceRow}), so a concurrent `PATCH /api/spaces/{id}` cannot commit
+ * while this removal runs; one that committed before the lock is not re-read —
+ * the request-scoped window RBAC spec §4.4 states and §13.8 declines to close.
  *
  * @throws 403 when the caller could not have granted the standing left behind,
  *   or the one being dropped.
@@ -361,6 +361,8 @@ export async function deleteSpaceMembershipsInOrg(
  * Unshare, and return, every user-owned shared connection in `scope` whose owner no longer
  * reaches its space — in the SAME transaction as the access loss. No `assertConnectionsUnpinned`:
  * a pin or default naming one fails loudly at resolution (`pinned_connection_unavailable`).
+ * Every access-loss path unshares here, locking the rows in id order, so two of them sharing
+ * rows (an org exit and a space close) wait on each other instead of deadlocking.
  */
 export async function unshareConnectionsOfOwnersWithoutAccess(
   tx: Tx,
@@ -376,11 +378,21 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
     ),
   );
   if (lost.length === 0) return [];
+  const locked = await tx
+    .select({ id: integrationConnections.id })
+    .from(integrationConnections)
+    .where(
+      and(inArray(integrationConnections.id, lost), eq(integrationConnections.sharedWithOrg, true)),
+    )
+    .orderBy(asc(integrationConnections.id))
+    .for("update");
+  const ids = locked.map((row) => row.id);
+  if (ids.length === 0) return [];
   await tx
     .update(integrationConnections)
     .set({ sharedWithOrg: false, updatedAt: new Date() })
-    .where(inArray(integrationConnections.id, lost));
-  return lost;
+    .where(inArray(integrationConnections.id, ids));
+  return ids;
 }
 
 /**

@@ -523,7 +523,8 @@ async function removeMemberInTx(
   // Not deleted: 30 days to convert it, or to hand it back on re-invite (spec §3.6).
   const orphanedSpaceIds = await orphanPersonalSpaces(tx, orgId, userId);
   // No space lock needed, unlike a role change: with the membership gone the owner reaches no
-  // space whatever a concurrent close leaves, so this unshares every shared connection.
+  // space whatever a concurrent close leaves, so this unshares every shared connection. A close
+  // unsharing the same rows is ordered against this by the row locks the unshare takes.
   const unsharedConnectionIds = await unshareConnectionsOfOwnersWithoutAccess(tx, {
     orgId,
     userId,

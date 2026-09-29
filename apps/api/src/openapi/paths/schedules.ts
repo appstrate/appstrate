@@ -6,7 +6,7 @@ import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 /** The 409 both schedule writes answer when an armed schedule leaves a connection choice open. */
 const scheduleConnectionNotChosen = {
   description:
-    "`missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run.",
+    "`missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run.",
   headers: REQUEST_ID_ONLY_HEADERS,
   content: {
     "application/problem+json": {
@@ -138,10 +138,10 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  description: `Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write.`,
+                  description: `Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (\`override_outranked\` otherwise, see 409). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write.`,
                   additionalProperties: {
                     type: "array",
-                    items: { type: "string", minLength: 1 },
+                    items: { type: "string", format: "uuid" },
                     minItems: 1,
                     maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
                   },
@@ -155,7 +155,7 @@ export const schedulesPaths = {
                 actor: {
                   type: "object",
                   description:
-                    "Execution identity for runs this schedule fires (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to default to the calling identity. The actor must be able to run agents in this space (the check every fire repeats) — else `400`. Requires `schedules:write`; naming ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin — else `403 forbidden` with `param: actor`.",
+                    "Execution identity for runs this schedule fires (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to default to the calling identity. The actor must be able to run agents in this space (the check every fire repeats) — else `400`. Requires `schedules:write`; naming ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin on the user's own credential (an API key or a third-party OAuth client is refused) — else `403 forbidden` with `param: actor`.",
                   properties: {
                     userId: { type: "string" },
                     endUserId: { type: "string" },
@@ -227,7 +227,7 @@ export const schedulesPaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "Insufficient permissions — including `forbidden` with `param: actor` when a caller who is not an org owner or admin names another member as `actor`, and `draft_not_writable` when `version_override` is `draft` and the caller cannot WRITE the agent, or a `dependency_overrides` entry is `draft` on a dependency they cannot WRITE (the message names it). Authority is checked at this write; the scheduler does not re-check at fire time.",
+            "Insufficient permissions — including `forbidden` with `param: actor` when a caller who is not an org owner or admin on the user's own credential (an API key or a third-party OAuth client never is) names another member as `actor`, and `draft_not_writable` when `version_override` is `draft` and the caller cannot WRITE the agent, or a `dependency_overrides` entry is `draft` on a dependency they cannot WRITE (the message names it). Authority is checked at this write; the scheduler does not re-check at fire time.",
         },
         // Shared with `PATCH /api/schedules/{id}`: both writes resolve the
         // manifest the schedule will FIRE, so both refuse a never-published
@@ -304,7 +304,7 @@ export const schedulesPaths = {
       tags: ["Schedules"],
       summary: "Update a schedule",
       description:
-        "Update a cron schedule (expression, timezone, enabled state, or input). Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. A schedule whose actor is ANOTHER platform member than the caller lends that member's connections to every run, so any patch of it — whatever the fields, enabling and disabling included — requires the org role owner or admin (else `403 forbidden`); schedules running as the caller or as an end user need `schedules:write` only.",
+        "Update a cron schedule (expression, timezone, enabled state, or input). Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. A schedule whose actor is ANOTHER platform member than the caller lends that member's connections to every run, so any patch of it — whatever the fields, enabling and disabling included — requires the org role owner or admin on the user's own credential, never an API key or a third-party OAuth client (else `403 forbidden`); schedules running as the caller or as an end user need `schedules:write` only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -342,7 +342,7 @@ export const schedulesPaths = {
                   description: `Per-integration connection sets frozen on the schedule, one array of 1..${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per integration. Pass \`null\` to clear. Same array shape, same bounds and same cascade layer as on create; label distinctness is likewise checked at each fire, not here.`,
                   additionalProperties: {
                     type: "array",
-                    items: { type: "string", minLength: 1 },
+                    items: { type: "string", format: "uuid" },
                     minItems: 1,
                     maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
                   },
@@ -356,7 +356,7 @@ export const schedulesPaths = {
                 actor: {
                   type: "object",
                   description:
-                    "Re-point the schedule's execution identity (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`; changing it to ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin — else `403 forbidden` with `param: actor`. A schedule already running as another member takes owner or admin for any patch, this field included.",
+                    "Re-point the schedule's execution identity (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`; changing it to ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin on the user's own credential (an API key or a third-party OAuth client is refused) — else `403 forbidden` with `param: actor`. A schedule already running as another member takes the same for any patch, this field included.",
                   properties: {
                     userId: { type: "string" },
                     endUserId: { type: "string" },
@@ -400,7 +400,7 @@ export const schedulesPaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "Insufficient permissions — including `forbidden` when a caller who is not an org owner or admin patches a schedule running as another member (any field), or (with `param: actor`) changes `actor` to another member, and `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged.",
+            "Insufficient permissions — including `forbidden` when a caller who is not an org owner or admin on the user's own credential (an API key or a third-party OAuth client never is) patches a schedule running as another member (any field), or (with `param: actor`) changes `actor` to another member, and `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged.",
         },
         // Two causes, both on this one response: `loadScheduleOr404` runs
         // first (unknown schedule id — the dominant 404 here), and a patch
@@ -409,8 +409,8 @@ export const schedulesPaths = {
         // revalidating onto a never-published agent gets `no_published_version`
         // here too. The shared component's description names both.
         "404": { $ref: "#/components/responses/NoPublishedVersion" },
-        // `must_choose_connection` / `auth_serves_no_selected_tool` need the schedule to stay
-        // enabled; `override_connection_unavailable` on another member's schedule (an owner/admin
+        // `must_choose_connection` / `override_outranked` / `auth_serves_no_selected_tool` need the
+        // schedule to stay enabled; `override_connection_unavailable` on another member's schedule (an owner/admin
         // write) is judged on every write, disabled or not; the concurrent-write one can be raised
         // by any patch.
         "409": {
@@ -425,7 +425,7 @@ export const schedulesPaths = {
       tags: ["Schedules"],
       summary: "Delete a schedule",
       description:
-        "Permanently delete a cron schedule. A schedule whose actor is ANOTHER platform member than the caller requires the org role owner or admin (else `403 forbidden`), on top of `schedules:delete`.",
+        "Permanently delete a cron schedule. A schedule whose actor is ANOTHER platform member than the caller requires the org role owner or admin on the user's own credential, never an API key or a third-party OAuth client (else `403 forbidden`), on top of `schedules:delete`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -440,7 +440,7 @@ export const schedulesPaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "Insufficient permissions — including `forbidden` when a caller who is not an org owner or admin deletes a schedule running as another member.",
+            "Insufficient permissions — including `forbidden` when a caller who is not an org owner or admin on the user's own credential (an API key or a third-party OAuth client never is) deletes a schedule running as another member.",
         },
         "404": { $ref: "#/components/responses/NotFound" },
       },

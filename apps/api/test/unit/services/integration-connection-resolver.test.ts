@@ -206,7 +206,7 @@ describe("resolveConnections — admin pin (cascade layer 1)", () => {
     expect(result.errors[0]!.message).toContain("may have been deleted");
   });
 
-  it("pin wins over run override", () => {
+  it("refuses a run override outside the pin with override_outranked", () => {
     const pinned = conn({});
     const overridden = conn({});
     const result = resolveConnections({
@@ -215,20 +215,41 @@ describe("resolveConnections — admin pin (cascade layer 1)", () => {
       pins: [pin(pinned.id)],
       launchOverrides: runOverride({ [INTEG]: [overridden.id] }),
     });
-    expect(result.resolved[INTEG]![0]!.connectionId).toBe(pinned.id);
-    expect(result.resolved[INTEG]![0]!.source).toBe("admin_pin");
+    expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors[0]!.code).toBe("override_outranked");
+    expect(result.errors[0]!.source).toBe("run_override");
+    expect(result.errors[0]!.message).toContain("an admin pin");
+    expect(translateResolutionError(result.errors[0]!).title).toBe(
+      "Override Outranked By Governance",
+    );
   });
 
-  it("pin wins over schedule override", () => {
+  it("refuses a schedule override that only PARTLY overlaps the pin", () => {
     const pinned = conn({});
     const sched = conn({});
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [pinned, sched],
       pins: [pin(pinned.id)],
-      launchOverrides: scheduleOverride({ [INTEG]: [sched.id] }),
+      launchOverrides: scheduleOverride({ [INTEG]: [pinned.id, sched.id] }),
     });
-    expect(result.resolved[INTEG]![0]!.source).toBe("admin_pin");
+    expect(result.errors[0]!.code).toBe("override_outranked");
+    expect(result.errors[0]!.source).toBe("schedule_override");
+  });
+
+  it("an override naming a subset of the pin binds exactly that subset", () => {
+    const a = conn({});
+    const b = conn({});
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [a, b],
+      pins: [pin([a.id, b.id])],
+      launchOverrides: runOverride({ [INTEG]: [b.id] }),
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]!.map((r) => [r.connectionId, r.source])).toEqual([
+      [b.id, "run_override"],
+    ]);
   });
 
   it("pin on a DIFFERENT auth shape still wins (oauth pin overrides agent's pat default)", () => {
@@ -896,14 +917,41 @@ describe("resolveConnections — org default", () => {
   const ENFORCE = (...ids: string[]) => ({ [INTEG]: { connectionIds: ids, enforce: true } });
   const SOFT = (...ids: string[]) => ({ [INTEG]: { connectionIds: ids, enforce: false } });
 
-  it("ENFORCE default wins over the launch override and member pin", () => {
+  it("ENFORCE default refuses a launch override outside it with override_outranked", () => {
+    const def = conn({ sharedWithOrg: true });
+    const other = conn({});
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [def, other],
+      pins: [],
+      launchOverrides: runOverride({ [INTEG]: [other.id] }),
+      orgDefaults: ENFORCE(def.id),
+    });
+    expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors[0]!.code).toBe("override_outranked");
+    expect(result.errors[0]!.message).toContain("an enforced org default");
+  });
+
+  it("a SOFT default never outranks a launch override", () => {
+    const def = conn({ sharedWithOrg: true });
+    const other = conn({});
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [def, other],
+      pins: [],
+      launchOverrides: runOverride({ [INTEG]: [other.id] }),
+      orgDefaults: SOFT(def.id),
+    });
+    expect(result.resolved[INTEG]![0]!.source).toBe("run_override");
+  });
+
+  it("ENFORCE default wins over the member pin", () => {
     const def = conn({ sharedWithOrg: true });
     const other = conn({});
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [def, other],
       pins: [memberPin(other.id)],
-      launchOverrides: runOverride({ [INTEG]: [other.id] }),
       orgDefaults: ENFORCE(def.id),
       actorUserId: USER_ID,
     });
@@ -1571,32 +1619,30 @@ describe("resolveConnections — connection sets", () => {
     expect(result.resolved[INTEG]!.every((r) => r.source === "run_override")).toBe(true);
   });
 
-  it("an admin pin of 2 beats a run override of 1", () => {
+  it("an admin pin of 2 binds whole when no override is given", () => {
     const pinnedA = conn({ label: "web-1" });
     const pinnedB = conn({ authKey: "pat", label: "db" });
-    const overridden = conn({ label: "other" });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
-      accessibleConnections: [pinnedA, pinnedB, overridden],
+      accessibleConnections: [pinnedA, pinnedB],
       pins: [pin([pinnedA.id, pinnedB.id])],
-      launchOverrides: runOverride({ [INTEG]: [overridden.id] }),
     });
     expect(result.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([pinnedA.id, pinnedB.id]);
   });
 
-  it("an ENFORCE org default of 2 beats a run override of 1", () => {
+  it("an ENFORCE org default of 2 is narrowed by an override naming one of its members", () => {
     const defA = conn({ label: "web-1", sharedWithOrg: true });
     const defB = conn({ authKey: "pat", label: "db", sharedWithOrg: true });
-    const overridden = conn({ label: "other" });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
-      accessibleConnections: [defA, defB, overridden],
+      accessibleConnections: [defA, defB],
       pins: [],
       orgDefaults: { [INTEG]: { connectionIds: [defA.id, defB.id], enforce: true } },
-      launchOverrides: runOverride({ [INTEG]: [overridden.id] }),
+      launchOverrides: runOverride({ [INTEG]: [defB.id] }),
     });
-    expect(result.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([defA.id, defB.id]);
-    expect(result.resolved[INTEG]![0]!.source).toBe("org_default_enforced");
+    expect(result.resolved[INTEG]!.map((r) => [r.connectionId, r.source])).toEqual([
+      [defB.id, "run_override"],
+    ]);
   });
 
   it("names the offending id when ONE member of a pinned set is gone", () => {

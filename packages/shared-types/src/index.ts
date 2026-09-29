@@ -456,6 +456,8 @@ export interface MeConnectionEntry {
   auth_key: string;
   /** Admin/owner sharing toggle (per-org). */
   shared_with_org: boolean;
+  /** What binds it for the whole space; while set, unshare and delete answer 409. */
+  locked_by: "admin_pin" | "org_default" | null;
   /**
    * Number of agents this connection's space RUNS — placed here and switched
    * on, or on by the deployment's default — that declare this integration in

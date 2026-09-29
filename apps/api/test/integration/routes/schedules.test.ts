@@ -16,6 +16,7 @@ import {
   seedSchedule,
   seedRun,
   seedEndUser,
+  seedApiKey,
   seedOrgModel,
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
@@ -384,7 +385,7 @@ describe("Schedules API", () => {
       });
       await publish(fid);
 
-      const overrides = { "@runorg/svc": ["conn_abc123", "conn_def456"] };
+      const overrides = { "@runorg/svc": [crypto.randomUUID(), crypto.randomUUID()] };
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -483,7 +484,7 @@ describe("Schedules API", () => {
         name: "co-sched",
       });
 
-      const overrides = { "@runorg/svc": ["conn_xyz789"] };
+      const overrides = { "@runorg/svc": [crypto.randomUUID()] };
       const res = await app.request(`/api/schedules/${schedule.id}`, {
         method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -543,7 +544,7 @@ describe("Schedules API", () => {
           body: JSON.stringify(body),
         });
 
-      const overrides = { "@runorg/svc": ["conn_merge"] };
+      const overrides = { "@runorg/svc": [crypto.randomUUID()] };
       expect((await patch({ connection_overrides: overrides })).status).toBe(200);
       const cleared = await patch({ connection_overrides: null });
       expect(cleared.status).toBe(200);
@@ -993,6 +994,49 @@ describe("Schedules API", () => {
         expect((await patch(admin, id, { name: "Renamed" })).status).toBe(200);
         expect((await patch(admin, id, { enabled: false })).status).toBe(200);
         expect((await remove(admin, id)).status).toBe(204);
+      });
+
+      // An owner's API key is a delegate, not the owner: it must not lend itself another member's reach.
+      it("refuses an owner's API key naming or writing another member's schedule", async () => {
+        const key = await seedApiKey({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          createdBy: ctx.user.id,
+          scopes: ["schedules:read", "schedules:write", "schedules:delete"],
+        });
+        const keyHeaders = {
+          Authorization: `Bearer ${key.rawKey}`,
+          "Content-Type": "application/json",
+        };
+        const id = await scheduleRunningAsOther();
+
+        const named = await app.request(`/api/agents/${fid}/schedules`, {
+          method: "POST",
+          headers: keyHeaders,
+          body: JSON.stringify({ cron_expression: "0 9 * * *", actor: { userId: other } }),
+        });
+        expect(named.status).toBe(403);
+        expect(await named.json()).toMatchObject({ code: "forbidden", param: "actor" });
+
+        const patched = await app.request(`/api/schedules/${id}`, {
+          method: "PATCH",
+          headers: keyHeaders,
+          body: JSON.stringify({ name: "Renamed" }),
+        });
+        expect(patched.status).toBe(403);
+        const deleted = await app.request(`/api/schedules/${id}`, {
+          method: "DELETE",
+          headers: keyHeaders,
+        });
+        expect(deleted.status).toBe(403);
+
+        // Its creator's own schedules stay writable through it.
+        const own = await app.request(`/api/agents/${fid}/schedules`, {
+          method: "POST",
+          headers: keyHeaders,
+          body: JSON.stringify({ cron_expression: "0 9 * * *" }),
+        });
+        expect(own.status).toBe(201);
       });
 
       it("lets a builder write their own schedule, and refuses moving it to another member", async () => {

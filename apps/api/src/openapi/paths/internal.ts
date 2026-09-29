@@ -22,17 +22,17 @@ const integrationCredentialsConflict409 = {
 } as const;
 
 /**
- * `connection_id` — the selector both integration-credentials operations
- * require. A run binds a SET of connections to an integration
+ * `connection_id` — the selector every agent run sends to both integration-credentials
+ * operations. A run binds a SET of connections to an integration
  * (`runs.resolved_connections`) and the sidecar runs one credentials source per
- * spawn spec, i.e. per connection, so the caller always names one.
+ * spawn spec, i.e. per connection, so an agent run always names one.
  */
 const connectionIdParam = {
   name: "connection_id",
   in: "query",
-  required: true,
+  required: false,
   description:
-    'Which of the connections this run bound to the integration the credentials are for. REQUIRED: a run may bind up to 10 connections per integration and each has its own credential surface, so there is no "the connection of this integration" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run\'s cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload.',
+    'Which of the connections this run bound to the integration the credentials are for. REQUIRED on an agent run (a connect run omits it): a run may bind up to 10 connections per integration and each has its own credential surface, so there is no "the connection of this integration" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run\'s cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload.',
   schema: { type: "string", format: "uuid" },
 } as const;
 

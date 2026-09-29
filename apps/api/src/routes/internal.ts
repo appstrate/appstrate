@@ -5,7 +5,12 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, packages, packageVersions } from "@appstrate/db/schema";
+import {
+  modelProviderCredentials,
+  packages,
+  packageVersions,
+  type runs,
+} from "@appstrate/db/schema";
 import { asRecord } from "@appstrate/core/safe-json";
 import { parseBearer } from "@appstrate/core/bearer";
 import { downloadVersionZipForExecution } from "../services/package-storage.ts";
@@ -403,9 +408,9 @@ export function createInternalRouter() {
   function requireBoundConnection(
     c: Context,
     packageId: string,
-    run: { resolvedConnections: Record<string, { connectionId: string; source: string }[]> | null },
+    run: { resolvedConnections: typeof runs.$inferSelect.resolvedConnections },
     runId: string,
-  ): { connectionId: string; source: string } {
+  ) {
     const parsed = z.uuid().safeParse(c.req.query("connection_id"));
     if (!parsed.success) {
       throw invalidRequest(
@@ -502,15 +507,11 @@ export function createInternalRouter() {
   });
 
   // POST /internal/integration-credentials/:scope/:name/refresh
-  // Sidecar-only. Called by the sidecar (api_call adapter + MITM listener) when
-  // an upstream 401 is seen. Force-refreshes that connection's credential and
-  // returns the fresh payload (200). When the credential cannot be recovered —
-  // a revoked OAuth refresh token, an unrefreshable OAuth auth, OR any
-  // non-OAuth auth (api_key/basic), since there is nothing to refresh after a
-  // 401 — `resolveLiveIntegrationCredentials` flags the connection
-  // `needsReconnection` and throws 410, which `recordTerminalCredentialFailure`
-  // stamps onto the run. The sidecar maps the 410 to "don't retry"; the
-  // next-launch readiness gate + live badge do the user-facing surfacing.
+  // Sidecar-only, on an upstream 401: force-refreshes that connection's credential (200).
+  // An auth with nothing to refresh (api_key, basic, unrefreshable OAuth) answers 502 below
+  // the reconnect threshold and 410 once reached; a revoked refresh token is 410 at once.
+  // A 410 has flagged the connection `needsReconnection`, is stamped onto the run, and
+  // tells the sidecar not to retry.
   router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/refresh`, async (c) => {
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
     // A connect run has no stored credential to force-refresh: the platform

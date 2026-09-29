@@ -23,13 +23,15 @@ import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 
 /**
- * The verdicts only an edit of the schedule can clear: an open choice, an unreachable pick, and
- * a pick on an auth serving no selected tool when the schedule's OWN set bound it.
+ * The verdicts only an edit of the schedule can clear: an open choice, an unreachable pick, a set
+ * an admin pin or enforced default outranks, and a pick on an auth serving no selected tool when
+ * the schedule's OWN set bound it.
  */
 function isScheduleOwned(e: ConnectionResolutionError): boolean {
   switch (e.code) {
     case "must_choose_connection":
     case "override_connection_unavailable":
+    case "override_outranked":
       return true;
     case "auth_serves_no_selected_tool":
       return e.source === "schedule_override";
@@ -146,9 +148,7 @@ export async function assertScheduleConnectionsChosen(params: {
     case "self":
       throw missingIntegrationConnection(unchosen.map(translateResolutionError));
     case "member":
-      throw missingIntegrationConnection(
-        await withSharedCandidatesOnly(unchosen, params.spaceId, params.connectionOverrides),
-      );
+      throw missingIntegrationConnection(await withSharedCandidatesOnly(unchosen, params.spaceId));
     case "end_user":
       throw missingIntegrationConnection(
         unchosen.map((e) =>
@@ -167,13 +167,12 @@ export async function assertScheduleConnectionsChosen(params: {
 
 /**
  * The refusal as a caller acting for another member may read it: a choice lists only shared
- * candidates, and an item about an unshared connection names no label or account (its id only
- * when the schedule's set already names it).
+ * candidates, and an item about an unshared connection names no label or account — only its id,
+ * which the schedule's own set already holds.
  */
 async function withSharedCandidatesOnly(
   errors: ConnectionResolutionError[],
   spaceId: string,
-  connectionOverrides: ConnectionOverrides | null,
 ): Promise<ValidationFieldError[]> {
   const shared = await sharedConnections(
     spaceId,
@@ -185,10 +184,8 @@ async function withSharedCandidatesOnly(
   return errors.map((e) => {
     if (e.code !== "must_choose_connection") {
       if (!e.connectionId || shared.has(e.connectionId)) return translateResolutionError(e);
-      const onSchedule = connectionOverrides?.[e.integrationId]?.includes(e.connectionId);
       return translateResolutionError({
         ...e,
-        connectionId: onSchedule ? e.connectionId : undefined,
         message: `A connection in the schedule's set for ${e.integrationId} cannot serve this run (${e.code}) — only the schedule's actor can see it; remove it from the set or ask them.`,
       });
     }

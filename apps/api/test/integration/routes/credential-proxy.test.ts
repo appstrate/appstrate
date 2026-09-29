@@ -25,6 +25,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
@@ -808,6 +809,39 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
     const res = await call({ "X-Run-Id": runId, "X-Connection-Id": own2 });
     expect(res.status).toBe(200);
     expect(upstreamAuth).toEqual(["Bearer tok-own-2"]);
+  });
+
+  it("refuses a bound connection flagged needs_reconnection (409), as without a run", async () => {
+    await db
+      .update(integrationConnections)
+      .set({ needsReconnection: true })
+      .where(eq(integrationConnections.id, own1));
+    const runId = await runBinding([own1]);
+    const res = await call({ "X-Run-Id": runId });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string; errors: { connection_id: string }[] };
+    expect(body.code).toBe("needs_reconnection");
+    expect(body.errors[0]!.connection_id).toBe(own1);
+    expect((await call({ "X-Connection-Id": own1 })).status).toBe(409);
+    expect(upstreamAuth).toEqual([]);
+  });
+
+  it("keys the session's cookie jar per connection, never per integration", async () => {
+    const sent: { auth: string; cookie: string | null }[] = [];
+    mockUpstream(async (_input, init) => {
+      const headers = new Headers(init?.headers);
+      const auth = headers.get("authorization") ?? "";
+      sent.push({ auth, cookie: headers.get("cookie") });
+      return new Response("{}", {
+        status: 200,
+        headers: { "Set-Cookie": `sid=${auth.slice(-5)}; Path=/` },
+      });
+    });
+    const session = { "X-Session-Id": uuidV4() };
+    await call({ ...session, "X-Connection-Id": own1 });
+    await call({ ...session, "X-Connection-Id": own2 });
+    await call({ ...session, "X-Connection-Id": own1 });
+    expect(sent.map((s) => s.cookie?.split(";")[0] ?? null)).toEqual([null, null, "sid=own-1"]);
   });
 
   it("refuses a named connection the run did not bind (400 connection_not_in_run)", async () => {

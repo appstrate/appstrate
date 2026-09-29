@@ -23,7 +23,12 @@ import {
 import { seedApiKey, seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { assertDbHas } from "../../helpers/assertions.ts";
-import { auditEvents, integrationConnections } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  integrationConnections,
+  integrationOrgDefaults,
+  integrationPins,
+} from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 
 const app = getTestApp();
@@ -342,6 +347,49 @@ describe("Me API (/api/me)", () => {
       expect(group?.kind).toBe("integration");
       expect(group?.total_connections).toBe(1);
       expect(group?.connections[0]?.kind).toBe("integration");
+    });
+
+    it("says which connections an admin pin or an org default locks, the pin winning", async () => {
+      const ctx = await createTestContext({ orgSlug: "lock-org" });
+      const seed = (integrationId: string) =>
+        seedConnectionFor({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId,
+          userId: ctx.user.id,
+          sharedWithOrg: true,
+        });
+      const pinned = await seed("@lock/pinned");
+      const defaulted = await seed("@lock/defaulted");
+      const free = await seed("@lock/free");
+      await seedPackage({ id: "@lock/agent", orgId: ctx.orgId, type: "agent", source: "local" });
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: "@lock/agent",
+        integrationId: "@lock/pinned",
+        userId: null,
+        connectionIds: [pinned],
+      });
+      await db.insert(integrationOrgDefaults).values([
+        { spaceId: ctx.defaultSpaceId, integrationId: "@lock/pinned", connectionIds: [pinned] },
+        {
+          spaceId: ctx.defaultSpaceId,
+          integrationId: "@lock/defaulted",
+          connectionIds: [defaulted],
+        },
+      ]);
+
+      const res = await app.request("/api/me/connections", { headers: { Cookie: ctx.cookie } });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ connections: Array<{ connection_id: string; locked_by: string | null }> }>;
+      };
+      const lockOf = new Map(
+        body.data.flatMap((g) => g.connections.map((c) => [c.connection_id, c.locked_by])),
+      );
+      expect(lockOf.get(pinned)).toBe("admin_pin");
+      expect(lockOf.get(defaulted)).toBe("org_default");
+      expect(lockOf.get(free)).toBeNull();
     });
 
     // Claim keys are snake_case (AFPS identity keys): `account_email` wins

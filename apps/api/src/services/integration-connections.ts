@@ -219,8 +219,8 @@ export function displayAccountId(accountId: string | null | undefined): string |
  * by the spawn and live-credentials resolvers to load a run-bound connection.
  *
  * SECURITY — `integrationId` is a REQUIRED filter: a connection id is
- * caller-supplied on some paths (`X-Connection-Id` on the credential
- * proxy), so without the integration binding a caller could pin
+ * caller-supplied on some paths (`connection_id` on the internal
+ * credentials routes), so without the integration binding a caller could pin
  * integration B's connection while requesting integration A and have
  * B's credentials injected under A's manifest + `authorized_uris`
  * allowlist. The id must resolve to a row of the REQUESTED integration
@@ -289,7 +289,8 @@ interface ConnectionSelectionContext {
 
 /**
  * The credential proxy's connection of `packageId`: under a run, a member of its bound set; else
- * the resolver's cascade without pins, `namedConnectionId` as the launch override.
+ * the resolver's cascade without pins, `namedConnectionId` as the launch override. Either way the
+ * pick passes the resolver's health checks.
  */
 export async function selectAccessibleConnection(
   packageId: string,
@@ -297,35 +298,42 @@ export async function selectAccessibleConnection(
   namedConnectionId: string | null,
   context: ConnectionSelectionContext,
 ): Promise<ResolvedConnectionRow | null> {
-  const named = namedConnectionId?.toLowerCase() ?? null;
+  let named = namedConnectionId?.toLowerCase() ?? null;
   const identity = actorIdentityOf(context.actor);
   const candidatesOf = (rows: readonly SelectableRow[]) =>
     rows.map((r) => candidateOf(identity, r));
   const { run } = context;
+  let bound: readonly { connectionId: string }[] = [];
   if (run) {
-    const bound = await run.boundSet();
-    const pick = named
-      ? requireRunBoundMember({
-          runId: run.id,
-          packageId,
-          connectionId: named,
-          bound,
-          param: "X-Connection-Id",
-        })
-      : bound.length === 1
-        ? bound[0]!
-        : null;
-    if (pick) return loadAccessibleConnectionById(pick.connectionId, packageId, null, context);
-    if (bound.length === 0) return null;
-    const ids = new Set(bound.map((m) => m.connectionId));
-    const rows = (await loadSelectableRows(packageId, context)).filter((r) => ids.has(r.id));
-    throw mustChoose(packageId, candidatesOf(rows), `Run '${run.id}' bound several connections`);
+    bound = await run.boundSet();
+    if (named) {
+      requireRunBoundMember({
+        runId: run.id,
+        packageId,
+        connectionId: named,
+        bound,
+        param: "X-Connection-Id",
+      });
+    } else if (bound.length === 1) {
+      named = bound[0]!.connectionId;
+    } else if (bound.length === 0) {
+      return null;
+    }
   }
 
+  // Under a run the bound set already passed governance at kickoff: no org default re-applies.
   const [rows, orgDefaults] = await Promise.all([
     loadSelectableRows(packageId, context),
-    listOrgDefaultsForResolver(context.spaceId),
+    run ? null : listOrgDefaultsForResolver(context.spaceId),
   ]);
+  if (run && !named) {
+    const ids = new Set(bound.map((m) => m.connectionId));
+    throw mustChoose(
+      packageId,
+      candidatesOf(rows.filter((r) => ids.has(r.id))),
+      `Run '${run.id}' bound several connections`,
+    );
+  }
   const { resolved, errors } = resolveConnections({
     // No agent selection: every declared auth serves, no scope is required.
     requirements: [
@@ -351,24 +359,22 @@ export async function selectAccessibleConnection(
     const candidates = error.candidateConnections ?? [];
     throw mustChoose(packageId, candidates, "No single own connection applies");
   }
-  if (error) throw resolutionConflict(error);
-
-  // A named connection is layer 3: the set is that row, or an enforced org default outranking it.
-  const set = (resolved[packageId] ?? []).map((m) => rows.find((r) => r.id === m.connectionId)!);
-  if (named) {
-    const hit = set.find((r) => r.id === named);
-    if (hit) return toResolvedRow(hit);
+  if (error?.code === "override_outranked") {
     throw new ApiError({
       status: 400,
       code: "connection_not_in_org_default",
       title: "Connection Not In The Enforced Org Default",
       detail:
         `Connection '${namedConnectionId}' is not in the enforced org default of ` +
-        `'${packageId}' (members: ${set.map((r) => r.id).join(", ")}), which binds ` +
-        `every call in this space.`,
+        `'${packageId}' (members: ${orgDefaults?.[packageId]?.connectionIds.join(", ")}), ` +
+        `which binds every call in this space.`,
       param: "X-Connection-Id",
     });
   }
+  if (error) throw resolutionConflict(error);
+
+  // A named connection binds alone; otherwise an org default may bind several.
+  const set = (resolved[packageId] ?? []).map((m) => rows.find((r) => r.id === m.connectionId)!);
   if (set.length === 1) return toResolvedRow(set[0]!);
   throw mustChoose(packageId, candidatesOf(set), "The org default holds several connections");
 }
@@ -2759,7 +2765,7 @@ type ConnectionLock = NonNullable<IntegrationConnectionSummary["locked_by"]>;
  * whole for every member of the space, so neither may lose a member. A member pin never locks —
  * its owner's next run reports `pinned_connection_unavailable`.
  */
-async function connectionLocks(
+export async function connectionLocks(
   executor: DbOrTx,
   ids: readonly string[],
 ): Promise<Map<string, ConnectionLock>> {

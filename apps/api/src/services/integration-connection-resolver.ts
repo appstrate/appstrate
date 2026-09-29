@@ -12,9 +12,10 @@
  *   6. fallback — the actor's ONE own connection on an auth serving the selection;
  *      none → `not_connected`, anything else → `must_choose_connection`
  *
- * Layers 1-5 bind their set whole or fail loudly, never falling through. A shared connection is
- * never bound implicitly. `resolveConnections()` is pure; `resolveConnectionsForRun()` loads its
- * inputs.
+ * Layers 1-5 bind their set whole or fail loudly, never falling through. A launch override
+ * under layer 1 or 2 must name a subset of that governing set, which it then narrows to;
+ * naming anything outside it is `override_outranked`. A shared connection is never bound
+ * implicitly. `resolveConnections()` is pure; `resolveConnectionsForRun()` loads its inputs.
  */
 
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
@@ -50,7 +51,7 @@ import {
   type ResolvedConnection,
   type ResolvedConnectionMap,
 } from "@appstrate/core/integration";
-import type { ResolutionFieldError } from "../lib/errors.ts";
+import type { ApiError, ResolutionFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import { actorOrSharedFilter } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -64,6 +65,7 @@ import {
   type OrgDefaultPick,
 } from "./integration-org-defaults-service.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
+import { missingIntegrationConnection } from "./agent-readiness.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
 
@@ -320,6 +322,10 @@ interface ExplicitLayer extends ExplicitLayerRef {
   ids: readonly string[] | null;
 }
 
+interface BoundLayer extends ExplicitLayer {
+  ids: readonly string[];
+}
+
 function orgDefaultLayer(enforce: boolean): ExplicitLayerRef {
   return {
     source: enforce ? "org_default_enforced" : "org_default",
@@ -355,22 +361,30 @@ export function unavailableMemberError(
 function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   const orgDefaultIds = nonEmpty(args.orgDefault?.connectionIds);
   const enforced = args.orgDefault?.enforce === true;
+  const governing: BoundLayer | null = args.adminPinIds
+    ? {
+        ids: args.adminPinIds,
+        source: "admin_pin",
+        code: "pinned_connection_unavailable",
+        noun: "Pinned connection",
+      }
+    : enforced && orgDefaultIds
+      ? { ids: orgDefaultIds, ...orgDefaultLayer(true) }
+      : null;
+  const override: BoundLayer | null = args.launchOverride
+    ? { ids: args.launchOverride.ids, ...launchOverrideLayer(args.launchOverride.source) }
+    : null;
+  if (governing && override && override.ids.some((id) => !governing.ids.includes(id))) {
+    const by = governing.source === "admin_pin" ? "an admin pin" : "an enforced org default";
+    return errorOf(args, {
+      code: "override_outranked",
+      source: override.source,
+      message: `${override.noun}s for ${args.integrationId} fall outside ${by}, which governs this integration — drop the override or name only connections of that set.`,
+    });
+  }
   const explicit: ExplicitLayer[] = [
-    {
-      ids: args.adminPinIds,
-      source: "admin_pin",
-      code: "pinned_connection_unavailable",
-      noun: "Pinned connection",
-    },
-    { ids: enforced ? orgDefaultIds : null, ...orgDefaultLayer(true) },
-    ...(args.launchOverride
-      ? [
-          {
-            ids: args.launchOverride.ids,
-            ...launchOverrideLayer(args.launchOverride.source),
-          },
-        ]
-      : []),
+    ...(override ? [override] : []),
+    ...(governing ? [governing] : []),
     {
       ids: args.memberPinIds,
       source: "member_pin",
@@ -669,17 +683,8 @@ export async function resolveConnectionsForRun(
   });
 }
 
-interface MissingConnectionError {
-  status: 409;
-  code: "missing_integration_connection";
-  title: "Missing Integration Connection";
-  detail: string;
-  errors: ResolutionFieldError[];
-}
-
 type ResolveRunConnectionsOutcome =
-  | { ok: true; resolved: ResolvedConnectionMap | null }
-  | { ok: false; error: MissingConnectionError };
+  { ok: true; resolved: ResolvedConnectionMap | null } | { ok: false; error: ApiError };
 
 /** The run's connection snapshot (`null` when empty), else the 409 both kickoff paths relay. */
 export async function resolveRunConnectionsOrError(
@@ -689,13 +694,7 @@ export async function resolveRunConnectionsOrError(
   if (resolution.errors.length > 0) {
     return {
       ok: false,
-      error: {
-        status: 409,
-        code: "missing_integration_connection",
-        title: "Missing Integration Connection",
-        detail: resolution.errors[0]!.message,
-        errors: resolution.errors.map(translateResolutionError),
-      },
+      error: missingIntegrationConnection(resolution.errors.map(translateResolutionError)),
     };
   }
   const resolved = Object.keys(resolution.resolved).length > 0 ? resolution.resolved : null;
@@ -741,8 +740,7 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
           })),
         }
       : {}),
-    // The connect kickoff forwards `required_scopes` as `body.scopes`, so one consent covers
-    // the selection; absent when there is no single oauth2 target or no scope to ask.
+    // Forwarded as the connect kickoff's `scopes`, so one consent covers the selection.
     ...(CONNECT_FLOW_CODES.has(e.code)
       ? {
           ...(e.authKey ? { auth_key: e.authKey } : {}),
@@ -771,8 +769,7 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
           ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
         }
       : {}),
-    // AFPS §4.1 — surface the agent dep's `auth_key` and, on a mismatch, which auth_keys the
-    // actor's existing connections use, so the UI can guide the user to the right auth method.
+    // AFPS §4.1: the dep's `auth_key` and, on a mismatch, the auths the actor's rows use.
     ...(e.code === "auth_key_mismatch" || e.code === "auth_key_serves_no_selected_tool"
       ? {
           ...(e.requiredAuthKey ? { required_auth_key: e.requiredAuthKey } : {}),
@@ -789,6 +786,7 @@ const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
   needs_reconnection: "Needs Reconnection",
   pinned_connection_unavailable: "Pinned Connection Unavailable",
   override_connection_unavailable: "Override Connection Unavailable",
+  override_outranked: "Override Outranked By Governance",
   must_choose_connection: "Multiple Connections Available — Pick One",
   insufficient_scopes: "Insufficient Permissions",
   auth_key_mismatch: "Connection Auth Method Mismatch",
@@ -812,8 +810,7 @@ export function requirementOf(
   manifest: IntegrationManifest,
 ): IntegrationRequirement {
   const wildcard = entry.tools === "*";
-  // Activeness uses the spawn resolver's own `resolveEffectiveToolSelection`, so every integration
-  // it will spawn gets a verdict here.
+  // The spawn resolver's own selection rule, so every integration it spawns gets a verdict.
   const effectiveTools = resolveEffectiveToolSelection(entry.tools, manifest);
   const hasSelectedTools =
     isToolsWildcard(effectiveTools) || (Array.isArray(effectiveTools) && effectiveTools.length > 0);

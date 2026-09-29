@@ -73,11 +73,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `ConnectionResolutionErrorCode` gains `override_outranked`**
+  (`@appstrate/core/integration`) — a launch override (run or schedule) naming
+  a connection outside the set an admin pin or an enforced org default binds
+  for that integration. Previously the governing layer silently won; now the
+  launch is refused. An override naming a subset of the governing set binds
+  that subset. `source` is the override's layer. Exhaustive switches over the
+  union must handle it.
+
 - **`ConnectionResolutionError.source` names the failing layer on every
   layer-bound code** (`@appstrate/core/integration`) — previously set only on
   `insufficient_scopes`; now on `needs_reconnection`, `insufficient_scopes`,
-  `auth_serves_no_selected_tool`, `pinned_connection_unavailable` and
-  `override_connection_unavailable`. Still absent when no layer bound anything
+  `auth_serves_no_selected_tool`, `pinned_connection_unavailable`,
+  `override_connection_unavailable` and `override_outranked`. Still absent when no layer bound anything
   (`not_connected`, `must_choose_connection`, `auth_key_mismatch`,
   `auth_key_serves_no_selected_tool`). The field's type is unchanged.
 

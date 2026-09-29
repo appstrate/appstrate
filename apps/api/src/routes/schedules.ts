@@ -33,6 +33,7 @@ import { parseListPagination } from "../lib/list-query.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
 import { callerOrgRole } from "../lib/view-as.ts";
+import { isUserPrincipal } from "../lib/principal.ts";
 import { getSpaceScope, type SpaceScope } from "../lib/scope.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
@@ -195,22 +196,18 @@ function movedDependencyOverrides(
  * ({@link draftSelectorMoved}). Both do it at the WRITE and never at fire time
  * — the authority is a property of the principal who writes the row, frozen
  * onto it exactly as `connection_overrides` are, and `services/scheduler.ts`
- * runs with no Hono context and deliberately re-checks nothing. This function
- * still RESOLVES the selector it is handed, including a `draft` it did not
- * judge, because the input has to be validated against the manifest that will
- * actually fire.
+ * runs with no Hono context and deliberately re-checks nothing. The definition
+ * judged here is the one the selector resolves to, including a `draft` the
+ * caller did not judge, because the input has to be validated against the
+ * manifest that will actually fire.
  */
-async function assertScheduleTargetValid(args: {
-  c: Context<AppEnv>;
-  scope: SpaceScope;
-  agent: LoadedPackage;
-  /** `version_override` as this request leaves it — the selector every fire replays. */
-  versionOverride: string | undefined;
+function assertScheduleTargetValid(args: {
+  /** The agent at the version every fire replays ({@link scheduledDefinition}). */
+  definition: LoadedPackage;
   packageSettings: SpacePackageSettings;
   input: Record<string, unknown> | undefined;
-}): Promise<LoadedPackage> {
-  const { agent: effectiveAgent } = await resolveAgentRunVersion(args.agent, args.versionOverride);
-  const inputSchema = effectiveAgent.manifest.input?.schema;
+}): void {
+  const inputSchema = args.definition.manifest.input?.schema;
 
   if (schemaHasFileFields(inputSchema ? asJSONSchemaObject(inputSchema) : undefined)) {
     throw invalidRequest("Cannot schedule agents with file inputs");
@@ -228,31 +225,18 @@ async function assertScheduleTargetValid(args: {
     input: args.input,
   });
   if (resolution.errors) throw scheduleInputInvalid(resolution.errors);
-  // Handed back so the dependency gate judges override KEYS against the very
-  // definition this write just validated the input against — resolving the
-  // selector a second time there would let the two answers drift.
-  return effectiveAgent;
 }
 
-/**
- * The agent definition a stored schedule fires, when the patch did not resolve it. `null` when that
- * version cannot resolve: the row already fails every tick for it, which must not block a rename.
- */
+/** The agent definition a schedule on `packageId` fires: `versionOverride` resolved as each tick does. */
 async function scheduledDefinition(
-  resolved: LoadedPackage | null,
   packageId: string,
-  scope: SpaceScope,
+  orgId: string,
   versionOverride: string | undefined,
-): Promise<LoadedPackage | null> {
-  if (resolved) return resolved;
-  const agent = await getPackage(packageId, scope.orgId);
+): Promise<LoadedPackage> {
+  const agent = await getPackage(packageId, orgId);
+  // Unreachable (`package_schedules.package_id` cascades); typed rather than assumed.
   if (!agent) throw notFound(`Agent '${packageId}' not found`);
-  try {
-    return (await resolveAgentRunVersion(agent, versionOverride)).agent;
-  } catch (err) {
-    if (err instanceof ApiError) return null;
-    throw err;
-  }
+  return (await resolveAgentRunVersion(agent, versionOverride)).agent;
 }
 
 /**
@@ -293,19 +277,23 @@ const actorSchema = z
 
 /**
  * A schedule running as ANOTHER member fires with that member's reach, so naming such an actor and
- * writing such a schedule is an org owner/admin act. `memberId` is `null` for an end-user actor.
+ * writing such a schedule is an org owner/admin act on their own credential: a delegate (API key,
+ * third-party OAuth client) is refused. `memberId` is `null` for an end-user actor.
  */
 function mayGovernMemberSchedule(c: Context<AppEnv>, memberId: string | null | undefined): boolean {
   if (!memberId) return true;
   const caller = getActor(c);
   if (caller.type === "user" && caller.id === memberId) return true;
-  return (ORG_ROLES_WITH_FULL_ACCESS as readonly OrgRole[]).includes(callerOrgRole(c));
+  return (
+    isUserPrincipal(c) &&
+    (ORG_ROLES_WITH_FULL_ACCESS as readonly OrgRole[]).includes(callerOrgRole(c))
+  );
 }
 
 const CHOOSE_MEMBER_ACTOR =
-  "Only an organization owner or admin can make another member a schedule's actor.";
+  "Only an organization owner or admin, on their own credential, can make another member a schedule's actor.";
 const WRITE_MEMBER_SCHEDULE =
-  "Only an organization owner or admin can change a schedule that runs as another member.";
+  "Only an organization owner or admin, on their own credential, can change a schedule that runs as another member.";
 
 /** 403 unless {@link mayGovernMemberSchedule}. */
 function assertMayGovern(
@@ -457,14 +445,8 @@ export function createSchedulesRouter() {
       // act: `version_override: "draft"` here IS the request to freeze the
       // author's working copy onto a row that replays it forever.
       await assertDraftSelectorAllowed(c, agent.id, data.version_override);
-      const effectiveAgent = await assertScheduleTargetValid({
-        c,
-        scope,
-        agent,
-        versionOverride: data.version_override,
-        packageSettings,
-        input: data.input,
-      });
+      const effectiveAgent = (await resolveAgentRunVersion(agent, data.version_override)).agent;
+      assertScheduleTargetValid({ definition: effectiveAgent, packageSettings, input: data.input });
       // The same proof for every dependency the schedule opts into its working
       // copy — frozen onto the row here, replayed unchecked at every fire. A
       // key the effective manifest does not declare is refused here as a
@@ -587,8 +569,10 @@ export function createSchedulesRouter() {
     const nextVersionOverride =
       (data.version_override !== undefined ? data.version_override : existing.version_override) ??
       undefined;
-    /** Set by the input or dependency gate below when it runs; reused by the gates after it. */
-    let effectiveAgent: LoadedPackage | null = null;
+    let fired: Promise<LoadedPackage> | undefined;
+    /** The definition this row fires after the patch, resolved once, when a gate first needs it. */
+    const firedDefinition = () =>
+      (fired ??= scheduledDefinition(existing.packageId, scope.orgId, nextVersionOverride));
 
     // A `version_override` this patch MOVES is an act and proves itself; one it
     // merely echoes back was judged at the write that chose it. Outside the
@@ -622,19 +606,8 @@ export function createSchedulesRouter() {
     // keep replaying (and vice versa) — the pair is validated together, the
     // gate only decides whether to look at all.
     if (data.input !== undefined || data.version_override !== undefined) {
-      const agentForInput = await getPackage(existing.packageId, scope.orgId);
-      // `package_schedules.package_id` is `ON DELETE CASCADE` and `getPackage`
-      // admits system packages, so this is unreachable in practice — it exists
-      // so the impossible case is a typed 404 rather than a schedule validated
-      // against nothing.
-      if (!agentForInput) throw notFound(`Agent '${existing.packageId}' not found`);
-      effectiveAgent = await assertScheduleTargetValid({
-        c,
-        scope,
-        agent: agentForInput,
-        // `null` clears the override, i.e. back to the unified default; omitted
-        // leaves whatever the row already replays.
-        versionOverride: nextVersionOverride,
+      assertScheduleTargetValid({
+        definition: await firedDefinition(),
         packageSettings,
         input: data.input ?? existing.input ?? undefined,
       });
@@ -675,20 +648,11 @@ export function createSchedulesRouter() {
       // The manifest the keys are judged against is the one this row will
       // FIRE, so a patch that only moves the dependency map still resolves it —
       // adding an override changes what the schedule executes, and that is the
-      // half of a patch that has to prove itself. Already resolved above
-      // whenever `version_override` is part of the patch (same condition gates
-      // the input pair), so this second lookup only happens for a patch that
-      // touches the map alone.
-      let target = effectiveAgent;
-      if (!target) {
-        const agentForDeps = await getPackage(existing.packageId, scope.orgId);
-        // Unreachable in practice for the same reason the input gate's twin is:
-        // `package_schedules.package_id` cascades. Typed, not assumed.
-        if (!agentForDeps) throw notFound(`Agent '${existing.packageId}' not found`);
-        target = (await resolveAgentRunVersion(agentForDeps, nextVersionOverride)).agent;
-        effectiveAgent = target;
-      }
-      const targetManifest = target.manifest as unknown as Record<string, unknown>;
+      // half of a patch that has to prove itself.
+      const targetManifest = (await firedDefinition()).manifest as unknown as Record<
+        string,
+        unknown
+      >;
       assertDependencyOverrideKeysDeclared(targetManifest, effectiveDependencyOverrides);
       if (movedDeps && Object.keys(movedDeps).length > 0) {
         // Re-runs the key gate over the moving subset — a subset of the map
@@ -736,17 +700,15 @@ export function createSchedulesRouter() {
 
     // #738: re-point the actor when the caller selected one (validated against
     // this org/space scope). `undefined` leaves the existing actor untouched.
-    if (data.actor?.userId !== existing.userId) {
-      assertMayGovern(c, data.actor?.userId, CHOOSE_MEMBER_ACTOR, "actor");
-    }
+    assertMayGovern(c, data.actor?.userId, CHOOSE_MEMBER_ACTOR, "actor");
     const actor = data.actor ? await resolveScheduleActor(scope, data.actor) : undefined;
 
     // Only a *real* identity change invalidates frozen connection picks. Picking
     // the same actor (or omitting it) leaves overrides untouched.
-    const existingActor = actorFromIds(existing.userId, existing.endUserId);
+    // `package_schedules_exactly_one_actor` guarantees exactly one of the two ids.
+    const existingActor = actorFromIds(existing.userId, existing.endUserId)!;
     const actorChanged =
-      !!actor &&
-      (!existingActor || actor.type !== existingActor.type || actor.id !== existingActor.id);
+      !!actor && (actor.type !== existingActor.type || actor.id !== existingActor.id);
 
     // On a real change, frozen `connection_overrides` reference the previous
     // identity's connections — reset them unless this patch supplies fresh
@@ -758,27 +720,24 @@ export function createSchedulesRouter() {
     const nextOverrides =
       connectionOverrides !== undefined ? connectionOverrides : existing.connection_overrides;
     // On EVERY write: a disabled row must not store a pick that arming it later would trust.
-    if (nextActor) {
-      await assertScheduleOverridesReachable({
-        spaceId: scope.spaceId,
-        actor: nextActor,
-        caller: getActor(c),
-        connectionOverrides: nextOverrides,
-        storedOverrides: actorChanged ? null : existing.connection_overrides,
-      });
-    }
+    await assertScheduleOverridesReachable({
+      spaceId: scope.spaceId,
+      actor: nextActor,
+      caller: getActor(c),
+      connectionOverrides: nextOverrides,
+      storedOverrides: actorChanged ? null : existing.connection_overrides,
+    });
     // Armed: re-judged on every write, since a new connection can make the choice ambiguous.
-    if ((data.enabled ?? existing.enabled) && nextActor) {
+    if (data.enabled ?? existing.enabled) {
       await assertScheduleActorValid(nextActor, scope.orgId, scope.spaceId);
-      const fired = await scheduledDefinition(
-        effectiveAgent,
-        existing.packageId,
-        scope,
-        nextVersionOverride,
-      );
-      if (fired) {
+      // A version that cannot resolve already fails every tick; it must not block a rename.
+      const definition = await firedDefinition().catch((err: unknown) => {
+        if (err instanceof ApiError) return null;
+        throw err;
+      });
+      if (definition) {
         await assertScheduleConnectionsChosen({
-          agent: fired,
+          agent: definition,
           orgId: scope.orgId,
           spaceId: scope.spaceId,
           actor: nextActor,

@@ -148,6 +148,7 @@ export const mePaths = {
                               "auth_key",
                               "shared_with_org",
                               "reused_by_agents",
+                              "locked_by",
                               "org",
                               "space",
                             ],
@@ -165,6 +166,12 @@ export const mePaths = {
                               reused_by_agents: { type: "integer" },
                               auth_key: { type: "string" },
                               shared_with_org: { type: "boolean" },
+                              locked_by: {
+                                type: ["string", "null"],
+                                enum: ["admin_pin", "org_default", null],
+                                description:
+                                  "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default.",
+                              },
                               org: {
                                 type: "object",
                                 required: ["id", "name"],
