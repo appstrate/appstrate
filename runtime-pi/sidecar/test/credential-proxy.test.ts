@@ -2018,7 +2018,7 @@ describe("executeApiCall — injected Cookie credential meets the jar (#1613)", 
       sent.push(
         (headers instanceof Headers ? [...headers] : Object.entries(headers))
           .filter(([k]) => k.toLowerCase() === "cookie")
-          .map(([, v]) => v),
+          .flatMap(([, v]) => v),
       );
       const u = String(url);
       if (u.endsWith("/go")) {

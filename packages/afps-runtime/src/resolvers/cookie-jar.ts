@@ -22,6 +22,9 @@ type Gate = "allowlist" | "open";
 // NUL occurs in neither a package id nor an origin, so keys cannot collide.
 const SEP = "\u0000";
 
+/** RFC 6265 §6.1's per-domain floor; bounds a bucket an upstream minting per-request names grows. */
+const MAX_COOKIES_PER_ORIGIN = 50;
+
 function originOf(url: string): string {
   try {
     return new URL(url).origin;
@@ -95,6 +98,10 @@ export function cookieScope(
         if (eq < 0 || !name) continue;
         if (isDeletion(attributes)) byName.delete(name);
         else byName.set(name, `${name}=${pair.slice(eq + 1).trim()}`);
+      }
+      for (const name of byName.keys()) {
+        if (byName.size <= MAX_COOKIES_PER_ORIGIN) break;
+        byName.delete(name); // oldest-inserted first
       }
       if (byName.size) jar.set(k, [...byName.values()]);
       else jar.delete(k);

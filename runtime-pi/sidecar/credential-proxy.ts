@@ -348,9 +348,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 
   const effectiveAllowAll = creds.allowAllUris && !substitutesCredential;
 
-  /** Set only by the literal-host allowlist branch below: the cookie scope's sibling gate. */
-  let literalAllowlist: string[] | null = null;
-
   if (effectiveAllowAll) {
     const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
     if (refusal) return refusal;
@@ -365,8 +362,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     if (!hostLiterallyAllowlisted(resolvedUrl, creds.authorizedUris)) {
       const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
       if (refusal) return refusal;
-    } else {
-      literalAllowlist = creds.authorizedUris;
     }
   } else if (substitutesCredential) {
     // allow_all_uris was the only permission but the call would exfiltrate a
@@ -383,7 +378,12 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   }
 
   // 4b. This call's view of the run-wide jar (docs/architecture/SIDECAR.md).
-  const cookies = cookieScope(cookieJar, integrationId, literalAllowlist);
+  //     Siblings are gated per URL, whatever gated the initial target.
+  const cookies = cookieScope(
+    cookieJar,
+    integrationId,
+    effectiveAllowAll || !creds.authorizedUris?.length ? null : creds.authorizedUris,
+  );
 
   // 5b. Pre-substitute headers with the *initial* creds so we can
   //     fail fast on unresolved placeholders. Re-substituted on each

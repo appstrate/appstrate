@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `www.vendor.example` unless both hosts are literal `authorized_uris`
   entries — list both to share it (honouring `Domain` safely would need the
   Public Suffix List).
+- `Path` is ignored too: a same-name cookie scoped to another path shadows
+  the injected one on every path of that origin. Each origin bucket keeps at
+  most 50 cookies, evicting the oldest-inserted names first.
 - `mergeSetCookieIntoJar` is no longer exported: `CookieScope.capture`
   replaces it.
 - New `cookieScope(jar, integrationId, literalAllowlist)`, `CookieScope` and

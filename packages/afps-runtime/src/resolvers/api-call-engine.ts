@@ -532,7 +532,11 @@ export async function guardedFetch(
     url: opts.url,
     init,
     fetchFn,
-    cookies: cookieScope(new Map(), integrationId, null),
+    cookies: cookieScope(
+      new Map(),
+      integrationId,
+      opts.allowAllUris ? null : (opts.authorizedUris ?? null),
+    ),
     integrationId,
     injectedCredentialHeader: opts.injectedCredentialHeader ?? null,
     authorizedUris: opts.authorizedUris ?? undefined,

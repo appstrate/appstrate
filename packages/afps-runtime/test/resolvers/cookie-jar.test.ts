@@ -7,7 +7,10 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { cookieScope, type CookieJar } from "../../src/resolvers/cookie-jar.ts";
-import { fetchFollowingRedirectsCapturingCookies } from "../../src/resolvers/api-call-engine.ts";
+import {
+  fetchFollowingRedirectsCapturingCookies,
+  guardedFetch,
+} from "../../src/resolvers/api-call-engine.ts";
 
 const API = "https://api.example.com/x";
 const CONTENT = "https://content.example.com/x";
@@ -59,6 +62,22 @@ describe("cookieScope.capture", () => {
     const jar: CookieJar = new Map();
     cookieScope(jar, "i", null).capture(API, ["a=1", "garbage; Path=/", "=value", "  =x"]);
     expect(ownCookies(jar, API)).toBe("a=1");
+  });
+
+  it("caps a bucket at 50 cookies, evicting the oldest-inserted names", () => {
+    const jar: CookieJar = new Map();
+    const scope = cookieScope(jar, "i", null);
+    scope.capture(
+      API,
+      Array.from({ length: 50 }, (_, n) => `c${n}=${n}`),
+    );
+    scope.capture(API, ["c0=updated", "c50=50"]);
+    const names = ownCookies(jar, API)!
+      .split("; ")
+      .map((p) => p.split("=")[0]);
+    expect(names).toHaveLength(50);
+    expect(names).not.toContain("c0");
+    expect(names.at(-1)).toBe("c50");
   });
 
   it("drops the bucket once its last cookie is deleted", () => {
@@ -225,5 +244,38 @@ describe("fetchFollowingRedirectsCapturingCookies — cookie scope", () => {
 
     // evil/2 gets evil's own cookie only, never the stripped session.
     expect(seen).toEqual(["PHPSESSID=victim", null, "e=1"]);
+  });
+});
+
+describe("guardedFetch — cookie scope", () => {
+  const SSO = "https://sso.vendor.example/login";
+  const HOME = "https://api.vendor.example/home";
+
+  async function secondHopCookie(authorizedUris: string[]): Promise<string | null> {
+    const seen: (string | null)[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers).get("cookie"));
+      return String(url) === SSO
+        ? new Response(null, { status: 302, headers: { location: HOME, "set-cookie": "sess=S" } })
+        : new Response("ok");
+    }) as unknown as typeof fetch;
+    await guardedFetch({
+      url: SSO,
+      init: { method: "GET" },
+      fetchFn,
+      authorizedUris,
+      resolveHost: async () => ["203.0.113.7"],
+    });
+    return seen[1] ?? null;
+  }
+
+  it("shares a hop's cookie with a literal-allowlist sibling within one chain", async () => {
+    expect(
+      await secondHopCookie(["https://sso.vendor.example/**", "https://api.vendor.example/**"]),
+    ).toBe("sess=S");
+  });
+
+  it("keeps it origin-scoped when a glob entry matched the hosts", async () => {
+    expect(await secondHopCookie(["https://*.vendor.example/**"])).toBeNull();
   });
 });
