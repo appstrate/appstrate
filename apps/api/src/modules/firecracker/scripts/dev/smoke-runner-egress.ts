@@ -268,16 +268,23 @@ async function bundleProbe(file: string, fail: Fail): Promise<string> {
   return output.text();
 }
 
-/** A local integration running the probe bundle (the stub serves one bundle for all). */
+/**
+ * A local integration running the probe bundle (the stub serves one bundle for all), bound to one
+ * connection as every agent-run spec is.
+ */
 function probeIntegration(
   integrationId: string,
   namespace: string,
-  extra: Omit<IntegrationSpawnSpec, "integrationId" | "namespace" | "sourceKind" | "manifest">,
+  extra: Omit<
+    IntegrationSpawnSpec,
+    "integrationId" | "namespace" | "sourceKind" | "manifest" | "connection"
+  >,
 ): IntegrationSpawnSpec {
   return {
     integrationId,
     namespace,
     sourceKind: "local",
+    connection: { id: crypto.randomUUID(), label: namespace, accountId: null },
     manifest: {
       name: integrationId,
       version: "1.0.0",
