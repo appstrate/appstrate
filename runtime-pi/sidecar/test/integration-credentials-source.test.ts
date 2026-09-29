@@ -19,12 +19,13 @@
  *     failure.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import {
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
   type IntegrationCredentialsWire,
 } from "../integration-credentials-source.ts";
+import { logger } from "../logger.ts";
 
 function makePayload(token: string): IntegrationCredentialsWire {
   return {
@@ -166,19 +167,38 @@ describe("createIntegrationCredentialsSource", () => {
     expect(source.current().auths[0]!.fields.apiKey).toBe("tok-1");
   });
 
-  it("returns false on non-OK non-410 status", async () => {
-    const initial = makePayload("tok-1");
-    const fetchFn = (async () =>
-      new Response("upstream broke", { status: 502 })) as unknown as typeof fetch;
-    const source = createIntegrationCredentialsSource({
-      integrationId: "@test/integ",
-      platformApiUrl: "http://api",
-      runToken: "run-tok",
-      initialPayload: initial,
-      fetchFn,
+  // 502 on a non-oauth2 auth is the platform counting the rejection: the POST
+  // is still sent, `false` means no caller replays, and nothing is warned.
+  // The same 502 on oauth2 is a real refresh failure and keeps its warning.
+  for (const [authType, warns] of [
+    ["api_key", false],
+    ["oauth2", true],
+  ] as const) {
+    it(`returns false on 502 for ${authType} (warns: ${warns})`, async () => {
+      const initial = makePayload("tok-1");
+      initial.auths[0]!.authType = authType;
+      const methods: string[] = [];
+      const fetchFn = (async (_url: string, init: RequestInit) => {
+        methods.push(init.method ?? "GET");
+        return new Response("upstream broke", { status: 502 });
+      }) as unknown as typeof fetch;
+      const source = createIntegrationCredentialsSource({
+        integrationId: "@test/integ",
+        platformApiUrl: "http://api",
+        runToken: "run-tok",
+        initialPayload: initial,
+        fetchFn,
+      });
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(await source.refreshOnUnauthorized("primary")).toBe(false);
+        expect(methods).toEqual(["POST"]);
+        expect(warnSpy).toHaveBeenCalledTimes(warns ? 1 : 0);
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
-    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
-  });
+  }
 
   it("coalesces concurrent refresh calls for the same authKey", async () => {
     const initial = makePayload("tok-1");
