@@ -8,25 +8,9 @@ import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
- * Parse a stored jar (JSON array of `[bucketKey, cookies]` entries). Anything
- * else — including the retired flat `string[]` format — reads as empty.
- */
-function parseJar(raw: string): CookieJar {
-  const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed)) return new Map();
-  const isEntry = (e: unknown): e is [string, string[]] =>
-    Array.isArray(e) &&
-    e.length === 2 &&
-    typeof e[0] === "string" &&
-    Array.isArray(e[1]) &&
-    e[1].every((c) => typeof c === "string");
-  return parsed.every(isEntry) ? new Map(parsed) : new Map();
-}
-
-/**
  * {@link CookieJarStore} backed by the shared {@link KeyValueCache} (Redis
- * in Tier 2+). Keys are scoped under `cp:jar:` to keep the namespace clean.
- * TTL is refreshed on every set.
+ * in Tier 2+). Keys are scoped under `cp:cookies:`; the jar is stored as the
+ * JSON array of its entries. TTL is refreshed on every set.
  *
  * The cache is resolved lazily through the injectable `getCache` seam so the
  * unit tests can supply a fake cache without `mock.module` (per the codebase
@@ -39,15 +23,15 @@ export class RedisCookieJarStore implements CookieJarStore {
     this.getCache = deps?.getCache ?? getCache;
   }
 
-  private cacheKey(sessionId: string, integrationKey: string): string {
-    return `cp:jar:${sessionId}:${integrationKey}`;
+  private cacheKey(sessionId: string, connectionId: string): string {
+    return `cp:cookies:${sessionId}:${connectionId}`;
   }
 
-  async get(sessionId: string, integrationKey: string): Promise<CookieJar> {
+  async get(sessionId: string, connectionId: string): Promise<CookieJar> {
     try {
       const cache = await this.getCache();
-      const raw = await cache.get(this.cacheKey(sessionId, integrationKey));
-      return raw ? parseJar(raw) : new Map();
+      const raw = await cache.get(this.cacheKey(sessionId, connectionId));
+      return raw ? new Map(JSON.parse(raw)) : new Map();
     } catch (err) {
       logger.warn("credential-proxy cookie jar GET failed", {
         error: getErrorMessage(err),
@@ -58,13 +42,13 @@ export class RedisCookieJarStore implements CookieJarStore {
 
   async set(
     sessionId: string,
-    integrationKey: string,
+    connectionId: string,
     jar: CookieJar,
     ttlSeconds: number,
   ): Promise<void> {
     try {
       const cache = await this.getCache();
-      await cache.set(this.cacheKey(sessionId, integrationKey), JSON.stringify([...jar]), {
+      await cache.set(this.cacheKey(sessionId, connectionId), JSON.stringify([...jar]), {
         ttlSeconds,
       });
     } catch (err) {

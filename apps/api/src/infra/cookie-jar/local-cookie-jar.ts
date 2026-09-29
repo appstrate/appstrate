@@ -3,11 +3,6 @@
 import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
 import type { CookieJarStore } from "./interface.ts";
 
-/** Deep copy — a caller mutating a jar it read or wrote must not alter the store. */
-function cloneJar(jar: CookieJar): CookieJar {
-  return new Map([...jar].map(([key, cookies]) => [key, [...cookies]]));
-}
-
 /**
  * {@link CookieJarStore} backed by a `Map`. Opportunistically purges
  * expired entries when the map grows past a soft threshold — keeps the
@@ -21,29 +16,29 @@ export class LocalCookieJarStore implements CookieJarStore {
     this.softLimit = opts?.softLimit ?? 1024;
   }
 
-  private cacheKey(sessionId: string, integrationKey: string): string {
-    return `${sessionId}::${integrationKey}`;
+  private cacheKey(sessionId: string, connectionId: string): string {
+    return `${sessionId}::${connectionId}`;
   }
 
-  async get(sessionId: string, integrationKey: string): Promise<CookieJar> {
-    const entry = this.store.get(this.cacheKey(sessionId, integrationKey));
+  async get(sessionId: string, connectionId: string): Promise<CookieJar> {
+    const entry = this.store.get(this.cacheKey(sessionId, connectionId));
     if (!entry) return new Map();
     if (entry.expiresAt <= Date.now()) {
-      this.store.delete(this.cacheKey(sessionId, integrationKey));
+      this.store.delete(this.cacheKey(sessionId, connectionId));
       return new Map();
     }
-    return cloneJar(entry.jar);
+    return new Map(entry.jar);
   }
 
   async set(
     sessionId: string,
-    integrationKey: string,
+    connectionId: string,
     jar: CookieJar,
     ttlSeconds: number,
   ): Promise<void> {
     const now = Date.now();
-    this.store.set(this.cacheKey(sessionId, integrationKey), {
-      jar: cloneJar(jar),
+    this.store.set(this.cacheKey(sessionId, connectionId), {
+      jar: new Map(jar),
       expiresAt: now + ttlSeconds * 1000,
     });
     if (this.store.size > this.softLimit) {

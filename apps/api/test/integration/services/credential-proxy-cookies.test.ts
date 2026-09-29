@@ -6,41 +6,46 @@
  * Successive `proxyCall()` invocations sharing one session id replay the
  * cookies upstreams set: merged with an injected `Cookie` credential (the
  * upstream's value wins by name, a deletion falls back to the credential),
- * stripped of attributes, accumulated across calls, and scoped by origin
- * exactly like the in-container sidecar.
+ * stripped of attributes, accumulated across calls, scoped by origin exactly
+ * like the in-container sidecar, and kept per connection.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { truncateAll, db } from "../../helpers/db.ts";
+import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageShare } from "../../helpers/seed.ts";
-import { spacePackages, integrationConnections } from "@appstrate/db/schema";
-import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
 import { LocalCookieJarStore } from "../../../src/infra/cookie-jar/local-cookie-jar.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
+import {
+  seedProxyIntegration,
+  seedProxyConnection,
+} from "../../helpers/credential-proxy-fixtures.ts";
 
 const SESSION_ID = "session-1613";
 const BEARER = httpHeaderDelivery({ name: "Authorization", prefix: "Bearer ", field: "api_key" });
+const SESSION_COOKIE = httpHeaderDelivery({
+  name: "Cookie",
+  prefix: "PHPSESSID=",
+  field: "api_key",
+});
 
+/** Seed an api_key integration and one connection; returns the connection id. */
 async function seedConnectedIntegration(
   ctx: TestContext,
   opts: {
     packageId: string;
     authorizedUris: string[];
+    allowAllUris?: boolean;
     delivery: ReturnType<typeof httpHeaderDelivery>;
     apiKey: string;
   },
-): Promise<void> {
-  await seedPackage({
-    id: opts.packageId,
-    orgId: ctx.orgId,
-    type: "integration",
-    source: "local",
-    draftManifest: localIntegrationManifest({
+): Promise<string> {
+  await seedProxyIntegration(
+    ctx,
+    localIntegrationManifest({
       name: opts.packageId,
       displayName: "Shop",
       description: "Shop integration",
@@ -48,26 +53,13 @@ async function seedConnectedIntegration(
         api: {
           type: "api_key",
           authorizedUris: opts.authorizedUris,
+          ...(opts.allowAllUris ? { allowAllUris: true } : {}),
           delivery: opts.delivery,
         },
       },
     }),
-  });
-  await seedPackageShare(ctx.defaultSpaceId, opts.packageId);
-  await db.insert(spacePackages).values({
-    spaceId: ctx.defaultSpaceId,
-    packageId: opts.packageId,
-  });
-  await db.insert(integrationConnections).values({
-    integrationId: opts.packageId,
-    authKey: "api",
-    accountId: "acct-1",
-    spaceId: ctx.defaultSpaceId,
-    userId: ctx.user.id,
-    credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: opts.apiKey } }),
-    scopesGranted: [],
-    sharedWithOrg: false,
-  });
+  );
+  return seedProxyConnection(ctx, opts.packageId, "api", { api_key: opts.apiKey });
 }
 
 /**
@@ -86,11 +78,10 @@ function scriptedUpstream(setCookies: string[][]) {
   return { fetchImpl, seen };
 }
 
-/** The `Cookie` header as a sorted list of `name=value` pairs. */
-function cookiePairs(headers: Headers | undefined): string[] {
-  const raw = headers?.get("cookie");
-  return raw
-    ? raw
+/** A `Cookie` header as a sorted list of `name=value` pairs. */
+function cookiePairs(cookie: string | null | undefined): string[] {
+  return cookie
+    ? cookie
         .split(";")
         .map((p) => p.trim())
         .sort()
@@ -107,10 +98,16 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     jar = new LocalCookieJarStore();
   });
 
-  const call = (packageId: string, target: string, fetchImpl: typeof fetch) =>
+  const call = (
+    packageId: string,
+    target: string,
+    fetchImpl: typeof fetch,
+    connectionId?: string,
+  ) =>
     proxyCall({
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      ...(connectionId ? { connectionId } : {}),
       integrationId: packageId,
       method: "POST",
       target,
@@ -122,11 +119,12 @@ describe("proxyCall — session cookie jar (#1613)", () => {
       fetch: fetchImpl,
     });
 
-  const cookieCredential = (packageId: string) =>
+  const cookieCredential = (packageId: string, allowAllUris = false) =>
     seedConnectedIntegration(ctx, {
       packageId,
       authorizedUris: ["https://1.1.1.1/**"],
-      delivery: httpHeaderDelivery({ name: "Cookie", prefix: "PHPSESSID=", field: "api_key" }),
+      allowAllUris,
+      delivery: SESSION_COOKIE,
       apiKey: "sess-abc",
     });
 
@@ -140,8 +138,8 @@ describe("proxyCall — session cookie jar (#1613)", () => {
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
-    expect(cookiePairs(upstream.seen[0])).toEqual(["PHPSESSID=sess-abc"]);
-    expect(cookiePairs(upstream.seen[1])).toEqual(["PHPSESSID=sess-abc", "pref=1"]);
+    expect(cookiePairs(upstream.seen[0]?.get("cookie"))).toEqual(["PHPSESSID=sess-abc"]);
+    expect(cookiePairs(upstream.seen[1]?.get("cookie"))).toEqual(["PHPSESSID=sess-abc", "pref=1"]);
   });
 
   it("replays an upstream-rotated session instead of the injected one", async () => {
@@ -152,7 +150,7 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
     await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
 
-    expect(cookiePairs(upstream.seen[1])).toEqual(["PHPSESSID=rotated"]);
+    expect(cookiePairs(upstream.seen[1]?.get("cookie"))).toEqual(["PHPSESSID=rotated"]);
   });
 
   it("falls back to the injected session once the upstream deletes its cookie", async () => {
@@ -164,8 +162,8 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
     await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
 
-    expect(cookiePairs(upstream.seen[1])).toEqual(["PHPSESSID=rotated"]);
-    expect(cookiePairs(upstream.seen[2])).toEqual(["PHPSESSID=sess-abc"]);
+    expect(cookiePairs(upstream.seen[1]?.get("cookie"))).toEqual(["PHPSESSID=rotated"]);
+    expect(cookiePairs(upstream.seen[2]?.get("cookie"))).toEqual(["PHPSESSID=sess-abc"]);
   });
 
   it("accumulates cookies across responses", async () => {
@@ -177,7 +175,93 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
     await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
 
-    expect(cookiePairs(upstream.seen[2])).toEqual(["PHPSESSID=sess-abc", "a=1", "b=2"]);
+    expect(cookiePairs(upstream.seen[2]?.get("cookie"))).toEqual([
+      "PHPSESSID=sess-abc",
+      "a=1",
+      "b=2",
+    ]);
+  });
+
+  it("does not let a slow concurrent call resurrect a deleted session", async () => {
+    const packageId = "@cpcookieorg/shop";
+    await cookieCredential(packageId);
+    const sent: string[] = [];
+    let slowReached!: () => void;
+    const reached = new Promise<void>((r) => (slowReached = r));
+    let releaseSlow!: () => void;
+    const released = new Promise<void>((r) => (releaseSlow = r));
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      const n = sent.push(new Headers(init.headers).get("cookie") ?? "");
+      const headers = new Headers();
+      if (n === 1) headers.append("Set-Cookie", "PHPSESSID=rotated");
+      if (n === 2) {
+        slowReached();
+        await released;
+        headers.append("Set-Cookie", "pref=1");
+      }
+      if (n === 3) headers.append("Set-Cookie", "PHPSESSID=; Max-Age=0");
+      return new Response("{}", { status: 200, headers });
+    }) as unknown as typeof fetch;
+
+    await call(packageId, "https://1.1.1.1/cart", fetchImpl); // rotates
+    const slow = call(packageId, "https://1.1.1.1/cart", fetchImpl); // read {rotated}, stalls
+    await reached;
+    await call(packageId, "https://1.1.1.1/cart", fetchImpl); // deletes
+    releaseSlow();
+    await slow;
+    await call(packageId, "https://1.1.1.1/cart", fetchImpl);
+
+    expect(cookiePairs(sent[3])).toEqual(["PHPSESSID=sess-abc", "pref=1"]);
+  });
+
+  it("keeps one jar per connection on a shared session id", async () => {
+    const packageId = "@cpcookieorg/shop";
+    const connectionA = await cookieCredential(packageId);
+    const connectionB = await seedProxyConnection(
+      ctx,
+      packageId,
+      "api",
+      { api_key: "sess-b" },
+      "acct-2",
+    );
+    const upstream = scriptedUpstream([["PHPSESSID=rotated-a"]]);
+
+    await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl, connectionA);
+    await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl, connectionB);
+    await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl, connectionA);
+
+    expect(cookiePairs(upstream.seen[1]?.get("cookie"))).toEqual(["PHPSESSID=sess-b"]);
+    expect(cookiePairs(upstream.seen[2]?.get("cookie"))).toEqual(["PHPSESSID=rotated-a"]);
+  });
+
+  it("captures a redirected response's cookies under the origin that served it", async () => {
+    const packageId = "@cpcookieorg/open";
+    await cookieCredential(packageId, true);
+    const seen: Array<{ url: string; cookie: string | null }> = [];
+    const fetchImpl = ((url: string | URL, init: RequestInit) => {
+      seen.push({ url: url.toString(), cookie: new Headers(init.headers).get("cookie") });
+      if (url.toString().startsWith("https://1.1.1.1") && seen.length === 1) {
+        return Promise.resolve(
+          new Response(null, { status: 302, headers: { location: "https://8.8.8.8/landing" } }),
+        );
+      }
+      return Promise.resolve(
+        new Response("{}", { status: 200, headers: { "Set-Cookie": "PHPSESSID=planted" } }),
+      );
+    }) as unknown as typeof fetch;
+
+    await call(packageId, "https://1.1.1.1/cart", fetchImpl);
+    await call(packageId, "https://1.1.1.1/cart", fetchImpl);
+    await call(packageId, "https://8.8.8.8/landing", fetchImpl);
+
+    expect(seen.map((s) => s.url)).toEqual([
+      "https://1.1.1.1/cart",
+      "https://8.8.8.8/landing",
+      "https://1.1.1.1/cart",
+      "https://8.8.8.8/landing",
+    ]);
+    expect(cookiePairs(seen[2]?.cookie)).toEqual(["PHPSESSID=sess-abc"]);
+    expect(cookiePairs(seen[3]?.cookie)).toEqual(["PHPSESSID=planted"]);
   });
 
   describe("origin scoping", () => {
@@ -196,7 +280,7 @@ describe("proxyCall — session cookie jar (#1613)", () => {
       await call(packageId, "https://1.1.1.1/x", upstream.fetchImpl);
 
       expect(upstream.seen[1]?.get("cookie")).toBeNull();
-      expect(cookiePairs(upstream.seen[2])).toEqual(["a=1"]);
+      expect(cookiePairs(upstream.seen[2]?.get("cookie"))).toEqual(["a=1"]);
     });
 
     it("shares cookies between literally allowlisted hosts", async () => {
@@ -212,7 +296,7 @@ describe("proxyCall — session cookie jar (#1613)", () => {
       await call(packageId, "https://1.1.1.1/x", upstream.fetchImpl);
       await call(packageId, "https://8.8.8.8/x", upstream.fetchImpl);
 
-      expect(cookiePairs(upstream.seen[1])).toEqual(["a=1"]);
+      expect(cookiePairs(upstream.seen[1]?.get("cookie"))).toEqual(["a=1"]);
     });
   });
 
@@ -230,6 +314,6 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     await call(packageId, "https://1.1.1.1/x", upstream.fetchImpl);
 
     expect(upstream.seen[1]?.get("authorization")).toBe("Bearer tok");
-    expect(cookiePairs(upstream.seen[1])).toEqual(["sid=abc"]);
+    expect(cookiePairs(upstream.seen[1]?.get("cookie"))).toEqual(["sid=abc"]);
   });
 });

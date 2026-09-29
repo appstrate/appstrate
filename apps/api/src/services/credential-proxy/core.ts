@@ -32,16 +32,7 @@ import {
   applyInjectedCredentialHeaderToHeaders,
   normalizeAuthSchemeTemplate,
 } from "@appstrate/connect";
-import {
-  cookieBucketKey,
-  originOf,
-  eligibleCookies,
-  mergeSetCookieIntoJar,
-  composeCookieHeader,
-  hostLiterallyAllowlisted,
-  type CookieJar,
-  type CookieGate,
-} from "@appstrate/afps-runtime/resolvers";
+import { cookieScope, type CookieJar } from "@appstrate/afps-runtime/resolvers";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import type { Actor } from "../../lib/actor.ts";
@@ -65,8 +56,8 @@ const OUTBOUND_TIMEOUT_MS = 30_000;
  * narrow contract here so the core stays free of infra imports.
  */
 interface CookieJarAdapter {
-  get(sessionId: string, integrationKey: string): Promise<CookieJar>;
-  set(sessionId: string, integrationKey: string, jar: CookieJar, ttlSeconds: number): Promise<void>;
+  get(sessionId: string, connectionId: string): Promise<CookieJar>;
+  set(sessionId: string, connectionId: string, jar: CookieJar, ttlSeconds: number): Promise<void>;
 }
 
 interface ProxyCallInput {
@@ -120,8 +111,8 @@ interface ProxyCallInput {
    */
   cookieJar?: CookieJarAdapter;
   /**
-   * Jar lookup key (usually `sessionId`). Combined with `integrationId` to
-   * scope cookies per-integration within one session.
+   * Jar lookup key (usually `sessionId`). Combined with the resolved
+   * connection id to scope cookies per connection within one session.
    */
   jarSessionId?: string;
   /** TTL applied on each write. Required when `cookieJar` is provided. */
@@ -241,6 +232,7 @@ function redactCredentialValues(value: string, fields: Record<string, string>): 
  */
 export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult> {
   let resolved;
+  let connectionId: string;
   try {
     const result = await resolveIntegrationProxyCredentials({
       integrationId: input.integrationId,
@@ -249,6 +241,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       ...(input.connectionId ? { connectionId: input.connectionId } : {}),
     });
     resolved = result.payload;
+    connectionId = result.connectionId;
   } catch (err) {
     if (err instanceof IntegrationCredentialNotFoundError) {
       throw new ProxyCredentialError(err.message);
@@ -373,27 +366,26 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     }
   }
 
-  // Cookie jar — same scoping as the sidecar (docs/architecture/SIDECAR.md,
-  // "Sticky-cookie jar scoping"): a cookie is replayed to its capture origin,
-  // or across hosts only when both are literal `authorized_uris` entries.
+  // Cookie jar, scoped like the sidecar's (docs/architecture/SIDECAR.md,
+  // "Sticky-cookie jar scoping"), one per (session, connection).
   const jarStore = input.cookieJar;
   const jarSessionId = input.jarSessionId;
   const jarTtl = input.cookieJarTtlSeconds;
-  const cookieJar: CookieJar | null =
-    jarStore && jarSessionId ? await jarStore.get(jarSessionId, input.integrationId) : null;
-  const cookieGate: CookieGate =
-    !resolved.allowAllUris && hostLiterallyAllowlisted(target, resolved.authorizedUris ?? [])
-      ? "allowlist"
-      : "open";
-  const targetOrigin = originOf(target);
-  // Jar cookies win by name over the injected credential / caller cookies:
-  // an upstream-rotated session must replace the stored one.
+  const literalAllowlist = resolved.allowAllUris ? null : (resolved.authorizedUris ?? []);
+  const cookies =
+    jarStore && jarSessionId
+      ? cookieScope(
+          await jarStore.get(jarSessionId, connectionId),
+          input.integrationId,
+          literalAllowlist,
+        )
+      : null;
+  // The target's own-origin jar cookies win by name over the injected
+  // credential / caller cookies: an upstream-rotated session must replace
+  // the injected one.
   const applyJarCookies = (): void => {
-    if (!cookieJar) return;
-    const stored = eligibleCookies(cookieJar, input.integrationId, cookieGate, targetOrigin);
-    const cookie = composeCookieHeader(headers.get("cookie"), stored.values());
-    if (cookie === undefined) headers.delete("cookie");
-    else headers.set("cookie", cookie);
+    const cookie = cookies?.header(target, headers.get("cookie"));
+    if (cookie) headers.set("cookie", cookie);
   };
   applyJarCookies();
 
@@ -407,6 +399,10 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   if (isStreamBody) {
     fetchInit.duplex = "half";
   }
+
+  // Logical URL of the returned response: the last hop `validateHop` passed
+  // (`Response.url` may carry the pinned IP). Set-Cookie is captured under it.
+  let servedFrom = target;
 
   // Single outbound transport: the SSRF-guarded platform egress primitive.
   // Per-hop DNS re-validation + manual redirects + connection pinned to the
@@ -430,7 +426,10 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     try {
       return await egressGuardedFetch(target, fetchArgs, {
         ...(input.fetch ? { fetchImpl: input.fetch } : {}),
-        validateHop: (url) => assertHopAuthorized(url.toString()),
+        validateHop: (url) => {
+          assertHopAuthorized(url.toString());
+          servedFrom = url.toString();
+        },
         sensitiveHeaders: [...sensitiveHeaderNames],
       });
     } catch (err) {
@@ -460,8 +459,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
 
   let res = await performFetch(fetchInit as RequestInit);
 
-  // Reactive 401-refresh-retry — mirror of the sidecar
-  // (runtime-pi/sidecar/credential-proxy.ts:259-285). The public route is
+  // Reactive 401-refresh-retry — mirror of the sidecar's (`executeApiCall`,
+  // runtime-pi/sidecar/credential-proxy.ts). The public route is
   // used by CLI / GitHub Action / self-hosted runners, which were silently
   // 401-ing whenever the stored OAuth access_token expired because the
   // refresh logic only fired on streaming bodies. Buffered bodies can be
@@ -508,16 +507,13 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     }
   }
 
-  if (jarStore && jarSessionId && cookieJar && jarTtl && jarTtl > 0) {
-    const setCookies = res.headers.getSetCookie();
-    if (setCookies.length > 0) {
-      mergeSetCookieIntoJar(
-        setCookies,
-        cookieJar,
-        cookieBucketKey(input.integrationId, cookieGate, targetOrigin),
-      );
-      await jarStore.set(jarSessionId, input.integrationId, cookieJar, jarTtl);
-    }
+  // Capture into a fresh read so a concurrent call's deletion or rotation is
+  // not overwritten by this call's stale snapshot.
+  const setCookies = res.headers.getSetCookie();
+  if (jarStore && jarSessionId && jarTtl && jarTtl > 0 && setCookies.length > 0) {
+    const latest = await jarStore.get(jarSessionId, connectionId);
+    cookieScope(latest, input.integrationId, literalAllowlist).capture(servedFrom, setCookies);
+    await jarStore.set(jarSessionId, connectionId, latest, jarTtl);
   }
 
   // Streaming body on 401: credentials may be stale. Force-refresh them
