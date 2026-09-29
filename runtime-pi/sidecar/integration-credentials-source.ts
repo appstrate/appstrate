@@ -433,9 +433,10 @@ export function createIntegrationCredentialsSource(
       return false;
     }
     if (!res.ok) {
-      // A non-oauth2 auth has nothing to refresh: the platform answers 502 on
-      // purpose while it counts the upstream rejection toward the reconnect
-      // threshold (then 410, above). Expected — the POST was the report.
+      // Any other non-2xx: the cached credential may still be valid, so no
+      // retry now. A 502 on an oauth2 auth is a failed refresh and warns; on
+      // any other auth it is expected — nothing to refresh, the platform counts
+      // the upstream rejection toward the reconnect threshold (then 410, above).
       const authType = payload.auths.find((a) => a.authKey === authKey)?.authType;
       if (res.status !== 502 || authType === "oauth2") {
         logger.warn("integration credential refresh non-OK status", {
@@ -444,8 +445,6 @@ export function createIntegrationCredentialsSource(
           status: res.status,
         });
       }
-      // 502 (transient upstream refresh failure) and any other non-2xx: the
-      // cached credential may still be valid. Don't retry now.
       return false;
     }
     let next: IntegrationCredentialsWire;
