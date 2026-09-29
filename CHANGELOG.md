@@ -466,6 +466,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Tier 0 dev no longer corrupts its PGlite database on a hot reload.**
+  `bun --hot` re-evaluates the database client inside the same process, which
+  opened a second PGlite on the data directory the first still held; the next
+  boot then aborted inside the core migrations. The instance now lives on
+  `globalThis`, keyed by data directory, and a reload reuses it.
+
 - **A connection an admin pin or the space default names says so before the
   refusal.** The connection list carries `locked_by` (`admin_pin` |
   `org_default` | null), from the same check that refuses unsharing or deleting
