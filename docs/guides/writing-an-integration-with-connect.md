@@ -609,6 +609,12 @@ down.
 Choose `link` when the credential is durable and acquired once. Choose `run-start`
 when each run needs a fresh session from a stored secret.
 
+Cookies the upstream sets during a proxy session (one `X-Session-Id` on the platform
+proxy, one run in the sidecar) are replayed alongside an injected cookie credential.
+On the same name the upstream's value wins, so a rotated session sticks; an upstream
+deletion falls back to the injected value. Replay stays on the origin that set the
+cookie, unless both hosts are literal `authorized_uris` entries.
+
 ---
 
 ## `tools_policy` — per-tool authorization metadata
