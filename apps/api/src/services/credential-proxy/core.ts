@@ -265,6 +265,25 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // `redactedTarget` instead.
   const redactedTarget = redactCredentialValues(target, fields);
 
+  // Credential-exfiltration guard — mirror of the sidecar's `executeApiCall`
+  // and the local resolver. A caller templating a decrypted field into the
+  // target, a header, or a substituted (string) body loses `allow_all_uris`:
+  // the whole chain is gated by `authorized_uris`, refused when there is none.
+  const referencesCredential = (s: string) =>
+    findUnresolvedPlaceholders(s).some((k) => k in fields);
+  const substitutesCredential =
+    referencesCredential(input.target) ||
+    Object.values(input.headers ?? {}).some(referencesCredential) ||
+    (input.substituteBody === true &&
+      typeof input.body === "string" &&
+      referencesCredential(input.body));
+  const allowAllUris = resolved.allowAllUris && !substitutesCredential;
+  if (substitutesCredential && !resolved.authorizedUris?.length) {
+    throw new ProxyAuthorizationError(
+      `Call for integration "${input.integrationId}" substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`,
+    );
+  }
+
   // authorized_uris gate (AFPS spec: `*` = one segment, `**` = any substring).
   // When `allow_all_uris` is set we still block private/internal network
   // targets — mirror of the sidecar's SSRF safety net so the public
@@ -282,7 +301,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // interpolated credential (vendor puts the token in a path, or echoes it
   // in a Location header).
   const assertHopAuthorized = (hopTarget: string): void => {
-    if (resolved.allowAllUris) return;
+    if (allowAllUris) return;
     const allowlist = resolved.authorizedUris ?? [];
     const ok = allowlist.some((p) => matchesAuthorizedUriSpec(p, hopTarget));
     if (!ok) {
@@ -368,7 +387,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const jarStore = input.cookieJar;
   const jarSessionId = input.jarSessionId;
   const jarTtl = input.cookieJarTtlSeconds;
-  const literalAllowlist = resolved.allowAllUris ? null : (resolved.authorizedUris ?? []);
+  const literalAllowlist = allowAllUris ? null : (resolved.authorizedUris ?? []);
   // guardedFetch composes every hop's Cookie from this snapshot and captures every hop's
   // Set-Cookie into it; `captured` is replayed over a fresh read at the end.
   const captured: Array<[string, string[]]> = [];
