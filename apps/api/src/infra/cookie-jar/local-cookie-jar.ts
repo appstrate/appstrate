@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
 import type { CookieJarStore } from "./interface.ts";
 
 /**
@@ -8,7 +9,7 @@ import type { CookieJarStore } from "./interface.ts";
  * memory footprint bounded without a background timer.
  */
 export class LocalCookieJarStore implements CookieJarStore {
-  private store = new Map<string, { cookies: string[]; expiresAt: number }>();
+  private store = new Map<string, { jar: CookieJar; expiresAt: number }>();
   private readonly softLimit: number;
 
   constructor(opts?: { softLimit?: number }) {
@@ -19,25 +20,25 @@ export class LocalCookieJarStore implements CookieJarStore {
     return `${sessionId}::${connectionId}`;
   }
 
-  async get(sessionId: string, connectionId: string): Promise<string[]> {
+  async get(sessionId: string, connectionId: string): Promise<CookieJar> {
     const entry = this.store.get(this.cacheKey(sessionId, connectionId));
-    if (!entry) return [];
+    if (!entry) return new Map();
     if (entry.expiresAt <= Date.now()) {
       this.store.delete(this.cacheKey(sessionId, connectionId));
-      return [];
+      return new Map();
     }
-    return entry.cookies;
+    return new Map(entry.jar);
   }
 
   async set(
     sessionId: string,
     connectionId: string,
-    cookies: string[],
+    jar: CookieJar,
     ttlSeconds: number,
   ): Promise<void> {
     const now = Date.now();
     this.store.set(this.cacheKey(sessionId, connectionId), {
-      cookies,
+      jar: new Map(jar),
       expiresAt: now + ttlSeconds * 1000,
     });
     if (this.store.size > this.softLimit) {

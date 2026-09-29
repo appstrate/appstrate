@@ -17,6 +17,7 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageShare, seedRun } from "../../helpers/seed.ts";
 import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
 import { runBoundSelection } from "../../../src/services/credential-proxy/integration-resolver.ts";
+import { LocalCookieJarStore } from "../../../src/infra/cookie-jar/local-cookie-jar.ts";
 import { createMockOAuthServer, type MockOAuthServer } from "../../helpers/oauth-server.ts";
 import {
   spacePackages,
@@ -42,7 +43,13 @@ afterAll(() => {
   mockServer.stop();
 });
 
-function oauthManifest(name: string): IntegrationManifest {
+const BEARER_DELIVERY = httpHeaderDelivery({
+  name: "Authorization",
+  prefix: "Bearer ",
+  field: "access_token",
+});
+
+function oauthManifest(name: string, delivery = BEARER_DELIVERY): IntegrationManifest {
   return localIntegrationManifest({
     name,
     displayName: "Gmail",
@@ -54,11 +61,7 @@ function oauthManifest(name: string): IntegrationManifest {
         tokenEndpoint: `${mockServer.url}/token`,
         defaultScopes: ["openid", "email"],
         authorizedUris: ["https://gmail.googleapis.com/**"],
-        delivery: httpHeaderDelivery({
-          name: "Authorization",
-          prefix: "Bearer ",
-          field: "access_token",
-        }),
+        delivery,
       },
     },
   });
@@ -68,13 +71,14 @@ async function setup(
   ctx: TestContext,
   packageId: string,
   fields: Record<string, string>,
+  delivery = BEARER_DELIVERY,
 ): Promise<void> {
   await seedPackage({
     id: packageId,
     orgId: ctx.orgId,
     type: "integration",
     source: "local",
-    draftManifest: oauthManifest(packageId),
+    draftManifest: oauthManifest(packageId, delivery),
   });
   // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
   // the package is placed in, so switching an unplaced integration on leaves it
@@ -278,6 +282,54 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     expect(captured).toEqual(["Bearer stale_token", "Bearer fresh_token"]);
     const tokenReqs = mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
     expect(new URLSearchParams(tokenReqs[0]!.body).get("refresh_token")).toBe("rt_valid");
+  });
+
+  it("re-applies session cookies to the retry after a refresh (#1613)", async () => {
+    const packageId = "@cprefreshorg/gmail-cookie";
+    await setup(
+      ctx,
+      packageId,
+      { access_token: "stale_token", refresh_token: "rt_valid" },
+      httpHeaderDelivery({ name: "Cookie", prefix: "at=", field: "access_token" }),
+    );
+    mockServer.setTokenResponse({
+      access_token: "fresh_token",
+      token_type: "Bearer",
+      expires_in: 3600,
+    });
+
+    // Call 1 sets `sid`; call 2 answers 401 once, then 200 on the retry.
+    const sent: string[] = [];
+    const fakeFetch = ((url: string, init: RequestInit) => {
+      if (String(url).startsWith(mockServer.url)) return fetch(url, init);
+      sent.push(new Headers(init.headers).get("cookie") ?? "");
+      const headers = new Headers(sent.length === 1 ? { "Set-Cookie": "sid=1; Path=/" } : {});
+      return Promise.resolve(
+        new Response("{}", { status: sent.length === 2 ? 401 : 200, headers }),
+      );
+    }) as unknown as typeof fetch;
+    const jar = new LocalCookieJarStore();
+    const call = () =>
+      proxyCall({
+        spaceId: ctx.defaultSpaceId,
+        actor: { type: "user", id: ctx.user.id },
+        integrationId: packageId,
+        method: "GET",
+        target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        headers: {},
+        cookieJar: jar,
+        jarSessionId: "session-refresh",
+        cookieJarTtlSeconds: 600,
+        fetch: fakeFetch,
+      });
+
+    await call();
+    const res = await call();
+
+    expect(res.status).toBe(200);
+    const pairs = (cookie: string | undefined) => cookie?.split("; ").sort();
+    expect(pairs(sent[1])).toEqual(["at=stale_token", "sid=1"]);
+    expect(pairs(sent[2])).toEqual(["at=fresh_token", "sid=1"]);
   });
 
   it("surfaces the original 401 when the refresh itself fails (invalid_grant)", async () => {

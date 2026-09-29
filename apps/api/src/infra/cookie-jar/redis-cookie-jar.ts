@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
 import type { CookieJarStore } from "./interface.ts";
 import type { KeyValueCache } from "../cache/interface.ts";
 import { getCache } from "../index.ts";
@@ -8,7 +9,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
  * {@link CookieJarStore} backed by the shared {@link KeyValueCache} (Redis
- * in Tier 2+). Keys are scoped under `cp:jar:` to keep the namespace clean.
+ * in Tier 2+). Keys are scoped under `cp:cookies:` (jar entries as JSON).
  * TTL is refreshed on every set.
  *
  * The cache is resolved lazily through the injectable `getCache` seam so the
@@ -23,33 +24,31 @@ export class RedisCookieJarStore implements CookieJarStore {
   }
 
   private cacheKey(sessionId: string, connectionId: string): string {
-    return `cp:jar:${sessionId}:${connectionId}`;
+    return `cp:cookies:${sessionId}:${connectionId}`;
   }
 
-  async get(sessionId: string, connectionId: string): Promise<string[]> {
+  async get(sessionId: string, connectionId: string): Promise<CookieJar> {
     try {
       const cache = await this.getCache();
       const raw = await cache.get(this.cacheKey(sessionId, connectionId));
-      if (!raw) return [];
-      const parsed: unknown = JSON.parse(raw);
-      return Array.isArray(parsed) ? (parsed as string[]) : [];
+      return raw ? new Map(JSON.parse(raw)) : new Map();
     } catch (err) {
       logger.warn("credential-proxy cookie jar GET failed", {
         error: getErrorMessage(err),
       });
-      return [];
+      return new Map();
     }
   }
 
   async set(
     sessionId: string,
     connectionId: string,
-    cookies: string[],
+    jar: CookieJar,
     ttlSeconds: number,
   ): Promise<void> {
     try {
       const cache = await this.getCache();
-      await cache.set(this.cacheKey(sessionId, connectionId), JSON.stringify(cookies), {
+      await cache.set(this.cacheKey(sessionId, connectionId), JSON.stringify([...jar]), {
         ttlSeconds,
       });
     } catch (err) {

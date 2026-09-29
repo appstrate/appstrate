@@ -15,6 +15,7 @@ import {
   runConnectOnce,
 } from "./integrations-boot.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
+import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
 import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
 import { RuntimeEventJournal, journalRuntimeToolDefs } from "./runtime-event-journal.ts";
@@ -205,7 +206,7 @@ if (connectLoginJson) {
   }
 }
 
-const cookieJar = new Map<string, string[]>();
+const cookieJar: CookieJar = new Map();
 
 // #1458 — the agent's proxy refuses runner peers (they have their own policed
 // listener). Rebound once the adapter is prepared; no runner exists before that.

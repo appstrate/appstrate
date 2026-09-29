@@ -679,3 +679,94 @@ describe("guardedFetch — caller hop contract (validateHop / sensitiveHeaders)"
     expect(seen[1]!.body).toBeUndefined();
   });
 });
+
+describe("guardedFetch — per-hop cookies", () => {
+  const resolve = resolverFor({
+    "first.example": ["203.0.113.1"],
+    "other.example": ["203.0.113.2"],
+  });
+
+  /** Minimal origin-bucketed scope: records every call, composes `base; own-origin pairs`. */
+  function recordingScope() {
+    const jar = new Map<string, string[]>();
+    const calls = { header: [] as Array<[string, string | null]>, capture: [] as string[] };
+    return {
+      calls,
+      header(url: string, base: string | null) {
+        calls.header.push([url, base]);
+        const pairs = [base, ...(jar.get(new URL(url).origin) ?? [])].filter(Boolean);
+        return pairs.length ? pairs.join("; ") : undefined;
+      },
+      capture(url: string, setCookies: string[]) {
+        calls.capture.push(url);
+        const origin = new URL(url).origin;
+        jar.set(origin, [...(jar.get(origin) ?? []), ...setCookies.map((c) => c.split(";")[0]!)]);
+      },
+    };
+  }
+
+  /** Serves `responses` in order and records each request's logical URL and Cookie header. */
+  function serve(responses: Response[]) {
+    const seen: Array<{ cookie: string | null }> = [];
+    const fetchImpl = (async (_input: string | URL | Request, reqInit?: RequestInit) => {
+      seen.push({ cookie: new Headers(reqInit?.headers ?? {}).get("cookie") });
+      return responses[seen.length - 1]!;
+    }) as unknown as typeof fetch;
+    return { seen, fetchImpl };
+  }
+
+  const redirect = (location: string, setCookie?: string) => {
+    const headers = new Headers({ location });
+    if (setCookie) headers.append("set-cookie", setCookie);
+    return new Response(null, { status: 302, headers });
+  };
+
+  it("captures each hop's Set-Cookie and composes it onto the next hop", async () => {
+    const { seen, fetchImpl } = serve([
+      redirect("/cart", "sid=new; Path=/; HttpOnly"),
+      new Response("ok", { status: 200, headers: { "set-cookie": "seen=1" } }),
+    ]);
+    const cookies = recordingScope();
+    await guardedFetch(
+      "https://first.example/cart/add",
+      { method: "POST", body: "x", headers: { cookie: "sid=old" } },
+      { resolve, fetchImpl, cookies },
+    );
+    expect(seen.map((s) => s.cookie)).toEqual(["sid=old", "sid=old; sid=new"]);
+    expect(cookies.calls.capture).toEqual([
+      "https://first.example/cart/add",
+      "https://first.example/cart",
+    ]);
+    expect(cookies.calls.header.every(([, base]) => base === "sid=old")).toBe(true);
+  });
+
+  it("drops the caller's base for the rest of the chain once a cross-origin hop stripped it", async () => {
+    const { seen, fetchImpl } = serve([
+      redirect("https://other.example/sso", "a=1"),
+      redirect("https://first.example/back", "b=2"),
+      new Response("ok", { status: 200 }),
+    ]);
+    const cookies = recordingScope();
+    await guardedFetch(
+      "https://first.example/start",
+      { headers: { cookie: "session=injected" } },
+      { resolve, fetchImpl, cookies },
+    );
+    expect(cookies.calls.header.map(([, base]) => base)).toEqual(["session=injected", null, null]);
+    // Back on the initial origin: its own captured cookie, never the stripped base.
+    expect(seen.map((s) => s.cookie)).toEqual(["session=injected", null, "a=1"]);
+  });
+
+  it("leaves Cookie and Set-Cookie alone when no cookie state is passed", async () => {
+    const { seen, fetchImpl } = serve([
+      redirect("/next", "sid=new"),
+      new Response("ok", { status: 200 }),
+    ]);
+    await guardedFetch(
+      "https://first.example/start",
+      { headers: { cookie: "sid=old" } },
+      { resolve, fetchImpl },
+    );
+    expect(seen.map((s) => s.cookie)).toEqual(["sid=old", "sid=old"]);
+  });
+});

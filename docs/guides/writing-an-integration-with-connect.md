@@ -609,6 +609,15 @@ down.
 Choose `link` when the credential is durable and acquired once. Choose `run-start`
 when each run needs a fresh session from a stored secret.
 
+Cookies the upstream sets during a proxy session (one `X-Session-Id` and connection on
+the platform proxy, one run in the sidecar), on any hop of a redirect chain, are filed
+under the host that set them and replayed there, winning by name over an injected cookie
+credential: a rotated session sticks, a deletion falls back to the injected value.
+Cookies are host-only: `Domain` and `Path` are ignored (a same-name cookie set for another
+path still shadows the injected one on that host), and two hosts share cookies only when
+both are literal `authorized_uris` entries. On a cross-origin redirect the platform proxy
+strips the Cookie credential; the sidecar keeps it inside the declared allowlist.
+
 ---
 
 ## `tools_policy` — per-tool authorization metadata

@@ -6,6 +6,7 @@ import pLimit, { type LimitFunction } from "p-limit";
 import { mountMcp, validateMcpHostHeader } from "./mcp.ts";
 import { RuntimeEventJournal } from "./runtime-event-journal.ts";
 import type { ApiCallBaseDeps } from "./credential-proxy.ts";
+import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { BlobStore } from "./blob-store.ts";
 import { SIDECAR_AUTH_HEADER, type IntegrationBootReport } from "@appstrate/core/sidecar-types";
@@ -95,7 +96,7 @@ export const SIDECAR_IDLE_TIMEOUT_SECONDS = 255;
 
 export interface AppDeps {
   config: SidecarConfig;
-  cookieJar: Map<string, string[]>;
+  cookieJar: CookieJar;
   fetchFn?: typeof fetch; // default: global fetch — injectable for tests
   isReady?: () => boolean; // default: () => true — controls /health
   /**

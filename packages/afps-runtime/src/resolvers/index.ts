@@ -63,6 +63,7 @@ export {
   STREAMING_THRESHOLD,
   makeApiCallTool,
   matchesAuthorizedUriSpec,
+  hostLiterallyAllowlisted,
   compileEgressPolicy,
   apiCallRequestJsonSchema,
   resolveSafeFile,
@@ -88,14 +89,15 @@ export {
 export {
   MAX_REDIRECTS,
   matchesAuthorizedUri,
-  hostLiterallyAllowlisted,
   stripUserInfoAndFragment,
   redactHost,
-  mergeSetCookieIntoJar,
   fetchFollowingRedirectsCapturingCookies,
   guardedFetch,
   RedirectBlockedError,
 } from "./api-call-engine.ts";
+
+// Sticky-cookie jar shared by both credential proxies and the redirect follower.
+export { cookieScope, type CookieJar, type CookieScope } from "./cookie-jar.ts";
 
 // Integration `api_call` surface — the portable equivalent of the platform's
 // `{ns}__api_call` MCP tool. Reuses the same HTTP core (`makeApiCallTool`) as

@@ -12,20 +12,17 @@
  * OAuth flow). Both expose the exact same contract; callers cannot tell
  * which backing store they are talking to.
  *
- * Keyed by `(sessionId, connectionId)` since a single X-Session-Id can drive
- * calls across several connections, each with its own cookie scope.
+ * Keyed by `(sessionId, connectionId)` since a single X-Session-Id can
+ * drive calls across multiple connections, each with its own cookie scope.
  */
 
+import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
+
 export interface CookieJarStore {
-  /** Read cookies for a connection within a session. Returns [] when absent. */
-  get(sessionId: string, connectionId: string): Promise<string[]>;
-  /** Replace cookies for a connection within a session. Resets the TTL. */
-  set(
-    sessionId: string,
-    connectionId: string,
-    cookies: string[],
-    ttlSeconds: number,
-  ): Promise<void>;
+  /** Read a connection's jar within a session. Returns an empty jar when absent. */
+  get(sessionId: string, connectionId: string): Promise<CookieJar>;
+  /** Replace a connection's jar within a session. Resets the TTL. */
+  set(sessionId: string, connectionId: string, jar: CookieJar, ttlSeconds: number): Promise<void>;
   /** Release all resources (timers, connections). */
   shutdown(): Promise<void>;
 }
