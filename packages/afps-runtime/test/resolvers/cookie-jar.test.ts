@@ -266,7 +266,10 @@ describe("guardedFetch — cookie scope", () => {
   const SSO = "https://sso.vendor.example/login";
   const HOME = "https://api.vendor.example/home";
 
-  async function secondHopCookie(authorizedUris: string[]): Promise<string | null> {
+  async function secondHopCookie(
+    authorizedUris: string[],
+    declaredUris: string[] = authorizedUris,
+  ): Promise<string | null> {
     const seen: (string | null)[] = [];
     const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
       seen.push(new Headers(init?.headers).get("cookie"));
@@ -279,6 +282,7 @@ describe("guardedFetch — cookie scope", () => {
       init: { method: "GET" },
       fetchFn,
       authorizedUris,
+      declaredUris,
       resolveHost: async () => ["203.0.113.7"],
     });
     return seen[1] ?? null;
@@ -288,6 +292,15 @@ describe("guardedFetch — cookie scope", () => {
     expect(
       await secondHopCookie(["https://sso.vendor.example/**", "https://api.vendor.example/**"]),
     ).toBe("sess=S");
+  });
+
+  it("keeps it origin-scoped when the literal hosts were rendered from connection values", async () => {
+    expect(
+      await secondHopCookie(
+        ["https://sso.vendor.example/**", "https://api.vendor.example/**"],
+        ["https://{$credential.sso_host}/**", "https://{$credential.api_host}/**"],
+      ),
+    ).toBeNull();
   });
 
   it("keeps it origin-scoped when a glob entry matched the hosts", async () => {

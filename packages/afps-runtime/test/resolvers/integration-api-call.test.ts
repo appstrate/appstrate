@@ -1125,6 +1125,82 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
   });
 });
 
+describe("LocalIntegrationResolver — authorized_uris rendered per connection (#1627)", () => {
+  async function toolFor(
+    authorizedUris: string[],
+    fields: Record<string, string>,
+    resolveHost: () => Promise<string[]> = async () => ["203.0.113.7"],
+  ) {
+    const hits: string[] = [];
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/wp", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(
+        apiKeyIntegrationManifest("@acme/wp", { authorizedUris }).integration,
+      ),
+    });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost,
+      creds: { version: 1, integrations: { "@acme/wp": { fields: { api_key: "k", ...fields } } } },
+      fetch: ((url: string) => {
+        hits.push(url);
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as unknown as typeof fetch,
+    });
+    const tools = await resolver.resolve(
+      [{ name: "@acme/wp", version: "^1" }],
+      makeBundle(root, [integ]),
+    );
+    const { ctx } = makeCtx();
+    const call = (target: string) =>
+      tools[0]!.execute({ method: "GET", target, headers: { "X-Key": "{{api_key}}" } }, ctx);
+    return { call, hits };
+  }
+
+  it("allows a templated call to the URL-form entry and refuses another host", async () => {
+    const { call, hits } = await toolFor(["{$credential.site_url}/**"], {
+      site_url: "https://wp.example.com",
+    });
+    await call("{{site_url}}/wp-json/x");
+    expect(hits).toEqual(["https://wp.example.com/wp-json/x"]);
+    await expect(call("https://other.example.com/wp-json/x")).rejects.toMatchObject({
+      code: "AUTHORIZED_URIS_MISMATCH",
+    });
+    expect(hits).toHaveLength(1);
+  });
+
+  it("allows the authority form's host and refuses another", async () => {
+    const { call, hits } = await toolFor(["https://{$credential.host}/**"], {
+      host: "wp.example.com",
+    });
+    await call("https://{{host}}/wp-json/x");
+    expect(hits).toEqual(["https://wp.example.com/wp-json/x"]);
+    await expect(call("https://other.example.com/x")).rejects.toMatchObject({
+      code: "AUTHORIZED_URIS_MISMATCH",
+    });
+  });
+
+  it.each([
+    [["{$credential.site_url}/**"], { site_url: "https://169.254.169.254" }, "{{site_url}}/latest"],
+    [["https://{$credential.host}/**"], { host: "127.0.0.1" }, "https://{{host}}/admin"],
+  ])("never pins a connection-supplied internal host (%j)", async (uris, fields, target) => {
+    const { call, hits } = await toolFor(uris, fields);
+    await expect(call(target)).rejects.toMatchObject({ code: "RESOLVER_URL_BLOCKED" });
+    expect(hits).toEqual([]);
+  });
+
+  it("runs the DNS rebind check on a rendered host", async () => {
+    const { call, hits } = await toolFor(
+      ["https://{$credential.host}/**"],
+      { host: "intranet.corp" },
+      async () => ["10.0.0.5"],
+    );
+    await expect(call("https://{{host}}/x")).rejects.toMatchObject({
+      code: "RESOLVER_URL_BLOCKED",
+    });
+    expect(hits).toEqual([]);
+  });
+});
+
 describe("RemoteAppstrateIntegrationResolver", () => {
   it("POSTs to /api/credential-proxy/proxy with X-Integration-Id = integration id", async () => {
     const calls: { url: string; init: RequestInit }[] = [];

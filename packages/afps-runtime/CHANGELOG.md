@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `authorized_uris` rendered per connection; only declared hosts pin (#1627)
+
+- `guardedFetch` (and the engine's `preflightUrl`) takes a required `declaredUris`: the manifest's
+  declared, unrendered `authorized_uris`. `authorizedUris` (the list rendered for the
+  connection) decides what matches; only a host written literally in `declaredUris`
+  exempts a target from the SSRF net, and only those hosts share cookies across
+  origins. `hostLiterallyAllowlisted` never pins a templated host (`{…}`).
+- `LocalIntegrationResolver` renders each auth's `authorized_uris` with the creds
+  file's fields (`renderAuthorizedUris`, `@appstrate/afps-shared/credential-template`)
+  and enforces it on the substituted target, so `{{site_url}}/wp-json/…` matches a
+  `{$credential.site_url}/**` entry. The `api_call` schema accepts a target that
+  starts with a `{{field}}` followed by nothing or a `/` path.
+
 ### Changed — `X-Run-Id` is a reserved transport header
 
 - An `api_call`'s own `x-run-id` header (any casing) is now dropped, like the

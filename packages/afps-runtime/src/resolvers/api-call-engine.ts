@@ -146,10 +146,15 @@ type PreflightResult =
 
 interface PreflightOptions {
   /**
-   * Provider's declared trust boundary. When non-empty and `allowAllUris`
-   * is false, the target must match.
+   * The connection's trust boundary (rendered `authorized_uris`). When non-empty and
+   * `allowAllUris` is false, the target must match.
    */
   authorizedUris?: string[] | null;
+  /**
+   * The manifest's DECLARED (unrendered) `authorized_uris`: only a host written literally
+   * there exempts a target from the SSRF net — a host rendered from a connection value never does.
+   */
+  declaredUris: readonly string[];
   /**
    * When true, the allowlist gate is skipped — but the SSRF blocklist
    * still applies (no `allowAllUris` ever permits a loopback / RFC1918 /
@@ -221,8 +226,8 @@ async function refuseSsrfUrl(
  * Validate the INITIAL target URL against the allowlist + SSRF blocklist
  * + DNS-rebind layer. Mirrors the sidecar's `executeApiCall` branches:
  *   - `allowAllUris` → SSRF safety-net (literal + DNS).
- *   - declared `authorizedUris` → must match; a glob-matched host (no
- *     literal pin) additionally passes the SSRF safety-net — `https://**`
+ *   - `authorizedUris` → must match; a host not pinned literally by
+ *     `declaredUris` additionally passes the SSRF safety-net — `https://**`
  *     would otherwise let the agent pick ANY host with zero floor,
  *     strictly weaker than allow_all.
  *   - neither → SSRF safety-net (no allowlist means "block internals").
@@ -242,7 +247,7 @@ export async function preflightUrl(url: string, opts: PreflightOptions): Promise
         message: `URL not in authorized_uris allowlist. Allowed: ${authorizedUris.join(", ")}`,
       };
     }
-    if (!hostLiterallyAllowlisted(url, authorizedUris)) {
+    if (!hostLiterallyAllowlisted(url, opts.declaredUris)) {
       return refuseSsrfUrl(url, opts.resolveHost, opts.credentialFields);
     }
     return { ok: true };
@@ -547,6 +552,8 @@ interface GuardedFetchOptions {
   init: RequestInit;
   fetchFn?: typeof fetch;
   authorizedUris?: string[] | null;
+  /** See {@link PreflightOptions.declaredUris}; also the only hosts that share cookies. */
+  declaredUris: readonly string[];
   allowAllUris?: boolean;
   /** Lowercased name of the credential header injected by the caller. */
   injectedCredentialHeader?: string | null;
@@ -574,6 +581,7 @@ export async function guardedFetch(
   const fetchFn = opts.fetchFn ?? fetch;
   const pre = await preflightUrl(opts.url, {
     authorizedUris: opts.authorizedUris,
+    declaredUris: opts.declaredUris,
     allowAllUris: opts.allowAllUris,
     resolveHost: opts.resolveHost,
     credentialFields: opts.credentialFields,
@@ -600,11 +608,7 @@ export async function guardedFetch(
     url: opts.url,
     init,
     fetchFn,
-    cookies: cookieScope(
-      new Map(),
-      integrationId,
-      opts.allowAllUris ? null : (opts.authorizedUris ?? null),
-    ),
+    cookies: cookieScope(new Map(), integrationId, opts.allowAllUris ? null : opts.declaredUris),
     integrationId,
     injectedCredentialHeader: opts.injectedCredentialHeader ?? null,
     authorizedUris: opts.authorizedUris ?? undefined,

@@ -59,8 +59,8 @@ function isDeletion(attributes: string[]): boolean {
   return expires !== undefined && expires <= Date.now();
 }
 
-/** `literalAllowlist`: the call's authorized_uris when they gated it, null under allow_all_uris
- *  or without an allowlist. Only hosts it names literally share cookies across origins. */
+/** `literalAllowlist`: the DECLARED (unrendered) authorized_uris when an allowlist gated the call,
+ *  null under allow_all_uris or without one. Only hosts it names literally share cookies across origins. */
 export function cookieScope(
   jar: CookieJar,
   integrationId: string,

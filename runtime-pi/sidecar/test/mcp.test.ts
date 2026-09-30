@@ -504,6 +504,7 @@ describe("POST /mcp — api_call", () => {
           namespace: "gmail",
           integrationId: "@official/gmail",
           connectionId: "conn-1",
+          declaredUris: ["https://gmail.googleapis.com/**"],
           fetchCredentials: async () => integrationCreds(),
           refreshCredentials: async () => integrationCreds("integ-tok-2"),
         },

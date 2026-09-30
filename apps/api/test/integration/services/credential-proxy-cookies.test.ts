@@ -18,6 +18,7 @@ import { LocalCookieJarStore } from "../../../src/infra/cookie-jar/local-cookie-
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
+  envDelivery,
 } from "../../helpers/integration-manifests.ts";
 import {
   seedProxyIntegration,
@@ -355,6 +356,38 @@ describe("proxyCall — session cookie jar (#1613)", () => {
 
       expect(upstream.seen[1]?.get("cookie")).toBeNull();
       expect(cookiePairs(upstream.seen[2]?.get("cookie"))).toEqual(["a=1"]);
+    });
+
+    it("never shares cookies between hosts rendered from connection fields", async () => {
+      const packageId = "@cpcookieorg/rendered";
+      await seedProxyIntegration(
+        ctx,
+        localIntegrationManifest({
+          name: packageId,
+          displayName: "Shop",
+          description: "Shop integration",
+          auths: {
+            api: {
+              type: "custom",
+              authorizedUris: [
+                "https://{$credential.host_a}/**",
+                "https://{$credential.host_b}/**",
+              ],
+              credentialFields: ["host_a", "host_b"],
+              requiredCredentialFields: ["host_a", "host_b"],
+              delivery: envDelivery({ HOST_A: "host_a", HOST_B: "host_b" }),
+            },
+          },
+        }),
+      );
+      await seedProxyConnection(ctx, packageId, "api", { host_a: "1.1.1.1", host_b: "8.8.8.8" });
+      const upstream = scriptedUpstream([["a=1"]]);
+
+      await call(packageId, "https://1.1.1.1/x", upstream.fetchImpl);
+      await call(packageId, "https://8.8.8.8/x", upstream.fetchImpl);
+
+      expect(upstream.seen).toHaveLength(2);
+      expect(upstream.seen[1]?.get("cookie")).toBeNull();
     });
 
     it("shares cookies between literally allowlisted hosts", async () => {

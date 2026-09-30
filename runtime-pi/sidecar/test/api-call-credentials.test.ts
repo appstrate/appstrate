@@ -2,6 +2,8 @@
 
 import { describe, it, expect } from "bun:test";
 import { createApiCallCredentialAdapter } from "../api-call-credentials.ts";
+import { executeApiCall } from "../credential-proxy.ts";
+import { renderAuthorizedUris } from "@appstrate/afps-shared/credential-template";
 import { PROXY_INJECTED_FIELD } from "@appstrate/connect/integration-credentials";
 import {
   createIntegrationCredentialsSource,
@@ -11,15 +13,20 @@ import {
 
 function fakeSource(
   payload: {
-    auths: Array<{ authKey: string; authType: string; fields: Record<string, string> }>;
+    auths: Array<{
+      authKey: string;
+      authType: string;
+      fields: Record<string, string>;
+      authorizedUris?: string[];
+    }>;
     deliveryPlans: Record<string, { headerName: string; headerPrefix: string; value: string }>;
   },
   onRefresh?: () => void,
 ): IntegrationCredentialsSource {
   const wire = {
     auths: payload.auths.map((a) => ({
-      ...a,
       authorizedUris: [] as string[],
+      ...a,
       identityClaims: {},
       expiresAt: null,
       scopesGranted: [] as string[],
@@ -41,7 +48,14 @@ function fakeSource(
 describe("createApiCallCredentialAdapter", () => {
   it("maps an oauth2 delivery plan into an injectable proxy payload", async () => {
     const source = fakeSource({
-      auths: [{ authKey: "primary", authType: "oauth2", fields: { access_token: "AT" } }],
+      auths: [
+        {
+          authKey: "primary",
+          authType: "oauth2",
+          fields: { access_token: "AT" },
+          authorizedUris: ["https://api.example.com/**"],
+        },
+      ],
       deliveryPlans: {
         primary: { headerName: "Authorization", headerPrefix: "Bearer ", value: "AT" },
       },
@@ -49,7 +63,7 @@ describe("createApiCallCredentialAdapter", () => {
     const adapter = createApiCallCredentialAdapter({
       source,
       authKey: "primary",
-      authorizedUris: ["https://api.example.com/**"],
+      declaredUris: ["https://api.example.com/**"],
     });
     const creds = await adapter.fetchCredentials("@scope/integ");
     expect(creds.credentialHeaderName).toBe("Authorization");
@@ -63,6 +77,28 @@ describe("createApiCallCredentialAdapter", () => {
     expect(creds.allowAllUris).toBe(false);
   });
 
+  it("matches against the list the platform rendered for the connection, not the declared one", async () => {
+    const source = fakeSource({
+      auths: [
+        {
+          authKey: "primary",
+          authType: "api_key",
+          fields: { host: "acme.example.com" },
+          authorizedUris: ["https://acme.example.com/**"],
+        },
+      ],
+      deliveryPlans: {},
+    });
+    const adapter = createApiCallCredentialAdapter({
+      source,
+      authKey: "primary",
+      declaredUris: ["https://{$credential.host}/**"],
+    });
+    expect((await adapter.fetchCredentials("@scope/integ")).authorizedUris).toEqual([
+      "https://acme.example.com/**",
+    ]);
+  });
+
   it("omits header injection when the auth declares no delivery.http (custom auth)", async () => {
     const source = fakeSource({
       auths: [{ authKey: "primary", authType: "custom", fields: { token: "T" } }],
@@ -71,7 +107,7 @@ describe("createApiCallCredentialAdapter", () => {
     const adapter = createApiCallCredentialAdapter({
       source,
       authKey: "primary",
-      authorizedUris: ["https://api.example.com/**"],
+      declaredUris: ["https://api.example.com/**"],
     });
     const creds = await adapter.fetchCredentials("@scope/integ");
     expect(creds.credentialHeaderName).toBeUndefined();
@@ -125,7 +161,7 @@ describe("createApiCallCredentialAdapter — connect.tool session via shared sou
     const adapter = createApiCallCredentialAdapter({
       source,
       authKey: "session",
-      authorizedUris: ["https://connecttool.test/**"],
+      declaredUris: ["https://connecttool.test/**"],
     });
 
     // BEFORE login: placeholder plan → empty injected value.
@@ -195,12 +231,12 @@ describe("createApiCallCredentialAdapter — connect.tool session via shared sou
     const sessionAdapter = createApiCallCredentialAdapter({
       source,
       authKey: "session",
-      authorizedUris: ["https://x/**"],
+      declaredUris: ["https://x/**"],
     });
     const apikeyAdapter = createApiCallCredentialAdapter({
       source,
       authKey: "apikey",
-      authorizedUris: ["https://x/**"],
+      declaredUris: ["https://x/**"],
     });
 
     source.setSessionOutputs(
@@ -245,7 +281,7 @@ describe("createApiCallCredentialAdapter — refresh re-snapshot", () => {
     const adapter = createApiCallCredentialAdapter({
       source,
       authKey: "primary",
-      authorizedUris: ["https://api.example.com/**"],
+      declaredUris: ["https://api.example.com/**"],
     });
     const result = await adapter.refreshCredentials("@scope/integ");
     expect(refreshed).toBe(true);
@@ -272,7 +308,7 @@ describe("createApiCallCredentialAdapter — refresh re-snapshot", () => {
     const adapter = createApiCallCredentialAdapter({
       source: connectToolSource([403]),
       authKey: "session",
-      authorizedUris: ["https://api.example.com/**"],
+      declaredUris: ["https://api.example.com/**"],
     });
     expect(await adapter.refreshCredentials("@scope/integ")).toBeNull();
   });
@@ -287,8 +323,101 @@ describe("createApiCallCredentialAdapter — refresh re-snapshot", () => {
     const adapter = createApiCallCredentialAdapter({
       source,
       authKey: "primary",
-      authorizedUris: ["https://api.example.com/**"],
+      declaredUris: ["https://api.example.com/**"],
     });
     expect(await adapter.refreshCredentials("@scope/integ")).toBeNull();
+  });
+});
+
+/**
+ * The adapter feeding `executeApiCall` (#1627): the list the platform renders for the connection
+ * decides what matches; only the DECLARED list pins the SSRF gate or shares cookies.
+ */
+describe("createApiCallCredentialAdapter + executeApiCall — rendered vs declared authorized_uris", () => {
+  function run(
+    declaredUris: string[],
+    fields: Record<string, string>,
+    resolveHost: () => Promise<string[]> = async () => ["203.0.113.7"],
+  ) {
+    const source = fakeSource({
+      auths: [
+        {
+          authKey: "main",
+          authType: "api_key",
+          fields: { api_key: "k", ...fields },
+          authorizedUris: renderAuthorizedUris(declaredUris, fields),
+        },
+      ],
+      deliveryPlans: {},
+    });
+    const adapter = createApiCallCredentialAdapter({ source, authKey: "main", declaredUris });
+    const hits: string[] = [];
+    const cookies: Array<string | null> = [];
+    const deps = {
+      config: { runToken: "rt", platformApiUrl: "http://platform" },
+      cookieJar: new Map(),
+      fetchFn: (async (url: string | URL, init?: RequestInit) => {
+        hits.push(String(url));
+        cookies.push(new Headers(init?.headers).get("cookie"));
+        return new Response("{}", { headers: { "Set-Cookie": "sess=S; Path=/" } });
+      }) as unknown as typeof fetch,
+      reportedAuthFailures: new Set<string>(),
+      resolveHost,
+      declaredUris,
+      fetchCredentials: adapter.fetchCredentials,
+    };
+    const call = (targetUrl: string) =>
+      executeApiCall(
+        {
+          integrationId: "@acme/wp",
+          connectionId: "conn-1",
+          targetUrl,
+          method: "GET",
+          callerHeaders: { "X-Key": "{{api_key}}" },
+          body: { kind: "none" },
+        },
+        deps,
+      );
+    return { call, hits, cookies };
+  }
+
+  it("allows a templated call to the URL-form entry and refuses another host", async () => {
+    const { call, hits } = run(["{$credential.site_url}/**"], {
+      site_url: "https://wp.example.com",
+    });
+    expect((await call("{{site_url}}/wp-json/x")).ok).toBe(true);
+    expect(hits).toEqual(["https://wp.example.com/wp-json/x"]);
+    const other = await call("https://other.example.com/wp-json/x");
+    expect(other).toMatchObject({ ok: false, status: 403 });
+    expect(hits).toHaveLength(1);
+  });
+
+  it.each([
+    [["{$credential.site_url}/**"], { site_url: "https://169.254.169.254" }, "{{site_url}}/latest"],
+    [["https://{$credential.host}/**"], { host: "127.0.0.1" }, "https://{{host}}/admin"],
+  ])("never pins a connection-supplied internal host (%j)", async (uris, fields, target) => {
+    const { call, hits } = run(uris, fields);
+    expect(await call(target)).toMatchObject({ ok: false, status: 403 });
+    expect(hits).toEqual([]);
+  });
+
+  it("runs the DNS rebind check on a rendered host", async () => {
+    const { call, hits } = run(
+      ["https://{$credential.host}/**"],
+      { host: "intranet.corp" },
+      async () => ["10.0.0.5"],
+    );
+    expect((await call("https://{{host}}/x")).ok).toBe(false);
+    expect(hits).toEqual([]);
+  });
+
+  it("never shares cookies between two rendered hosts", async () => {
+    const { call, cookies } = run(["https://{$credential.a}/**", "https://{$credential.b}/**"], {
+      a: "a.example.com",
+      b: "b.example.com",
+    });
+    expect((await call("https://{{a}}/x")).ok).toBe(true);
+    expect((await call("https://{{b}}/x")).ok).toBe(true);
+    expect(cookies).toEqual([null, null]);
   });
 });

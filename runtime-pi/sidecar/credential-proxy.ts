@@ -188,6 +188,12 @@ export interface ApiCallBaseDeps {
 }
 
 export interface ApiCallDeps extends ApiCallBaseDeps {
+  /**
+   * The manifest's declared (unrendered) `authorized_uris`. Matching uses the connection's
+   * rendered `CredentialsResponse.authorizedUris`; only a host written literally HERE pins the
+   * SSRF gate or shares cookies, so a connection-supplied host never does.
+   */
+  declaredUris: readonly string[];
   fetchCredentials: (integrationId: string) => Promise<CredentialsResponse>;
   /**
    * Force a refresh on a mid-run 401. Resolves to the fresh credentials when
@@ -328,7 +334,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //    targets when allowAllUris is set). The SSRF branches add the
   //    DNS-resolving rebind layer over the literal blocklist (see
   //    `refuseSsrfTarget`). On the allowlist branch, the SSRF gate
-  //    applies UNLESS some entry pins this exact host literally —
+  //    applies UNLESS some DECLARED entry pins this exact host literally —
   //    a named host resolving internally is the operator's declared
   //    topology (on-prem APIs are legitimate allowlist targets), but
   //    the AFPS glob grammar lets `**` span the host (`https://**`),
@@ -363,7 +369,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
         error: `URL not authorized for integration "${integrationId}". Allowed: ${authorizedUris.join(", ")}`,
       };
     }
-    if (!hostLiterallyAllowlisted(resolvedUrl, authorizedUris)) {
+    if (!hostLiterallyAllowlisted(resolvedUrl, deps.declaredUris)) {
       const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
       if (refusal) return refusal;
     }
@@ -378,7 +384,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   const cookies = cookieScope(
     cookieJar,
     scope,
-    policy.allowAllUris || !authorizedUris.length ? null : authorizedUris,
+    policy.allowAllUris || !authorizedUris.length ? null : deps.declaredUris,
   );
 
   // 5b. Pre-substitute headers with the *initial* creds so we can

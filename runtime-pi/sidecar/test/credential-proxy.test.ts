@@ -33,6 +33,7 @@ function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
           headers: { "Content-Type": "application/json" },
         }),
     ) as unknown as typeof fetch,
+    declaredUris: ["https://api.example.com/**"],
     fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
       credentials: { access_token: "tok-123" },
       authorizedUris: ["https://api.example.com/**"],
@@ -1996,6 +1997,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     const result = await call(
       makeDeps({
         fetchFn: fetchFn as unknown as typeof fetch,
+        declaredUris: ["https://intranet.corp.example/**"],
         fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
           credentials: { access_token: "tok" },
           authorizedUris: ["https://intranet.corp.example/**"],
@@ -2237,7 +2239,11 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
       credentialFieldName: "access_token",
     }));
     const { cookiesSeen, fetchFn } = recordingFetch("sess=DROPBOX");
-    const deps = makeDeps({ fetchFn, fetchCredentials: dropboxCreds });
+    const deps = makeDeps({
+      fetchFn,
+      declaredUris: ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
+      fetchCredentials: dropboxCreds,
+    });
 
     await executeApiCall(
       {

@@ -854,6 +854,7 @@ function buildSidecarTools(options: MountMcpOptions): {
     const ctx = {
       proxyDeps: {
         ...proxyDeps,
+        declaredUris: integ.declaredUris,
         fetchCredentials: integ.fetchCredentials,
         refreshCredentials: integ.refreshCredentials,
       },
@@ -1699,6 +1700,8 @@ export interface ApiCallIntegrationConfig {
   integrationId: string;
   /** Bound connection whose credentials this tool injects. */
   connectionId: string;
+  /** See {@link ApiCallDeps.declaredUris}. */
+  declaredUris: ApiCallDeps["declaredUris"];
   /** Resolve the integration's credentials into the proxy payload. */
   fetchCredentials: ApiCallDeps["fetchCredentials"];
   /** Force-refresh on a mid-run 401 and re-resolve (null when not rotated). */

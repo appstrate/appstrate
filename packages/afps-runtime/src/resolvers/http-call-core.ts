@@ -288,14 +288,23 @@ const responseModeSchema = z
   })
   .optional();
 
+const httpUrl = z.url({ protocol: /^https?$/ });
+/** A URL-valued credential field, then nothing or a path: `{{site_url}}/wp-json/…` (#1627). */
+const URL_FIELD_TARGET = /^\{\{\s*\w+\s*\}\}(?:\/.*)?$/;
+
 /** Zod schema for `api_call` arguments — validated at runtime in execute(). */
 export const apiCallRequestSchema = z.object({
   method: z
     .enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
     .describe("HTTP method for the upstream request"),
   target: z
-    .url({ protocol: /^https?$/, error: "target must be an absolute http(s) URL" })
-    .describe("Absolute URL of the upstream endpoint"),
+    .string()
+    .refine((t) => httpUrl.safeParse(t).success || URL_FIELD_TARGET.test(t), {
+      error: "target must be an absolute http(s) URL or start with a {{field}} holding one",
+    })
+    .describe(
+      "Absolute URL of the upstream endpoint, or a {{field}} holding the base URL followed by a path",
+    ),
   headers: z
     .record(z.string(), z.string())
     .optional()
@@ -1719,7 +1728,12 @@ export async function serializeFetchResponse(
   };
 }
 
-function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
+/** Match `resolved` (the substituted target, when the caller substitutes) and name `target`. */
+export function enforceAuthorizedUris(
+  meta: ApiCallMeta,
+  target: string,
+  resolved: string = target,
+): void {
   if (meta.allowAllUris) return;
   const patterns = meta.authorizedUris ?? [];
   if (patterns.length === 0) {
@@ -1731,7 +1745,7 @@ function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
     );
   }
   for (const pattern of patterns) {
-    if (matchesAuthorizedUriSpec(pattern, target)) return;
+    if (matchesAuthorizedUriSpec(pattern, resolved)) return;
   }
   throw new AuthorizedUrisError(
     "AUTHORIZED_URIS_MISMATCH",
@@ -1854,7 +1868,8 @@ export function hostLiterallyAllowlisted(url: string, specs: readonly string[]):
     const m = /^(?:[a-zA-Z][a-zA-Z0-9+.-]*|\*{1,2}):\/\/([^/?#]+)/.exec(spec.trim());
     if (!m) continue;
     const hostPart = m[1]!.replace(/^[^@]*@/, "").replace(/:(\d+|\*)$/, "");
-    if (hostPart.includes("*")) continue;
+    // A templated host (`{$credential.host}`) is connection-chosen, never a pin.
+    if (hostPart.includes("*") || hostPart.includes("{")) continue;
     if (hostPart.toLowerCase() === host) return true;
   }
   return false;
