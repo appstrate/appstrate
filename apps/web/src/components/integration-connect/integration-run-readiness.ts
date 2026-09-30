@@ -3,32 +3,41 @@
 import type { IntegrationAgentResolution } from "@appstrate/shared-types";
 
 /**
- * Whether a connection verdict (`IntegrationAgentResolution`) represents a
- * "not usable" connection state — no connection, ambiguous pick, stale, or
- * insufficient scopes. Used for the management views (Connexions tab cards, 409
- * recovery modal) to render per-connection status.
- *
- * NOTE: this is NOT the run-blocking authority. Whether an integration blocks
- * the run (run semantics — inert optional integrations don't block, inert
- * required ones do) comes from the server's `run_blocking` flag on the bulk
- * connection-readiness query (`useIntegrationRunBlocking` /
- * `useAgentConnectionReadiness`). This predicate only classifies a verdict's
- * connection health, independent of run relevance.
- *
- * Status → not-usable mapping:
- *   - `none` ........... not connected (no candidate)
- *   - `must_choose` .... N>1 candidates, ambiguous pick
- *   - `needs_reconnection` connection flagged for re-consent
- *   - `stale` .......... pinned/override connection unavailable
- *   - `auto` / `pinned` / `admin_locked` resolve to a connection → OK, UNLESS
- *     `resolved_missing_scopes` is non-empty (insufficient_scopes upgrade).
+ * What the picker's trigger asks for when nothing is bound. `reconfigure`: the agent's own
+ * `auth_key` serves none of its selected tools — no pick or connection clears it.
  */
-export function resolutionBlocksRun(resolution: IntegrationAgentResolution): boolean {
-  if (resolution.resolved_missing_scopes.length > 0) return true;
-  return (
-    resolution.status === "none" ||
-    resolution.status === "must_choose" ||
-    resolution.status === "needs_reconnection" ||
-    resolution.status === "stale"
-  );
+type EmptyPickerPrompt = "choose" | "connect" | "reconfigure";
+
+interface ResolutionView {
+  /** The admin pin, else an enforced org default — read off the stored configuration. */
+  lockedConnectionIds: string[];
+  /** Bound without anyone's pick: a soft org default or the actor's single own connection. */
+  byDefault: boolean;
+  /** The soft org default's whole stored set while in play, incl. members candidates hide. */
+  softDefaultIds: string[];
+  /** Connection health, not run relevance (the server's `run_blocking`). No verdict ⇒ false. */
+  resolved: boolean;
+  emptyPickerPrompt: EmptyPickerPrompt;
+}
+
+/** The one reading of a server verdict shared by the picker, the 409 modal and the agent block. */
+export function describeResolution(resolution: IntegrationAgentResolution): ResolutionView {
+  const { source, error_code: code } = resolution;
+  return {
+    lockedConnectionIds:
+      resolution.admin_pinned_connection_ids.length > 0
+        ? resolution.admin_pinned_connection_ids
+        : resolution.org_default_enforced
+          ? resolution.org_default_connection_ids
+          : [],
+    byDefault: source === "org_default" || source === "fallback_auto",
+    softDefaultIds: source === "org_default" ? resolution.org_default_connection_ids : [],
+    resolved: code === null && resolution.resolved_connection_ids.length > 0,
+    emptyPickerPrompt:
+      code === "must_choose_connection"
+        ? "choose"
+        : code === "auth_key_serves_no_selected_tool"
+          ? "reconfigure"
+          : "connect",
+  };
 }

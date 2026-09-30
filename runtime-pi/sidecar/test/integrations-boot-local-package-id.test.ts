@@ -21,6 +21,8 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations } from "../integrations-boot.ts";
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 
+const CONN_A = { id: "conn-a", label: "work", accountId: null };
+
 const INTEGRATION_ID = "@tractr/local-integration";
 const SERVER_ID = "@tractr/local-server";
 
@@ -28,6 +30,7 @@ function localSpec(server: Record<string, unknown>): IntegrationSpawnSpec {
   return {
     integrationId: INTEGRATION_ID,
     namespace: "local",
+    connection: CONN_A,
     sourceKind: "local",
     manifest: { name: INTEGRATION_ID, version: "1.0.0", server },
     spawnEnv: {},

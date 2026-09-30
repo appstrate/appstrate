@@ -95,13 +95,18 @@ describe("GET /health", () => {
 describe("GET /integrations/boot-report", () => {
   const sampleReport = {
     ok: false,
-    declared: 2,
+    declaredConnections: 2,
     adapter: "process",
-    spawned: [{ integrationId: "@scope/a", namespace: "a", toolCount: 3 }],
-    failed: [{ integrationId: "@scope/b", error: "spawn python3 ENOENT" }],
+    spawned: [{ integrationId: "@scope/a", namespace: "a", connectionLabel: "work", toolCount: 3 }],
+    failed: [
+      { integrationId: "@scope/b", connectionLabel: "perso", error: "spawn python3 ENOENT" },
+    ],
     breadcrumbs: [
       { message: "runtime adapter: process", level: "info" as const },
-      { message: "@scope/b: failed after 12ms — spawn python3 ENOENT", level: "error" as const },
+      {
+        message: "@scope/b [perso]: failed after 12ms — spawn python3 ENOENT",
+        level: "error" as const,
+      },
     ],
   };
 
@@ -134,7 +139,7 @@ describe("GET /integrations/boot-report", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       ok: true,
-      declared: 0,
+      declaredConnections: 0,
       adapter: "none",
       spawned: [],
       failed: [],
@@ -275,7 +280,7 @@ describe("ALL /llm/* — shared forwarding policy", () => {
     authorization: "Bearer someone-elses-key",
     cookie: "session=abc",
     "x-forwarded-for": "10.0.0.1",
-    "x-appstrate-pi-sdk": "0.86.1",
+    "x-appstrate-pi-sdk": "0.87.1",
     "x-run-id": "run_1",
   };
   const KEPT = ["content-type", "x-opencode-session", "http-referer", "x-vendor-foo", "user-agent"];

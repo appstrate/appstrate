@@ -809,6 +809,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
         integrationId: "@oidcstrat/svc",
         authKey: "primary",
         accountId: "acct-oidc",
+        label: "Connexion 1",
         spaceId,
         userId: authUserId,
         credentialsEncrypted: "x",

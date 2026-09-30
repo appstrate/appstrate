@@ -14,7 +14,7 @@
  *   4. Inject the credential header server-side.
  *   5. Forward the request to the upstream API.
  *   6. Retry once on 401 with a refreshed token.
- *   7. Log persistent auth failures locally (once per integration per run).
+ *   7. Log persistent auth failures locally (once per connection per run).
  *
  * The MCP `api_call` tool handler in `runtime-pi/sidecar/mcp.ts`
  * takes typed JSON-RPC arguments and calls this helper directly, then
@@ -43,11 +43,17 @@ import {
   type SidecarConfig,
 } from "./helpers.ts";
 import {
+  allowlistUnrendered,
+  cookieScope,
+  credentialUrlPolicy,
+  exfiltrationRefusal,
+  redactionFields,
   fetchFollowingRedirectsCapturingCookies,
   hostLiterallyAllowlisted,
-  mergeSetCookieIntoJar,
-  redactHost,
+  redactCredentialHost,
   RedirectBlockedError,
+  UNRENDERED_ALLOWLIST_REFUSAL,
+  type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
@@ -96,6 +102,7 @@ export type ApiCallRequestBody =
 
 interface ApiCallArgs {
   integrationId: string;
+  connectionId: string;
   targetUrl: string;
   method: string;
   /** Hop-by-hop and routing headers must already be filtered out. */
@@ -161,21 +168,17 @@ type ApiCallResult = ApiCallSuccess | ApiCallFailure;
  * The integration-agnostic half of {@link ApiCallDeps}: everything the
  * credential-proxy core needs that is scoped to the RUN rather than to one
  * integration. Built once per sidecar (`buildSidecarRuntimeDeps`) and shared;
- * the credential pair is layered on per integration at tool-build time.
+ * the credential pair is layered on per bound connection at tool-build time.
  */
 export interface ApiCallBaseDeps {
   config: SidecarConfig;
-  /**
-   * Run-wide sticky-cookie store. Bucketed by
-   * {@link cookieBucketKey} — NOT by bare integration id; see that helper for
-   * why the capture origin is part of the identity of a cookie.
-   */
-  cookieJar: Map<string, string[]>;
+  /** Run-wide sticky-cookie store, read and written through `cookieScope`. */
+  cookieJar: CookieJar;
   fetchFn: typeof fetch;
   /**
-   * Set tracking which integrations already had a persistent auth
+   * Set tracking which credential scopes already had a persistent auth
    * failure logged in this run. Mutated by the function — shared
-   * across calls so a flapping integration only logs once and so the
+   * across calls so a flapping connection only logs once and so the
    * 401-retry path skips the refresh after the first failure.
    */
   reportedAuthFailures: Set<string>;
@@ -187,6 +190,12 @@ export interface ApiCallBaseDeps {
 }
 
 export interface ApiCallDeps extends ApiCallBaseDeps {
+  /**
+   * The manifest's declared (unrendered) `authorized_uris`. Matching uses the connection's
+   * rendered `CredentialsResponse.authorizedUris`; only a host written literally HERE pins the
+   * SSRF gate or shares cookies, so a connection-supplied host never does.
+   */
+  declaredUris: readonly string[];
   fetchCredentials: (integrationId: string) => Promise<CredentialsResponse>;
   /**
    * Force a refresh on a mid-run 401. Resolves to the fresh credentials when
@@ -218,18 +227,23 @@ function deepSubstituteJson(value: unknown, creds: Record<string, string> | unde
   return value;
 }
 
+/** The string leaves of a JSON value: what {@link deepSubstituteJson} substitutes. */
+function* jsonStringLeaves(value: unknown): Generator<string> {
+  if (typeof value === "string") yield value;
+  else if (Array.isArray(value)) for (const v of value) yield* jsonStringLeaves(v);
+  else if (value && typeof value === "object") {
+    for (const v of Object.values(value)) yield* jsonStringLeaves(v);
+  }
+}
+
 /** Collect unresolved `{{placeholders}}` left in a JSON value's string leaves. */
 function findUnresolvedJsonPlaceholders(
   value: unknown,
   creds: Record<string, string>,
-  acc: Set<string> = new Set(),
 ): Set<string> {
-  if (typeof value === "string") {
-    for (const p of findUnresolvedPlaceholders(substituteVars(value, creds))) acc.add(p);
-  } else if (Array.isArray(value)) {
-    for (const v of value) findUnresolvedJsonPlaceholders(v, creds, acc);
-  } else if (value && typeof value === "object") {
-    for (const v of Object.values(value)) findUnresolvedJsonPlaceholders(v, creds, acc);
+  const acc = new Set<string>();
+  for (const leaf of jsonStringLeaves(value)) {
+    for (const p of findUnresolvedPlaceholders(substituteVars(leaf, creds))) acc.add(p);
   }
   return acc;
 }
@@ -240,144 +254,28 @@ function assertNever(value: never): never {
 }
 
 /**
- * Which URL policy admitted the call that captured (or is about to replay) a
- * cookie.
- *
- * `allowlist` — the integration's `authorized_uris` gated it AND some entry
- * names this exact host with a wildcard-free host segment
- * (`hostLiterallyAllowlisted`). That conjunction is the whole point: matching
- * an entry is not enough, because the AFPS glob grammar lets `*`/`**` span the
- * host (`https://**`, `https://*.myshopify.com/**`), and then the concrete
- * host was picked by the AGENT at call time, not written down by the operator.
- * `system-packages/` ships such entries on user-registrable subdomains.
- *
- * `open` — everything else: `allow_all_uris`, no allowlist at all, or an
- * allowlist matched only through a glob host. The SSRF floor is not a trust
- * boundary, it only excludes internals.
+ * Per-connection key of the cookie jar and the 401 verdicts (`reportedAuthFailures`): two
+ * connections of one integration never share a cookie nor a persistent-401 verdict. NUL occurs
+ * in neither a package id (`INTEGRATION_ID_RE`) nor a connection uuid, so the two parts are
+ * unambiguous and no integration id can be crafted to forge another's scope.
  */
-type CookieGate = "allowlist" | "open";
-
-/**
- * Separator for {@link cookieBucketKey}. NUL cannot occur in a package id
- * (`INTEGRATION_ID_RE`) nor in a WHATWG origin, so the three parts of a key are
- * unambiguous and no integration id can be crafted to forge another's bucket.
- */
-const COOKIE_KEY_SEP = "\u0000";
-
-/**
- * Key of one bucket in the run-wide cookie jar.
- *
- * The jar used to be keyed on `integrationId` alone, with the cookie
- * attributes (Domain, Path, Secure, …) already stripped by
- * `mergeSetCookieIntoJar`. Nothing therefore recorded WHERE a cookie came
- * from, and every later `api_call` for that integration re-attached the whole
- * bucket. Under `allow_all_uris` the agent picks the host, so a live provider
- * session cookie shipped wherever the model named it. The
- * `substitutesCredential` exfiltration guard does not cover this: it only sees
- * `{{field}}` templating, and a replayed cookie is never templated.
- *
- * So the bucket identity is `(integration, gate, capture origin)`:
- *   - `origin` — WHATWG origin (scheme + host + port) of the call's INITIAL,
- *     policy-checked target. A whole redirect chain shares one bucket on
- *     purpose: #473 exists because the session cookie of an OAuth/CAS flow
- *     lands on an intermediate hop and must be usable by the next call to the
- *     origin that started the flow, and the redirect follower already strips
- *     cookies on an out-of-boundary cross-origin hop.
- *   - `gate` — see {@link CookieGate}. Recorded at capture time so
- *     {@link eligibleCookies} can tell an allowlist-gated bucket from one an
- *     `allow_all_uris` call created, without having to re-derive the policy
- *     for a URL it no longer has.
- */
-export function cookieBucketKey(integrationId: string, gate: CookieGate, origin: string): string {
-  return `${integrationId}${COOKIE_KEY_SEP}${gate}${COOKIE_KEY_SEP}${origin}`;
+export function credentialScope(integrationId: string, connectionId: string): string {
+  return `${integrationId}\u0000${connectionId}`;
 }
 
-/** WHATWG origin of `url`, or `"null"` (the opaque origin) when unparseable. */
-function originOf(url: string): string {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return "null";
-  }
-}
-
-/**
- * Cookies the run-wide jar may attach to a call for `targetOrigin`, deduped by
- * cookie name (the caller may overlay fresher entries on the returned map).
- *
- * Two admission rules, and only two:
- *   - Same origin as capture — always. That IS sticky-session continuity, and
- *     it is what the jar exists for.
- *   - Different origin — only when BOTH the capturing call and this call
- *     landed on a host the operator wrote down LITERALLY in
- *     `authorized_uris` (`gate === "allowlist"`, see {@link CookieGate}).
- *     That is the declared multi-host case (Dropbox `api ⇄ content`, Twilio
- *     `api ⇄ lookups ⇄ verify`) and it takes the same stance as the redirect
- *     follower's hybrid credential strip 150 lines away in
- *     `api-call-engine.ts`: a host the operator named is inside the trust
- *     boundary by declaration; anywhere else, origin equality is the boundary
- *     (WHATWG). What it deliberately does NOT extend to is two hosts that only
- *     share a glob — `victim.myshopify.com` and `attacker.myshopify.com` both
- *     match `https://*.myshopify.com/**` and are two different tenants.
- *     Cookies are credentials too, and a replayed one carries no `{{field}}`
- *     template, so `substitutesCredential` never sees it.
- *
- * Same-origin buckets are folded in LAST so a fresh same-origin value wins
- * over a stale sibling-host one of the same name.
- */
-function eligibleCookies(
-  cookieJar: Map<string, string[]>,
-  integrationId: string,
-  gate: CookieGate,
-  targetOrigin: string,
-): Map<string, string> {
-  const byName = new Map<string, string>();
-  const fold = (cookies: readonly string[] | undefined) => {
-    for (const ck of cookies ?? []) byName.set(ck.split("=")[0]!, ck);
-  };
-  if (gate === "allowlist") {
-    const prefix = `${integrationId}${COOKIE_KEY_SEP}allowlist${COOKIE_KEY_SEP}`;
-    for (const [key, cookies] of cookieJar) {
-      if (key.startsWith(prefix)) fold(cookies);
-    }
-  }
-  fold(cookieJar.get(cookieBucketKey(integrationId, "open", targetOrigin)));
-  fold(cookieJar.get(cookieBucketKey(integrationId, "allowlist", targetOrigin)));
-  return byName;
-}
-
-/**
- * True when `input` contains a `{{key}}` placeholder naming a decrypted
- * credential field. Mirrors the local resolver's `referencesCredentialField`:
- * an agent that templates a credential into an agent-controlled URL / header /
- * body must not be allowed to ship that secret to an arbitrary host under
- * `allow_all_uris`.
- */
-// Reuses the canonical placeholder grammar so this exfil guard can never drift from what substituteVars actually substitutes.
-const referencesCredentialField = (input: string, creds: Record<string, unknown>): boolean =>
-  findUnresolvedPlaceholders(input).some((k) => k in creds);
-
-/**
- * True when a `substituteBody: true` request body would have a decrypted
- * credential field templated into it. Exhaustive over every
- * {@link ApiCallRequestBody} kind — adding a new kind without deciding its
- * exfil-guard behaviour fails to compile via `assertNever`.
- */
-function bodyReferencesCredential(
-  body: ApiCallRequestBody,
-  creds: Record<string, string>,
-): boolean {
+/** Strings substituted in a `substituteBody: true` body (JSON escaping would hide `{{\tkey}}`). */
+function substitutedBodyStrings(body: ApiCallRequestBody): Iterable<string> {
   switch (body.kind) {
     case "none":
     case "streaming":
       // Pass-through by design — no substitution ever happens on these kinds.
-      return false;
+      return [];
     case "buffered":
-      return body.text !== undefined && referencesCredentialField(body.text, creds);
+      return body.text !== undefined ? [body.text] : [];
     case "formData":
-      return !!body.fieldTemplates?.some((t) => referencesCredentialField(t, creds));
+      return body.fieldTemplates ?? [];
     case "json":
-      return referencesCredentialField(JSON.stringify(body.value), creds);
+      return jsonStringLeaves(body.value);
     default:
       return assertNever(body);
   }
@@ -395,6 +293,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   const { config, cookieJar, fetchFn, fetchCredentials, refreshCredentials, reportedAuthFailures } =
     deps;
   const { integrationId, targetUrl, method, body, substituteBody } = args;
+  const scope = credentialScope(integrationId, args.connectionId);
 
   // Repair `Bearer{{token}}` → `Bearer {{token}}` on the caller TEMPLATES,
   // once, before any substitution runs. Doing it on the resolved value (what
@@ -437,83 +336,71 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //    targets when allowAllUris is set). The SSRF branches add the
   //    DNS-resolving rebind layer over the literal blocklist (see
   //    `refuseSsrfTarget`). On the allowlist branch, the SSRF gate
-  //    applies UNLESS some entry pins this exact host literally —
+  //    applies UNLESS some DECLARED entry pins this exact host literally —
   //    a named host resolving internally is the operator's declared
   //    topology (on-prem APIs are legitimate allowlist targets), but
   //    the AFPS glob grammar lets `**` span the host (`https://**`),
   //    and a glob-matched host is agent-chosen, not operator-chosen —
   //    without the gate that branch would be strictly weaker than
-  //    allow_all.
-  // 4a. Credential-exfiltration guard. When the agent templates a decrypted
-  //     credential (`{{field}}`) into the agent-controlled URL, a header, or a
-  //     substituted body, `allow_all_uris` MUST NOT be honoured — the SSRF net
-  //     alone blocks only internal hosts, so the secret would still be
-  //     shippable to any external attacker host. Downgrade to allowlist-only,
-  //     mirroring the local resolver, and refuse outright if the integration
-  //     declares no `authorized_uris` to constrain the destination.
-  const substitutesCredential =
-    referencesCredentialField(targetUrl, creds.credentials) ||
-    Object.values(callerHeaders).some((v) => referencesCredentialField(v, creds.credentials)) ||
-    (substituteBody && bodyReferencesCredential(body, creds.credentials));
+  //    allow_all. A declared allowlist rendering to nothing refuses every target.
+  // 4a. Credential-exfiltration guard (docs/architecture/SIDECAR.md).
+  const authorizedUris = creds.authorizedUris ?? [];
+  const policy = credentialUrlPolicy({
+    templates: [
+      targetUrl,
+      ...Object.values(callerHeaders),
+      ...(substituteBody ? substitutedBodyStrings(body) : []),
+    ],
+    fields: creds.credentials,
+    allowAllUris: creds.allowAllUris,
+    authorizedUris,
+  });
+  // Reassigned when a 401 retry runs with refreshed credentials.
+  let redactFields = redactionFields(policy, creds.credentials);
 
-  const effectiveAllowAll = creds.allowAllUris && !substitutesCredential;
-
-  /**
-   * Cookie scope for this call — see {@link CookieGate}. Assigned by whichever
-   * branch below admits the call, so the recorded gate and the policy that
-   * actually ran can never disagree.
-   */
-  let cookieGate: CookieGate = "open";
-
-  if (effectiveAllowAll) {
-    const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
-    if (refusal) return refusal;
-  } else if (creds.authorizedUris && creds.authorizedUris.length) {
-    if (!matchesAuthorizedUri(resolvedUrl, creds.authorizedUris)) {
-      return {
-        ok: false,
-        status: 403,
-        error: `URL not authorized for integration "${integrationId}". Allowed: ${creds.authorizedUris.join(", ")}`,
-      };
-    }
-    if (!hostLiterallyAllowlisted(resolvedUrl, creds.authorizedUris)) {
-      const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
-      if (refusal) return refusal;
-    } else {
-      // The SAME predicate that decides whether the allowlist is a host-level
-      // operator declaration for the SSRF gate decides it for cookies: only a
-      // wildcard-free host entry names this host, and only then is the
-      // cross-host fold in `eligibleCookies` a statement the operator made.
-      // A glob-matched host is agent-chosen, so the call keeps the
-      // origin-scoped `open` bucket.
-      cookieGate = "allowlist";
-    }
-  } else if (substitutesCredential) {
-    // allow_all_uris was the only permission but the call would exfiltrate a
-    // credential to an agent-chosen host — no allowlist exists to constrain it.
+  if (
+    allowlistUnrendered({
+      declaredUris: deps.declaredUris,
+      authorizedUris,
+      allowAllUris: policy.allowAllUris,
+    })
+  ) {
     return {
       ok: false,
       status: 403,
-      error: `Call for integration "${integrationId}" substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`,
+      error: `Integration "${integrationId}": ${UNRENDERED_ALLOWLIST_REFUSAL}`,
     };
+  } else if (policy.refuse) {
+    return { ok: false, status: 403, error: exfiltrationRefusal(integrationId) };
+  } else if (policy.allowAllUris) {
+    const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
+    if (refusal) return refusal;
+  } else if (authorizedUris.length) {
+    if (!matchesAuthorizedUri(resolvedUrl, authorizedUris)) {
+      return {
+        ok: false,
+        status: 403,
+        // The declared entries: a rendered one may be a secret (an exact webhook URL).
+        error: `URL not authorized for integration "${integrationId}". Allowed: ${deps.declaredUris.join(", ")}`,
+      };
+    }
+    if (!hostLiterallyAllowlisted(resolvedUrl, deps.declaredUris)) {
+      const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
+      if (refusal) return refusal;
+    }
   } else {
     // No authorizedUris and no allowAllUris — apply the SSRF safety net.
-    const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
+    const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
     if (refusal) return refusal;
   }
 
-  // 4b. Where this call is going. Together with `cookieGate` above it names
-  //     the jar bucket this call may read from and will write to. See
-  //     {@link cookieBucketKey}.
-  const targetOrigin = originOf(resolvedUrl);
-  /**
-   * Cookies captured by THIS call, across every redirect hop and the 401
-   * retry. Kept separate from the run-wide jar so the redirect follower —
-   * which knows nothing about origins and keys everything under the id it is
-   * handed — cannot write into another origin's bucket. Promoted into the
-   * run-wide jar once, at step 8, under this call's bucket.
-   */
-  const callJar = new Map<string, string[]>();
+  // 4b. This call's view of the run-wide jar (docs/architecture/SIDECAR.md), keyed by the
+  //     connection's credential scope. Siblings are gated per URL, whatever gated the initial target.
+  const cookies = cookieScope(
+    cookieJar,
+    scope,
+    policy.allowAllUris || !authorizedUris.length ? null : deps.declaredUris,
+  );
 
   // 5b. Pre-substitute headers with the *initial* creds so we can
   //     fail fast on unresolved placeholders. Re-substituted on each
@@ -626,17 +513,11 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     }
     // Server-side credential injection (Authorization, X-Api-Key, …).
     const credentialInjection = applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
-    // Re-inject sticky cookies — only those this call's origin is entitled to
-    // (see `eligibleCookies`). Anything captured earlier in THIS call (a 401
-    // retry replays after the first attempt's `Set-Cookie`) is fresher, so it
-    // is overlaid last.
-    const byName = eligibleCookies(cookieJar, integrationId, cookieGate, targetOrigin);
-    for (const ck of callJar.get(integrationId) ?? []) byName.set(ck.split("=")[0]!, ck);
-    if (byName.size) {
-      const existing = resolvedHeaders["cookie"] || "";
-      const stored = [...byName.values()].join("; ");
-      resolvedHeaders["cookie"] = existing ? `${existing}; ${stored}` : stored;
-    }
+    // ONE Cookie header (injected credential + caller cookies): the jar's base.
+    const cookieKeys = Object.keys(resolvedHeaders).filter((k) => k.toLowerCase() === "cookie");
+    const baseCookie = cookieKeys.map((k) => resolvedHeaders[k]).join("; ");
+    for (const k of cookieKeys) delete resolvedHeaders[k];
+    if (baseCookie) resolvedHeaders[cookieKeys[0]!] = baseCookie;
 
     // For the FormData body shape, drop a caller-supplied *multipart*
     // Content-Type (matched case-insensitively on the header NAME) so Bun's
@@ -698,6 +579,9 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       // agent either — it never leaves this module.
       init.duplex = "half";
       init.redirect = "manual";
+      // No follower on this path, so the jar cookies are composed here.
+      const cookie = cookies.header(resolvedUrl, baseCookie);
+      if (cookie) resolvedHeaders[cookieKeys[0] ?? "cookie"] = cookie;
       const response = await fetchFn(resolvedUrl, init);
       // Streaming path issues a single unfollowed request — no manual hops.
       return {
@@ -712,7 +596,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       url: resolvedUrl,
       init,
       fetchFn,
-      cookieJar: callJar,
+      cookies,
       integrationId,
       injectedCredentialHeader:
         credentialInjection.kind === "inject"
@@ -720,8 +604,9 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
           : credentialInjection.kind === "caller_override"
             ? credentialInjection.headerName.toLowerCase()
             : null,
-      authorizedUris: creds.authorizedUris ?? undefined,
-      allowAllUris: creds.allowAllUris,
+      // The 4a policy, not the raw flag: a templated credential must not be redirected off-list.
+      authorizedUris,
+      allowAllUris: policy.allowAllUris,
       // Thread the injected DNS resolver into the per-hop SSRF rebind
       // check — same resolver the initial-target gate uses. Without it
       // the follower falls back to the system resolver, which diverges
@@ -730,6 +615,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       ...(deps.resolveHost ? { resolveHost: deps.resolveHost } : {}),
       // Preserve the sidecar's structured per-hop refusal logging.
       logger,
+      credentialFields: redactionFields(policy, activeCreds.credentials),
     });
     return {
       ...followed,
@@ -756,7 +642,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     requestHeaderNames = r.requestHeaderNames;
     credentialInjection = r.credentialInjection;
   } catch (err) {
-    return wrapRequestError(err, resolvedUrl);
+    return wrapRequestError(err, resolvedUrl, redactFields);
   }
 
   let authRefreshed = false;
@@ -773,11 +659,12 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     config.platformApiUrl &&
     config.runToken &&
     credentialInjection === "inject" &&
-    !reportedAuthFailures.has(integrationId)
+    !reportedAuthFailures.has(scope)
   ) {
     const fresh = await refreshCredentials(integrationId).catch(() => null);
     if (fresh) {
       if (body.kind !== "streaming") {
+        redactFields = redactionFields(policy, fresh.credentials);
         try {
           const r = await doUpstreamRequest(fresh);
           upstream = r.response;
@@ -786,7 +673,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
           requestHeaderNames = r.requestHeaderNames;
           credentialInjection = r.credentialInjection;
         } catch (err) {
-          return wrapRequestError(err, resolvedUrl);
+          return wrapRequestError(err, resolvedUrl, redactFields);
         }
       } else {
         // Body already consumed — surface the rotated-but-still-401 signal to
@@ -796,37 +683,23 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     }
   }
 
-  // 8. Terminal-hop Set-Cookie capture. No-op for buffered (the
-  //    follower already merged every hop into `callJar`); load-bearing for
-  //    streaming (final hop only — bodies can't be replayed).
-  mergeSetCookieIntoJar(upstream.headers.getSetCookie(), callJar, integrationId);
-  //    Promote what this call captured into the run-wide jar, tagged with the
-  //    origin + policy that earned it. A whole redirect chain lands in the
-  //    bucket of the INITIAL, policy-checked target: that is what keeps #473
-  //    working (the session cookie of an OAuth/CAS flow is set on an
-  //    intermediate hop and must serve the next call to the origin that
-  //    started the flow), and the follower already strips cookies on an
-  //    out-of-boundary cross-origin hop.
-  const capturedCookies = callJar.get(integrationId);
-  if (capturedCookies?.length) {
-    mergeSetCookieIntoJar(
-      capturedCookies,
-      cookieJar,
-      cookieBucketKey(integrationId, cookieGate, targetOrigin),
-    );
-  }
+  // 8. Terminal-hop Set-Cookie capture (buffered: idempotent re-merge; streaming: no follower).
+  cookies.capture(upstreamFinalUrl, upstream.headers.getSetCookie());
 
-  // 9. Log a persistent auth failure once per integration per run. The flag is
+  // 9. Log a persistent auth failure once per connection per run. The flag is
   //    set platform-side by the `/refresh` call above (which returns null on a
   //    terminal credential); here we only gate the one-refresh-attempt-per-run
   //    behaviour and surface a log line.
   if (
     upstream.status === 401 &&
     credentialInjection === "inject" &&
-    !reportedAuthFailures.has(integrationId)
+    !reportedAuthFailures.has(scope)
   ) {
-    reportedAuthFailures.add(integrationId);
-    logger.warn("Upstream returned 401 after refresh attempt", { integrationId });
+    reportedAuthFailures.add(scope);
+    logger.warn("Upstream returned 401 after refresh attempt", {
+      integrationId,
+      connectionId: args.connectionId,
+    });
   }
 
   // 10. Success-path diagnostic envelope (#404). One structured line per
@@ -838,7 +711,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   logger.debug("integration api_call completed", {
     integrationId,
     method,
-    host: redactHost(upstreamFinalUrl),
+    host: redactCredentialHost(upstreamFinalUrl, redactFields),
     status: upstream.status,
     durationMs: Math.round(performance.now() - requestStartedAt),
     hops: upstreamHops,
@@ -849,9 +722,9 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     injectedHeader:
       credentialInjection === "inject" ? (creds.credentialHeaderName?.toLowerCase() ?? null) : null,
     // Which URL-trust policy gated the call.
-    urlPolicy: creds.allowAllUris
+    urlPolicy: policy.allowAllUris
       ? "allow_all"
-      : creds.authorizedUris && creds.authorizedUris.length
+      : authorizedUris.length
         ? "allowlist"
         : "ssrf_guard",
     authRefreshed,
@@ -884,6 +757,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
  */
 async function refuseSsrfTarget(
   url: string,
+  fields: Readonly<Record<string, string>>,
   resolveHost?: HostResolver,
 ): Promise<ApiCallFailure | null> {
   const blockedFailure: ApiCallFailure = {
@@ -904,21 +778,28 @@ async function refuseSsrfTarget(
     return {
       ok: false,
       status: 502,
-      error: `Target host could not be resolved (${redactHost(url)})`,
+      error: `Target host could not be resolved (${redactCredentialHost(url, fields)})`,
     };
   }
   logger.warn("api_call refused: target resolves into a blocked network range", {
-    host: redactHost(url),
+    host: redactCredentialHost(url, fields),
   });
   return blockedFailure;
 }
 
-function wrapFetchError(err: unknown, label: string, url: string): ApiCallFailure {
+function wrapFetchError(
+  err: unknown,
+  label: string,
+  url: string,
+  fields: Readonly<Record<string, string>>,
+): ApiCallFailure {
   const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
   const suffix = code ? `: ${code}` : "";
-  // Same host projection every sibling in this file uses, from the one helper —
-  // an inline `new URL(url).hostname` here was a second copy of `redactHost`.
-  return { ok: false, status: 502, error: `${label}${suffix} (${redactHost(url)})` };
+  return {
+    ok: false,
+    status: 502,
+    error: `${label}${suffix} (${redactCredentialHost(url, fields)})`,
+  };
 }
 
 /**
@@ -934,13 +815,17 @@ function wrapFetchError(err: unknown, label: string, url: string): ApiCallFailur
  * out because a redirect target may itself encode capabilities
  * (`?token=…`) we don't want surfaced to the agent.
  */
-function wrapRequestError(err: unknown, resolvedUrl: string): ApiCallFailure {
+function wrapRequestError(
+  err: unknown,
+  resolvedUrl: string,
+  fields: Readonly<Record<string, string>>,
+): ApiCallFailure {
   if (err instanceof RedirectBlockedError) {
     return {
       ok: false,
       status: 403,
-      error: `Redirect blocked (${err.reason}): host=${redactHost(err.hopUrl)}`,
+      error: `Redirect blocked (${err.reason}): host=${redactCredentialHost(err.hopUrl, fields)}`,
     };
   }
-  return wrapFetchError(err, "Upstream request failed", resolvedUrl);
+  return wrapFetchError(err, "Upstream request failed", resolvedUrl, fields);
 }

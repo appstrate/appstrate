@@ -24,14 +24,25 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion, seedSpaceMember } from "../../helpers/seed.ts";
-import { activatePackage, updateSpacePackage } from "../../../src/services/space-packages.ts";
 import {
-  buildMinimalZip,
-  deleteVersionZip,
-  uploadPackageZip,
-} from "../../../src/services/package-storage.ts";
-import { runs, packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
+  loseVersionArchive,
+  seedPackage,
+  seedPackageVersion,
+  seedSpaceMember,
+} from "../../helpers/seed.ts";
+import { activatePackage, updateSpacePackage } from "../../../src/services/space-packages.ts";
+import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
+import {
+  runs,
+  packages,
+  packageVersions,
+  packageDistTags,
+  integrationPins,
+} from "@appstrate/db/schema";
+import {
+  seedConnectionTestIntegration,
+  seedIntegrationConnection,
+} from "../../helpers/run-connection-fixtures.ts";
 import { validateManifest } from "@appstrate/core/validation";
 import { and } from "drizzle-orm";
 import { expectProblem } from "../../helpers/assertions.ts";
@@ -617,7 +628,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     it("refuses a version whose ZIP is gone with 422, never running the draft", async () => {
       await seedPublishedAgent(ctx, "1.2.3");
-      await deleteVersionZip("@acme/briefing", "1.2.3");
+      await loseVersionArchive("@acme/briefing", "1.2.3");
       // The seeded draft is runnable (non-empty prompt): the 422 and zero run
       // rows prove it was not substituted for the missing version.
       await expectProblem(await launch(), 422, { code: "version_artifact_unavailable" });
@@ -674,11 +685,73 @@ describe("POST /api/runs/remote — kind: registry", () => {
       // 422 below is precedence, not an integration the fixture failed to declare.
       await expectProblem(await launch(), 409, { code: "missing_integration_connection" });
 
-      await deleteVersionZip("@acme/briefing", "1.2.3");
+      await loseVersionArchive("@acme/briefing", "1.2.3");
       await expectProblem(await launch(), 422, { code: "version_artifact_unavailable" });
       expect(await db.select().from(runs).where(eq(runs.packageId, "@acme/briefing"))).toHaveLength(
         0,
       );
+    });
+  });
+
+  // The afps-runtime `api_call` tool takes no connection argument, so a remote
+  // runner cannot address a set: its credential-proxy calls would 409 forever.
+  describe("a connection set", () => {
+    const INTEG = "@acme/svc";
+    let a: string;
+    let b: string;
+
+    beforeEach(async () => {
+      // Published 1.0.0: the remote kickoff freezes the agent's `^1.0.0` pin
+      // against published versions before it snapshots the connections.
+      await seedConnectionTestIntegration(ctx, INTEG);
+      await seedRegistryAgent(
+        ctx,
+        {
+          ...publishedManifest("1.2.3"),
+          dependencies: { skills: {}, mcp_servers: {}, integrations: { [INTEG]: "^1.0.0" } },
+          integrations_configuration: { [INTEG]: { tools: ["search"] } },
+        } as unknown as Record<string, unknown>,
+        "1.2.3",
+      );
+      a = await seedIntegrationConnection(ctx, INTEG);
+      b = await seedIntegrationConnection(ctx, INTEG);
+    });
+
+    async function pinMine(connectionIds: string[]) {
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: "@acme/briefing",
+        integrationId: INTEG,
+        userId: ctx.user.id,
+        connectionIds,
+      });
+    }
+
+    function launch() {
+      return post({
+        source: {
+          kind: "registry",
+          packageId: "@acme/briefing",
+          stage: "published",
+          spec: "1.2.3",
+        },
+        spaceId: ctx.defaultSpaceId,
+        input: {},
+      });
+    }
+
+    it("refuses a run whose cascade binds several connections to one integration (409 agent_not_ready)", async () => {
+      await pinMine([a, b]);
+      const problem = await expectProblem(await launch(), 409, { code: "agent_not_ready" });
+      expect(problem.detail).toContain(INTEG);
+      expect(await db.select().from(runs).where(eq(runs.packageId, "@acme/briefing"))).toHaveLength(
+        0,
+      );
+    });
+
+    it("creates the run once the set is narrowed to one (control)", async () => {
+      await pinMine([b]);
+      expect((await launch()).status).toBe(201);
     });
   });
 

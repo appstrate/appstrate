@@ -31,6 +31,7 @@ import {
   readDefaultTools,
   resolveEffectiveToolSelection,
   resolveIntegrationToolCatalog,
+  selectedApiCallConfigs,
   findNonSnakeCaseIdentityClaimKeys,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
@@ -461,11 +462,10 @@ describe("integrationManifestSchema — templated authorized_uris", () => {
     expect(messages).toContainEqual(expect.stringContaining("forbidden on an oauth2 auth"));
   });
 
-  it("rejects a template on an auth exposing api_call", () => {
-    const issues = entryIssues(
-      sshLike({}, { _meta: { "dev.appstrate/api": { auths: { primary: {} } } } }),
-    );
-    expect(issues).toEqual([expect.stringContaining("forbidden on an auth exposing api_call")]);
+  const apiCall = { _meta: { "dev.appstrate/api": { auths: { primary: {} } } } };
+
+  it("accepts an authority template on an auth exposing api_call", () => {
+    expect(entryIssues(sshLike({}, apiCall))).toEqual([]);
   });
 
   it("rejects a placeholder in the path", () => {
@@ -494,6 +494,78 @@ describe("integrationManifestSchema — templated authorized_uris", () => {
       authorized_uris: ["https://{$credential.host}:{$credential.port}/api/**"],
     });
     expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  describe("URL form", () => {
+    const siteSchema = {
+      credentials: {
+        schema: {
+          type: "object",
+          required: ["site_url"],
+          properties: { site_url: { type: "string" }, path: { type: "string" } },
+        },
+      },
+    };
+    const urlForm = (authorized_uris: string[], auth: Record<string, unknown> = {}) =>
+      sshLike({ ...siteSchema, authorized_uris, ...auth }, apiCall);
+
+    for (const pattern of [
+      "{$credential.site_url}/**",
+      "{$credential.site_url}/api/3/**",
+      "{$credential.site_url}",
+    ]) {
+      it(`accepts ${JSON.stringify(pattern)} on an api_call auth`, () => {
+        expect(entryIssues(urlForm([pattern]))).toEqual([]);
+      });
+    }
+
+    for (const pattern of [
+      "x{$credential.site_url}/**",
+      "{$credential.site_url}.example.com/**",
+      "{$credential.site_url}/{$credential.site_url}",
+      "{$credential.site_url}{$credential.site_url}",
+    ]) {
+      it(`rejects ${JSON.stringify(pattern)}`, () => {
+        expect(entryIssues(urlForm([pattern]))).toEqual([
+          expect.stringContaining("without a scheme:// prefix"),
+        ]);
+      });
+    }
+
+    it("rejects an undeclared field", () => {
+      expect(entryIssues(urlForm(["{$credential.site}/**"]))).toEqual([
+        expect.stringContaining("'site', which is not a credentials"),
+      ]);
+    });
+
+    it("rejects a declared field that is not required", () => {
+      expect(entryIssues(urlForm(["{$credential.path}/**"]))).toEqual([
+        expect.stringContaining("'path', which is not listed"),
+      ]);
+    });
+
+    it("rejects the URL form on an auth declaring connect", () => {
+      const connect = {
+        login: {
+          request: { method: "POST", url: "https://api.example.com/login" },
+          success_criteria: [{ condition: "$statusCode == 200" }],
+          outputs: { site_url: "$response.body#/site_url" },
+        },
+      };
+      expect(entryIssues(urlForm(["{$credential.site_url}/**"], { connect }))).toContainEqual(
+        expect.stringContaining("forbidden on an auth declaring connect"),
+      );
+    });
+
+    it("rejects the URL form on an oauth2 auth", () => {
+      const m = baseManifest();
+      const auths = m.auths as Record<string, Record<string, unknown>>;
+      auths.oauth!.authorized_uris = ["{$credential.site_url}/**"];
+      const messages = (integrationManifestSchema.safeParse(m).error?.issues ?? [])
+        .filter((i) => i.path.join(".") === "auths.oauth.authorized_uris.0")
+        .map((i) => i.message);
+      expect(messages).toContainEqual(expect.stringContaining("forbidden on an oauth2 auth"));
+    });
   });
 
   it("leaves untemplated entries unaffected on an api_call auth", () => {
@@ -2148,5 +2220,38 @@ describe("resolveEffectiveToolSelection", () => {
   });
   it("an undefined selection with no declared default stays undefined", () => {
     expect(resolveEffectiveToolSelection(undefined, noDefault)).toBeUndefined();
+  });
+});
+
+describe("selectedApiCallConfigs", () => {
+  const apiKeyAuth = (env: string) => ({
+    type: "api_key",
+    credentials: { schema: { type: "object", properties: {} } },
+    authorized_uris: ["https://api/**"],
+    delivery: { env: { [env]: { value: "{$credential.k}" } } },
+  });
+  const m = parse(
+    baseManifest({
+      source: { kind: "none" },
+      auths: { key: apiKeyAuth("K"), alt: apiKeyAuth("K2") },
+      _meta: { "dev.appstrate/api": { auths: { key: { upload_protocols: ["tus"] }, alt: {} } } },
+    }),
+  );
+  const authKeys = (selection: readonly string[] | "*" | undefined) =>
+    selectedApiCallConfigs(m, selection).map((cfg) => cfg.authKey);
+
+  it("grants every api_call under the wildcard", () => {
+    expect(authKeys("*")).toEqual(["key", "alt"]);
+  });
+  it("grants an api_call picked by its own name", () => {
+    expect(authKeys(["api_call__alt"])).toEqual(["alt"]);
+  });
+  it("grants an api_call picked through its api_upload companion", () => {
+    expect(authKeys(["api_upload__key"])).toEqual(["key"]);
+  });
+  it("grants none for an undefined, empty or unrelated selection", () => {
+    expect(authKeys(undefined)).toEqual([]);
+    expect(authKeys([])).toEqual([]);
+    expect(authKeys(["search"])).toEqual([]);
   });
 });

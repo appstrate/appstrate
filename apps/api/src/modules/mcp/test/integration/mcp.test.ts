@@ -53,6 +53,15 @@ await registerTestPlatformApp();
 
 const rpc = mcpRpc(app);
 
+/** A raw `initialize` POST, for the refusals `rpc` would parse as an envelope. */
+function initializeAs(headers: Record<string, string>) {
+  return app.request(mcpPath(headers), {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
+  });
+}
+
 /** Parse the JSON payload a tool returns in its first text content block. */
 function toolPayload(envelope: JsonRpcEnvelope): {
   isError: boolean;
@@ -182,7 +191,7 @@ describe("mcp discovery + auth gate", () => {
     // RBAC spec §7.3: the per-org endpoint pins an org, resolves the ORG'S
     // DEFAULT SPACE, and reads the caller's role there. `mcp` is a space-level
     // resource, so a `guest` — implicit in no space — cannot pass its guard.
-    // A session caller is used because it takes the same `resolveMcpSpaceRow` →
+    // A session caller is used because it takes the same `enterMcpSpace` →
     // `applySpacePermissions` path a per-org bearer does; only the credential
     // that resolved the org role differs.
     const owner = await createTestContext();
@@ -190,11 +199,7 @@ describe("mcp discovery + auth gate", () => {
     await addOrgMember(owner.orgId, guest.id, "guest");
     const headers = { Cookie: guest.cookie, "X-Org-Id": owner.orgId };
 
-    const denied = await app.request(mcpPath(headers), {
-      method: "POST",
-      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
-    });
+    const denied = await initializeAs(headers);
     expect(denied.status).toBe(403);
 
     // The control: one `operator` row in the default space, same caller, same
@@ -209,6 +214,57 @@ describe("mcp discovery + auth gate", () => {
     expect((listed.envelope.result?.tools as unknown[]).length).toBeGreaterThan(0);
   });
 
+  it("enters an X-Space-Id space with the middleware's refusals, byte for byte", async () => {
+    // `enterMcpSpace` → `enterSpaceById`, the door `requireSpaceContext` uses:
+    // a malformed id is a 400 before any lookup; a missing id, a space of
+    // another org and a private one the caller is not in are the SAME 404; a
+    // closed one is the 403; a row lets the same caller in.
+    const owner = await createTestContext();
+    const other = await createTestContext();
+    const member = await memberContext(owner, "member");
+    const foreign = await seedSpace({ orgId: other.orgId, visibility: "open" });
+    const priv = await seedSpace({ orgId: owner.orgId, visibility: "private" });
+    const closed = await seedSpace({ orgId: owner.orgId, visibility: "closed" });
+    const initialize = (spaceId: string) =>
+      initializeAs({ Cookie: member.cookie, "X-Org-Id": owner.orgId, "X-Space-Id": spaceId });
+
+    const malformed = await initialize("spc_1");
+    expect(malformed.status).toBe(400);
+    expect(((await malformed.json()) as { detail: string }).detail).toContain("Malformed space id");
+    for (const id of [prefixedId("spc"), foreign.id, priv.id]) {
+      const res = await initialize(id);
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as { detail: string }).detail).toBe(
+        `Space '${id}' not found in this organization`,
+      );
+    }
+    const refused = await initialize(closed.id);
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { code: string }).code).toBe("not_a_space_member");
+
+    await seedSpaceMember({ spaceId: closed.id, userId: member.user.id, presetRole: "operator" });
+    expect((await initialize(closed.id)).status).toBe(200);
+  });
+
+  it("holds a space-pinned API key to its space", async () => {
+    const owner = await createTestContext();
+    const sibling = await seedSpace({ orgId: owner.orgId, visibility: "open" });
+    const key = await seedApiKey({
+      orgId: owner.orgId,
+      spaceId: owner.defaultSpaceId,
+      createdBy: owner.user.id,
+      scopes: ["mcp:read"],
+    });
+    const headers = { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": owner.orgId };
+
+    expect((await initializeAs(headers)).status).toBe(200);
+    const spoofed = await initializeAs({ ...headers, "X-Space-Id": sibling.id });
+    expect(spoofed.status).toBe(403);
+    expect(((await spoofed.json()) as { detail: string }).detail).toBe(
+      "X-Space-Id does not match authenticated space",
+    );
+  });
+
   it("rejects GET on the per-org endpoint with 405 for an authenticated caller", async () => {
     // Stateless transport (no session id, JSON response mode) does not serve a
     // standalone SSE stream, so GET is Method Not Allowed. This is the
@@ -220,6 +276,35 @@ describe("mcp discovery + auth gate", () => {
     });
     expect(res.status).toBe(405);
     expect(res.headers.get("Allow")).toBe("POST");
+  });
+
+  it("answers notifications/initialized with a bare 202", async () => {
+    // The chat's MCP client answers this hop itself (`answerStatelessHopsLocally`,
+    // module-chat): it may only do so while the server's reply is exactly this.
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const res = await app.request(mcpPath(headers), {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+    });
+    expect(res.status).toBe(202);
+    expect(await res.text()).toBe("");
+  });
+
+  it("accepts an envelope over the SDK's 4 MB default, up to API_BODY_LIMIT_BYTES", async () => {
+    const size = 4 * 1024 * 1024 + 1024;
+    expect(getEnv().API_BODY_LIMIT_BYTES).toBeGreaterThan(size);
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const res = await app.request(mcpPath(headers), {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+        params: { pad: "x".repeat(size) },
+      }),
+    });
+    expect(res.status).toBe(202);
   });
 
   it("rejects DELETE on the per-org endpoint with 405 (no session to terminate in stateless mode)", async () => {

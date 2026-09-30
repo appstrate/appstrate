@@ -8,101 +8,27 @@ import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
-import { resolutionBlocksRun } from "./integration-connect/integration-run-readiness";
+import { describeResolution } from "./integration-connect/integration-run-readiness";
 import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
+import { integrationIdOfField, type MissingIntegrationFieldError } from "../lib/connection-choice";
+import { withConnectionPick } from "../lib/connection-set";
+import { refusalMessage } from "../lib/mutation-error";
+
+/** Per-run picks in the run route's `connection_overrides` shape (`launch-schemas.ts`). */
+type ConnectionOverridesMap = Record<string, string[]>;
 
 /**
- * Recovery surface for the run-kickoff 409 emitted by
- * `validateAgentReadiness` when integration connections are missing. The
- * 409 ships every failing `(integration, auth)` pair on `errors[]`;
- * this modal renders one row per entry.
- *
- * Each actionable row embeds the SAME `IntegrationConnectionPicker` the
- * Connexions tab and the schedule editor use, in `override` mode: the picker
- * lists every accessible connection (own + shared — including ones that need
- * reconnection, with an inline renew button) and exposes the connect / renew /
- * upgrade / add flows. A selection accumulates into the modal's per-run
- * `connection_overrides` map; the footer's "Re-run with picks" button fires
- * the parent's `onRetryWithOverrides` callback with the full
- * `{ integrationId: connectionId }` flat map (mechanism #2).
- *
- * Reusing the picker keeps this modal in lockstep with the dropdown — same
- * candidate list, scope/lock verdicts and connect orchestration — instead of
- * re-deriving an affordance from the static 409 payload. Only structural failures — the integration is not active here, or
- * its package is missing, mistyped or unloadable — keep a plain message: no
- * connection pick can fix them.
- */
-
-export interface MissingIntegrationFieldError {
-  field: string; // `integrations.{packageId}` (integration-level — auth_key lives on the candidate row)
-  /**
-   * The codes the server puts on an `integrations.*` item: the four verdicts
-   * `collectAgentReadinessErrors` raises about the integration PACKAGE
-   * (`agent-readiness.ts`) and the connection verdicts
-   * `integration-connection-resolver.ts` raises about the accounts behind it.
-   * `| string` keeps an unlisted one rendering its server message rather than
-   * crashing the row — it is not licence to adapt a shape nothing emits.
-   */
-  code:
-    | "not_connected"
-    | "needs_reconnection"
-    | "insufficient_scopes"
-    | "must_choose_connection"
-    | "auth_key_mismatch"
-    | "pinned_connection_unavailable"
-    | "override_connection_unavailable"
-    | "integration_not_found"
-    | "integration_wrong_type"
-    | "integration_invalid_manifest"
-    | "integration_not_active"
-    | string;
-  title?: string;
-  message: string;
-  /** Missing scopes — populated on insufficient_scopes for the OAuth re-consent upgrade. */
-  missing_scopes?: string[];
-  /**
-   * Candidate connections — populated on must_choose_connection. Declared to
-   * describe the payload, deliberately unread here: the row embeds the shared
-   * `IntegrationConnectionPicker`, whose candidate list is a superset (see the
-   * module comment above). API and MCP callers, which have no picker, choose
-   * from this field.
-   */
-  candidate_connections?: {
-    id: string;
-    label: string | null;
-    account_id: string;
-    owned_by_actor: boolean;
-  }[];
-  /**
-   * The dead/under-scoped connection id — populated on `needs_reconnection`
-   * and `insufficient_scopes`.
-   */
-  connection_id?: string;
-}
-
-/**
- * Per-run connection picks, flat map keyed by integration id. Matches the
- * wire format the run route expects on `connection_overrides` (mechanism #2,
- * validated by `input-parser.ts`: `Record<integrationId, connectionId>`). The
- * chosen connection carries its own `auth_key`; storing it twice would let
- * the two diverge.
- */
-type ConnectionOverridesMap = Record<string, string>;
-
-/**
- * Codes that no connection pick can fix — surfaced as a plain message, no
- * picker. They are exactly the four the readiness pass raises about the
- * integration PACKAGE, before any account is looked at: the declared package is
- * absent, is not an integration, has a manifest that will not load, or is not
- * active in this space. Connecting an account changes none of them.
+ * The package-level verdicts and the agent's own `auth_key` serving none of its selected tools,
+ * all raised before any account is looked at: no pick fixes them.
  */
 function isStructuralCode(code: string): boolean {
   return (
     code === "integration_not_active" ||
     code === "integration_not_found" ||
     code === "integration_wrong_type" ||
-    code === "integration_invalid_manifest"
+    code === "integration_invalid_manifest" ||
+    code === "auth_key_serves_no_selected_tool"
   );
 }
 
@@ -110,19 +36,9 @@ interface MissingConnectionsModalProps {
   open: boolean;
   onClose: () => void;
   errors: MissingIntegrationFieldError[];
-  /**
-   * The agent whose run 409'd. Keys the bulk server resolution
-   * (`GET /api/agents/:scope/:name/connection-readiness`) each picker consumes
-   * so its status + CTA stay in lockstep with the Connexions tab. Omitted only
-   * by callers without the agent in context (none today).
-   */
+  /** The agent whose run 409'd; keys the server resolution each picker consumes. */
   agentPackageId?: string;
-  /**
-   * The agent's declared integration entries (tools/scopes per integration).
-   * Forwarded to the picker so a fresh connection / re-consent requests
-   * exactly the scopes THIS agent needs (avoids an immediate
-   * insufficient_scopes re-run).
-   */
+  /** The agent's tools/scopes per integration, so a (re)connect requests exactly those. */
   integrationEntries?: AgentIntegrationEntry[];
   /** Re-run with the picked overrides. */
   onRetryWithOverrides: (overrides: ConnectionOverridesMap) => void;
@@ -130,6 +46,12 @@ interface MissingConnectionsModalProps {
   retrying?: boolean;
 }
 
+/**
+ * Recovery surface for the run-kickoff `409 missing_integration_connection`: one row per
+ * `errors[]` entry. Actionable rows embed `IntegrationConnectionPicker` in `override` mode;
+ * validated sets accumulate into the `connection_overrides` "Re-run" hands to
+ * `onRetryWithOverrides`. Structural failures keep a plain message: no pick fixes them.
+ */
 export function MissingConnectionsModal({
   open,
   onClose,
@@ -144,32 +66,19 @@ export function MissingConnectionsModal({
 
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
 
-  // must_choose rows have N>1 candidates and no auto-pick, so a re-run can't
-  // proceed until the user picks one. Other actionable rows (connect / renew /
-  // upgrade) resolve through the picker's own flow and re-run freely — a fresh
-  // 409 just reopens the modal with the updated error list.
+  // A must_choose row waits for a pick; the others re-run freely (a fresh 409 reopens this).
   const mustChooseIds = integrationErrors
     .filter((e) => e.code === "must_choose_connection")
-    .map((e) => parseField(e.field));
-  const allMustChosen = mustChooseIds.every((id) => !!picks[id]);
+    .map((e) => integrationIdOfField(e.field));
+  const allMustChosen = mustChooseIds.every((id) => (picks[id]?.length ?? 0) > 0);
 
   const hasActionable = integrationErrors.some((e) => !isStructuralCode(e.code));
   const showRetry = hasActionable;
   const canRetry = !retrying && allMustChosen;
 
-  // Selecting a connection writes the per-run override; clearing (empty id,
-  // the picker's "inherit / reset" entry) drops the key so the resolver falls
-  // back to the member pin / cascade default at re-run.
-  const setPick = (integrationId: string, connectionId: string) => {
-    setPicks((prev) => {
-      if (!connectionId) {
-        const { [integrationId]: _omit, ...rest } = prev;
-        void _omit;
-        return rest;
-      }
-      return { ...prev, [integrationId]: connectionId };
-    });
-  };
+  // An empty pick drops the key: the re-run falls back to the cascade.
+  const setPick = (integrationId: string, connectionIds: string[]) =>
+    setPicks((prev) => withConnectionPick(prev, integrationId, connectionIds));
 
   return (
     <Modal
@@ -207,7 +116,7 @@ export function MissingConnectionsModal({
             err={err}
             agentPackageId={agentPackageId}
             integrationEntries={integrationEntries}
-            pick={picks[parseField(err.field)] ?? ""}
+            pick={picks[integrationIdOfField(err.field)] ?? []}
             onPick={setPick}
           />
         ))}
@@ -226,16 +135,16 @@ function MissingRow({
   err: MissingIntegrationFieldError;
   agentPackageId?: string;
   integrationEntries?: AgentIntegrationEntry[];
-  /** Current per-run pick for this integration; empty = no override. */
-  pick: string;
-  onPick: (integrationId: string, connectionId: string) => void;
+  /** Current per-run pick set for this integration; empty = no override. */
+  pick: string[];
+  onPick: (integrationId: string, connectionIds: string[]) => void;
 }) {
   const { t } = useTranslation(["agents"]);
-  const packageId = parseField(err.field);
+  const packageId = integrationIdOfField(err.field);
   const { data: detail } = useIntegrationDetail(packageId);
   const readsIntegrations = usePermissions().can("integrations:read");
   // Structural failures can't be fixed by connecting — an admin must activate
-  // the integration or the agent must drop the dependency. No picker.
+  // the integration, or the agent's dependency or configuration must change. No picker.
   const isStructural = isStructuralCode(err.code);
 
   // Server-authoritative verdict — the SAME `IntegrationAgentResolution` the
@@ -250,9 +159,8 @@ function MissingRow({
   );
   const entry = integrationEntries?.find((e) => e.id === packageId);
 
-  // Resolved = the run-kickoff gate would no longer reject this integration.
-  // Single predicate shared with the badge, so resolved here ⇔ not blocking there.
-  const resolved = !!resolution && !resolutionBlocksRun(resolution);
+  // Resolved = the run-kickoff gate would no longer reject it; no verdict is not "ready".
+  const resolved = !!resolution && describeResolution(resolution).resolved;
   // The picker needs the manifest + first verdict to render fully wired; hold
   // a spinner until both land (non-structural rows with the agent in context).
   // Both reads gate on `integrations:read`: without it neither lands, so the
@@ -262,6 +170,7 @@ function MissingRow({
   const loadingVerdict = pickable && (!detail || !resolution);
 
   const displayName = detail?.manifest.display_name ?? packageId;
+  const message = refusalMessage(err) ?? err.message;
   const Icon = resolved ? Check : isStructural ? XCircle : AlertTriangle;
   const colorClass = resolved
     ? "text-emerald-600"
@@ -282,8 +191,8 @@ function MissingRow({
                   carry the server's diagnosis (e.g. the manifest schema issues
                   behind `integration_invalid_manifest`), and a cause clipped at
                   the row width is a cause the user never reads. */}
-              <span className="truncate" title={resolved ? undefined : err.message}>
-                {resolved ? t("missingConnections.resolved") : err.message}
+              <span className="truncate" title={resolved ? undefined : message}>
+                {resolved ? t("missingConnections.resolved") : message}
               </span>
             </div>
           </div>
@@ -304,16 +213,11 @@ function MissingRow({
             persistence={{
               mode: "override",
               value: pick,
-              onChange: (connectionId) => onPick(packageId, connectionId),
+              onChange: (connectionIds) => onPick(packageId, connectionIds),
             }}
           />
         </div>
       )}
     </div>
   );
-}
-
-/** Extract the integration package id from the `integrations.{packageId}` field path. */
-function parseField(field: string): string {
-  return field.slice("integrations.".length);
 }

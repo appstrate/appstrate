@@ -140,7 +140,7 @@ describe("proxied Pi model payload parity", () => {
     });
   }
 
-  // pi-ai 0.86.1 records a cap equal to the window: no room left for the prompt.
+  // pi-ai 0.87.1 records a cap equal to the window: no room left for the prompt.
   it("mistral-medium-2604: a record cap filling the window resolves to the default on every path", () => {
     const def = providers.find((p) => p.providerId === "mistral")!;
     const record = nativeModel("mistral", "mistral-medium-2604")!;

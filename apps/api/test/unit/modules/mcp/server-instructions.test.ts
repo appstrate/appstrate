@@ -162,6 +162,21 @@ describe("MCP server instructions — run guidance", () => {
     }
   });
 
+  it("routes the agent's auth_key serving no selected tool to a configuration change", () => {
+    const bulletOf = (caller: ReadonlySet<string>) =>
+      prose(caller)
+        .split("\n")
+        .find((line) => line.startsWith("- Code `auth_key_serves_no_selected_tool`"));
+    const bullet = bulletOf(RUNNER);
+    expect(bullet).toContain("configuration must change");
+    expect(bullet).toContain("Do not start a connect flow");
+    expect(bullet).toContain("Do not retry");
+    // A caller that composes inline runs wrote the configuration itself.
+    const composer = bulletOf(new Set([...RUNNER, "agents:write"]));
+    expect(composer).toContain("in your manifest and retry");
+    expect(composer).toContain("for a stored agent, do not retry");
+  });
+
   // Same rule, applied inside a bullet rather than to a whole paragraph: an act
   // that needs `invoke_operation` is absent for a caller who was never declared
   // that tool, even when the bullet around it survives.

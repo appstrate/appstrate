@@ -30,6 +30,7 @@
  *   - GET    /orgs                      — orgs the caller belongs to
  *   - GET    /connections               — the caller's integration connections
  *   - DELETE /connections/:connectionId — destructive global credential delete
+ *   - GET    /connections/:connectionId/delete-impact — the caller's pins/schedules it rewrites
  *   - GET    /integration-pins          — member-self pins for an agent
  *   - PUT    /integration-pins          — upsert a member-self pin
  *   - DELETE /integration-pins          — clear a member-self pin
@@ -44,7 +45,11 @@ import { getOrgById, getUserOrganizations } from "../services/organizations.ts";
 import { db } from "@appstrate/db/client";
 import { integrationConnections, spaces } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
-import { listMeConnections, type MeConnectionAuthority } from "../services/me-connections.ts";
+import {
+  listMeConnections,
+  type MeConnectionAuthority,
+  getConnectionDeleteImpact,
+} from "../services/me-connections.ts";
 import { actorFilter, getActor } from "../lib/actor.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
@@ -64,6 +69,8 @@ import {
   listUsableIntegrationsForActor,
 } from "../services/integration-connections.ts";
 import { handoffStepsFor } from "../services/connect/provisioning.ts";
+import { removeScheduleJobs } from "../services/scheduler.ts";
+import { connectionIdSetSchema } from "../lib/connection-set.ts";
 import { logger } from "../lib/logger.ts";
 import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
@@ -200,17 +207,36 @@ router.get("/connections", requireCeiling("integrations", "read"), async (c) => 
 });
 
 /**
+ * `GET /api/me/connections/:connectionId/delete-impact` — the caller's own member pins and
+ * schedules the delete would rewrite. A non-UUID id answers empty lists.
+ */
+router.get(
+  "/connections/:connectionId/delete-impact",
+  requireCeiling("integrations", "read"),
+  async (c) => {
+    const connectionId = c.req.param("connectionId")!;
+    if (!z.uuid().safeParse(connectionId).success) return c.json({ pins: [], schedules: [] });
+    return c.json(
+      await getConnectionDeleteImpact(
+        getActor(c),
+        connectionId.toLowerCase(),
+        getMeConnectionAuthority(c),
+      ),
+    );
+  },
+);
+
+/**
  * `/api/me/integration-pins` — member-self pin CRUD.
  *
  * The persisted replacement for the R5 localStorage pick: when an agent
- * has >1 candidate connection on a required (integration, authKey) and
- * the member picks one, the choice is stored here and read by the
- * resolver on every subsequent run (cascade layer 4).
+ * has >1 candidate connection on a required integration, the member's pick is stored
+ * here and read by the resolver on every run (cascade layer 4).
  *
  * Member-only (no end-user surface — end-users are addressed via API key
  * impersonation and the calling member controls the choice via run
  * overrides). All routes require `X-Space-Id`; the pin is scoped
- * to (member, space, agent, integration, authKey).
+ * to (member, space, agent, integration).
  *
  * Admin pins live under `/api/integrations/:packageId/pins/...` and use
  * a different validation rule (the connection must be `sharedWithOrg`);
@@ -220,7 +246,7 @@ export const upsertMemberPinSchema = z
   .object({
     agent_package_id: z.string().min(1),
     integration_package_id: z.string().min(1),
-    connection_id: z.uuid(),
+    connection_ids: connectionIdSetSchema,
   })
   .strict();
 
@@ -265,14 +291,14 @@ router.put(
     const result = await upsertMemberPin(scope, {
       agentPackageId: input.agent_package_id,
       integrationId: input.integration_package_id,
-      connectionId: input.connection_id,
+      connectionIds: input.connection_ids,
       userId: user.id,
     });
     await recordAuditFromContext(c, {
       action: "integration.member_pin.upserted",
       resourceType: "integration_pin",
       resourceId: `${input.agent_package_id}|${input.integration_package_id}`,
-      after: { connectionId: input.connection_id },
+      after: { connectionIds: result.connection_ids },
     });
     return c.json(result);
   },
@@ -309,10 +335,10 @@ router.delete(
 /**
  * `DELETE /api/me/connections/:connectionId` — destructive global delete.
  *
- * Removes the underlying `integration_connections` row. ON DELETE CASCADE
- * naturally vacates every reference: admin pins, member pins, run snapshots,
- * schedule overrides. The intent is *destructive* — "I never want to use
- * this credential anywhere again".
+ * Removes the underlying `integration_connections` row — *destructive* — unless an
+ * admin pin or an org default names it (409 `connection_pinned`). The caller's own
+ * member pins and schedule overrides drop it (a schedule it empties is disabled);
+ * `GET …/delete-impact` lists them beforehand.
  *
  * This is the ONLY entrypoint for that delete, and it is owner-scoped by
  * construction. Surfaced only from `/connections` (the user-owned management
@@ -348,8 +374,9 @@ router.delete(
     // (userId | endUserId) filter, not by org membership: a connection
     // belongs to its owner regardless of which org context they're browsing.
     const [row] = await db
-      .select({ spaceId: integrationConnections.spaceId })
+      .select({ spaceId: integrationConnections.spaceId, orgId: spaces.orgId })
       .from(integrationConnections)
+      .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
       .where(eq(integrationConnections.id, connectionId))
       .limit(1);
     if (!row) {
@@ -388,11 +415,15 @@ router.delete(
     } else {
       scope = { spaceId: row.spaceId } satisfies ActorScope;
     }
-    await deleteIntegrationConnection(scope, connectionId, actor);
+    const { disabledScheduleIds } = await deleteIntegrationConnection(scope, connectionId, actor);
+    await removeScheduleJobs(disabledScheduleIds);
+    // A cookie session carries no org context on /me/*: the audit names the connection's org.
     await recordAuditFromContext(c, {
       action: "integration.connection.deleted",
       resourceType: "integration_connection",
       resourceId: connectionId,
+      after: { disabledScheduleIds },
+      orgIdOverride: row.orgId,
     });
     return c.body(null, 204);
   },
@@ -517,18 +548,21 @@ router.get("/context", requireSpaceContext(), async (c) => {
   // Resolved once for both hint listings: `home_writable` is what tells the
   // model whether a draft-only package is THIS caller's to run, and computing
   // it needs the caller's reach over every space, not the package rows.
-  const accessible = await packageAccessSpaces(c);
-  const homeWritable = (pkg: Parameters<typeof homeWireForCaller>[0]) =>
-    homeWireForCaller(pkg, accessible).home_writable;
+  // `packageAccessSpaces` is memoized per request, so each listing awaits it.
+  const withHomeWritable = async () => {
+    const accessible = await packageAccessSpaces(c);
+    return (pkg: Parameters<typeof homeWireForCaller>[0]) =>
+      homeWireForCaller(pkg, accessible).home_writable;
+  };
   const [connections, runnable, activeSkills, recentRuns] = await Promise.all([
     mayReadIntegrations
       ? listUsableIntegrationsForActor(scope, actor)
       : Promise.resolve([] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>),
     canRun
-      ? listRunnableAgents(scope, { homeWritable })
+      ? withHomeWritable().then((homeWritable) => listRunnableAgents(scope, { homeWritable }))
       : Promise.resolve({ agents: [], truncated: false, total: 0 }),
     canReadSkills
-      ? listActiveSkills(scope, { homeWritable })
+      ? withHomeWritable().then((homeWritable) => listActiveSkills(scope, { homeWritable }))
       : Promise.resolve({ skills: [], truncated: false, total: 0 }),
     // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
     // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).

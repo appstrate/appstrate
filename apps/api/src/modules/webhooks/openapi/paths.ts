@@ -7,6 +7,7 @@ const sharedCreateProps = {
   url: { type: "string", format: "uri" },
   events: {
     type: "array",
+    minItems: 1,
     items: {
       type: "string",
       enum: [
@@ -286,6 +287,7 @@ export const webhooksPaths = {
                 url: { type: "string", format: "uri" },
                 events: {
                   type: "array",
+                  minItems: 1,
                   items: {
                     type: "string",
                     enum: [

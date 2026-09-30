@@ -18,6 +18,7 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
+import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
@@ -107,6 +108,7 @@ async function resolveWith(
     integrationId: INTEG,
     authKey: "main",
     accountId: "default",
+    label: "default",
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
@@ -124,6 +126,7 @@ async function resolveWith(
     spaceId: ctx.defaultSpaceId,
     actor: { type: "user", id: ctx.user.id },
     agentManifest: agentManifest(),
+    resolvedConnections: await bindAllConnections(INTEG),
   });
   expect(specs.length).toBe(1);
   return specs[0]!;

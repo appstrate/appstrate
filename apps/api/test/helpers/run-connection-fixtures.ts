@@ -163,22 +163,28 @@ export async function seedConnectionTestIntegration(ctx: TestContext, id: string
   await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
 }
 
-/** Add one connection on the integration's `primary` auth, owned by the ctx user. */
+/**
+ * Add one connection on the integration's `primary` auth, owned by the ctx
+ * user. `label` is NOT NULL and unique per (space, integration), so it and
+ * `accountId` default here to generated names. Pass them when the test asserts on them.
+ */
 export async function seedIntegrationConnection(
   ctx: TestContext,
   integrationId: string,
+  opts: { label?: string; accountId?: string } = {},
 ): Promise<string> {
   const [row] = await db
     .insert(integrationConnections)
     .values({
       integrationId,
       authKey: "primary",
-      accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
+      accountId: opts.accountId ?? `acct-${crypto.randomUUID().slice(0, 8)}`,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-value" } }),
       scopesGranted: [],
+      label: opts.label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
     })
     .returning({ id: integrationConnections.id });
   return row!.id;

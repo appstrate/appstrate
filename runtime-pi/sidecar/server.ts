@@ -15,6 +15,7 @@ import {
   runConnectOnce,
 } from "./integrations-boot.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
+import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
 import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
 import { RuntimeEventJournal, journalRuntimeToolDefs } from "./runtime-event-journal.ts";
@@ -205,7 +206,7 @@ if (connectLoginJson) {
   }
 }
 
-const cookieJar = new Map<string, string[]>();
+const cookieJar: CookieJar = new Map();
 
 // #1458 — the agent's proxy refuses runner peers (they have their own policed
 // listener). Rebound once the adapter is prepared; no runner exists before that.
@@ -233,7 +234,7 @@ const oauthTokenCache = new OAuthTokenCache({
 
 // Phase 1.4 — bootstrap declared integrations IN THE BACKGROUND so the
 // sidecar's `/mcp` listener comes up immediately (the agent retries the
-// MCP handshake; the per-integration spawn + listTools handshake can
+// MCP handshake; the per-connection spawn + listTools handshake can
 // take several seconds for a fresh node_modules tree). The agent's
 // first `tools/list` call then briefly awaits this promise via the
 // lazy tools provider below.
@@ -268,14 +269,14 @@ const runtimeToolDefs = journalRuntimeToolDefs(
 
 let integrationTools: AppstrateToolDefinition[] = [];
 const specs = readIntegrationSpecsFromEnv();
-const declaredIntegrations = specs?.length ?? 0;
+const declaredConnections = specs?.length ?? 0;
 
 // Boot report fetched by the agent via `GET /integrations/boot-report`. Starts
 // as a synthetic empty-OK report (covers the no-integrations run); the boot
 // `.then`/`.catch` below overwrite it with the real outcome.
 let integrationBootReport: IntegrationBootReport = {
   ok: true,
-  declared: declaredIntegrations,
+  declaredConnections,
   adapter: "none",
   spawned: [],
   failed: [],
@@ -304,10 +305,10 @@ const integrationBootPromise =
           });
         })
         .catch((err) => {
-          // A throw here (vs. a per-integration failure) means the whole boot
+          // A throw here (vs. a per-connection failure) means the whole boot
           // pass blew up — surface it as a non-OK report so the agent aborts
           // the run rather than running with a silently empty toolset.
-          // Same sink as the per-integration `failed[]` entries:
+          // Same sink as the per-connection `failed[]` entries:
           // `GET /integrations/boot-report`, which the agent relays into the
           // org-visible run log. Scrub for the same reason (see
           // `integrations-boot.ts`' per-spec catch).
@@ -315,7 +316,7 @@ const integrationBootPromise =
           logger.error("Integration boot raised", { error });
           integrationBootReport = {
             ok: false,
-            declared: declaredIntegrations,
+            declaredConnections,
             adapter: "unknown",
             spawned: [],
             failed: [{ integrationId: "*", error }],

@@ -37,6 +37,7 @@ import { assertDbCount } from "../../helpers/assertions.ts";
 import { packages, runs, schedules } from "@appstrate/db/schema";
 import { addMemories, upsertPinned } from "../../../src/services/state/package-persistence.ts";
 import { resolveEffectiveInput } from "../../../src/services/input-resolution.ts";
+import { updateSchedule, type ScheduleWriteSnapshot } from "../../../src/services/scheduler.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 
 const app = getTestApp();
@@ -613,7 +614,7 @@ describe("Agents API", () => {
         body: JSON.stringify({ cron_expression: "0 * * * *", input, version_override: "draft" }),
       });
       expect(res.status).toBe(201);
-      return (await res.json()) as { id: string };
+      return (await res.json()) as ScheduleWriteSnapshot;
     }
 
     const readScheduleRow = async (id: string) =>
@@ -644,6 +645,30 @@ describe("Agents API", () => {
       const untouchedRow = await readScheduleRow(untouched.id);
       expect(untouchedRow.input).toEqual({ label: "weekly" });
       expect(untouchedRow.updatedAt).toEqual(untouchedBefore.updatedAt);
+    });
+
+    // A system rewrite, not a judged patch: it takes no compare-and-set (which could 409 after the
+    // settings committed), and it moves the stamp so a patch judged against the old input cannot
+    // write it back.
+    it("rewrites every affected schedule and refuses a patch judged against the old row", async () => {
+      const agentId = "@myorg/lock-stamp-agent";
+      await seedTwoFieldAgent(agentId);
+      const first = await createSchedule(agentId, { folder: "inbox" });
+      const second = await createSchedule(agentId, { folder: "sent", label: "x" });
+
+      const res = await app.request(`/api/agents/${agentId}/input-settings`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ values: { folder: "archive" }, locked_fields: ["folder"] }),
+      });
+      expect(res.status).toBe(200);
+      expect((await readScheduleRow(first.id)).input).toEqual({});
+      expect((await readScheduleRow(second.id)).input).toEqual({ label: "x" });
+
+      await expect(
+        updateSchedule(spaceScope(), first, { input: { folder: "inbox" } }, null, undefined),
+      ).rejects.toMatchObject({ status: 409, code: "schedule_modified_concurrently" });
+      expect((await readScheduleRow(first.id)).input).toEqual({});
     });
 
     it("leaves the reconciled schedule firing successfully instead of failing every tick", async () => {

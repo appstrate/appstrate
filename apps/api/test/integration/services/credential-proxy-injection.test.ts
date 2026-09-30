@@ -20,53 +20,18 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageShare } from "../../helpers/seed.ts";
-import { spacePackages, integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { encryptCredentialEnvelope } from "@appstrate/connect";
-import type { IntegrationManifest } from "@appstrate/core/integration";
 import { proxyCall, ProxySubstitutionError } from "../../../src/services/credential-proxy/core.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
   envDelivery,
 } from "../../helpers/integration-manifests.ts";
-
-async function seedIntegration(orgId: string, manifest: IntegrationManifest) {
-  return seedPackage({
-    id: manifest.name,
-    orgId,
-    type: "integration",
-    source: "local",
-    draftManifest: manifest,
-  });
-}
-
-async function installAndConnect(
-  ctx: TestContext,
-  packageId: string,
-  authKey: string,
-  fields: Record<string, string>,
-): Promise<void> {
-  // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
-  // the package is placed in, so switching an unplaced integration on leaves it
-  // inactive — which is not the fixture any of these cases mean to build.
-  await seedPackageShare(ctx.defaultSpaceId, packageId);
-  await db.insert(spacePackages).values({
-    spaceId: ctx.defaultSpaceId,
-    packageId,
-  });
-  await db.insert(integrationConnections).values({
-    integrationId: packageId,
-    authKey,
-    accountId: "acct-1",
-    spaceId: ctx.defaultSpaceId,
-    userId: ctx.user.id,
-    credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
-    scopesGranted: [],
-    sharedWithOrg: false,
-  });
-}
+import {
+  seedProxyIntegration,
+  seedProxyConnection,
+} from "../../helpers/credential-proxy-fixtures.ts";
 
 describe("proxyCall — server-side credential injection (integration-backed)", () => {
   let ctx: TestContext;
@@ -78,8 +43,8 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
   it("injects Authorization: Bearer <token> for an api_key delivery.http plan", async () => {
     const packageId = "@cpinjectorg/gmail";
-    await seedIntegration(
-      ctx.orgId,
+    await seedProxyIntegration(
+      ctx,
       localIntegrationManifest({
         name: packageId,
         displayName: "Gmail",
@@ -97,7 +62,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
         },
       }),
     );
-    await installAndConnect(ctx, packageId, "api", { api_key: "ya29.live-token" });
+    await seedProxyConnection(ctx, packageId, "api", { api_key: "ya29.live-token" });
 
     let captured: Record<string, string> | undefined;
     const fakeFetch = ((_url: string, init: RequestInit) => {
@@ -129,8 +94,8 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
   it("injects X-Api-Key without prefix when the plan declares it", async () => {
     const packageId = "@cpinjectorg/svc";
-    await seedIntegration(
-      ctx.orgId,
+    await seedProxyIntegration(
+      ctx,
       localIntegrationManifest({
         name: packageId,
         displayName: "Svc",
@@ -144,7 +109,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
         },
       }),
     );
-    await installAndConnect(ctx, packageId, "api", { api_key: "sk_live_abc" });
+    await seedProxyConnection(ctx, packageId, "api", { api_key: "sk_live_abc" });
 
     let captured: Record<string, string> | undefined;
     const fakeFetch = ((_url: string, init: RequestInit) => {
@@ -172,8 +137,8 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
   it("does not inject when the auth declares no delivery.http (custom)", async () => {
     const packageId = "@cpinjectorg/custom";
-    await seedIntegration(
-      ctx.orgId,
+    await seedProxyIntegration(
+      ctx,
       localIntegrationManifest({
         name: packageId,
         displayName: "Custom",
@@ -188,7 +153,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
         },
       }),
     );
-    await installAndConnect(ctx, packageId, "custom", { username: "admin", password: "s3cret" });
+    await seedProxyConnection(ctx, packageId, "custom", { username: "admin", password: "s3cret" });
 
     let captured: Record<string, string> | undefined;
     const fakeFetch = ((_url: string, init: RequestInit) => {
@@ -214,8 +179,8 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
   it("replaces a caller-supplied non-Authorization header by default", async () => {
     const packageId = "@cpinjectorg/dual";
-    await seedIntegration(
-      ctx.orgId,
+    await seedProxyIntegration(
+      ctx,
       localIntegrationManifest({
         name: packageId,
         displayName: "Dual",
@@ -229,7 +194,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
         },
       }),
     );
-    await installAndConnect(ctx, packageId, "api", { api_key: "platform-pinned-key" });
+    await seedProxyConnection(ctx, packageId, "api", { api_key: "platform-pinned-key" });
 
     let captured: Record<string, string> | undefined;
     const fakeFetch = ((_url: string, init: RequestInit) => {
@@ -255,8 +220,8 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
   it("strips an allowed caller override on redirect even when the platform value is empty", async () => {
     const packageId = "@cpinjectorg/override";
-    await seedIntegration(
-      ctx.orgId,
+    await seedProxyIntegration(
+      ctx,
       localIntegrationManifest({
         name: packageId,
         displayName: "Override",
@@ -275,7 +240,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
         },
       }),
     );
-    await installAndConnect(ctx, packageId, "api", { api_key: "" });
+    await seedProxyConnection(ctx, packageId, "api", { api_key: "" });
 
     const captured: Array<Record<string, string>> = [];
     const fakeFetch = ((url: string | URL, init: RequestInit) => {
@@ -316,8 +281,8 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
   it("throws ProxySubstitutionError (fail-closed) when the target references an unresolved {{field}}", async () => {
     const packageId = "@cpinjectorg/failclosed";
-    await seedIntegration(
-      ctx.orgId,
+    await seedProxyIntegration(
+      ctx,
       localIntegrationManifest({
         name: packageId,
         displayName: "FailClosed",
@@ -335,7 +300,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     );
     // Resolved credential fields = { api_key }. The target references
     // {{mailbox}}, which is NOT a credential field → must fail closed.
-    await installAndConnect(ctx, packageId, "api", { api_key: "sk_live_abc" });
+    await seedProxyConnection(ctx, packageId, "api", { api_key: "sk_live_abc" });
 
     let upstreamHit = false;
     const fakeFetch = (() => {

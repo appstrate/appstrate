@@ -74,7 +74,7 @@ describe("scheduled fire — version resolution failures", () => {
     });
     restoreStorage = () => downloadSpy.mockRestore();
 
-    await triggerScheduledRun(scheduleId, AGENT, actor, ctx.orgId, ctx.defaultSpaceId, undefined);
+    await triggerScheduledRun(scheduleId);
 
     // The fault was actually injected on this path — otherwise the assertion
     // below could pass for an unrelated downstream failure.

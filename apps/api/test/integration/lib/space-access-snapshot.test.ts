@@ -196,7 +196,12 @@ describe("updateSpace writes access columns only against the judged state", () =
   });
 
   it("writes when the judged state still holds", async () => {
-    const updated = await updateSpace(ctx.orgId, space.id, { visibility: "open" }, space);
+    const { space: updated } = await updateSpace(
+      ctx.orgId,
+      space.id,
+      { visibility: "open" },
+      space,
+    );
 
     expect(updated.visibility).toBe("open");
   });
@@ -204,7 +209,7 @@ describe("updateSpace writes access columns only against the judged state", () =
   it("does not condition a write that leaves the access columns alone", async () => {
     await setAccess(space.id, { visibility: "closed", defaultRole: "admin" });
 
-    const updated = await updateSpace(ctx.orgId, space.id, { name: "Renamed" }, space);
+    const { space: updated } = await updateSpace(ctx.orgId, space.id, { name: "Renamed" }, space);
 
     expect(updated.name).toBe("Renamed");
   });

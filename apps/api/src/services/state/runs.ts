@@ -43,6 +43,7 @@ import {
   terminalRunStatusValues,
   type RunStatus,
 } from "@appstrate/core/run-status";
+import { ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
 import { extractFileIds } from "@appstrate/core/file-uri";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
@@ -51,13 +52,14 @@ import { scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { runLogDataSchema } from "../../lib/jsonb-schemas.ts";
-import { ApiError, conflict } from "../../lib/errors.ts";
+import { ApiError, conflict, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
 import { detachOrDeleteContainedFiles } from "../files.ts";
 import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
+import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
 import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import {
   modelGenerationSettingsSchema,
@@ -328,20 +330,22 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
  * Project the internal `runs.resolved_connections` snapshot into the
  * display-safe `connections_used` wire shape. Drops the raw `connectionId`
  * (internal state) and keeps the denormalized label/account so the panel
- * renders even after the connection is renamed or deleted. Empty/absent → null.
+ * renders even after the connection is renamed or deleted. A label/account the
+ * snapshot does not carry projects as null. Empty/absent → null.
  */
 function projectConnectionsUsed(
   resolved: typeof runs.$inferSelect.resolvedConnections,
 ): RunConnectionUsed[] | null {
   if (!resolved || typeof resolved !== "object") return null;
-  const entries = Object.entries(resolved);
-  if (entries.length === 0) return null;
-  return entries.map(([integrationId, v]) => ({
-    integration_id: integrationId,
-    label: v.label ?? null,
-    account_id: v.accountId ?? null,
-    source: v.source,
-  }));
+  const used = Object.entries(resolved).flatMap(([integrationId, bound]) =>
+    bound.map((v) => ({
+      integration_id: integrationId,
+      label: v.label ?? null,
+      account_id: v.accountId ?? null,
+      source: v.source,
+    })),
+  );
+  return used.length > 0 ? used : null;
 }
 
 function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): EnrichedRun {
@@ -606,23 +610,12 @@ interface CreateRunParams {
    */
   runnerKind?: string | null;
   /**
-   * Caller's per-(integration, authKey) connection override map. Persisted
-   * verbatim on `runs.connection_overrides` for audit + "re-run with same
-   * picks" replay. Feeds the resolver's mechanism #2 at kickoff; surface
-   * pinned admin choices and fallback if absent. Null when the run used
+   * Caller's per-integration override sets, persisted verbatim on `runs.connection_overrides`
+   * (audit + replay); the run-override layer at kickoff. Null when the run used
    * defaults verbatim.
    */
-  connectionOverrides?: Record<string, string> | null;
-  /**
-   * Snapshot of the resolver output at kickoff: per integration, which
-   * connection id was actually picked and which mechanism produced the
-   * pick. Persisted on `runs.resolved_connections` so the credentials
-   * resolver (sidecar MITM refresh) can honour the pick long after kickoff.
-   */
-  resolvedConnections?: Record<
-    string,
-    { connectionId: string; source: string; label?: string | null; accountId?: string | null }
-  > | null;
+  connectionOverrides?: ConnectionOverrides | null;
+  resolvedConnections?: ResolvedConnectionMap | null;
   /**
    * Snapshot of each declared integration's resolved manifest version at
    * kickoff (#686). Persisted on `runs.resolved_integration_versions` so the
@@ -1013,7 +1006,7 @@ export async function computeRunSpend(runId: string, orgId: string): Promise<Run
 
 /**
  * Minimal org-scoped attribution row for validating a caller-supplied run
- * reference (the llm-proxy `X-Run-Id` header) against the calling principal
+ * reference (the llm-proxy / credential-proxy `X-Run-Id` header) against the calling principal
  * BEFORE any usage is recorded on it. Returns `null` for an unknown id and
  * for a run outside `orgId` — the caller must treat both identically (404)
  * so a foreign tenant's run id can't be probed for existence. Never use this
@@ -1032,6 +1025,8 @@ export async function getRunAttribution(
   userId: string | null;
   endUserId: string | null;
   apiKeyId: string | null;
+  /** The kickoff's connection snapshot — what a credential-proxy call naming this run may reach. */
+  resolvedConnections: typeof runs.$inferSelect.resolvedConnections;
 } | null> {
   const [row] = await db
     .select({
@@ -1044,11 +1039,34 @@ export async function getRunAttribution(
       userId: runs.userId,
       endUserId: runs.endUserId,
       apiKeyId: runs.apiKeyId,
+      resolvedConnections: runs.resolvedConnections,
     })
     .from(runs)
     .where(and(eq(runs.id, runId), eq(runs.orgId, orgId)))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * The in-flight run an `X-Run-Id` names: unknown, other-org and (with `spaceId`) other-space ids
+ * are one 404, no existence probe; not `owner`'s (when set) is 403; finished is 400.
+ */
+export async function requireAttributableRun(input: {
+  orgId: string;
+  runId: string;
+  spaceId?: string | null;
+  owner?: Actor | null;
+}): Promise<NonNullable<Awaited<ReturnType<typeof getRunAttribution>>>> {
+  const { orgId, runId, spaceId, owner } = input;
+  const run = await getRunAttribution(orgId, runId);
+  if (!run || (spaceId && run.spaceId !== spaceId)) throw notFound(`run ${runId} not found`);
+  if (owner && (owner.type === "user" ? run.userId : run.endUserId) !== owner.id) {
+    throw forbidden("X-Run-Id does not reference a run of the calling actor");
+  }
+  if (!ACTIVE_RUN_STATUSES.has(run.status)) {
+    throw invalidRequest(`run ${runId} is no longer active`, "X-Run-Id");
+  }
+  return run;
 }
 
 export async function getRecentRuns(

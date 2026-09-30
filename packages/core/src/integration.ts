@@ -35,7 +35,10 @@ import {
   apiUploadToolNameFor as deriveApiUploadToolName,
   assertUniqueApiToolAuthTokens,
 } from "@appstrate/afps-shared/api-tool-naming";
-import { credentialTemplateRefs } from "@appstrate/afps-shared/credential-template";
+import {
+  credentialTemplateRefs,
+  parseUrlFormPattern,
+} from "@appstrate/afps-shared/credential-template";
 import { isBareAuthSchemePrefix } from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
@@ -182,7 +185,6 @@ export function findNonSnakeCaseIdentityClaimKeys(manifest: unknown): IdentityCl
 export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefine((m, ctx) => {
   const manifest = m as unknown as IntegrationManifest;
   const auths = manifest.auths ?? {};
-  const apiCallAuthKeys = new Set(Object.keys(readApiMetaAuths(manifest) ?? {}));
 
   for (const [authKey, auth] of Object.entries(auths)) {
     // (1) authorized_uris non-empty unless allow_all_uris.
@@ -304,9 +306,10 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       }
     });
 
-    // (1g) Templated authorized_uris entries (#1458) reference declared, required
-    // fields, in the authority only. Forbidden with `connect` and api_call (their hosts are pinned past
-    // the SSRF gate) and on oauth2 (a refresh keeps only tokens in the bundle).
+    // (1g) Templated authorized_uris entries (#1458) reference declared, required fields, in the
+    // authority of a `scheme://` entry or as a leading whole URL (#1627). Forbidden with `connect`
+    // (its hosts are pinned past the SSRF gate) and on oauth2 (a refresh keeps only tokens in the
+    // bundle). Allowed on api_call: its consumers pin only the declared literal entries.
     const credentialFields = credentialsSchema as
       { properties?: Record<string, unknown>; required?: unknown } | undefined;
     const declaredFields = new Set(Object.keys(credentialFields?.properties ?? {}));
@@ -315,16 +318,19 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       const refs = credentialTemplateRefs(pattern);
       if (refs.length === 0) return;
       const path = ["auths", authKey, "authorized_uris", index];
-      // Placeholders live in the authority only: a rendered `..` in a path would widen it.
+      // Outside the URL form, placeholders live in the authority only: a rendered `..` in a path
+      // would widen it.
       const scheme = TEMPLATE_SCHEME_PREFIX.exec(pattern);
       const afterScheme = scheme ? pattern.slice(scheme[0].length) : "";
       const authorityEnd = afterScheme.search(/[/?#]/);
       if (!scheme) {
-        ctx.addIssue({
-          code: "custom",
-          message: `authorized_uris entry "${pattern}" is templated without a scheme:// prefix; placeholders are only allowed in the host and port`,
-          path,
-        });
+        if (!parseUrlFormPattern(pattern)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `authorized_uris entry "${pattern}" is templated without a scheme:// prefix; without one, the entry must be a single leading placeholder followed by nothing or a "/" path without placeholders`,
+            path,
+          });
+        }
       } else if (
         authorityEnd !== -1 &&
         credentialTemplateRefs(afterScheme.slice(authorityEnd)).length > 0
@@ -346,13 +352,6 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
         ctx.addIssue({
           code: "custom",
           message: `authorized_uris entry "${pattern}" is templated, which is forbidden on an oauth2 auth`,
-          path,
-        });
-      }
-      if (apiCallAuthKeys.has(authKey)) {
-        ctx.addIssue({
-          code: "custom",
-          message: `authorized_uris entry "${pattern}" is templated, which is forbidden on an auth exposing api_call (_meta["${API_META_KEY}"])`,
           path,
         });
       }
@@ -982,6 +981,26 @@ export function resolveEffectiveToolSelection(
 }
 
 /**
+ * The api_call capabilities a tool selection grants: every one under the `"*"` wildcard, else
+ * each whose `api_call` or `api_upload` companion the selection names — the pair is granted
+ * together, since an upload dispatches every chunk through its sibling api_call. `undefined`
+ * grants none. Pass the EFFECTIVE selection ({@link resolveEffectiveToolSelection}).
+ */
+export function selectedApiCallConfigs(
+  manifest: IntegrationManifest,
+  selection: readonly string[] | "*" | undefined,
+): ApiCallConfig[] {
+  const configs = getApiCallConfigs(manifest);
+  if (isToolsWildcard(selection)) return configs;
+  const picked = new Set(selection ?? []);
+  return configs.filter(
+    (cfg) =>
+      picked.has(cfg.toolName) ||
+      (cfg.uploadToolName !== undefined && picked.has(cfg.uploadToolName)),
+  );
+}
+
+/**
  * True when `name` is an api_call tool name — the bare `api_call` or a
  * per-auth `api_call__{authToken}` variant. Used to recognise api_call selections
  * that never appear in `tools_policy`.
@@ -1298,14 +1317,17 @@ export function validateAgentIntegrationScopes(
 // resolver output, not the AFPS manifest, so they stay idiomatic TS.
 // ────────────────────────────────────────────────────────────────────
 
-/**
- * Per-integration connection picks. Used on `runs.connection_overrides`
- * (caller's run-time choice) and `package_schedules.connection_overrides`
- * (frozen at schedule create). Shape: `{ "@scope/integration": "<connection_id>" }`.
- */
-export type ConnectionOverrides = Record<string, string>;
+/** Cap on the connections one declared integration binds in a run, enforced at every write. */
+export const MAX_CONNECTIONS_PER_INTEGRATION = 10;
 
-/** Where a resolved connection came from — drives the audit + UI badge. */
+/**
+ * Per-integration connection picks on `runs.connection_overrides` and
+ * `package_schedules.connection_overrides` — the resolver's launch-override layer.
+ * Shape: `{ "@scope/integration": ["<connection_id>", ...] }`.
+ */
+export type ConnectionOverrides = Record<string, string[]>;
+
+/** The cascade layer that bound a set — drives the audit + UI badge. */
 export type ConnectionResolutionSource =
   | "admin_pin"
   | "org_default_enforced"
@@ -1322,18 +1344,17 @@ export interface ResolvedConnection {
   /**
    * Connection label + account identifier, denormalized at run kickoff so the
    * run's "connexions utilisées" panel survives the connection being renamed
-   * or deleted (same rationale as `runs.agent_scope`/`agent_name`). Absent on
-   * runs created before this snapshot existed.
+   * or deleted (same rationale as `runs.agent_scope`/`agent_name`).
    */
-  label?: string | null;
-  accountId?: string | null;
+  label: string;
+  accountId: string;
 }
 
 /**
  * Snapshot of the resolver output for one run. Persisted on
- * `runs.resolved_connections`. Shape: `{ "@scope/integration": ResolvedConnection }`.
+ * `runs.resolved_connections`. Shape: `{ "@scope/integration": ResolvedConnection[] }`.
  */
-export type ResolvedConnectionMap = Record<string, ResolvedConnection>;
+export type ResolvedConnectionMap = Record<string, ResolvedConnection[]>;
 
 /** Error codes the resolver emits per integration. */
 export type ConnectionResolutionErrorCode =
@@ -1341,42 +1362,48 @@ export type ConnectionResolutionErrorCode =
   | "needs_reconnection"
   | "pinned_connection_unavailable"
   | "override_connection_unavailable"
+  | "override_outranked"
   | "must_choose_connection"
   | "insufficient_scopes"
-  | "auth_key_mismatch";
+  | "auth_key_mismatch"
+  | "auth_serves_no_selected_tool"
+  | "auth_key_serves_no_selected_tool";
 
 /**
- * One connection the caller may pick from on `must_choose_connection`.
+ * One connection carried by `must_choose_connection`.
  *
  * Carries what it takes to TELL the candidates apart, not just to name them.
  * An id alone is opaque: a model reading the 409 has to fetch the connection
  * list to learn which uuid is the account the user named before it can retry,
  * and a human reading a log learns nothing at all. The resolver already holds
- * the rows, so denormalizing the three distinguishing fields costs no query.
+ * the rows, so denormalizing the distinguishing fields costs no query.
  *
- * `label` is user-given and may be null; `accountId` is the connect flow's own
- * discriminator and is always set, so the pair always identifies the account.
+ * `label` is user-given; `accountId` is the connect flow's own discriminator
+ * and is always set, so the pair always identifies the account.
  */
 export interface ConnectionCandidate {
   id: string;
-  /** User-given name, `null` when the connection was never labelled. */
-  label: string | null;
+  /** User-given name, minted at creation. */
+  label: string;
   /** The auth's account discriminator (`sub` claim, email, host…). */
   accountId: string;
   /** True when the row is the calling actor's own, false when inherited via org sharing. */
   ownedByActor: boolean;
+  /** The row's credentials died: pickable, but a run needs it reconnected. */
+  needsReconnection: boolean;
 }
 
 /** One unresolved integration plus structured detail. */
 export interface ConnectionResolutionError {
   integrationId: string;
   code: ConnectionResolutionErrorCode;
-  /** The connections the caller may pick from when `code === "must_choose_connection"`. */
+  /** Pickable on `must_choose_connection`. */
   candidateConnections?: ConnectionCandidate[];
   /**
    * The connection the error is bound to:
    *   - `insufficient_scopes` → the under-scoped connection (target of OAuth upgrade).
    *   - `needs_reconnection` → the dead connection (target of OAuth reconnect).
+   *   - `auth_serves_no_selected_tool` → the member to take out of the set.
    * Threaded into the OAuth re-kickoff `state` so the callback UPDATEs the
    * existing row instead of INSERTing a duplicate (integration-connections.ts
    * "explicit connectionId = update; no id = insert").
@@ -1400,19 +1427,18 @@ export interface ConnectionResolutionError {
    * The integration manifest auth the connect flow must target
    * (`/auths/{authKey}/connect/...`), for the three codes a connect flow can
    * clear: `insufficient_scopes` and `needs_reconnection` (the resolved
-   * connection's own auth) and `not_connected` (the agent dep's pinned
-   * `auth_key`, else the integration's single `oauth2` auth). Omitted on
-   * `not_connected` when the integration declares several oauth2 auths and
-   * the dep pins none — the caller must then let the user choose.
+   * connection's own auth) and `not_connected` (the dep's `auth_key`, else the single serving
+   * `oauth2` auth; omitted when ambiguous — the user then chooses).
    */
   authKey?: string;
   /**
-   * The cascade layer that resolved the (failing) connection, when the error
-   * is bound to a specific connection (`insufficient_scopes`). Lets callers
-   * derive the pick status directly instead of re-comparing `connectionId`
-   * against re-fetched pin ids.
+   * The cascade layer whose set failed, on every layer-bound code; absent when no layer bound
+   * anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`,
+   * `auth_key_serves_no_selected_tool`).
    */
   source?: ConnectionResolutionSource;
+  /** The failing layer's whole set, in its order. */
+  boundConnectionIds?: string[];
   /**
    * True when the resolved connection belongs to the current actor. Carried on
    * the two connection-bound connect-flow codes — `insufficient_scopes` and
@@ -1421,8 +1447,9 @@ export interface ConnectionResolutionError {
    */
   ownedByActor?: boolean;
   /**
-   * AFPS §4.1 — agent dep's pinned `auth_key` when
-   * `code === "auth_key_mismatch"`.
+   * AFPS §4.1 — the agent dep's `auth_key`, on `auth_key_mismatch` and on
+   * `auth_key_serves_no_selected_tool` (an auth exposing none of the selected tools: the
+   * agent's configuration must change, no connection clears it).
    */
   requiredAuthKey?: string;
   /**

@@ -158,6 +158,15 @@ export interface GuardedFetchOptions {
    * redirect would carry them to the new origin.
    */
   sensitiveHeaders?: readonly string[];
+  /**
+   * Per-hop cookie state (afps-runtime's `CookieScope` fits): `capture` gets each hop's
+   * Set-Cookie; `header` composes each hop's Cookie over `base` (the caller's Cookie header,
+   * null once a cross-origin hop stripped it). Both receive the logical URL, never the pinned one.
+   */
+  cookies?: {
+    header(url: string, base: string | null): string | undefined;
+    capture(url: string, setCookieHeaders: string[]): void;
+  };
   /** Structured logger for blocked/hop events. Values are never secrets. */
   logger?: { warn: (msg: string, meta?: Record<string, unknown>) => void };
 }
@@ -277,6 +286,8 @@ export async function guardedFetch(
   // (a virtual-host override for the URL the caller chose). On every later or
   // pinned hop the logical URL owns the Host value.
   const callerSetHost = headers.has("host");
+  const cookies = opts?.cookies;
+  let cookieBase = headers.get("cookie");
 
   // The address pin requires owning the socket semantics: Bun's `fetch` `tls`
   // extension AND the global fetch (an injected transport seam cannot be
@@ -319,6 +330,12 @@ export async function guardedFetch(
         headers.delete("host");
       }
 
+      if (cookies) {
+        const cookie = cookies.header(current.toString(), cookieBase);
+        if (cookie) headers.set("cookie", cookie);
+        else headers.delete("cookie");
+      }
+
       const doFetch = opts?.fetchImpl ?? fetch;
       const res = await doFetch(requestUrl, {
         ...init,
@@ -329,6 +346,7 @@ export async function guardedFetch(
         redirect: "manual",
         ...(tlsOverride ? { tls: tlsOverride } : {}),
       } as RequestInit);
+      cookies?.capture(current.toString(), res.headers.getSetCookie());
 
       // `fetch` reports opaqueredirect / 3xx: follow manually so each hop is guarded.
       const isRedirect = res.status >= 300 && res.status < 400 && res.headers.has("location");
@@ -350,6 +368,7 @@ export async function guardedFetch(
 
       if (next.origin !== current.origin) {
         for (const h of sensitiveHeaderNames) headers.delete(h);
+        cookieBase = null;
         // A 307/308 preserves method+body by spec, but re-sending a
         // secret-bearing request body (OAuth `client_secret`/`refresh_token`,
         // a signed webhook payload) to a DIFFERENT HOST is the same

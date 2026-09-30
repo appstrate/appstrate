@@ -92,6 +92,7 @@ interface ValidationFieldError {
     label: string | null;
     account_id: string;
     owned_by_actor: boolean;
+    needs_reconnection: boolean;
   }[];
 }
 
@@ -173,7 +174,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
       kind: "inline",
       manifest: inlineAgentManifest([INTEGRATION]),
       prompt: "do the thing",
-      connection_overrides: { [INTEGRATION]: picked },
+      connection_overrides: { [INTEGRATION]: [picked] },
     });
 
     // No 409 this time: the tool waited on a real run instead of reporting a
@@ -192,11 +193,55 @@ describe("mcp run_and_wait — connection_overrides", () => {
     expect(row).toBeDefined();
     // The audit trail of what the MODEL asked for — this is the field that was
     // silently dropped somewhere between the tool schema and the route.
-    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: picked });
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [picked] });
     // …and the resolver snapshot the spawn loader + MITM refresh read back,
     // proving the pick was honoured rather than merely stored.
     expect(row!.resolvedConnections).toMatchObject({
-      [INTEGRATION]: { connectionId: picked },
+      [INTEGRATION]: [{ connectionId: picked, source: "run_override" }],
     });
   }, 60_000);
+
+  // Two ids bind two connections end to end; a layer keeping only the first passes the test above,
+  // not this one.
+  it("binds every connection the override names, in the run's snapshot", async () => {
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+    const first = await seedIntegrationConnection(ctx, INTEGRATION, { label: "compte-a" });
+    const second = await seedIntegrationConnection(ctx, INTEGRATION, { label: "compte-b" });
+
+    const result = await callTool(headers, "run_and_wait", {
+      kind: "inline",
+      manifest: inlineAgentManifest([INTEGRATION]),
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: [first, second] },
+    });
+
+    expect(result.data.body).toBeUndefined();
+    const runId = result.data.id as string;
+    expect(runId).toStartWith("run_");
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId));
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [first, second] });
+    const resolved = row!.resolvedConnections![INTEGRATION];
+    expect(resolved!.map((c) => c.connectionId).sort()).toEqual([first, second].sort());
+  }, 60_000);
+
+  // A string where a set belongs is refused (400), never wrapped into a one-element set.
+  it("refuses a string where a set belongs, without launching", async () => {
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+    const picked = await seedIntegrationConnection(ctx, INTEGRATION);
+
+    const result = await callTool(headers, "run_and_wait", {
+      kind: "inline",
+      manifest: inlineAgentManifest([INTEGRATION]),
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: picked },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.data.status).toBe(400);
+    expect(JSON.stringify(result.data.body)).toContain(INTEGRATION);
+    expect(await db.select().from(runs)).toHaveLength(0);
+  });
 });

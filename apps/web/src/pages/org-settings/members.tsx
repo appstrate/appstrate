@@ -16,6 +16,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
+import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
 import { useAuth } from "../../hooks/use-auth";
 import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
 import { OrgInvitationForm } from "../../components/org-invitation-form";
@@ -27,6 +28,13 @@ import { toast } from "sonner";
 import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstrate/shared-types";
 
 type OrgMember = components["schemas"]["OrgMember"];
+
+/**
+ * Implicit space reach per role: a drop ends access, and the server then unshares connections.
+ * Exhaustive, so a new role must be placed here rather than read as one that revokes access.
+ */
+const ROLE_REACH = { owner: 2, admin: 2, member: 1, guest: 0 } satisfies Record<OrgRole, number>;
+
 export function OrgSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { currentOrg } = useOrg();
@@ -40,11 +48,13 @@ export function OrgSettingsMembersPage() {
 
   const [inviting, setInviting] = useState(false);
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
-  // Ownership changes confirm first: a new owner can remove whoever named them.
-  const [ownerChange, setOwnerChange] = useState<{
+  // Ownership changes confirm first (a new owner can remove whoever named them), and so do
+  // demotions that end space access.
+  const [roleChange, setRoleChange] = useState<{
     label: string;
     id: string;
     role: OrgRole;
+    from: OrgRole;
   } | null>(null);
 
   const {
@@ -60,8 +70,10 @@ export function OrgSettingsMembersPage() {
 
   const members = orgData?.members ?? [];
   const invitations = orgData?.invitations ?? [];
+  // A removal or a role drop that ends space access unshares the member's connections.
   const invalidateOrg = () => {
     void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
+    void invalidateIntegrationQueries(queryClient);
   };
 
   const toastMemberError = (err: unknown) =>
@@ -94,11 +106,12 @@ export function OrgSettingsMembersPage() {
   };
 
   const handleRoleChange = (member: OrgMember, newRole: OrgRole) => {
-    if (newRole === "owner" || member.role === "owner") {
-      setOwnerChange({
+    if (newRole === "owner" || member.role === "owner" || revokesAccess(member.role, newRole)) {
+      setRoleChange({
         label: member.displayName || member.email || member.userId,
         id: member.userId,
         role: newRole,
+        from: member.role,
       });
       return;
     }
@@ -222,30 +235,45 @@ export function OrgSettingsMembersPage() {
       )}
 
       <ConfirmModal
-        open={!!ownerChange}
-        onClose={() => setOwnerChange(null)}
+        open={!!roleChange}
+        onClose={() => setRoleChange(null)}
         title={t(
-          ownerChange?.role === "owner"
+          roleChange?.role === "owner"
             ? "orgSettings.promoteOwnerTitle"
-            : "orgSettings.demoteOwnerTitle",
+            : roleChange?.from === "owner"
+              ? "orgSettings.demoteOwnerTitle"
+              : "orgSettings.demoteTitle",
         )}
         description={
-          !ownerChange
+          !roleChange
             ? ""
-            : ownerChange.role === "owner"
-              ? t("orgSettings.promoteOwnerConfirm", { name: ownerChange.label })
-              : t("orgSettings.demoteOwnerConfirm", {
-                  name: ownerChange.label,
-                  role: t(roleI18nKey(ownerChange.role)),
-                })
+            : roleChange.role === "owner"
+              ? t("orgSettings.promoteOwnerConfirm", { name: roleChange.label })
+              : [
+                  t(
+                    roleChange.from === "owner"
+                      ? "orgSettings.demoteOwnerConfirm"
+                      : "orgSettings.demoteConfirm",
+                    { name: roleChange.label, role: t(roleI18nKey(roleChange.role)) },
+                  ),
+                  revokesAccess(roleChange.from, roleChange.role)
+                    ? t("orgSettings.demotionUnsharesConnections")
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")
         }
         confirmLabel={t(
-          ownerChange?.role === "owner" ? "orgSettings.promoteOwner" : "orgSettings.demoteOwner",
+          roleChange?.role === "owner"
+            ? "orgSettings.promoteOwner"
+            : roleChange?.from === "owner"
+              ? "orgSettings.demoteOwner"
+              : "orgSettings.demote",
         )}
         isPending={changeRoleMutation.isPending}
         onConfirm={() => {
-          if (ownerChange) {
-            changeRole(ownerChange.id, ownerChange.role, () => setOwnerChange(null));
+          if (roleChange) {
+            changeRole(roleChange.id, roleChange.role, () => setRoleChange(null));
           }
         }}
       />
@@ -269,4 +297,8 @@ export function OrgSettingsMembersPage() {
       />
     </>
   );
+}
+
+function revokesAccess(from: OrgRole, to: OrgRole): boolean {
+  return ROLE_REACH[to] < ROLE_REACH[from];
 }

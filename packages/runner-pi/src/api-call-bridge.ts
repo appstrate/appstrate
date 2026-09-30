@@ -18,13 +18,21 @@ import type { RuntimeEventEmitter } from "./runtime-tools/mcp-forward.ts";
 import { piToolResultOrThrow } from "./pi-tool-result.ts";
 import {
   apiCallRequestJsonSchema,
+  apiCallTargetJsonSchema,
   readIntegrationRefs,
   readApiCallIntegrationMetas,
+  readIntegrationManifest,
   type IntegrationApiCallResolver,
   type IntegrationRef,
   type Tool as AfpsTool,
   type ToolContext as AfpsToolContext,
 } from "@appstrate/afps-runtime/resolvers";
+import { parseManifestIntegrations } from "@appstrate/core/dependencies";
+import {
+  resolveEffectiveToolSelection,
+  selectedApiCallConfigs,
+  type IntegrationManifest,
+} from "@appstrate/core/integration";
 
 // Pull body + responseMode JSON schemas from the canonical AFPS source so
 // the LLM-facing schema documents the discriminated body union. Same
@@ -44,8 +52,8 @@ export interface BuildApiCallExtensionFactoryOptions {
 
 /**
  * Resolve every apiCall integration declared in the bundle's manifest and
- * expose each as a `{ns}__api_call` Pi tool. Returns an empty array when
- * the bundle declares no apiCall integrations — safe to splice
+ * expose each api_call tool the agent SELECTED as a `{ns}__api_call` Pi tool.
+ * Returns an empty array when the bundle declares none — safe to splice
  * unconditionally into the factory list.
  */
 export async function buildApiCallExtensionFactory(
@@ -53,20 +61,31 @@ export async function buildApiCallExtensionFactory(
 ): Promise<ExtensionFactory[]> {
   const refs = readIntegrationRefs(opts.bundle);
   if (refs.length === 0) return [];
+  const root = opts.bundle.packages.get(opts.bundle.root)?.manifest;
+  const agentTools = new Map(
+    parseManifestIntegrations((root ?? {}) as Record<string, unknown>).map((e) => [e.id, e.tools]),
+  );
 
-  // Keep only refs that resolve to ≥1 apiCall surface. Pure MCP-server
+  // Keep only refs with ≥1 SELECTED apiCall surface. Pure MCP-server
   // integrations have no generic call surface and are skipped (their tools
   // flow through the sidecar/runner path on the platform, not the CLI). An
   // integration may opt several auths into api_call, yielding multiple tools
-  // — track the owning integration id per emitted tool so the index pairing
-  // below stays aligned with the resolver's (ref, auth) iteration order.
+  // — track the owning integration id and whether it is selected per emitted
+  // tool so the index pairing below stays aligned with the resolver's
+  // (ref, auth) iteration order.
   const refsWithApiCall: IntegrationRef[] = [];
-  const integrationIdPerTool: string[] = [];
+  const perTool: { integrationId: string; selected: boolean }[] = [];
   for (const ref of refs) {
     const metas = readApiCallIntegrationMetas(opts.bundle, ref);
-    if (metas.length === 0) continue;
+    const selected = selectedApiCallToolNames(
+      readIntegrationManifest(opts.bundle, ref),
+      agentTools.get(ref.name),
+    );
+    if (!metas.some((m) => selected.has(m.toolName))) continue;
     refsWithApiCall.push(ref);
-    for (let i = 0; i < metas.length; i++) integrationIdPerTool.push(ref.name);
+    for (const meta of metas) {
+      perTool.push({ integrationId: ref.name, selected: selected.has(meta.toolName) });
+    }
   }
   if (refsWithApiCall.length === 0) return [];
 
@@ -78,10 +97,27 @@ export async function buildApiCallExtensionFactory(
   const factories: ExtensionFactory[] = [];
   for (let i = 0; i < tools.length; i++) {
     const tool = tools[i]!;
-    const integrationId = integrationIdPerTool[i] ?? tool.name;
+    if (perTool[i]?.selected === false) continue;
+    const integrationId = perTool[i]?.integrationId ?? tool.name;
     factories.push(makeApiCallExtension(tool, integrationId, opts));
   }
   return factories;
+}
+
+/**
+ * The api_call tools the platform grants this integration: those its EFFECTIVE selection (the
+ * agent's `tools`, else the integration's `default_tools`) grants, by the rule the spawn
+ * resolver applies. Anything else would expose a tool whose integration the run's connection
+ * snapshot skipped as inert, which the proxy refuses.
+ */
+function selectedApiCallToolNames(
+  manifest: unknown,
+  agentTools: readonly string[] | "*" | undefined,
+): ReadonlySet<string> {
+  if (!manifest || typeof manifest !== "object") return new Set();
+  const integration = manifest as IntegrationManifest;
+  const selection = resolveEffectiveToolSelection(agentTools, integration);
+  return new Set(selectedApiCallConfigs(integration, selection).map((cfg) => cfg.toolName));
 }
 
 function makeApiCallExtension(
@@ -99,7 +135,7 @@ function makeApiCallExtension(
         additionalProperties: false,
         required: ["target"],
         properties: {
-          target: { type: "string", format: "uri" },
+          target: apiCallTargetJsonSchema,
           method: {
             type: "string",
             enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],

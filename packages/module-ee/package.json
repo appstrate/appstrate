@@ -20,14 +20,14 @@
   "dependencies": {
     "@appstrate/core": "workspace:*",
     "@appstrate/emails": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "hono": "^4.13.8",
+    "drizzle-orm": "^0.45.3",
+    "hono": "^4.13.9",
     "ioredis": "^6.0.0",
     "postgres": "^3.4.9",
     "stripe": "^22.6.2",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.31.10"
+    "drizzle-kit": "^0.31.11"
   }
 }

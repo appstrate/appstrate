@@ -7,6 +7,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `authorized_uris` rendered per connection; only declared hosts pin (#1627)
+
+- `guardedFetch` (and the engine's `preflightUrl`) takes a required `declaredUris`: the manifest's
+  declared, unrendered `authorized_uris`. `authorizedUris` (the list rendered for the
+  connection) decides what matches; only a host written literally in `declaredUris`
+  exempts a target from the SSRF net, and only those hosts share cookies across
+  origins. `hostLiterallyAllowlisted` never pins a templated host (`{…}`).
+- `LocalIntegrationResolver` renders each auth's `authorized_uris` with the creds
+  file's fields (`renderAuthorizedUris`, `@appstrate/afps-shared/credential-template`)
+  and enforces it on the substituted target, so `{{site_url}}/wp-json/…` matches a
+  `{$credential.site_url}/**` entry. The `api_call` schema accepts a target that
+  starts with a `{{field}}` followed by nothing or a `/` path; `apiCallRequestJsonSchema`
+  publishes it (`anyOf` a `uri` or that pattern), and the new `apiCallTargetJsonSchema`
+  export is its `target` property for tool schemas composed by hand.
+- A declared allowlist that renders to nothing for the connection (its URL field unset
+  or not an absolute http(s) URL) refuses every target instead of falling back to the
+  no-allowlist SSRF branch: `allowlistUnrendered` + `UNRENDERED_ALLOWLIST_REFUSAL`, applied
+  by `preflightUrl` / `guardedFetch`, the local resolver and the sidecar.
+- Off-allowlist refusals (`preflightUrl`, `enforceAuthorizedUris`) name the DECLARED
+  entries, never a rendered one — an exact-URL entry such as `{$credential.webhook_url}`
+  renders to a secret. `enforceAuthorizedUris(meta, target, rendered?)` takes the
+  substituted target and the rendered list as one optional `rendered` argument.
+
+### Changed — `X-Run-Id` is a reserved transport header
+
+- An `api_call`'s own `x-run-id` header (any casing) is now dropped, like the
+  other Appstrate transport headers: the remote resolver sets `X-Run-Id` itself
+  (`extraHeaders`), and a second casing would reach the platform merged as
+  `"a, b"`. `X-Connection-Id` stays open, only so that a caller already holding
+  a connection id can name it: the `api_call` tool has no argument addressing
+  one member of a bound set, which is why the platform refuses a remote run
+  that binds several connections to one integration.
+
+### Added — `readIntegrationManifest`
+
+- `readIntegrationManifest(bundle, ref)`, exported from
+  `@appstrate/afps-runtime/resolvers`: the integration manifest a ref resolves
+  to in the bundle, unvalidated — its `integration.json` (else `manifest.json`)
+  file, else the package's parsed manifest; `undefined` when the bundle does
+  not carry the package. `readApiCallIntegrationMetas` now reads through it.
+  `@appstrate/runner-pi` uses it to expose `api_call` only for the tools the
+  agent selected.
+
+### Added — credential-exfiltration guard
+
+Exported from `@appstrate/afps-runtime/resolvers` and shared by all three
+`api_call` paths (the sidecar, the local resolver, the platform credential
+proxy):
+
+- `credentialUrlPolicy({ templates, fields, allowAllUris, authorizedUris })`
+  and its result type `CredentialUrlPolicy` (`substitutesCredential`,
+  `allowAllUris`, `refuse`). A call whose `templates` reference a credential
+  field loses `allow_all_uris`; `refuse` is set when `authorizedUris` is empty.
+  `templates` must be exactly the strings substituted — the sidecar now passes
+  a JSON body's string leaves, not `JSON.stringify(body)`, whose escaping hid
+  `{{\tapi_key}}`.
+- `redactionFields(policy, fields)`: the credential values to scrub from an
+  echoed host — `fields` when the call templates a credential, `{}` otherwise.
+- `exfiltrationRefusal(integrationId)`: the one refusal message for
+  `policy.refuse`.
+- `redactCredentialHost(url, fields)`: the URL's host with credential values
+  (compared lowercased) replaced by their `{{field}}` placeholder.
+- `scrubTransportError(err, fields)`: `err` unchanged when `fields` is empty
+  (untemplated call); otherwise a same-`name` `Error` carrying only the message,
+  every URL cut to its redacted host (Bun keeps the full URL on `.path`).
+- `guardedFetch` and `fetchFollowingRedirectsCapturingCookies` take an optional
+  `credentialFields`, scrubbed from every host their refusals and logs name.
+  The "Too many redirects" error names the start URL's host instead of the
+  full URL.
+
+### Changed — local resolver
+
+- Runs the shared guard; its `RESOLVER_CREDENTIAL_EXFIL_BLOCKED` message is
+  `exfiltrationRefusal`'s.
+- A refused target's error `details.target` carries the template
+  (`https://{{api_key}}.x.com/`), never the substituted URL, and the host in
+  the message has credential values scrubbed.
+- A transport error is rethrown through `scrubTransportError`.
+
+### Fixed — own-property placeholders
+
+- `substituteVars` and the guard's placeholder lookup match own properties
+  only: `{{constructor}}` no longer resolves to `Object.prototype`'s.
+
+### Changed — redirect follower takes a `CookieScope` (BREAKING)
+
+- `fetchFollowingRedirectsCapturingCookies` takes `cookies: CookieScope` in
+  place of the `cookieJar` map. Each hop's `Set-Cookie` lands in the bucket of
+  THAT hop's origin (host-only), no longer in the initial target's, and every
+  hop's `Cookie` (the first included) is composed from `init`'s uncomposed
+  `Cookie`. Once a cross-origin credential strip fires, that `Cookie` is
+  dropped for the rest of the chain.
+- Cookies are host-only: `Domain` is ignored, so a cookie
+  `id.vendor.example` sets with `Domain=vendor.example` is not replayed to
+  `www.vendor.example` unless both hosts are literal `authorized_uris`
+  entries — list both to share it (honouring `Domain` safely would need the
+  Public Suffix List).
+- `Path` is ignored too: a same-name cookie scoped to another path shadows
+  the injected one on every path of that origin. Each origin bucket keeps at
+  most 50 cookies, evicting the least recently set names first.
+- `mergeSetCookieIntoJar` is no longer exported: `CookieScope.capture`
+  replaces it.
+- New `cookieScope(jar, integrationId, literalAllowlist)`, `CookieScope` and
+  `CookieJar`, exported from `@appstrate/afps-runtime/resolvers`, shared by
+  both credential proxies. `header(url, base)` composes one `Cookie` header:
+  sibling literal-allowlist origins < `base` (injected credential / caller
+  cookies) < the URL's own origin. `capture(url, setCookies)` strips
+  attributes and removes a cookie expired by `Max-Age <= 0` or a past
+  `Expires`.
+- `hostLiterallyAllowlisted` now lives in `http-call-core.ts`; still exported
+  from `@appstrate/afps-runtime/resolvers`.
+
 ### Removed — `computeTokenCost` (BREAKING)
 
 - `computeTokenCost` is no longer exported from `@appstrate/afps-runtime/runner`.

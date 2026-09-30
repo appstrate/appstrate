@@ -24,6 +24,9 @@ import {
   writeSecretEnvFile,
 } from "../integration-runtime-adapter-docker.ts";
 import { selectIntegrationRuntimeAdapter } from "../integration-runtime-adapter.ts";
+import { runnerKeyOf } from "../runner-peers.ts";
+
+const CONN_A = { id: "conn-a", label: "work", accountId: null };
 
 const FAKE_CONTAINER_ID = "c0ffee1234567890";
 
@@ -114,6 +117,7 @@ function spec(overrides: Partial<IntegrationSpawnSpec> = {}): IntegrationSpawnSp
   return {
     integrationId: "@tractr/gmail",
     namespace: "gmail",
+    connection: CONN_A,
     sourceKind: "local",
     manifest: {
       name: "@tractr/gmail",
@@ -477,7 +481,7 @@ describe("docker adapter — runner peer attribution (#1458)", () => {
     }
   }
 
-  it("attributes a spawned runner's address on the run network to its integration", async () => {
+  it("attributes a spawned runner's address on the run network to its connection", async () => {
     let members: Record<string, { Name: string; IPv4Address: string }> = {};
     const respond = (args: string[]) =>
       args[0] === "network" ? JSON.stringify([{ Containers: members }]) : "";
@@ -501,7 +505,8 @@ describe("docker adapter — runner peer attribution (#1458)", () => {
         };
 
         const attribute = adapter.peerAttribution();
-        expect(await attribute(at("172.18.0.3"))).toBe("@tractr/gmail");
+        expect(await attribute(at("172.18.0.3"))).toBe(runnerKeyOf(spec()));
+        expect(await attribute(at("172.18.0.3"))).not.toBe("@tractr/gmail");
         expect(await attribute(at("172.18.0.2"))).toBeNull();
         expect(await attribute(at("172.18.0.9"))).toBeNull();
         expect(calls.find((c) => c.args[0] === "network")!.args).toEqual([

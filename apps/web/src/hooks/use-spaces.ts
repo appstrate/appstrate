@@ -5,6 +5,7 @@ import { $api } from "../api/client";
 import { queryClient } from "../lib/query-client";
 import { getCurrentOrgId } from "../stores/org-store";
 import { orgOnlyHeader, useOrgOnlyScope } from "./use-org-scope";
+import { invalidateIntegrationQueries } from "./use-integrations";
 
 /** The one request init for the listing: the boot prime must land on `useSpaces`'s key. */
 function spacesListInit(header: ReturnType<typeof orgOnlyHeader>) {
@@ -73,7 +74,14 @@ export function useCreateSpace() {
 
 export function useUpdateSpace() {
   const invalidate = useInvalidateSpaces();
-  return $api.useMutation("patch", "/api/spaces/{id}", { onSuccess: invalidate });
+  const qc = useQueryClient();
+  return $api.useMutation("patch", "/api/spaces/{id}", {
+    onSuccess: () => {
+      invalidate();
+      // Closing the space unshares the connections of owners it leaves without access.
+      void invalidateIntegrationQueries(qc);
+    },
+  });
 }
 
 export function useDeleteSpace() {

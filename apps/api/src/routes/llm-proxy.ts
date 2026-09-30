@@ -49,7 +49,7 @@
  *   - `X-Run-Id` request header (optional; Phase 4 populates it) pins
  *     a call to a specific `runs` row so cost rolls up per-run. The id is
  *     validated against the principal (org + space + actor for JWT
- *     users) before the upstream call — see {@link assertRunAttributable}.
+ *     users) before the upstream call — see `requireAttributableRun`.
  *   - Audit log on every call (authMethod, principalId, preset, status,
  *     duration).
  */
@@ -60,10 +60,10 @@ import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { bodyLimit } from "../middleware/body-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { invalidRequest, forbidden, notFound } from "../lib/errors.ts";
+import { invalidRequest, forbidden } from "../lib/errors.ts";
 import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { LLM_PROXY_ROUTES, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
-import { getRunAttribution, isServedByLlmProxy } from "../services/state/runs.ts";
+import { isServedByLlmProxy, requireAttributableRun } from "../services/state/runs.ts";
 import { enforceSystemProxyAdmission } from "../services/system-proxy-admission.ts";
 import { recordLlmLatency } from "@appstrate/core/telemetry";
 import {
@@ -76,11 +76,10 @@ import { openaiCompletionsAdapter } from "../services/llm-proxy/openai.ts";
 import { openaiResponsesAdapter } from "../services/llm-proxy/openai-responses.ts";
 import { anthropicMessagesAdapter } from "../services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
-import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/types.ts";
+import type { LlmProxyAdapter } from "../services/llm-proxy/types.ts";
 import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
-import { ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
 import { verifyRunToken } from "../lib/verify-run-token.ts";
 
 // Protocol family → adapter; the paths come from `LLM_PROXY_ROUTES`.
@@ -100,7 +99,7 @@ export function createLlmProxyRouter() {
   for (const apiShape of PROXIED_API_SHAPES) {
     // Past `llm-proxy:call` the RUN named by `X-Run-Id`
     // decides — a jwt principal may only bill a run it launched
-    // (`assertRunAttributable`).
+    // (`requireAttributableRun`).
     router.post(
       llmProxyUrlPath(apiShape),
       rateLimit(limits.rate_per_min),
@@ -151,57 +150,6 @@ export function createRunLlmProxyRouter() {
   return router;
 }
 
-/**
- * Validate a caller-supplied `X-Run-Id` against the calling principal
- * (CRIT-07). The header pins the call's `llm_usage` row to a run, and
- * `computeRunSpend` rolls those rows up into `runs.cost` — so an unvalidated
- * id would let any principal holding `llm-proxy:call` inflate the cost of
- * any run whose id it knows, including runs of other tenants.
- *
- * Checks, in order:
- *   1. The run exists inside the principal's org (`getRunAttribution` is
- *      org-scoped) — unknown and cross-org ids both map to the same 404 so
- *      a foreign tenant's run id cannot be probed for existence.
- *   2. The run belongs to the same space as the auth context, when the
- *      context carries one (always true for API keys — they are space-bound;
- *      JWT strategies may resolve without a space, in which case the
- *      org boundary plus the actor check below is the enforced scope).
- *   3. For an actor-bound identity (`jwt_user`), the run must belong to that
- *      same user — a JWT user cannot attribute spend to another actor's run.
- *      API-key principals are space-scoped infrastructure identities (the run
- *      may legitimately carry a user/end-user actor or a sibling key), so the
- *      org + space boundary is their enforcement line.
- *   4. The run is still active. A terminal run id must not become a reusable
- *      billing context for arbitrary post-run system-model calls.
- *
- * Because check 3 leaves an API key free to reference any live run of its own
- * space, this validation alone does NOT bound platform-paid spend — it
- * bounds cost *attribution*. Admission is enforced separately, per call, by
- * `enforceSystemProxyAdmission`, which gates every run-context call —
- * platform-supplied or BYOK — regardless of the referenced run's origin.
- */
-async function assertRunAttributable(
-  c: Context<AppEnv>,
-  runId: string,
-  principal: LlmProxyPrincipal,
-): Promise<NonNullable<Awaited<ReturnType<typeof getRunAttribution>>>> {
-  const run = await getRunAttribution(principal.orgId, runId);
-  if (!run) {
-    throw notFound(`run ${runId} not found`);
-  }
-  const spaceId = c.get("spaceId");
-  if (spaceId && run.spaceId !== spaceId) {
-    throw notFound(`run ${runId} not found`);
-  }
-  if (principal.kind === "jwt_user" && run.userId !== principal.userId) {
-    throw forbidden("X-Run-Id does not reference a run owned by the calling user");
-  }
-  if (!ACTIVE_RUN_STATUSES.has(run.status)) {
-    throw invalidRequest(`run ${runId} is no longer active`);
-  }
-  return run;
-}
-
 async function handleProxy(
   c: Context<AppEnv>,
   apiShape: ProxiedApiShape,
@@ -228,8 +176,17 @@ async function handleProxy(
   // CRIT-07 guard — `X-Run-Id` is caller-supplied and feeds
   // `llm_usage.run_id` → `computeRunSpend` → `runs.cost`. Validate it against
   // the principal BEFORE the upstream call so a caller with `llm-proxy:call`
-  // cannot bill LLM cost onto an arbitrary (even cross-tenant) run.
-  const runAttribution = runId ? await assertRunAttributable(c, runId, principal) : null;
+  // cannot bill LLM cost onto an arbitrary (even cross-tenant) run. Only a `jwt_user` must own
+  // it: an API key's space runs legitimately carry other actors. This bounds ATTRIBUTION only;
+  // `enforceSystemProxyAdmission` gates spend.
+  const runAttribution = runId
+    ? await requireAttributableRun({
+        orgId: principal.orgId,
+        runId,
+        spaceId: c.get("spaceId"),
+        owner: principal.kind === "jwt_user" ? { type: "user", id: principal.userId } : null,
+      })
+    : null;
   if (runAttribution && !runAttribution.packageId) {
     throw invalidRequest(`run ${runAttribution.id} has no agent package attribution`);
   }

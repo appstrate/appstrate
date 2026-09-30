@@ -2,6 +2,7 @@
 
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { RunWithOptionsSubmit } from "../components/run-with-options-modal";
+import { integrationIdOfField, type MissingIntegrationFieldError } from "./connection-choice";
 
 /** One run launch, as the launch surfaces build it — `useRunAgent` maps it onto the wire. */
 export interface RunLaunch {
@@ -18,13 +19,11 @@ export interface RunLaunch {
    */
   version?: string;
   /**
-   * Per-integration connection picks for THIS run (#199 mechanism #2).
-   * Flat map: `{ "@scope/integration": "<connectionId>" }` — one pick per
-   * integration; the chosen connection carries its own `auth_key`. Wire
-   * format validated by `input-parser.ts`. Set by the run-with-options modal
+   * Per-integration connection sets for THIS run (cascade layer 3), validated in
+   * `apps/api/src/lib/launch-schemas.ts`. Set by the run-with-options modal
    * and, on a retry, by the connection-recovery modal (`retryLaunch`).
    */
-  connectionOverrides?: Record<string, string>;
+  connectionOverrides?: Record<string, string[]>;
   /** Per-run model id override (wire `modelId`). From the run-with-options modal. */
   modelId?: string;
   /** Per-run proxy id override (wire `proxyId`). From the run-with-options modal. */
@@ -39,15 +38,37 @@ export interface RunLaunch {
   dependencyOverrides?: Record<string, string>;
 }
 
+/** Codes refusing the launch's own pick itself: replayed, it would be refused again. */
+const OWN_PICK_REFUSALS = new Set(["override_outranked", "override_connection_unavailable"]);
+
 /**
  * The launch a `409 missing_integration_connection` refused, replayed with the
  * recovery modal's picks. Everything else the user chose rides along — the
- * input typed in the run modal above all (#1539). The picks answer the
- * integrations the 409 named, so they win over a per-run pick the launch
- * already carried for the same one; picks for other integrations are kept.
+ * input typed in the run modal above all (#1539). The launch's own pick for an
+ * integration is dropped only when the 409 refuses that pick itself
+ * (`OWN_PICK_REFUSALS`, or `auth_serves_no_selected_tool` naming a connection
+ * of it). Under any other code — a connection to repair, above all — the pick
+ * is kept: dropping it could let the retry bind another account.
  */
-export function retryLaunch(launch: RunLaunch, picks: Record<string, string>): RunLaunch {
-  return { ...launch, connectionOverrides: { ...launch.connectionOverrides, ...picks } };
+export function retryLaunch(
+  launch: RunLaunch,
+  picks: Record<string, string[]>,
+  errors: readonly MissingIntegrationFieldError[],
+): RunLaunch {
+  const own = launch.connectionOverrides ?? {};
+  const refused = new Set(
+    errors.flatMap((e) => {
+      const id = integrationIdOfField(e.field);
+      const refusesPick =
+        OWN_PICK_REFUSALS.has(e.code) ||
+        (e.code === "auth_serves_no_selected_tool" &&
+          e.connection_id !== undefined &&
+          (own[id] ?? []).includes(e.connection_id));
+      return refusesPick ? [id] : [];
+    }),
+  );
+  const kept = Object.entries(own).filter(([id]) => !refused.has(id));
+  return { ...launch, connectionOverrides: { ...Object.fromEntries(kept), ...picks } };
 }
 
 /**

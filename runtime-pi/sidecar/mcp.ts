@@ -64,6 +64,7 @@ import {
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { isTextShapedContentType } from "@appstrate/core/mime";
+import { apiCallTargetJsonSchema } from "@appstrate/afps-runtime/resolvers";
 // The canonical api_call/api_upload naming. NOT copied: the reason this file
 // gave for copying it — "the sidecar bundle deliberately avoids the manifest
 // schema stack" — named `@appstrate/core/integration`, but the definition lives
@@ -658,10 +659,10 @@ function buildSidecarTools(options: MountMcpOptions): {
     required: ["target"],
     properties: {
       target: {
-        type: "string",
-        format: "uri",
+        ...apiCallTargetJsonSchema,
         description:
-          "Absolute target URL. Must match an entry in the integration auth's `authorizedUris` " +
+          "Absolute target URL, or a `{{field}}` holding the connection's base URL followed by a " +
+          "path. Must match an entry in the integration auth's `authorizedUris` " +
           "(or be a non-private URL if the integration is `allowAllUris`).",
       },
       method: {
@@ -854,10 +855,12 @@ function buildSidecarTools(options: MountMcpOptions): {
     const ctx = {
       proxyDeps: {
         ...proxyDeps,
+        declaredUris: integ.declaredUris,
         fetchCredentials: integ.fetchCredentials,
         refreshCredentials: integ.refreshCredentials,
       },
       integrationId: integ.integrationId,
+      connectionId: integ.connectionId,
       label: toolName,
     };
     return {
@@ -1009,7 +1012,7 @@ function buildSidecarTools(options: MountMcpOptions): {
    */
   async function credentialProxyInner(
     rawArgs: unknown,
-    ctx: { proxyDeps: ApiCallDeps; integrationId: string; label: string },
+    ctx: { proxyDeps: ApiCallDeps; integrationId: string; connectionId: string; label: string },
   ): Promise<CallToolResult> {
     {
       const args = rawArgs as {
@@ -1104,6 +1107,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       const result = await executeApiCall(
         {
           integrationId: ctx.integrationId,
+          connectionId: ctx.connectionId,
           targetUrl: args.target,
           method,
           callerHeaders,
@@ -1677,10 +1681,10 @@ async function readBodyBounded(res: Response, maxBytes: number): Promise<string>
  * tool then performs.
  */
 /**
- * One integration's `api_call` wiring.
+ * One `api_call` wiring: one auth of one bound connection.
  * The credential adapters are built by the sidecar boot from the
- * integration's live credentials source; `mountMcp` threads them into a
- * per-integration `ApiCallDeps` so the generic tool reuses the
+ * connection's live credentials source; `mountMcp` threads them into a
+ * per-tool `ApiCallDeps` so the generic tool reuses the
  * shared credential-proxy core.
  */
 export interface ApiCallIntegrationConfig {
@@ -1695,6 +1699,10 @@ export interface ApiCallIntegrationConfig {
   toolName?: string;
   /** Integration package id (used as the proxy `integrationId` + audit source). */
   integrationId: string;
+  /** Bound connection whose credentials this tool injects. */
+  connectionId: string;
+  /** See {@link ApiCallDeps.declaredUris}. */
+  declaredUris: ApiCallDeps["declaredUris"];
   /** Resolve the integration's credentials into the proxy payload. */
   fetchCredentials: ApiCallDeps["fetchCredentials"];
   /** Force-refresh on a mid-run 401 and re-resolve (null when not rotated). */
@@ -1793,7 +1801,7 @@ interface MountMcpOptions {
    * {@link executeApiCall} directly with structured args; `run_history`
    * and `recall_memory` use `proxyDeps.fetchFn` + `proxyDeps.config` to
    * reach the platform upstream. Required: there is no longer a legacy
-   * HTTP-route fallback. The per-integration credential pair is layered
+   * HTTP-route fallback. The per-connection credential pair is layered
    * on top of these by `makeApiCallTool`.
    */
   proxyDeps: ApiCallBaseDeps;
@@ -1842,7 +1850,7 @@ interface MountMcpOptions {
 /**
  * Cap on how long the first `/mcp` request waits for integrations to
  * register their tools before responding. Tuned for the Phase 1.5 path
- * on Docker Desktop / macOS: per-integration spawn pays for `docker
+ * on Docker Desktop / macOS: per-connection spawn pays for `docker
  * create` + `docker cp bundle` + `docker cp ca.pem` (MITM) +
  * `docker start` + Python/Node runner cold-start + MCP handshake, each
  * `docker exec` round-trip costing 1–2 s on the LinuxKit VM. Linux hosts
@@ -2005,6 +2013,9 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
       enableDnsRebindingProtection: false,
+      // The envelope was already bounded above; without this the SDK's own
+      // 4 MB default rejects it first and the tool never answers 413 itself.
+      maxRequestBodySize: MAX_MCP_REQUEST_BODY_SIZE,
     });
     try {
       await server.connect(transport);

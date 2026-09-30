@@ -609,6 +609,15 @@ down.
 Choose `link` when the credential is durable and acquired once. Choose `run-start`
 when each run needs a fresh session from a stored secret.
 
+Cookies the upstream sets during a proxy session (one `X-Session-Id` and connection on
+the platform proxy, one run in the sidecar), on any hop of a redirect chain, are filed
+under the host that set them and replayed there, winning by name over an injected cookie
+credential: a rotated session sticks, a deletion falls back to the injected value.
+Cookies are host-only: `Domain` and `Path` are ignored (a same-name cookie set for another
+path still shadows the injected one on that host), and two hosts share cookies only when
+both are literal `authorized_uris` entries. On a cross-origin redirect the platform proxy
+strips the Cookie credential; the sidecar keeps it inside the declared allowlist.
+
 ---
 
 ## `tools_policy` — per-tool authorization metadata
@@ -671,6 +680,38 @@ Consumers MUST NOT send credentials to URIs outside the authorized set unless
 `allow_all_uris` is explicitly `true`. URL-encoding bypass, fragment injection, and
 open-redirect chains MUST NOT cross the allowlist (§8.6).
 
+A caller that templates a credential field (`{{field}}`) into the target, a header or
+a substituted body loses `allow_all_uris`: the target and every redirect hop must
+match `authorized_uris`, and the call is refused when there is none. The sidecar, the
+CLI resolver and the platform proxy share this rule (`credentialUrlPolicy`).
+
+An integration whose endpoint is per-connection declares it as a URL-form entry
+instead of `allow_all_uris`: `"{$credential.site_url}/**"`, or
+`"{$credential.webhook_url}"` for one exact URL. The placeholder comes first, alone,
+followed by nothing or a suffix starting with `/`; the field must be declared and
+`required`. Each connection's list is rendered from its value — an absolute
+`http(s)` URL without userinfo, `#`, an empty `?` or `*`, and without a query string
+unless the entry is the bare placeholder: `"{$credential.webhook_url}"` is matched
+exactly, so a Google Chat or Power Automate URL keeps its `?key=…&token=…` without
+widening anything, while a query before a `/**` suffix is refused. Every redirect hop
+must match that exact URL too, so a webhook that redirects elsewhere (Google Apps
+Script `…/exec` → `script.googleusercontent.com`) is refused. A value that does not
+qualify drops the entry, so a connection left with no entry has every call refused;
+the platform therefore refuses such a value when the connection is created or its
+credentials are updated (a 400 `validation_failed` naming `credentials.<field>` and
+the form it must take, never the value).
+Prefer the exact form when the host is shared between tenants (`hooks.slack.com`).
+Rendered entries never exempt a host from the SSRF blocklist, and never share cookies.
+
+What the guard covers is narrow. A templated credential cannot leave
+`authorized_uris`, which bound host and path, not tenant: an allowlisted multi-tenant
+API such as `https://discord.com/api/**` still reaches other tenants' endpoints on that
+path. The server-injected credential header (`delivery.http`) is not templated: under
+`allow_all_uris`, an untemplated call sends it to any public host, by design. Set
+`allow_all_uris` only when that is acceptable for the credential; the system
+catalogue refuses it on any auth that injects through `delivery.http`
+(`bun run build:system-packages:check`).
+
 The runtime layer (sidecar MITM) enforces this on the wire, including across redirect
 hops (per-hop allowlist check, per-hop SSRF blocklist, hybrid credential-strip on
 cross-host hops). For a `source.kind: "local"` integration run in Docker, the same list is also the
@@ -696,10 +737,11 @@ connection field with `{$credential.<field>}`:
 
 The field must be declared and listed in `credentials.schema.required`, and the entry
 must start with `scheme://` with its placeholders in the host and port only (never in
-the path or query). Templates are refused on an `oauth2` auth, on an auth that declares
-`connect`, and on one exposing `api_call`. At run time a value containing anything but
-letters, digits, `.` and `-`, or made only of dots, drops the pattern, so a user cannot
-add a wildcard, a separator or another host.
+the path or query) — or be a URL-form entry (`{$credential.site_url}/**`, above).
+Templates are refused on an `oauth2` auth and on an auth that declares `connect`. At run
+time a host or port value containing anything but letters, digits, `.` and `-`, or made
+only of dots, drops the pattern, so a user cannot add a wildcard, a separator or another
+host.
 
 ---
 

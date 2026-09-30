@@ -180,7 +180,7 @@ export function setupPluginFiles(problem: string, remedy: string): Record<string
 }
 
 /** POSIX single-quote quoting: the only escape is closing, backslash-quoting, reopening. */
-function shellQuote(value: string): string {
+export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 

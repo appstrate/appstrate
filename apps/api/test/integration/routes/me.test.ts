@@ -23,7 +23,7 @@ import {
 import { seedApiKey, seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { assertDbHas } from "../../helpers/assertions.ts";
-import { integrationConnections } from "@appstrate/db/schema";
+import { auditEvents, integrationConnections, integrationPins } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 
 const app = getTestApp();
@@ -53,7 +53,7 @@ async function seedConnectionFor(opts: {
       userId: opts.userId,
       credentialsEncrypted: "x",
       scopesGranted: ["openid", "email"],
-      label: opts.label ?? null,
+      label: opts.label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       sharedWithOrg: opts.sharedWithOrg ?? false,
       ...(opts.identityClaims ? { identityClaims: opts.identityClaims } : {}),
     })
@@ -344,6 +344,35 @@ describe("Me API (/api/me)", () => {
       expect(group?.connections[0]?.kind).toBe("integration");
     });
 
+    // Which lock wins is `integrations-connections-visibility.test.ts`'s; this route projects it.
+    it("projects the lock an admin pin puts on a connection", async () => {
+      const ctx = await createTestContext({ orgSlug: "lock-org" });
+      const pinned = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@lock/pinned",
+        userId: ctx.user.id,
+        sharedWithOrg: true,
+      });
+      await seedPackage({ id: "@lock/agent", orgId: ctx.orgId, type: "agent", source: "local" });
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: "@lock/agent",
+        integrationId: "@lock/pinned",
+        userId: null,
+        connectionIds: [pinned],
+      });
+
+      const res = await app.request("/api/me/connections", { headers: { Cookie: ctx.cookie } });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ connections: Array<{ connection_id: string; locked_by: string | null }> }>;
+      };
+      expect(body.data.flatMap((g) => g.connections)).toEqual([
+        expect.objectContaining({ connection_id: pinned, locked_by: "admin_pin" }),
+      ]);
+    });
+
     // Claim keys are snake_case (AFPS identity keys): `account_email` wins
     // over `email`, and a camelCase `accountEmail` is not an identity key.
     it("derives identity from the snake_case account_email claim only", async () => {
@@ -565,6 +594,26 @@ describe("Me API (/api/me)", () => {
         .from(integrationConnections)
         .where(eq(integrationConnections.id, connId));
       expect(after).toHaveLength(0);
+    });
+
+    it("audits a cookie-session delete in the connection's org", async () => {
+      const ctx = await createTestContext({ orgSlug: "self-del-audit" });
+      const connId = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@del/audited",
+        userId: ctx.user.id,
+      });
+
+      const res = await app.request(`/api/me/connections/${connId}`, {
+        method: "DELETE",
+        headers: { Cookie: ctx.cookie },
+      });
+      expect(res.status).toBe(204);
+
+      const [event] = await db.select().from(auditEvents).where(eq(auditEvents.resourceId, connId));
+      expect(event?.action).toBe("integration.connection.deleted");
+      expect(event?.orgId).toBe(ctx.orgId);
     });
 
     it("returns 401 without authentication", async () => {

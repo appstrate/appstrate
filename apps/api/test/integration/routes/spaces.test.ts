@@ -163,6 +163,7 @@ describe("Spaces API", () => {
         name: "Audited Renamed",
         defaultRole: "viewer",
         settings: { allowedRedirectDomains: ["example.com"] },
+        unsharedConnectionIds: [],
       });
     });
   });

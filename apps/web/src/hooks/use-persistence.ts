@@ -24,7 +24,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
-import { onMutationError } from "./use-mutations";
+import { onMutationError } from "../lib/mutation-error";
 import { persistenceKeys } from "../lib/query-keys";
 import type { PersistenceScopeFilter } from "../components/persistence/scope-filter";
 

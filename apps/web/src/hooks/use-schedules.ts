@@ -12,7 +12,7 @@ import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
-import { onMutationError } from "./use-mutations";
+import { onMutationError } from "../lib/mutation-error";
 import { scheduleKeys } from "../lib/query-keys";
 import type { AgentDetail, ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 
@@ -87,7 +87,8 @@ export function useSchedules(packageId: string | undefined) {
   });
 }
 
-function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
+/** Every cached schedule list and detail, across org/space — also used after a connection delete. */
+export function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: scheduleKeys.listAll });
   qc.invalidateQueries({ queryKey: scheduleKeys.detailAll });
 }
@@ -109,7 +110,7 @@ export function useCreateSchedule(packageId: string) {
       generation_config_override?: ModelGenerationSettings | null;
       proxy_id_override?: string | null;
       version_override?: string | null;
-      connection_overrides?: Record<string, string> | null;
+      connection_overrides?: Record<string, string[]> | null;
       actor?: { userId?: string; endUserId?: string };
     }): Promise<ScheduleWireDto> => {
       const { scope, name } = splitPackageRef(packageId);
@@ -142,7 +143,7 @@ export function useUpdateSchedule() {
       generation_config_override?: ModelGenerationSettings | null;
       proxy_id_override?: string | null;
       version_override?: string | null;
-      connection_overrides?: Record<string, string> | null;
+      connection_overrides?: Record<string, string[]> | null;
       actor?: { userId?: string; endUserId?: string };
     }): Promise<ScheduleWireDto> => {
       const { data: updated } = await client.PATCH("/api/schedules/{id}", {

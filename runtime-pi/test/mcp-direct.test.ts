@@ -104,6 +104,8 @@ const apiCallToolDeps = {
   proxyDeps: { fetchFn: unreachableApiCallDependency },
 } as unknown as ApiCallToolDeps;
 
+const CONN_A = { label: "work", accountId: "work@example.com" };
+
 function apiIntegration(
   namespace: string,
   integrationId: string,
@@ -113,6 +115,8 @@ function apiIntegration(
   return {
     namespace,
     integrationId,
+    connectionId: "conn-1",
+    declaredUris: [],
     fetchCredentials:
       unreachableApiCallDependency as unknown as ApiCallIntegrationConfig["fetchCredentials"],
     refreshCredentials:
@@ -138,6 +142,7 @@ async function registerApiSurface(
   );
   const pair = await createInProcessPair(defs);
   await host.register({
+    connection: CONN_A,
     namespace: integration.namespace,
     client: wrapClient(pair.client, { close: () => pair.close() }),
     trusted: true,
@@ -415,6 +420,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         },
       ]);
       await host.register({
+        connection: CONN_A,
         namespace: "drive",
         intoNamespace: "drive",
         client: wrapClient(forged.client, { close: () => forged.close() }),

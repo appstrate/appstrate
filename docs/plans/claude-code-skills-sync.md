@@ -67,7 +67,7 @@ one that is never changes the version, which `versions/latest` resolves per org.
 Explicit flags accept IDs or unambiguous exact names. Persistent selections
 contain space IDs and are cleared when the organization changes. An empty
 `syncSpaces` list installs no business skills and retains MCP. The server
-validates `X-Space-Id` against the org (`resolveMcpSpaceRow`) and forwards it
+validates `X-Space-Id` against the org (`enterMcpSpace`) and forwards it
 on every in-process dispatch, so the header cannot reach another org's space.
 The CLI reference documents OAuth, reloads, legacy connection coexistence and
 opt-out.

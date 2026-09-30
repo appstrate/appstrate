@@ -10,15 +10,24 @@
 import type { Peer } from "./helpers.ts";
 import { logger } from "./logger.ts";
 
-/** Runner's integration id; `null` = not a runner, `undefined` = lookup failed (refuse). */
+/** Runner's {@link runnerKeyOf}; `null` = not a runner, `undefined` = lookup failed (refuse). */
 export type PeerAttribution = (peer: Peer) => Promise<string | null | undefined>;
+
+/**
+ * A runner is attributed to its connection, not its integration: N connections
+ * are N runners with their own credentials and egress allowlists, and must not
+ * reach a sibling's listeners.
+ */
+export function runnerKeyOf(spec: { integrationId: string; connection?: { id: string } }): string {
+  return spec.connection ? `${spec.integrationId}#${spec.connection.id}` : spec.integrationId;
+}
 
 /** Attribution where no runner can exist (before any adapter is prepared). */
 export const noRunnerPeers: PeerAttribution = async () => null;
 
 export interface RunnerPeers {
-  register(containerName: string, integrationId: string): void;
-  integrationOf: PeerAttribution;
+  register(containerName: string, runnerKey: string): void;
+  runnerOf: PeerAttribution;
 }
 
 interface NetworkInspectEntry {
@@ -67,11 +76,11 @@ export function createRunnerPeers(options: {
   }
 
   return {
-    register(containerName, integrationId) {
-      runners.set(containerName, integrationId);
+    register(containerName, runnerKey) {
+      runners.set(containerName, runnerKey);
       members = null;
     },
-    async integrationOf({ address: ip }) {
+    async runnerOf({ address: ip }) {
       if (runners.size === 0) return null;
       const wasCached = members !== null;
       const current = load();
@@ -101,7 +110,7 @@ export function policyForRunnerPeer<P>(
   policies: ReadonlyMap<string, P>,
 ): (peer: Peer) => Promise<P | null> {
   return async (peer) => {
-    const integrationId = await attribute(peer);
-    return typeof integrationId === "string" ? (policies.get(integrationId) ?? null) : null;
+    const runnerKey = await attribute(peer);
+    return typeof runnerKey === "string" ? (policies.get(runnerKey) ?? null) : null;
   };
 }

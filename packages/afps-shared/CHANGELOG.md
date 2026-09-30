@@ -12,7 +12,39 @@ consumer that raises its range — `scripts/verify-package-resolves.ts` installs
 the real tarball outside the monorepo, so an unpublished leaf fails the
 consumer's publish rather than the first user's `npm install`.
 
-## [0.9.1] — unreleased
+## [Unreleased]
+
+## [0.9.2] — 2026-09-30
+
+Additive only. Publish before any `@appstrate/core` that imports
+`parseUrlFormPattern` (core raises its range to `^0.9.2`).
+
+### Added
+
+- **`GuardedFetchOptions.cookies`** — optional per-hop cookie state for
+  `guardedFetch`: `capture(url, setCookies)` receives every hop's `Set-Cookie`,
+  and each hop's `Cookie` is `header(url, base)`, where `base` is the caller's
+  `Cookie` header until a cross-origin hop strips it, then `null`. Both get the
+  logical URL, never the pinned one. A session an upstream rotates on a
+  redirect response now reaches the next hop. Without the option nothing changes.
+- **URL-form `authorized_uris` in `renderAuthorizedUris`** (`./credential-template`,
+  issue #1627) — a pattern that is exactly one `{$credential.<field>}` at index 0,
+  followed by nothing or a placeholder-free `/` suffix (`{$credential.site_url}/**`),
+  renders the field as a whole URL: it must parse as an absolute `http:`/`https:`
+  URL with a host, no userinfo, no `#`, no empty `?` and no `*`; it renders as
+  origin + path (a bare entry keeps the exact path; before a suffix one
+  trailing `/` is dropped), then the suffix. A query string is kept for a bare
+  entry only (`{$credential.webhook_url}` — Google Chat, Power Automate), which
+  is an exact match the query cannot widen; before a suffix it drops the entry.
+  Any other value drops the entry. New export `parseUrlFormPattern(pattern)`
+  splits such a pattern into `{ field, suffix }` (`null` otherwise).
+  Authority-form patterns are unchanged.
+- **`unrenderableAuthorizedUriFields(patterns, fields)`** (`./credential-template`,
+  issue #1627) — the fields whose value would make `renderAuthorizedUris` drop an
+  entry, once per field, each with the form it must take (`{ field, expected }`,
+  never the value), so a connection can be refused when it is written.
+
+## [0.9.1] — 2026-09-24
 
 Additive only. `@appstrate/core` declares `^0.9.1`, so tag `afps-shared@0.9.1`
 on the squash commit right after merge (`docs/deployment/RELEASING_CORE.md` §1).

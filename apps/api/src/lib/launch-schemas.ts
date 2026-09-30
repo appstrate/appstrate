@@ -19,7 +19,7 @@
  *
  *   - `connection_overrides` — agent run, inline (+ validate) and schedules all
  *     take {@link connectionOverridesSchema}. The remote surface declares none,
- *     and `run-creation.ts` relies on that: it passes `runOverrides: null` to
+ *     and `run-creation.ts` relies on that: it passes `launchOverrides: null` to
  *     the connection cascade and stamps `connectionOverrides: null` on the row,
  *     so the readiness pass and the snapshot resolve the identical cascade.
  *     Accepting the field here without threading it would break that equality.
@@ -40,25 +40,21 @@
 import { z } from "zod";
 import { collectOverridableDependencyIds } from "@appstrate/core/dependencies";
 import { ApiError } from "./errors.ts";
+import { connectionIdSetSchema } from "./connection-set.ts";
 import { isValidDependencyOverride } from "../services/input-parser.ts";
 
 /**
- * Per-integration connection picks: `{ "@scope/integration": "<connection_id>" }`.
+ * Per-integration connection picks: `{ "@scope/integration": ["<connection_id>", ...] }`.
  *
- * `.min(1)` on the VALUE is load-bearing on every surface, and it costs the
- * most on schedules. An empty-string id is FALSY at the resolver's `resolveOne`
- * (`integration-connection-resolver.ts`, layer 4), so the pin is skipped
- * without a trace and the launch falls through to the actor-fallback or dies
- * with a 409 `must_choose_connection`. A schedule replays its frozen map on
- * every tick, so without this the write answers 200 once and every subsequent
- * fire is silently wrong.
+ * The uuid gate keeps a malformed id off the uuid column, where Postgres would
+ * reject the query instead of the resolver refusing the pick.
  *
  * It is also owned here rather than delegated to `parseRequestInput`:
  * `POST /api/runs/inline/validate` never calls the parser, so the guard would
  * have no owner there and the validator would disagree with the launch on the
  * same body.
  */
-export const connectionOverridesSchema = z.record(z.string(), z.string().min(1));
+export const connectionOverridesSchema = z.record(z.string(), connectionIdSetSchema);
 
 /**
  * Per-dependency version overrides: `{ "@scope/dep": "draft" | "<spec>" }`.

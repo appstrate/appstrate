@@ -6,7 +6,7 @@
  * endpoints (GET = read-current-with-proactive-refresh, POST /refresh =
  * force-refresh).
  *
- * The factory is one-shot per (run × integration): it fetches the
+ * The factory is one-shot per (run × bound connection): it fetches the
  * initial payload at sidecar boot, caches it in memory, and exposes the
  * `MitmCredentialSource` contract that
  * {@link createIntegrationMitmListener} consumes. The cache is updated
@@ -14,14 +14,12 @@
  * `refreshOnUnauthorized` hook calls back into this module rather than
  * tracking state itself.
  *
- * Why a per-integration source instead of a shared one: each integration
- * has its own MITM listener (per the existing 1.2d design — proxyUrl is
- * per-integration in `IntegrationToSpawn.credentialSource`), so the
- * source's `current()` already scopes naturally to one integration's
- * auths.
+ * Why a per-connection source instead of a shared one: each spawn spec
+ * (one per bound connection) has its own MITM listener, so the source's
+ * `current()` scopes naturally to that connection's auth.
  *
  * Source/Sink model (design principle — do NOT violate):
- *   - ONE canonical credentials Source per (integration × run). It owns the
+ *   - ONE canonical credentials Source per (bound connection × run). It owns the
  *     cache, the refresh/re-login lifecycle, the substitution window, and
  *     `setSessionOutputs`. `bootIntegrations` creates it once and threads the
  *     SAME instance into every consumer.
@@ -129,9 +127,18 @@ function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCredentia
   return { auths, deliveryPlans, expiresAtEpochMs };
 }
 
+function connectionQuery(connectionId: string | undefined): string {
+  return connectionId === undefined ? "" : `?connection_id=${encodeURIComponent(connectionId)}`;
+}
+
 interface CreateIntegrationCredentialsSourceOptions {
   /** Package id (e.g. `@vendor/integration`). */
   integrationId: string;
+  /**
+   * Bound connection this source serves, sent as `?connection_id=` on every call.
+   * `undefined` only for a connect run, which has no connection yet.
+   */
+  connectionId: string | undefined;
   /** Platform base URL (e.g. `http://appstrate-api:3000`). */
   platformApiUrl: string;
   /** Run token used as `Bearer` for both endpoints. */
@@ -288,6 +295,7 @@ export function createIntegrationCredentialsSource(
 ): IntegrationCredentialsSource {
   const fetchFn = options.fetchFn ?? fetch;
   const minRefreshIntervalMs = options.minRefreshIntervalMs ?? 5_000;
+  const logCtx = { integrationId: options.integrationId, connectionId: options.connectionId };
   let payload = options.initialPayload;
   // Transient-input substitution windows (connect-login P1). Empty by default —
   // the MITM listener behaves byte-identically to today unless a connect-login
@@ -338,16 +346,15 @@ export function createIntegrationCredentialsSource(
 
   const refreshOnUnauthorized = async (authKey: string): Promise<boolean> => {
     // Cheap dedup against retry storms. We don't track per-authKey
-    // separately on the network side — the platform refreshes ALL auths
-    // on this integration in one call — but we DO want to suppress
-    // duplicates per authKey because the listener can fire concurrent
-    // refresh calls if multiple requests racing on different SNI hosts
-    // each see 401.
+    // separately on the network side — the platform refreshes the named
+    // connection in one call — but we DO want to suppress duplicates per
+    // authKey because the listener can fire concurrent refresh calls if
+    // multiple requests racing on different SNI hosts each see 401.
     const now = Date.now();
     const last = lastRefreshAt.get(authKey) ?? 0;
     if (now - last < minRefreshIntervalMs) {
       logger.info("integration credential refresh suppressed (cooldown)", {
-        integrationId: options.integrationId,
+        ...logCtx,
         authKey,
         cooldownMs: minRefreshIntervalMs,
         elapsedMs: now - last,
@@ -378,7 +385,7 @@ export function createIntegrationCredentialsSource(
       ok = await handler();
     } catch (err) {
       logger.warn("integration connect-login re-login handler failed", {
-        integrationId: options.integrationId,
+        ...logCtx,
         authKey,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -389,7 +396,7 @@ export function createIntegrationCredentialsSource(
     lastRefreshAt.set(authKey, Date.now());
     if (ok) {
       logger.info("integration connect-login session re-minted", {
-        integrationId: options.integrationId,
+        ...logCtx,
         authKey,
       });
     }
@@ -399,10 +406,13 @@ export function createIntegrationCredentialsSource(
   async function doRefresh(authKey: string): Promise<boolean> {
     let res: Response;
     try {
-      res = await postIntegrationCredentialsRefresh(options.integrationId, { ...options, fetchFn });
+      res = await postIntegrationCredentialsRefresh(options.integrationId, options.connectionId, {
+        ...options,
+        fetchFn,
+      });
     } catch (err) {
       logger.warn("integration credential refresh fetch failed", {
-        integrationId: options.integrationId,
+        ...logCtx,
         authKey,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -414,7 +424,7 @@ export function createIntegrationCredentialsSource(
       // on the platform. The integration's next call will return 401
       // again; we don't want to chase it forever.
       logger.warn("integration credential refresh revoked", {
-        integrationId: options.integrationId,
+        ...logCtx,
         authKey,
         // W3 — definitive: the refresh token is dead, the user must reconnect.
         category: CREDENTIAL_FAILURE_RECONNECT_REQUIRED,
@@ -427,13 +437,18 @@ export function createIntegrationCredentialsSource(
       return false;
     }
     if (!res.ok) {
-      logger.warn("integration credential refresh non-OK status", {
-        integrationId: options.integrationId,
-        authKey,
-        status: res.status,
-      });
-      // 502 (transient upstream refresh failure) and any other non-2xx: the
-      // cached credential may still be valid. Don't retry now.
+      // Any other non-2xx: the cached credential may still be valid, so no
+      // retry now. A 502 on an oauth2 auth is a failed refresh and warns; on
+      // any other auth it is expected — nothing to refresh, the platform counts
+      // the upstream rejection toward the reconnect threshold (then 410, above).
+      const authType = payload.auths.find((a) => a.authKey === authKey)?.authType;
+      if (res.status !== 502 || authType === "oauth2") {
+        logger.warn("integration credential refresh non-OK status", {
+          ...logCtx,
+          authKey,
+          status: res.status,
+        });
+      }
       return false;
     }
     let next: IntegrationCredentialsWire;
@@ -441,7 +456,7 @@ export function createIntegrationCredentialsSource(
       next = normalizeIntegrationCredentialsWire(await res.json());
     } catch (err) {
       logger.warn("integration credential refresh malformed JSON", {
-        integrationId: options.integrationId,
+        ...logCtx,
         authKey,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -453,7 +468,7 @@ export function createIntegrationCredentialsSource(
     payload = next;
     lastRefreshAt.set(authKey, Date.now());
     logger.info("integration credentials refreshed", {
-      integrationId: options.integrationId,
+      ...logCtx,
       authKey,
       authCount: payload.auths.length,
     });
@@ -478,7 +493,7 @@ export function createIntegrationCredentialsSource(
       },
     };
     logger.info("integration session outputs installed", {
-      integrationId: options.integrationId,
+      ...logCtx,
       authKey: auth.authKey,
     });
   };
@@ -538,11 +553,12 @@ export function createIntegrationCredentialsSource(
  */
 export function postIntegrationCredentialsRefresh(
   integrationId: string,
+  connectionId: string | undefined,
   opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
 ): Promise<Response> {
   const fetchFn = opts.fetchFn ?? fetch;
   return fetchFn(
-    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/refresh`,
+    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/refresh${connectionQuery(connectionId)}`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${opts.runToken}` },
@@ -588,10 +604,11 @@ export function isCredentialRejectedResult(result: {
  */
 export async function fetchInitialIntegrationCredentials(
   integrationId: string,
+  connectionId: string | undefined,
   opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
 ): Promise<IntegrationCredentialsWire> {
   const fetchFn = opts.fetchFn ?? fetch;
-  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}`;
+  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}${connectionQuery(connectionId)}`;
   const res = await fetchFn(url, {
     headers: { Authorization: `Bearer ${opts.runToken}` },
   });

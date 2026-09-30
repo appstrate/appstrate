@@ -27,7 +27,7 @@ import type { PeerAttribution } from "./runner-peers.ts";
 /**
  * Per-run network + CA delivery context returned by
  * {@link IntegrationRuntimeAdapter.prepare}. Computed once at boot
- * and consumed by callers to wire the per-integration MITM listener
+ * and consumed by callers to wire the per-connection MITM listener
  * (bind host) + the proxy URL handed to the integration's runner.
  */
 export interface RuntimeAdapterRunContext {
@@ -47,7 +47,7 @@ export interface RuntimeAdapterRunContext {
 }
 
 /**
- * Per-integration egress context the adapter wires into the runner (proxy
+ * Per-connection egress context the adapter wires into the runner (proxy
  * env vars + optional CA file delivery). `null` means the runner gets no
  * egress route.
  *
@@ -435,7 +435,7 @@ export function isPathSafeForMount(
 
 /**
  * Proxy-routing half of the egress env block — points every standard
- * `HTTP(S)_PROXY` var at the per-integration listener. Always applied when an
+ * `HTTP(S)_PROXY` var at the per-connection listener. Always applied when an
  * egress context is present, for BOTH listener kinds (MITM and plain CONNECT),
  * because routing the runner's traffic out is orthogonal to whether the proxy
  * terminates TLS. The CA half ({@link buildCaEnvBlock}) is layered on top only

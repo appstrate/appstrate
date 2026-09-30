@@ -28,6 +28,8 @@ import { bootIntegrations } from "../integrations-boot.ts";
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 import { installPassthroughRunnerExec } from "./helpers/runner-exec.ts";
 
+const CONN_A = { id: "conn-a", label: "work", accountId: null };
+
 const FIXTURE_DIR = path.join(import.meta.dir, "fixtures/bun-toolkit");
 const INTEG_ID = "@appstrate/bun-toolkit";
 const SERVER_ID = "@appstrate/bun-toolkit-server";
@@ -47,6 +49,7 @@ function spec(): IntegrationSpawnSpec {
   return {
     integrationId: INTEG_ID,
     namespace: NAMESPACE,
+    connection: CONN_A,
     sourceKind: "local",
     manifest: {
       name: INTEG_ID,
@@ -111,7 +114,7 @@ describe("@appstrate/bun-toolkit — complex bun integration (e2e)", () => {
       // trail the agent relays into the run log — the runtime-adapter line
       // plus this integration's spawn/connect breadcrumb.
       expect(boot.report.ok).toBe(true);
-      expect(boot.report.declared).toBe(1);
+      expect(boot.report.declaredConnections).toBe(1);
       expect(boot.report.adapter).toBe("process");
       const messages = boot.report.breadcrumbs.map((b) => b.message);
       expect(messages.some((m) => m.startsWith("runtime adapter: process"))).toBe(true);

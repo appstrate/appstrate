@@ -53,6 +53,7 @@ import { initSystemModelProviderKeys } from "../../../apps/api/src/services/mode
 import { buildSystemPrompt } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
+import { platformMcpSurfaceKey } from "../src/pi-chat/mcp-surface-cache.ts";
 import { _resetChatEnvForTests } from "../src/env.ts";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
@@ -929,8 +930,13 @@ describe("handleChatStream", () => {
     expect(input.system).toContain(CONTEXT_ORG_MARKER);
     expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);
     expect(input.platformMcp.headers.Authorization).toMatch(/^Bearer /);
-    // The handshake transport is the platform's in-process dispatch, not global
-    // `fetch` — three JSON-RPC hops that used to open real loopback sockets back
+    // The cached MCP surface is keyed on exactly what the bearer carries: a key
+    // cut from any other list would hand this turn another caller's descriptors.
+    expect(input.platformMcp.surfaceKey).toBe(
+      platformMcpSurfaceKey(input.platformMcp.url, await tokenPermissions(input)),
+    );
+    // The MCP transport is the platform's in-process dispatch, not global
+    // `fetch` — JSON-RPC hops that used to open real loopback sockets back
     // into this same process. Proven by calling it: it answers from the scripted
     // dispatch, which a socket to a non-existent server could not do.
     expect(typeof input.platformMcp.fetch).toBe("function");

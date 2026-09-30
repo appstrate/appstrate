@@ -22,16 +22,19 @@ import {
   type SpawnIntegrationOptions,
 } from "../integration-runtime-adapter.ts";
 import type { Peer } from "../helpers.ts";
-import type { PeerAttribution } from "../runner-peers.ts";
+import { runnerKeyOf, type PeerAttribution } from "../runner-peers.ts";
 
 const ADAPTER_ID = `egress-wiring-${Math.random().toString(36).slice(2, 8)}`;
 const INTEGRATION_ID = "@tractr/egress";
 const SERVER_ID = "@tractr/egress-server";
 const EGRESS = { authorizedUris: ["https://api.allowed.test/**"], allowAllUris: false };
+const CONNECTION = { id: "conn-web", label: "web", accountId: null };
+/** The runner key of {@link spec}'s own runner — its connection, not its integration. */
+const OWN_RUNNER = runnerKeyOf({ integrationId: INTEGRATION_ID, connection: CONNECTION });
 
 let spawnedWith: SpawnIntegrationOptions[] = [];
 /** What the fake adapter attributes every peer to (see {@link PeerAttribution}). */
-let peerOwner: string | null | undefined = INTEGRATION_ID;
+let peerOwner: string | null | undefined = OWN_RUNNER;
 /** Every peer the fake adapter was asked to attribute. */
 let askedAbout: Peer[] = [];
 
@@ -56,7 +59,7 @@ registerIntegrationRuntimeAdapter({
 
 afterEach(() => {
   spawnedWith = [];
-  peerOwner = INTEGRATION_ID;
+  peerOwner = OWN_RUNNER;
   askedAbout = [];
 });
 
@@ -96,6 +99,7 @@ function spec(overrides: Partial<IntegrationSpawnSpec> = {}): IntegrationSpawnSp
   return {
     integrationId: INTEGRATION_ID,
     namespace: "egress",
+    connection: CONNECTION,
     sourceKind: "local",
     manifest: {
       name: INTEGRATION_ID,
@@ -184,12 +188,15 @@ describe("bootIntegrations — runner egress wiring (#1458)", () => {
     }
   });
 
-  it("refuses a peer attributed to another integration, or to none", async () => {
+  it("refuses a peer attributed to another integration, a sibling connection, or none", async () => {
     const resolved: string[] = [];
     const result = await boot(spec({ egress: EGRESS }), resolved);
     try {
       const { proxyUrl } = spawnedWith[0]!.egress!;
-      for (const owner of ["@tractr/other", null, undefined]) {
+      // A sibling connection of the SAME integration holds another credential
+      // and another allowlist, so its runner is as foreign as any other.
+      const sibling = runnerKeyOf({ integrationId: INTEGRATION_ID, connection: { id: "conn-db" } });
+      for (const owner of ["@tractr/other", INTEGRATION_ID, sibling, null, undefined]) {
         peerOwner = owner;
         expect(await connectVia(proxyUrl, "api.allowed.test:443")).toContain("403");
       }

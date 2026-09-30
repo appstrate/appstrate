@@ -42,7 +42,12 @@ import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { orgPackageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { orgApiVersionCache } from "./org-settings-cache.ts";
-import { deleteSpaceMembershipsInOrg, lockOrgMember } from "./space-members.ts";
+import {
+  deleteSpaceMembershipsInOrg,
+  lockOrgMember,
+  lockSpacesOfSharedConnections,
+  unshareConnectionsOfOwnersWithoutAccess,
+} from "./space-members.ts";
 import { orphanPersonalSpaces } from "./spaces.ts";
 import { ensurePersonalSpace, provisionOrg } from "@appstrate/db/provision-org";
 import type { RevokedSpaceAssignment } from "./space-members.ts";
@@ -393,6 +398,7 @@ interface MemberActor {
 interface MemberExitResult {
   orphanedSpaceIds: string[];
   revokedApiKeyIds: string[];
+  unsharedConnectionIds: string[];
 }
 
 /**
@@ -516,6 +522,13 @@ async function removeMemberInTx(
 
   // Not deleted: 30 days to convert it, or to hand it back on re-invite (spec §3.6).
   const orphanedSpaceIds = await orphanPersonalSpaces(tx, orgId, userId);
+  // No space lock needed, unlike a role change: with the membership gone the owner reaches no
+  // space whatever a concurrent close leaves, so this unshares every shared connection. A close
+  // unsharing the same rows is ordered against this by the row locks the unshare takes.
+  const unsharedConnectionIds = await unshareConnectionsOfOwnersWithoutAccess(tx, {
+    orgId,
+    userId,
+  });
 
   // Disabled, not deleted (org history): they would keep firing under the
   // departed identity, whose user row survives (CRIT-13).
@@ -530,6 +543,7 @@ async function removeMemberInTx(
   return {
     orphanedSpaceIds,
     revokedApiKeyIds: revokedKeys.map((row) => row.id),
+    unsharedConnectionIds,
     disabledScheduleIds: disabled.map((row) => row.id),
   };
 }
@@ -588,14 +602,19 @@ export async function leaveOrganization(orgId: string, userId: string): Promise<
  * 403 when the actor is not a member, `assignableRolesForMember` does not offer
  * `role`, or owner is granted or taken outside a dashboard session.
  *
- * @returns the previous role and the space grants the promotion revoked, for the audit.
+ * @returns the previous role, the space grants the promotion revoked and the
+ *   connections the demotion unshared, for the audit.
  */
 export async function updateMemberRole(
   orgId: string,
   targetUserId: string,
   role: OrgRole,
   actor: MemberActor,
-): Promise<{ previousRole: OrgRole; revoked: RevokedSpaceAssignment[] }> {
+): Promise<{
+  previousRole: OrgRole;
+  revoked: RevokedSpaceAssignment[];
+  unsharedConnectionIds: string[];
+}> {
   return db.transaction(async (tx) => {
     await lockOrgOwnership(tx, orgId);
     const target = await lockOrgMember(tx, orgId, targetUserId);
@@ -625,7 +644,14 @@ export async function updateMemberRole(
       role === "owner" || role === "admin"
         ? await deleteSpaceMembershipsInOrg(tx, orgId, targetUserId)
         : [];
-    return { previousRole: target.role, revoked };
+    // A demotion drops the implicit reach of the org role (admin → member,
+    // member → guest on open spaces). Member row (above), then the spaces: see `lockSpaceRow`.
+    await lockSpacesOfSharedConnections(tx, orgId, targetUserId);
+    const unsharedConnectionIds = await unshareConnectionsOfOwnersWithoutAccess(tx, {
+      orgId,
+      userId: targetUserId,
+    });
+    return { previousRole: target.role, revoked, unsharedConnectionIds };
   });
 }
 

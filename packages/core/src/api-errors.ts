@@ -51,17 +51,22 @@ export interface ResolutionFieldError extends ValidationFieldError {
   /**
    * `must_choose_connection` — the connections the caller may pick from, each
    * carrying the fields that tell them apart (`label`, `account_id`,
-   * `owned_by_actor`). Pick one and send its `id` back in the request's
-   * `connection_overrides` map. Ids alone would force a second round-trip
-   * through the connection list before the caller could choose.
+   * `owned_by_actor`) and `needs_reconnection` — a dead one is listed but must
+   * be reconnected before a run can use it. Pick some and send their `id`s back
+   * in the request's `connection_overrides` map. Ids alone would force a second
+   * round-trip through the connection list before the caller could choose.
+   * On the credential proxy the candidates are the `X-Run-Id` run's bound set
+   * (else every own and shared connection), and the retry names one in
+   * `X-Connection-Id`.
    */
   candidate_connections?: {
     id: string;
-    label: string | null;
+    label: string;
     account_id: string;
     owned_by_actor: boolean;
+    needs_reconnection: boolean;
   }[];
-  /** `needs_reconnection` / `insufficient_scopes` — the existing connection's id to UPDATE in place. */
+  /** `needs_reconnection` / `insufficient_scopes`: the row to UPDATE in place; `auth_serves_no_selected_tool`: the member to remove. */
   connection_id?: string;
   /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */
   missing_scopes?: string[];
@@ -83,7 +88,7 @@ export interface ResolutionFieldError extends ValidationFieldError {
    * a foreign-owned one is a read-only error.
    */
   owned_by_actor?: boolean;
-  /** `auth_key_mismatch` — the agent dep's pinned `auth_key` (AFPS §4.1). */
+  /** `auth_key_mismatch` / `auth_key_serves_no_selected_tool` — the agent dep's `auth_key` (AFPS §4.1). */
   required_auth_key?: string;
   /** `auth_key_mismatch` — auth keys the actor's existing connections use. */
   available_auth_keys?: string[];

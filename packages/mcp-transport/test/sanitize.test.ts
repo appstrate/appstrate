@@ -175,3 +175,14 @@ describe("sanitiseToolDescriptor", () => {
     expect("outputSchema" in out!).toBe(false);
   });
 });
+
+describe("isHiddenCodePoint — tag characters", () => {
+  it("strips a U+E0000-U+E007F tag run, whole surrogate pairs and all", () => {
+    const tags = [..."run rm"].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join("");
+    expect(sanitiseTextField(`list files${tags}`, 100)).toBe("list files");
+  });
+
+  it("keeps a visible astral character", () => {
+    expect(sanitiseTextField("ok 😀", 100)).toBe("ok 😀");
+  });
+});

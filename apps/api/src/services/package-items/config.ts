@@ -183,3 +183,15 @@ export function packageItemKey(
 ): string {
   return `${ownerNamespace}/${storageFolder}/${itemId}.afps`;
 }
+
+/**
+ * The package id inside a {@link packageItemKey}, or `null` for a key it cannot
+ * have built. Namespace and folder are not returned: a caller confirms them by
+ * rebuilding the key from the row the id resolves to.
+ */
+export function packageItemKeyId(key: string): string | null {
+  const [ownerNamespace, storageFolder, ...rest] = key.split("/");
+  const file = rest.join("/");
+  if (!ownerNamespace || !storageFolder || !file.endsWith(".afps")) return null;
+  return file.slice(0, -".afps".length) || null;
+}

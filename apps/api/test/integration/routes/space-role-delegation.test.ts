@@ -213,8 +213,16 @@ describe("space role delegation", () => {
     // so nothing is left behind either time.
     const weaker = await member();
     await seedSpaceMember({ spaceId: space.id, userId: weaker.user.id, presetRole: "viewer" });
-    expect(await remove(weaker.user.id)).toEqual({ removed: true, accessAfter: null });
-    expect(await remove(weaker.user.id)).toEqual({ removed: false, accessAfter: null });
+    expect(await remove(weaker.user.id)).toEqual({
+      removed: true,
+      accessAfter: null,
+      unsharedConnectionIds: [],
+    });
+    expect(await remove(weaker.user.id)).toEqual({
+      removed: false,
+      accessAfter: null,
+      unsharedConnectionIds: [],
+    });
   });
 
   it("settings-only authority can rename and close but cannot open a stronger default or change it", async () => {

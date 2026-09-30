@@ -26,6 +26,7 @@ import { seedPackage, seedPackageShare, seedPackageVersion } from "../../helpers
 import { getTestApp } from "../../helpers/app.ts";
 import { assertDbMissing } from "../../helpers/assertions.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
+import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 import {
   _setRunLimitsForTesting,
   getInlineRunLimits,
@@ -38,6 +39,7 @@ import {
   packageDistTags,
   packageVersions,
   packages,
+  storageDeletionJobs,
 } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import * as storage from "@appstrate/db/storage";
@@ -748,6 +750,19 @@ describe("POST /api/packages/import-bundle — import", () => {
       .where(eq(packageVersions.packageId, "@srcorphan/root"))
       .limit(1);
     expect(ver).toBeUndefined();
+
+    // The draft archive post-install had already written leaves through the
+    // outbox with the row, instead of staying behind with nothing pointing at it.
+    const jobs = await db
+      .select({ bucket: storageDeletionJobs.bucket, storageKey: storageDeletionJobs.storageKey })
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.reason, "import_rolled_back"));
+    expect(jobs).toEqual([
+      { bucket: "library-packages", storageKey: `${ctx.orgId}/agents/@srcorphan/root.afps` },
+    ]);
+    expect(await storage.fileExists(jobs[0]!.bucket, jobs[0]!.storageKey)).toBe(true);
+    await processStorageDeletionJobs();
+    expect(await storage.fileExists(jobs[0]!.bucket, jobs[0]!.storageKey)).toBe(false);
   });
 
   it("rejects non-multipart requests with 400", async () => {

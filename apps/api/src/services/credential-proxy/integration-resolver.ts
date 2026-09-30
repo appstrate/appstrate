@@ -11,10 +11,8 @@
  * {@link proxyCall} consumes verbatim (header injection +
  * `{{var}}` substitution + `authorized_uris` allowlist).
  *
- * `X-Integration-Id` carries the integration package id (`@scope/name`). The
- * actor (dashboard user, CLI/JWT user, or impersonated end-user) selects
- * which `integration_connections` row is decrypted; an optional
- * connection id (from `X-Connection-Id`) pins a specific row.
+ * `X-Integration-Id` carries the integration package id (`@scope/name`); which
+ * connection is decrypted is `selectAccessibleConnection`'s call.
  *
  * Both this external-runner path and the in-container sidecar path
  * (`api-call-credentials.ts`) build the payload via the shared
@@ -35,11 +33,13 @@ import {
 } from "../integration-manifest-helpers.ts";
 import type { Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
+import { requireAttributableRun } from "../state/runs.ts";
 import {
   assertIntegrationActive,
   selectAccessibleConnection,
   markIntegrationConnectionNeedsReconnection,
   type ResolvedConnectionRow,
+  type RunBoundSelection,
 } from "../integration-connections.ts";
 import { fetchIntegrationManifest } from "../integration-service.ts";
 import {
@@ -48,6 +48,24 @@ import {
   refreshAndClassify,
 } from "../integration-token-refresh.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+
+/** The `X-Run-Id` run, bound to the ACTOR: a caller borrows only the snapshot of its own run. */
+export function runBoundSelection(input: {
+  orgId: string;
+  spaceId: string;
+  runId: string;
+  integrationId: string;
+  actor: Actor;
+}): RunBoundSelection {
+  const { orgId, spaceId, runId, integrationId, actor } = input;
+  return {
+    id: runId,
+    boundSet: async () => {
+      const run = await requireAttributableRun({ orgId, runId, spaceId, owner: actor });
+      return run.resolvedConnections?.[integrationId] ?? [];
+    },
+  };
+}
 
 /** Errors mapped by the route to 404 (credential not found). */
 export class IntegrationCredentialNotFoundError extends Error {
@@ -65,20 +83,23 @@ interface ResolveIntegrationProxyInput {
   actor: Actor;
   /** Optional connection id pin (from `X-Connection-Id`). */
   connectionId?: string;
+  /** The run named by `X-Run-Id` — confines the call to the connections it bound. */
+  run?: RunBoundSelection;
 }
 
 interface ResolvedIntegrationProxyCredentials {
+  /** `payload.authorizedUris` is rendered for the connection: it decides what matches. */
   payload: ProxyCredentialsPayload;
+  /** The auth's declared (unrendered) `authorized_uris`: only its literal hosts share cookies. */
+  declaredUris: readonly string[];
   /** The decrypted connection id — used by the route's 401 force-refresh path. */
   connectionId: string;
   authKey: string;
 }
 
 /**
- * Resolve live credentials for the credential-proxy from an
- * integration connection. Throws {@link IntegrationCredentialNotFoundError}
- * when the integration is not active / has no accessible connection — the
- * only way this path fails.
+ * Live credentials for the credential-proxy. Throws {@link IntegrationCredentialNotFoundError}
+ * when there is no usable connection, and the selection's `ApiError` when it has no single answer.
  */
 export async function resolveIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
@@ -86,15 +107,13 @@ export async function resolveIntegrationProxyCredentials(
   const manifest = await loadManifest(input.integrationId);
   await assertIntegrationActive(input.integrationId, input.spaceId);
 
-  const auths = manifest.auths ?? {};
-  const declaredAuthKeys = Object.keys(auths);
-  if (declaredAuthKeys.length === 0) {
+  if (Object.keys(manifest.auths ?? {}).length === 0) {
     throw new IntegrationCredentialNotFoundError(
       `Integration '${input.integrationId}' declares no auth methods`,
     );
   }
 
-  const connection = await resolveConnection(input, declaredAuthKeys);
+  const connection = await resolveConnection(input, manifest);
   if (!connection) {
     throw new IntegrationCredentialNotFoundError(
       `No credentials configured for integration '${input.integrationId}' in space ${input.spaceId}`,
@@ -102,12 +121,18 @@ export async function resolveIntegrationProxyCredentials(
   }
 
   const payload = buildPayload(input.integrationId, manifest, connection);
-  return { payload, connectionId: connection.id, authKey: connection.authKey };
+  return {
+    payload,
+    declaredUris: declaredUrisOf(manifest, connection.authKey),
+    connectionId: connection.id,
+    authKey: connection.authKey,
+  };
 }
 
 /**
  * Force-refresh the integration connection's OAuth2 token (the proxy's
- * reactive 401-retry path) and rebuild the payload. Never throws for a
+ * reactive 401-retry path) and rebuild the payload. `input.connectionId` names
+ * the connection the failed call used; the selection still re-checks reach. Never throws for a
  * credential outcome — both call sites in `core.ts` sit inside `catch {}`, so
  * a throw would be swallowed and buy nothing. Returns `null` in the four
  * not-refreshed cases, which are NOT equivalent and are told apart by what
@@ -128,13 +153,10 @@ export async function forceRefreshIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
 ): Promise<ResolvedIntegrationProxyCredentials | null> {
   const manifest = await loadManifest(input.integrationId);
-  const auths = manifest.auths ?? {};
-  const declaredAuthKeys = Object.keys(auths);
-
-  const connection = await resolveConnection(input, declaredAuthKeys);
+  const connection = await resolveConnection(input, manifest);
   if (!connection) return null;
 
-  const authDef = auths[connection.authKey];
+  const authDef = manifest.auths?.[connection.authKey];
   if (!authDef || authDef.type !== "oauth2") return null;
 
   let refreshContext;
@@ -236,7 +258,12 @@ export async function forceRefreshIntegrationProxyCredentials(
   const fields = classified.result.fields;
   const payload = buildPayloadFromFields(manifest, connection.authKey, fields);
   if (!payload) return null;
-  return { payload, connectionId: connection.id, authKey: connection.authKey };
+  return {
+    payload,
+    declaredUris: declaredUrisOf(manifest, connection.authKey),
+    connectionId: connection.id,
+    authKey: connection.authKey,
+  };
 }
 
 // ─────────────────────────────────────────────
@@ -269,23 +296,15 @@ async function loadManifest(integrationId: string): Promise<IntegrationManifest>
   }
 }
 
-async function resolveConnection(
+function resolveConnection(
   input: ResolveIntegrationProxyInput,
-  declaredAuthKeys: string[],
+  manifest: IntegrationManifest,
 ): Promise<ResolvedConnectionRow | null> {
-  // Single source of truth for connection selection (snapshot-pin-by-id vs
-  // auto-pick over declared auths) — shared with the spawn + credentials
-  // resolvers so the proxy can't drift on which connection it picks.
-  // The by-id branch (caller-supplied `X-Connection-Id`) is bound to
-  // `input.integrationId` inside the selector: a connection id belonging
-  // to another integration resolves to null (→ 404) instead of leaking
-  // that integration's credentials into this integration's payload.
-  return selectAccessibleConnection(
-    input.integrationId,
-    declaredAuthKeys,
-    input.connectionId ?? null,
-    { spaceId: input.spaceId, actor: input.actor },
-  );
+  return selectAccessibleConnection(input.integrationId, manifest, input.connectionId ?? null, {
+    spaceId: input.spaceId,
+    actor: input.actor,
+    ...(input.run ? { run: input.run } : {}),
+  });
 }
 
 function buildPayload(
@@ -310,6 +329,10 @@ function buildPayload(
     );
   }
   return payload;
+}
+
+function declaredUrisOf(manifest: IntegrationManifest, authKey: string): readonly string[] {
+  return (manifest.auths?.[authKey] as AfpsManifestAuth | undefined)?.authorized_uris ?? [];
 }
 
 /**

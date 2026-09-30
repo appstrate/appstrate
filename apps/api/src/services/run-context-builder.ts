@@ -113,12 +113,6 @@ export async function buildRunContext(params: {
    * (scheduler) leave it unset and the runtime mints a fresh trace.
    */
   traceparent?: string;
-  /**
-   * Snapshot of the connection resolver output (#199 flat-connections
-   * cascade). When set, the spawn loader uses it to pin which connection
-   * row is decrypted per (integration, authKey) — admin pins / run
-   * overrides survive the kickoff handoff into the live runtime.
-   */
   resolvedConnections?: ResolvedConnectionMap | null;
   /**
    * Per-call-graph memo for integration manifest fetches — threaded into the
@@ -375,7 +369,8 @@ function withoutInherited(settings: ModelGenerationSettings | null | undefined) 
 /**
  * Run-log `event` name for a declared-but-not-spawned integration. Stable
  * (an operator/API consumer can filter on it) and singular — one row per
- * dropped integration, so `data.integrationId` is never a list.
+ * drop, so `data.integrationId` is never a list; drops of one bound set
+ * share it and differ by `connectionLabel`.
  */
 export const INTEGRATION_DROPPED_EVENT = "integration_dropped";
 
@@ -405,13 +400,16 @@ export async function recordDroppedIntegrations(
       scope,
       runId,
       INTEGRATION_DROPPED_EVENT,
-      `integration '${entry.integrationId}' is declared by this agent but was not started (${entry.reason})` +
+      `integration '${entry.integrationId}'` +
+        (entry.connectionLabel ? ` (connection '${entry.connectionLabel}')` : "") +
+        ` is declared by this agent but was not started (${entry.reason})` +
         (entry.detail ? `: ${entry.detail}` : "") +
         " — its tools are unavailable to this run",
       {
         integrationId: entry.integrationId,
         reason: entry.reason,
         ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
+        ...(entry.connectionLabel !== undefined ? { connectionLabel: entry.connectionLabel } : {}),
       },
     );
   }

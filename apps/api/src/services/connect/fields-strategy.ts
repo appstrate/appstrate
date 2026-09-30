@@ -10,6 +10,7 @@
  */
 
 import type { JSONSchemaObject } from "@appstrate/core/form";
+import { unrenderableAuthorizedUriFields } from "@appstrate/afps-shared/credential-template";
 
 import {
   extractIdentity,
@@ -19,7 +20,7 @@ import {
 } from "../integration-connections.ts";
 import { validateConnectionCredentials } from "../schema.ts";
 import { maskCredentialLabel } from "./mask-label.ts";
-import { invalidRequest } from "../../lib/errors.ts";
+import { invalidRequest, validationFailed } from "../../lib/errors.ts";
 import type {
   ConnectContext,
   ConnectCompleteInput,
@@ -51,6 +52,19 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
           .map((e) => `${e.field} ${e.message}`)
           .join("; ")}`,
         "credentials",
+      );
+    }
+    // #1627: an `authorized_uris` entry the submitted fields cannot render would refuse every
+    // later call, so the connection is refused now. Never echoes the value.
+    const unrenderable = unrenderableAuthorizedUriFields(auth.authorized_uris ?? [], credentials);
+    if (unrenderable.length > 0) {
+      throw validationFailed(
+        unrenderable.map(({ field, expected }) => ({
+          field: `credentials.${field}`,
+          code: "unrenderable_authorized_uri",
+          title: "Invalid Connection Field",
+          message: `must be ${expected}`,
+        })),
       );
     }
 

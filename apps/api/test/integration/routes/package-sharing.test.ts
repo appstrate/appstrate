@@ -58,6 +58,7 @@ import {
   seedSpace,
   seedSpaceMember,
   seedSpaceRole,
+  loseVersionArchive,
 } from "../../helpers/seed.ts";
 import {
   createFakeOrchestrator,
@@ -65,11 +66,7 @@ import {
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
-import {
-  buildMinimalZip,
-  uploadPackageZip,
-  deleteVersionZip,
-} from "../../../src/services/package-storage.ts";
+import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { runs } from "@appstrate/db/schema";
@@ -709,14 +706,7 @@ describe("offered is not activated", () => {
       packageId: AGENT,
       userId: recipient.userId,
     });
-    await triggerScheduledRun(
-      schedule.id,
-      AGENT,
-      { type: "user", id: recipient.userId },
-      ctx.orgId,
-      recipient.personalSpaceId,
-      undefined,
-    );
+    await triggerScheduledRun(schedule.id);
     await waitForRunPipelineSettled();
     const scheduled = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
     expect(scheduled).toHaveLength(1);
@@ -736,7 +726,7 @@ describe("offered is not activated", () => {
 
   it("never replaces an unavailable published archive with the author's current prompt", async () => {
     expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
-    await deleteVersionZip(AGENT, "0.1.0");
+    await loseVersionArchive(AGENT, "0.1.0");
     await db
       .update(packages)
       .set({ draftContent: "Unpublished replacement" })

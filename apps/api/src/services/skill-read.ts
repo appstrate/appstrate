@@ -26,7 +26,7 @@ import {
   resolvePackageFileValidator,
   type PackageFileSnapshot,
 } from "./package-files.ts";
-import { withPackageDraftLock } from "./package-draft-lock.ts";
+import { withPackageDraftLock } from "./package-locks.ts";
 
 const SKILLS_READ = packagePermission("skill", "read");
 const CHAT_TURN = "chat:write";

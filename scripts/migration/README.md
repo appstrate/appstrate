@@ -99,7 +99,8 @@ docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
   -f - < scripts/migration/<NNNN>-<slug>.sql
 ```
 
-Exception: `0020` is a dry run unless given `-v apply=on` (see its header).
+Exceptions: `0020` is a dry run unless given `-v apply=on` (see its header);
+`0032` refuses to run without `-v ran_0033=1`, which `0033 --apply` prints.
 
 ## Detail — RBAC rollout (drizzle `0056` + `0059`, scripts `0008` + `0009` + `0012` + `0017`)
 
@@ -895,6 +896,72 @@ re-points, with the value it held, before writing: that psql output is the only
 record, keep it. Run it inside the deploy window, before the new image boots.
 Details in the file header.
 
+## Detail — Connection sets (script `0032`, drizzle `0077`)
+
+**Not a runbook.** The release turns every pinned, overridden and resolved
+connection into a SET and makes a label unique per (space, integration). Two
+scripts run before its drizzle batch, in this order, with the app container
+stopped (`docker stop`), not a Coolify stop — that takes the whole compose down,
+Postgres included, and prunes the images:
+
+1. stop, THEN `pg_dump` — the only rollback, so no write may follow it;
+2. `0033 --apply` (next section), which prints the `0032` command on commit;
+3. `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v ran_0033=1 -f scripts/migration/0032-connection-sets.sql`
+   — without `-v ran_0033=1` the file refuses before its transaction opens;
+4. deploy (`0077` applies at boot), reopen.
+
+Five sections in one transaction (rules: the file header): (1) SHAPE —
+`runs.connection_overrides` / `resolved_connections` and
+`package_schedules.connection_overrides` become sets (a string override or an
+object snapshot becomes one element; any other value raises first); (2)
+OUTRANKED — a schedule override key an admin pin, else the enforced org default,
+outranks is dropped (ignored before, `override_outranked` at every fire now),
+emptied → NULL, `enabled` kept; (3) FREEZE — the old fallback's implicit shared
+picks, from 30 days of runs and each enabled schedule's latest resolved run,
+become member pins (end-users are not covered — a standalone query in the file
+lists them); (4) NORMALIZE — labels only as far as `connectionLabelProblem`
+and `CONNECTION_LABEL_MAX` require, else verbatim; (5) DEDUPE — `<base> (n)`, ≤ 80 UTF-16 units. It needs
+psql (`\if`), PostgreSQL 16+ (its `0x…` integer literals) and a UTF8 database
+(NORMALIZE reads code points with `ascii()`; it refuses another encoding).
+Skipped, `0077`'s first statement refuses a scalar snapshot or override value or
+a label held twice, rolling the batch back and naming both scripts; a skipped
+drop, freeze or normalization it cannot detect.
+
+## Detail — Connections shared by owners who lost their space (script `0033`)
+
+**Not a runbook**; its place in the window is in the section above. It runs
+before `0032` because `0032` freezes a colleague's still-shared connection as a
+member pin: run after it, `0033` would unshare connections just frozen, and
+those members would fail on pins they never set. It unshares every user-owned
+shared connection whose owner no longer reaches its space, with
+`unshareConnectionsOfOwnersWithoutAccess` — the predicate the release applies at
+every live access loss. An admin pin or org default naming one is left as it is
+and fails its runs with `pinned_connection_unavailable`, as after a live loss.
+It touches no column `0077` changes.
+
+`set -a && . ./.env && set +a && bun scripts/migration/0033-unshare-space-access-loss.ts`
+is the dry run; `--apply` commits. It refuses an empty `DATABASE_URL` (the
+client would open `./data/pglite`) and prints the database it reached first.
+
+## Detail — Per-connection URL allowlists (script `0034`)
+
+**Not a runbook.** `@appstrate/activecampaign` 1.0.3, `wordpress` / `woocommerce` 1.0.4 and
+`webhooks` 1.0.3 replace `allow_all_uris` with `authorized_uris` rendered from one URL field of
+the connection (#1627, #1628); a connection whose field does not render has every call refused.
+From this release a new or updated connection with such a value is refused at connect time, so
+only connections stored before it can be in that state.
+`0034` gives each ActiveCampaign connection without one `api_url = https://<account_name>.api-us1.com`
+and keeps `account_name` (1.0.3 still declares it, optional, so `https://{{account_name}}.api-us1.com/…`
+in saved prompts and skills keeps resolving), then lists every connection of the four
+integrations whose URL field would not render — id and the form the field must take, never a
+value (a query string passes only in the bare `webhook_url` entry). Run `--apply` just BEFORE
+the deploy: it only adds a field, which the running 1.0.2 manifest ignores, so nothing is
+refused in between; then the dry run again after it.
+
+`set -a && . ./.env && set +a && bun scripts/migration/0034-integration-url-allowlists.ts` is the
+dry run; `--apply` commits. Exit 1 while any connection is refused: its owner fixes the URL, and
+an ActiveCampaign account on another API domain than `api-us1.com` edits its `api_url`.
+
 ## Log
 
 | #    | date                | what                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -929,3 +996,6 @@ Details in the file header.
 | 0029 | not applied         | READ-ONLY pre-flight: org integration drafts and `latest` published versions declaring a non-snake_case `identity_claims` key (`accountId`, …) or `identity_outputs` entry, which `extractIdentity` no longer reads (system packages skipped — fixed by this release) — **run BEFORE deploying; exits non-zero until every one is fixed**                                                                                                                                                                                                                                                                                 |
 | 0030 | not applied         | `org_models` of a named provider outside Pi's offer deleted (backed up to a file), an org default naming one repointed to a surviving row of its credential or NULL, other pointers set to NULL (#1549) — **run inside the deploy window, before the new image boots, after `bun run verify:system-models` passes**; `.ts`, dry-run by default, `--apply` to commit                                                                                                                                                                                                                                                       |
 | 0031 | not applied         | `google-ai` model provider retired (#1568): its `model_provider_credentials` and every `org_models` row bound to one deleted, the org default / space pin / schedule override naming such a model set to NULL — **run inside the deploy window, before the new image boots**                                                                                                                                                                                                                                                                                                                                              | 0 — rehearsed 2026-09-25 on a restored production dump (PostgreSQL 16.15, drizzle `0068` + `0069`–`0073`): every before count 0, production holding no `google-ai` credential; `COMMIT` in 214 ms, a rerun a no-op. Prints before counts, aborts unless all zero after                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 0032 | not applied         | connection snapshots and overrides → sets, schedule override keys a governing admin pin or enforced default outranks dropped, the old fallback's implicit shared picks frozen as member pins, labels normalized and deduped per (space, integration) (#1610) — **run with the app container stopped** (`docker stop`, not a Coolify stop), **after `0033`, before the drizzle batch** (`0077`); psql only, with `-v ran_0033=1` (it refuses without), PostgreSQL 16+, a UTF8 database                                                                                                                                     | unmeasured, NOT rehearsed on a production dump — rehearse on a restored dump and record every count in the header. Prints before/after counts (every after reads 0); skipped, `0077` refuses a scalar or a duplicate label, not a missing drop, freeze or normalization                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 0033 | not applied         | user-owned shared connections whose owner no longer reaches the space (left the organization, removed, demoted, the space closed) unshared with the service's predicate, every organization in one transaction — **run FIRST in the window, app container stopped, before `0032`**; `.ts`, dry run by default, `--apply` to commit                                                                                                                                                                                                                                                                                        | unmeasured, NOT rehearsed on a production dump — prints the database it is connected to and every id it unshares; idempotent, a second run prints 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 0034 | not applied         | ActiveCampaign connections without `api_url`: `api_url` derived from `account_name` (`https://<account_name>.api-us1.com`), `account_name` kept; then a READ-ONLY audit of `@appstrate/{activecampaign,wordpress,woocommerce,webhooks}` connections whose URL field no longer renders an allowlist (#1627, #1628) — **`--apply` just BEFORE the deploy, dry run again after it**, env loaded (it decrypts); `.ts`, dry run by default, `--apply` to commit                                                                                                                                                                | unmeasured — prints every rewritten id and every refused id with its reason, exit 1 while any is refused; idempotent, a second run rewrites nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |

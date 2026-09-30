@@ -14,8 +14,9 @@
  *   - the auth's decrypted `fields` are exposed under `credentials` so an
  *     agent can still `{{var}}`-substitute them into the URL / headers /
  *     body;
- *   - `authorizedUris` is the auth's verbatim allowlist (integrations
- *     always declare ≥1 URI, so `allowAllUris` is always false).
+ *   - `authorizedUris` is the list the platform rendered for the connection
+ *     (post-refresh), the declared one when the source carries no such auth;
+ *     `allowAllUris` is the manifest flag.
  *
  * `refreshCredentials` delegates to the source's `refreshOnUnauthorized`
  * (per-authKey cooldown + in-flight dedup live in the source) and
@@ -48,10 +49,11 @@ interface ApiCallCredentialAdapter {
 export function createApiCallCredentialAdapter(opts: {
   source: IntegrationCredentialsSource;
   authKey: string;
-  authorizedUris: readonly string[];
+  /** The manifest's declared (unrendered) `authorized_uris`. */
+  declaredUris: readonly string[];
   allowAllUris?: boolean;
 }): ApiCallCredentialAdapter {
-  const { source, authKey, authorizedUris, allowAllUris = false } = opts;
+  const { source, authKey, declaredUris, allowAllUris = false } = opts;
 
   const toPayload = (): ProxyCredentialsPayload => {
     const snap = source.snapshot();
@@ -60,7 +62,7 @@ export function createApiCallCredentialAdapter(opts: {
     return buildProxyCredentialsPayload({
       fields: auth?.fields ?? {},
       plan,
-      authorizedUris,
+      authorizedUris: auth?.authorizedUris ?? declaredUris,
       allowAllUris,
     });
   };

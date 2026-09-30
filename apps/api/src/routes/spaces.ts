@@ -52,8 +52,7 @@ import {
   personaMemberships,
 } from "../lib/view-as.ts";
 import { resolveSpaceRole, toSpaceRoleWire, type SpaceRoleRef } from "../lib/space-role.ts";
-import { applySpacePermissions } from "../middleware/space-context.ts";
-import { validateSpaceInOrg } from "../lib/space-lookup.ts";
+import { enterSpaceById } from "../middleware/space-context.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
   activatePackage,
@@ -250,10 +249,7 @@ function requireSpaceFromParam(param: "id" | "spaceId") {
   // space the PATH names, not in the space the request entered — a reader of
   // the route table cannot see that from the mounts alone.
   return markSpaceRescope(async (c: Context<AppEnv>, next: Next) => {
-    const spaceId = c.req.param(param)!;
-    const space = await validateSpaceInOrg(spaceId, c.get("orgId"));
-    if (!space) throw notFound(`Space '${spaceId}' not found in this organization`);
-    await applySpacePermissions(c, space);
+    await enterSpaceById(c, c.req.param(param)!, c.get("orgId"));
     return next();
   });
 }
@@ -513,7 +509,7 @@ export function createSpacesRouter() {
 
       try {
         const { default_role, ...rest } = data;
-        const space = await updateSpace(
+        const { space, unsharedConnectionIds } = await updateSpace(
           orgId,
           spaceId,
           { ...rest, defaultRole: default_role },
@@ -528,6 +524,7 @@ export function createSpacesRouter() {
             settings: data.settings,
             visibility: data.visibility,
             defaultRole: default_role,
+            unsharedConnectionIds,
           },
         });
         return c.json(spaceWireForCaller(c, space, c.get("spaceRole") ?? null));
@@ -745,7 +742,7 @@ export function createSpacesRouter() {
     // a concurrent promotion can move between the read and the DELETE (#1439),
     // which is also why `access_after` comes back from that transaction rather
     // than from a lookup after it.
-    const { removed, accessAfter } = await removeSpaceMember({
+    const { removed, accessAfter, unsharedConnectionIds } = await removeSpaceMember({
       orgId: c.get("orgId"),
       space,
       userId,
@@ -756,6 +753,7 @@ export function createSpacesRouter() {
       action: "space.member_removed",
       resourceType: "space_member",
       resourceId: `${space.id}:${userId}`,
+      after: { unsharedConnectionIds },
     });
 
     return c.json({ access_after: accessAfter ? "implicit" : "none" });

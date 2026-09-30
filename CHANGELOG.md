@@ -6,10 +6,293 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`claude-opus-5-5` replaces `claude-opus-5` among the featured models** of
+  the `anthropic` and `claude-code` providers (#1642), now that the pinned Pi
+  registry (`@earendil-works/pi-ai` 0.87.1) records it. Featured ids are
+  seeded into `org_models` on a provider's first connection, the first one
+  becoming the default of an org that has none, so a first Claude Code
+  connection now defaults to Opus 5.5. Existing `org_models` rows are untouched; `claude-opus-5` stays in
+  the offer.
+
+## [1.0.0-beta.64] - 2026-09-30
+
+### Operators
+
+- **Two one-off scripts run before the drizzle batch, with the app container
+  stopped** (`docker stop` — a Coolify stop takes the whole compose down,
+  Postgres included, and prunes the images). From the release checkout, with
+  the platform env loaded (`set -a && . ./.env && set +a`):
+  1. `docker stop` the app container;
+  2. `pg_dump` the platform database — the only rollback, so after the stop;
+  3. `bun scripts/migration/0033-unshare-space-access-loss.ts --apply` — a dry
+     run without `--apply`; refuses an empty `DATABASE_URL`;
+  4. `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v ran_0033=1 -f scripts/migration/0032-connection-sets.sql`
+     — PostgreSQL 16+, a UTF8 database; refuses without `-v ran_0033=1`;
+     every "after" count must read 0;
+  5. deploy: drizzle `0077` applies at boot and refuses the batch when a
+     skipped `0032` left a scalar override or snapshot, or a duplicate label;
+     schedule jobs held in Redis need no rewrite;
+  6. reopen.
+
+  `0033` unshares connections whose owner lost their space before the deploy;
+  `0032` turns stored connection choices into sets, drops outranked schedule
+  overrides, freezes the old fallback's shared picks as member pins and
+  normalizes then deduplicates labels. Details: each file's header and its
+  "Detail —" section in `scripts/migration/README.md`.
+
+- **Deploy the platform and the runtime images (`appstrate-pi` /
+  `appstrate-sidecar`) at the same version.** The internal credential routes
+  now require the `connection_id` of a run-bound connection, which only this
+  release's sidecar sends: an older sidecar gets `400` and its integration
+  tools fail. Docker-mode dev hosts rebuild with `bun run docker:build:runtime`;
+  Firecracker hosts must run the kernel and rootfs published with this release.
+- **Before the window, find who loses an implicit shared connection** (the
+  fallback now binds only the actor's own, see `### Changed`):
+  - end-users own no member pins, so the freeze skips them: the standalone
+    query at the end of `0032` lists the (space, agent, integration) triples
+    whose end-user runs will answer `409 must_choose_connection` until the API
+    caller passes `connection_overrides` or an admin pins a connection;
+  - a space that blocks personal connections (`block_user_connections`) so
+    that members fall through to an admin's shared connection must make it the
+    org default (`PUT /api/integrations/{packageId}/default`).
+- **Run `bun scripts/migration/0034-integration-url-allowlists.ts --apply`
+  just before the deploy** (env loaded, it decrypts): it adds `api_url`
+  (`https://<account_name>.api-us1.com`) to ActiveCampaign connections without
+  one, which the running release ignores, and lists every ActiveCampaign,
+  WordPress, WooCommerce and Webhooks connection whose URL field will have its
+  calls refused (exit 1 while any remains: its owner fixes the URL, an
+  ActiveCampaign account outside `api-us1.com` its `api_url`). Re-run the dry
+  run after the deploy.
+
+### Added
+
+- **An agent can use several connections of one integration in a single run**
+  — two SSH hosts, two mailboxes, up to 10 per declared integration. The tools
+  do not change: when a namespace receives several connections, the sidecar
+  adds a required `connection` parameter (an enum of their labels) to each of
+  its tools and strips it before forwarding; a namespace with one connection is
+  advertised as before. A tool declaring its own `connection` property fails
+  the sidecar boot with `connection_param_conflict`. Each bound connection gets
+  its own runner, credential, `api_call` cookie jar and `401` state. A set is
+  spawned whole or not at all (`integration_dropped` reasons `no_delivery`,
+  `bound_set_incomplete`). Under the `process` runner adapter, a connection
+  declaring a `delivery.files` path another connection of the run already
+  holds refuses to spawn, so an integration with a fixed file path (SSH's
+  `/run/secrets/ssh_key`) binds several connections only under the `docker`
+  runner adapter. A remote run (`POST /api/runs/remote`) binding
+  several connections to one integration is refused with
+  `409 agent_not_ready`.
+- **`GET /api/me/connections/{connectionId}/delete-impact`** lists the
+  caller's own member pins and schedules a delete would rewrite, `disables`
+  marking the schedules it would disable; the delete confirmation shows them.
+
+- **The chat shows the model's reasoning phase instead of a blank bubble**
+  (#1601). The thinking dots disappeared as soon as the model started
+  reasoning and nothing replaced them, so a reasoning model left an empty
+  bubble until its first word: 3.2 s with a 3 s reasoning mock in Chromium,
+  67 ms now. Each run of reasoning renders as a collapsed « Réflexion… » row
+  with the dots while it is the tail of a running turn, then settles to
+  « Réflexion » once text or a tool call follows, or once the turn is stopped,
+  fails or is reloaded. The row expands to the reasoning as plain text. Models
+  that emit no reasoning keep the dots, then the answer, as before.
+
+### Changed
+
+- **BREAKING (API): an integration binds a SET of connections.** Every field
+  naming the connections bound to an integration is an array — one pick is a
+  one-element array, a bare string is refused. Fields naming ONE connection
+  stay scalar (a `409` item's `connection_id`, a `GET /api/me/connections`
+  entry).
+  - `connection_overrides` is `{ "@scope/integration": ["<id>", …] }`, 1 to 10
+    distinct uuids (`400` otherwise), on agent runs, inline runs
+    (+ `/validate`), schedules and the MCP `run_and_wait` tool, and in run and
+    schedule responses.
+  - A run's `connections_used` has one entry per bound connection, so
+    `integration_id` may repeat.
+  - Member pins (`PUT /api/me/integration-pins`), admin pins
+    (`PUT /api/integrations/{packageId}/pins/{agentPackageId}`) and org
+    defaults (`PUT /api/integrations/{packageId}/default`) take and return
+    `connection_ids` instead of `connection_id`, and no longer carry
+    `auth_key`. A write replaces the whole set; `DELETE` clears it.
+  - Connection readiness (`integrations[].resolution`):
+    `resolved_connection_id`, `admin_pinned_connection_id`,
+    `member_pinned_connection_id` and `org_default_connection_id` become
+    `…_connection_ids`; `resolved_owned_by_actor` is removed.
+  - `GET /internal/integration-credentials/{scope}/{name}` and `/refresh`
+    require `?connection_id=`, one the run bound (`400 connection_not_in_run`).
+  - `@appstrate/core` and `@appstrate/afps-runtime` change their public types
+    with it; see their `CHANGELOG.md`.
+- **BREAKING (API): a connection label is required and unique per (space,
+  integration)** across owners, compared verbatim: it is how a tool call
+  addresses a connection.
+  `PATCH /api/integrations/{packageId}/connections/{connectionId}` refuses a
+  taken `label` with `409 connection_label_taken`, and with `400` one that is
+  null, empty, padded with whitespace, or holds a control, invisible or
+  bidirectional-override character (it reaches the model verbatim). A new
+  connection takes its account id or the connect flow's hint, sanitized, else
+  `Connexion N`, suffixed ` (2)`, ` (3)`… when taken, within 80 UTF-16 code
+  units; a reconnect keeps it.
+- **BREAKING (API): deleting a connection an admin pin or org default names is
+  refused** with `409 connection_pinned`, like unsharing it, whether directly
+  or by deleting the OAuth client that minted it. Either delete drops the
+  connection from its owner's member pins and schedule overrides in the same
+  transaction; a schedule left with no connection for an integration is
+  disabled rather than fall back to another account. Any other set naming it
+  fails its next run with `pinned_connection_unavailable` or
+  `override_connection_unavailable`.
+- **BREAKING (API): a connection serving none of the agent's selected tools is
+  refused.** Bound by a pin, an org default or a launch override on such an
+  auth, it answers `auth_serves_no_selected_tool` (with its `connection_id`) at
+  kickoff, in readiness and at an enabled schedule's write; the fallback never
+  picks one. An agent whose own `integrations_configuration.<id>.auth_key`
+  names such an auth gets the new `auth_key_serves_no_selected_tool` (with
+  `required_auth_key`, no `connection_id`, no connect offer) where it got
+  `auth_key_mismatch` or `not_connected`; publishing or importing it is a
+  `400`.
+- **BREAKING: the fallback binds only the actor's single own connection**, on
+  a serving auth, healthy or not (`needs_reconnection` rather than a silent
+  switch). It used to bind the one healthy connection the actor reached, a
+  colleague's shared one included, so an end-user could run on an employee's
+  account. No own connection while shared ones exist, or several, is
+  `409 must_choose_connection` for members and end-users alike: a shared
+  connection binds only through an explicit pick. `candidate_connections[]`
+  lists every connection on a serving auth, each with `needs_reconnection`.
+- **BREAKING (API): connection readiness reports the resolver's verdict.**
+  `GET /api/agents/{scope}/{name}/connection-readiness` replaces
+  `integrations[].resolution.status` with `source` (the cascade layer that
+  bound the set or whose set failed) and `error_code` (what the kickoff 409
+  would carry), `null` when not applicable. The layers, in unchanged order:
+  admin pin → enforced org default → launch override (`run_override` or
+  `schedule_override`) → member pin → soft org default → fallback.
+- **BREAKING (API): a launch override an admin pin or enforced org default
+  outranks is refused, not ignored.** A run's or schedule's
+  `connection_overrides` naming a connection outside the governing set is a
+  `409 missing_integration_connection` item with the new code
+  `override_outranked` — at kickoff, at an enabled schedule's write, and at a
+  fire, which records a failed run. A subset of the governing set binds that
+  subset.
+- **BREAKING: a soft org default binds its whole set or fails**, like an
+  enforced one: a member the actor cannot reach fails the run with
+  `pinned_connection_unavailable` instead of being skipped for the fallback. A
+  member pin or a launch override still beats it.
+- **BREAKING (API): an enabled schedule cannot leave its connection choice
+  open.** Writing a schedule that is (or stays) enabled resolves it as a fire
+  would and answers `409 missing_integration_connection` for
+  `must_choose_connection`, `override_connection_unavailable` or (its own
+  overrides) `auth_serves_no_selected_tool`; other connection problems are
+  still accepted. An actor who could never fire it (no `agents:run` in the
+  space, outside the organization, an end-user absent from the space) is a
+  `400` on `actor`, so such an enabled schedule cannot be updated until
+  disabled or given another actor.
+- **BREAKING (API): a schedule running as another member is an org owner or
+  admin matter** (#738), from their own user session. Anyone else — a
+  `builder`, a custom role, a space admin whose org role is `member`, any API
+  key or OAuth / MCP client — gets `403`: on `actor` for naming another
+  member, and on any `PATCH` or `DELETE` of a schedule already running as one.
+  Such a write names and sees only connections shared in the space
+  (`override_connection_unavailable` for any other id) unless it leaves the
+  actor and that set unchanged; changing the actor resets the picks.
+- **BREAKING (API): a pin or org-default target the caller may not pin is one
+  `404`** — unknown, of another space or integration, not shared, or (member
+  pin) neither own nor shared (`validatePinTargets`). Some were `400`, which
+  told a colleague's private connection id from a made-up one; `400` now only
+  refuses the set's shape.
+- **BREAKING (API): the credential proxy applies the connection cascade.**
+  `/api/credential-proxy/proxy` ignored the run's snapshot and, without
+  `X-Connection-Id`, took the first accessible row, a colleague's shared one
+  included. With `X-Run-Id` the call must name an in-flight run of the caller
+  in this space (`404` unknown, `403` another actor's, `400` finished) and
+  reaches only the connections it bound; several need an `X-Connection-Id`
+  inside the set (`409 must_choose_connection`, `400 connection_not_in_run`).
+  Without it: an enforced org default (`400 connection_not_in_org_default` for
+  a name outside it), else the named connection, else a soft default, else the
+  caller's single own connection; otherwise `409 must_choose_connection`, and
+  `409 pinned_connection_unavailable` / `409 needs_reconnection` as for runs.
+  The `401` retry refreshes the connection used, never re-selects. The cookie
+  jar is per connection, and `@appstrate/afps-runtime` drops an `api_call`'s
+  own `x-run-id` header.
+- **BREAKING (CLI): `appstrate run` offers `api_call` only for the tools the
+  agent selected** (`@appstrate/runner-pi`'s `buildApiCallExtensionFactory`),
+  by the platform's rule: `tools`, else `default_tools`, `"*"` granting all. An
+  agent that called an unselected `api_call` remotely must select it.
+
+- **Entering a space costs one query instead of two** (#1601). Every
+  space-scoped request, the MCP endpoint and the per-space `/api/spaces/{id}`
+  routes looked the space up in the org, then read it again joined to the
+  caller's membership. For a caller with an org role and no role preview, that
+  second statement already filters on the org, so it is now the only one.
+  `GET /api/me/context` also runs its package-access read beside the other
+  listings instead of before them. Together, 115 to 150 ms
+  off the chat's first visible token in the #1601 benchmark. Responses
+  are unchanged, refusals included.
+- **A chat turn's MCP handshake sends two requests to the platform, not four**
+  (#1601). Each one pays the full pipeline: auth, a Redis rate-limit round
+  trip, the space lookups and a server rebuild. The endpoint is stateless, so
+  `notifications/initialized` (always a bare `202`) and the client's SSE `GET`
+  (always a `405`) are now answered in the chat itself. Measured on the first
+  visible token: 34 to 53 ms sooner.
+- **A chat turn skips the MCP handshake when its permissions were seen before**
+  (#1601). The server instructions and tool descriptors depend only on the
+  permission list the turn's bearer carries, so the process caches them per
+  list (64 lists at most, 5 minutes each) and opens the MCP client on the
+  first tool call instead. On such a turn a broken MCP endpoint no longer fails
+  the turn before the model is called: it surfaces as the error of the tool
+  call that needed it, and the list leaves the cache, so the next turn
+  handshakes up front and fails there, as before. Measured on the first
+  visible token: 180 to 201 ms sooner
+  (`mcpHandshakeMs` from ~200 ms to ~1 ms). The `chat turn construction` log
+  line gains `mcpSurfaceCached`.
+- **ActiveCampaign, WordPress, WooCommerce and Webhooks send their credential
+  only to the connection's own URL** (#1627, #1628), no longer to any host
+  (`allow_all_uris`). ActiveCampaign 1.0.3 adds a required `api_url`; prefer
+  `{{api_url}}/…` in new prompts, while `https://{{account_name}}.api-us1.com/…`
+  keeps working for accounts on `api-us1.com`. Webhooks admits its exact URL
+  only, redirect hops included. A connection whose URL field does not qualify
+  is refused when it is created or updated.
+
 ### Fixed
 
+- **"Continuer" on the onboarding members step sends the invitation still
+  typed in the email field** instead of dropping it; an invalid address shows
+  the form's error and a failed invitation keeps the step.
+- **The sidecar no longer warns on the expected `502` of a rejected API key.**
+  The platform answers it on purpose while it counts the rejection; the report
+  is still sent, and a failed OAuth refresh still warns.
+- **Tier 0 dev no longer corrupts its PGlite database on a hot reload.**
+  `bun --hot` opened a second PGlite on the directory the first still held; the
+  instance now lives on `globalThis`, keyed by data directory.
+- **A connection an admin pin or org default names says so before the
+  refusal**: `locked_by` (`admin_pin` | `org_default` | `null`) on connection
+  listings, and the integration page disables unshare and delete with the
+  reason. Connection refusals are translated.
+- **The credential proxy answers `Cache-Control: no-store`** instead of
+  relaying the upstream's, so an HTTP client cannot replay one connection's
+  response for another.
+- **Deleting a connection from a browser session is audited**, in the
+  connection's org, with the schedules the delete disabled.
+- **A member who loses access to a space stops sharing their connections
+  there.** Leaving or being removed from the organization, losing a space
+  membership, a demotion or a space closing left their shared connections
+  powering colleagues' runs. The access change now unshares them in the same
+  transaction (`unsharedConnectionIds` on `org.member_removed`,
+  `org.member_left`, `org.member_role_updated`); a pin or default still naming
+  one fails with `pinned_connection_unavailable`. A racing share is refused
+  with `409 connection_owner_without_access`. An `integrations:configure`
+  holder may unshare a colleague's connection; sharing stays the owner's.
+- **`PATCH /api/schedules/{id}` writes only the schedule it checked**: two
+  concurrent patches could combine into a schedule running as a member on
+  their private connection. It is a compare-and-set on `updated_at`, answering
+  `409 schedule_modified_concurrently` when the schedule was written since it
+  was read (a patch, a connection delete, a fire disabling it for an actor
+  who lost access): reload and retry.
+- **A schedule fire runs what the schedule row holds now.** The queue job
+  carried a copy of the schedule taken when armed, so a stale job could fire a
+  disabled schedule or replay replaced values; it carries only
+  `{ scheduleId }`, and a fire skips a deleted or disabled schedule.
 - **Runs on an `openai-compatible` model that is not aliased reach
-  `/chat/completions` again**. The agent installed its credential with
+  `/chat/completions` again** (#1600). The agent installed its credential with
   `setRuntimeApiKey`, which leaves Pi's builtin `openai` provider untouched,
   and that provider streams Responses only. So a gateway model's
   `openai-completions` call went out as `POST /responses`, and the sidecar
@@ -27,6 +310,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   integrations booted in time** (#1548). The 30 s deadline was never disarmed,
   so every run that outlived it logged the warning operators are told to look
   for when an agent cannot see an integration.
+- **Unicode tag characters (U+E0000–U+E007F) are stripped from third-party MCP
+  tool descriptors** (`packages/mcp-transport/src/sanitize.ts`). They render
+  as nothing yet reach the model, and the hidden-character filter compared
+  UTF-16 units, so it could not match these surrogate pairs; it now walks code
+  points. Connection labels, which share that filter, refuse and drop them too.
+- **An integration's injected session cookie survives the credential proxy**
+  (#1613). Delivered in `Cookie`, it was lost from the second call of an
+  `X-Session-Id` through `/api/credential-proxy/proxy` on, once the upstream
+  had set any cookie. The platform proxy and the sidecar now share one cookie
+  jar: a cookie the upstream sets or rotates wins, a deleted one falls back to
+  the injected value, and each redirect hop keeps its cookies to its own origin
+  unless both hosts are literal `authorized_uris` entries. In-flight proxy
+  sessions lose their stored cookies once at deploy.
+- **Recreating a package, or republishing a deleted version's number, keeps
+  its files** (#1612). When the successor was written before the deferred
+  storage purge ran, the purge deleted its bytes: the draft fell back to
+  `SKILL.md` + `manifest.json` and the version answered
+  `422 version_artifact_unavailable`. The purge now skips a key a live package
+  or version claims.
+- **`appstrate packages push` on a skill says how to try it** (#1632). It
+  printed `appstrate code sync --target claude-user --source draft`, which
+  swaps every synced skill for its draft; it now prints
+  `claude --plugin-dir '<work folder>'`, which loads the folder as it is for
+  one Claude Code session.
+
+### Security
+
+- **The platform credential proxy no longer sends a templated credential to
+  any host** (#1624). `/api/credential-proxy/proxy` honoured `allow_all_uris`
+  for a call templating a credential (`{{api_key}}`) into its URL, a header or
+  its body, so an API-key caller could ship the secret anywhere. Like the
+  sidecar and the CLI's local resolver, such a call now needs a matching
+  `authorized_uris` entry on the target and every redirect hop, else `403`; the
+  sidecar's redirect follower, which skipped that check, now applies it. The
+  proxy no longer relays upstream `Set-Cookie`, and no path echoes a templated
+  secret in its error messages.
+- **Patched transitive `brace-expansion` and `undici` copies** (#1630).
 
 ## [1.0.0-beta.63] - 2026-09-26
 

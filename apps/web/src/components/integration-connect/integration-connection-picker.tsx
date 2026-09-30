@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
@@ -16,6 +17,7 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,35 +39,64 @@ import {
   useDeleteMemberIntegrationPin,
 } from "../../hooks/use-member-integration-pins";
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
-import { connectionDisplayLabel } from "./connection-label";
 import { connectableAuthKeys } from "./connectable-auth-keys";
-import { requiredScopesForAgent } from "@appstrate/core/integration";
+import { describeResolution } from "./integration-run-readiness";
+import {
+  requiredScopesForAgent,
+  MAX_CONNECTIONS_PER_INTEGRATION,
+} from "@appstrate/core/integration";
+import {
+  canApplyConnectionSet,
+  checkedConnectionIds,
+  displayedConnectionIds,
+  placeCreatedConnection,
+  toggleCapped,
+  unavailableConnectionIds,
+} from "../../lib/connection-set";
 import { client } from "../../api/client";
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
 import { isVersioned } from "../../lib/version-selector";
 import { usePermissions } from "../../hooks/use-permissions";
+import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { useCanReach } from "../../hooks/use-can-reach";
+import { ClearChoiceButton } from "./clear-choice-button";
 
 /**
  * How the picker persists the actor's pick:
  *
- *  - `pin`      — writes a member `integration_pin` immediately on select
- *                 (agent page). Becomes the agent-wide default for this
- *                 member across every run. The trigger reflects the
- *                 server-resolved connection.
- *  - `override` — controlled form value (schedule editor). Selecting sets
- *                 `value` via `onChange`; nothing is persisted until the
- *                 schedule is saved, and the pick is scoped to THAT schedule
- *                 (`schedules.connection_overrides`, cascade layer 4 — below
- *                 admin pins, above member pins). Empty string = inherit.
+ *  - `pin`      — writes a member `integration_pin` (agent page), the
+ *                 agent-wide default for this member across every run.
+ *  - `override` — controlled form value (schedule editor, per-run modal);
+ *                 nothing is persisted until the form is. Empty = inherit.
  *
- * Locks (admin pin, enforced org default) apply identically in both modes:
- * they sit above the schedule override in the resolver cascade, so a locked
- * connection would beat a schedule pick anyway — surfacing the lock here is
- * the honest signal that the override would be ignored.
+ * Locks (admin pin, enforced org default) render read-only in both modes: a
+ * member pin loses to them, and an override naming a connection outside the
+ * locked set is refused (`override_outranked`). A stored override within the
+ * locked set narrows it and is shown as what binds; one reaching outside it is
+ * offered its only fix, being cleared.
  */
 type ConnectionPickerPersistence =
-  { mode: "pin" } | { mode: "override"; value: string; onChange: (connectionId: string) => void };
+  | { mode: "pin" }
+  | { mode: "override"; value: string[]; onChange: (connectionIds: string[]) => void };
+
+const AMBER_TEXT = "text-amber-600 dark:text-amber-400";
+
+function PickerWarning({ testId, children }: { testId: string; children: ReactNode }) {
+  return (
+    <div
+      className="mt-1.5 flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
+      data-testid={testId}
+    >
+      <AlertTriangle className="size-3 shrink-0" />
+      <span>{children}</span>
+    </div>
+  );
+}
+
+// Module-level constant so the default prop is a stable reference across
+// renders (a `{ mode: "pin" }` literal default would be a new object each
+// render — react/no-object-type-as-default-prop).
+const DEFAULT_PERSISTENCE: ConnectionPickerPersistence = { mode: "pin" };
 
 /**
  * Per-integration connection picker, rendered as a rich dropdown. Lists every
@@ -74,17 +105,16 @@ type ConnectionPickerPersistence =
  * connection" entries (one per declared auth) that launch the connect flow
  * inline.
  *
- * Single source of truth for "which connection?" UX — shared by the agent
+ * Rows are checkboxes composing a draft set (up to
+ * {@link MAX_CONNECTIONS_PER_INTEGRATION}) that "Valider" writes in one go;
+ * with a single candidate, clicking its row binds it directly.
+ *
+ * Single source of truth for "which connections?" UX — shared by the agent
  * page (member pins) and the schedule editor (per-schedule overrides) via the
  * `persistence` prop. The candidate list, scope/lock verdicts and the connect
  * orchestration (hosted connect portal popup) are identical across both; only
  * where the pick lands differs.
  */
-// Module-level constant so the default prop is a stable reference across
-// renders (a `{ mode: "pin" }` literal default would be a new object each
-// render — react/no-object-type-as-default-prop).
-const DEFAULT_PERSISTENCE: ConnectionPickerPersistence = { mode: "pin" };
-
 export function IntegrationConnectionPicker({
   integrationId,
   agentPackageId,
@@ -123,6 +153,13 @@ export function IntegrationConnectionPicker({
   const { openPopup, isPending: oauthPending } = useHostedConnectPopup();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  // Uncommitted ticks (`null` = untouched); dropped when the menu closes.
+  const [draft, setDraft] = useState<string[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) setDraft(null);
+  };
   // Renewing and upgrading open a connect session (`integrations:connect`).
   // Adding is the server's `can_add_connection`, which already includes it:
   // here the grant only tells a role refusal from the admin's block policy.
@@ -157,85 +194,142 @@ export function IntegrationConnectionPicker({
 
   const {
     candidates,
-    status,
-    resolved_connection_id: resolvedConnectionId,
-    resolved_missing_scopes: resolvedMissingScopes,
-    admin_pinned_connection_id: adminPinnedConnectionId,
-    member_pinned_connection_id: memberPinnedConnectionId,
-    org_default_connection_id: orgDefaultConnectionId,
-    org_default_enforced: orgDefaultEnforced,
+    resolved_connection_ids: resolvedConnectionIds,
+    member_pinned_connection_ids: memberPinnedConnectionIds,
     can_add_connection: canAddConnection,
   } = resolution;
+  const { lockedConnectionIds, byDefault, softDefaultIds, emptyPickerPrompt } =
+    describeResolution(resolution);
 
+  // Nothing to pick or connect: the agent's configuration must change, whatever the lock.
+  if (emptyPickerPrompt === "reconfigure") {
+    return (
+      <div data-testid={`member-picker-${integrationId}`}>
+        <DisabledReasonTooltip reason={t("error.authKeyServesNoSelectedTool")}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled
+            className="h-7 justify-start gap-1.5 text-xs text-amber-600 dark:text-amber-400"
+            data-testid={`member-pick-reconfigure-${integrationId}`}
+          >
+            <AlertTriangle className="size-3" />
+            <span className="truncate">{t("detail.integrationMemberPicker.reconfigureLabel")}</span>
+          </Button>
+        </DisabledReasonTooltip>
+      </div>
+    );
+  }
+
+  const byId = (id: string): IntegrationCandidate | undefined =>
+    candidates.find((c) => c.id === id);
   const ownerLabel = (c: IntegrationCandidate): string =>
     c.is_own
       ? t("detail.integrationMemberPicker.byYou")
       : (c.owner_name ?? t("detail.integrationMemberPicker.ownerUnknown"));
 
-  // Locked when an admin force applies and the member can never override:
-  // a per-agent admin pin OR an enforced org default. Either way we render
-  // the read-only lock instead of the editable dropdown. (A schedule override
-  // would lose to either at run time, so locking it here is correct too.)
-  const lockedConnectionId =
-    adminPinnedConnectionId ?? (orgDefaultEnforced ? orgDefaultConnectionId : null);
-  if (lockedConnectionId) {
-    const pinned = candidates.find((c) => c.id === lockedConnectionId);
-    const label = pinned ? connectionDisplayLabel(pinned) : lockedConnectionId;
+  const candidateIds = candidates.map((c) => c.id);
+  const setLabel = (ids: string[], unavailable: string[]): string =>
+    unavailable.length > 0
+      ? `${t("detail.integrationMemberPicker.selectedCount", { count: ids.length })} · ${t(
+          "detail.integrationMemberPicker.unavailableCount",
+          { count: unavailable.length },
+        )}`
+      : ids.map((id) => byId(id)!.label).join(" · ");
+
+  // An admin force (pin or enforced org default) renders read-only: a member pin loses to it.
+  // A stored override within its set narrows it, so that subset is what binds; one reaching
+  // outside it is refused (`override_outranked`) and offered its only fix, being cleared.
+  if (lockedConnectionIds.length > 0) {
+    const storedOverride = overrideMode ? persistence.value : [];
+    const outranked = storedOverride.some((id) => !lockedConnectionIds.includes(id));
+    const bindingIds =
+      storedOverride.length > 0 && !outranked ? storedOverride : lockedConnectionIds;
+    const lockedUnavailableIds = unavailableConnectionIds(bindingIds, candidateIds);
     return (
       <div data-testid={`member-picker-${integrationId}`}>
         <Button
           variant="outline"
           size="sm"
           disabled
-          className="h-7 justify-start gap-1.5 text-xs"
+          className={`h-7 justify-start gap-1.5 text-xs ${runBlocking ? AMBER_TEXT : ""}`}
           data-testid={`member-pick-locked-${integrationId}`}
         >
-          <Lock className="size-3" />
-          <span className="truncate">{label}</span>
+          {runBlocking ? <AlertTriangle className="size-3" /> : <Lock className="size-3" />}
+          <span className="truncate">{setLabel(bindingIds, lockedUnavailableIds)}</span>
           <Badge variant="secondary" className="ml-1 text-[0.6rem]">
-            {t("detail.integrationMemberPicker.adminLocked")}
+            {t("detail.integrationMemberPicker.adminLocked", { count: bindingIds.length })}
           </Badge>
         </Button>
+        {overrideMode && outranked && (
+          <ClearChoiceButton
+            onClick={() => persistence.onChange([])}
+            testId={`member-pick-clear-${integrationId}`}
+          />
+        )}
+        {lockedUnavailableIds.length > 0 && (
+          <PickerWarning testId={`member-pick-unavailable-warning-${integrationId}`}>
+            {t("detail.integrationMemberPicker.lockedUnavailableWarning", {
+              count: lockedUnavailableIds.length,
+            })}
+          </PickerWarning>
+        )}
       </div>
     );
   }
 
-  // The actor's explicit pick: their member pin (pin mode) or the controlled
-  // override value (override mode). Empty/absent = "defer to the cascade".
-  const explicitId = overrideMode ? persistence.value || null : memberPinnedConnectionId;
-  const selectedConn = explicitId ? (candidates.find((c) => c.id === explicitId) ?? null) : null;
-  const resolvedConn = candidates.find((c) => c.id === resolvedConnectionId) ?? null;
-  // The connection the trigger should reflect: the override pick in override
-  // mode (falling back to the agent-resolved one as the "what inherit uses"
-  // hint), else the server-resolved one.
-  const displayConn = overrideMode ? selectedConn : resolvedConn;
-  const displayMissingScopes = overrideMode
-    ? (selectedConn?.missing_scopes ?? [])
-    : resolvedMissingScopes;
-  const displayOwnedByActor = overrideMode
-    ? (selectedConn?.is_own ?? false)
-    : resolution.resolved_owned_by_actor;
-  // Which row carries the ✓: the explicit pick when set, else the
-  // agent-resolved connection (the default that inherit/auto lands on).
-  const checkId = overrideMode ? (explicitId ?? resolvedConnectionId) : resolvedConnectionId;
+  const explicitIds = overrideMode ? persistence.value : memberPinnedConnectionIds;
+  const boundIds = displayedConnectionIds({
+    overrideMode,
+    explicitIds,
+    resolvedIds: resolvedConnectionIds,
+  });
+  // The set in play, named whole: the actor's own pick, else (pin mode) a soft
+  // space default — a member of either that is no candidate blocks the run.
+  const fromDefault = !overrideMode && explicitIds.length === 0 && softDefaultIds.length > 0;
+  const storedIds = fromDefault ? softDefaultIds : explicitIds;
+  const unavailableIds = unavailableConnectionIds(storedIds, candidateIds);
+  const dirty = draft !== null;
+  const checkedIds = checkedConnectionIds({
+    draft,
+    explicitIds,
+    resolvedIds: resolvedConnectionIds,
+    candidateIds,
+  });
+  const atCap = checkedIds.length >= MAX_CONNECTIONS_PER_INTEGRATION;
+  const oneClick = candidates.length === 1;
+
+  const toConns = (ids: string[]) => ids.map(byId).filter((c): c is IntegrationCandidate => !!c);
+  // The trigger reflects the bound set, never the uncommitted draft.
+  const displayConns = toConns(boundIds);
+  const checkedConns = toConns(checkedIds);
+  // Warnings judge the set "Valider" would write, not the bound one.
+  const verdictConns = dirty ? checkedConns : displayConns;
+  const underScopedConns = verdictConns.filter((c) => c.missing_scopes.length > 0);
+  const deadConns = verdictConns.filter((c) => c.needs_reconnection);
   const hasCandidates = candidates.length > 0;
-  const underScoped = displayMissingScopes.length > 0;
+  const canApply = canApplyConnectionSet(checkedConns, explicitIds, dirty) && !upsertPin.isPending;
 
-  // Route a pick to its persistence: a member pin (agent page) or the
-  // controlled override value (schedule). Both refresh the resolution so the
-  // candidate list / scope diff re-render (a freshly connected account shows
-  // up, the ✓ moves).
-  const applyPick = async (connectionId: string) => {
-    if (overrideMode) persistence.onChange(connectionId);
-    else await upsertPin.mutateAsync({ agentPackageId, integrationId, connectionId });
+  // An empty set clears the pick. False = refused; the mutation already toasted why.
+  const persist = async (connectionIds: string[]): Promise<boolean> => {
+    if (overrideMode) persistence.onChange(connectionIds);
+    else {
+      try {
+        if (connectionIds.length > 0) {
+          await upsertPin.mutateAsync({ agentPackageId, integrationId, connectionIds });
+        } else {
+          await deletePin.mutateAsync({ agentPackageId, integrationId });
+        }
+      } catch {
+        return false;
+      }
+    }
     await refresh();
+    setDraft(null);
+    return true;
   };
 
-  const clearPick = async () => {
-    if (overrideMode) persistence.onChange("");
-    else await deletePin.mutateAsync({ agentPackageId, integrationId });
-    await refresh();
-  };
+  const toggle = (connectionId: string) => setDraft(toggleCapped(checkedIds, connectionId));
 
   const triggerConnect = async (authKey: string, opts?: { connectionId?: string }) => {
     if (!auths[authKey]) return;
@@ -247,7 +341,6 @@ export function IntegrationConnectionPicker({
     // prior resolution intact). On a renew (connectionId supplied) the backend
     // UPDATEs in place and the snapshot diff is empty — we skip the select step.
     const before = new Set(candidates.map((c) => c.id));
-    const hadExplicit = !!explicitId;
     const isRenew = !!opts?.connectionId;
     // Forward the agent's per-tool inferred scopes so consent asks for what THIS
     // agent needs — not just the integration's manifest defaults (the
@@ -264,7 +357,7 @@ export function IntegrationConnectionPicker({
       ...(isRenew ? {} : { forceAccountSelect: true }),
       ...(opts?.connectionId ? { connectionId: opts.connectionId } : {}),
     });
-    if (isRenew || hadExplicit) {
+    if (isRenew) {
       await refresh();
       return;
     }
@@ -277,37 +370,49 @@ export function IntegrationConnectionPicker({
     const freshCandidates = fresh?.integrations.find((i) => i.integration_id === integrationId)
       ?.resolution.candidates;
     const added = freshCandidates?.find((c) => !before.has(c.id));
-    if (added) await applyPick(added.id);
-    else await refresh();
+    if (!added) {
+      await refresh();
+      return;
+    }
+    const placed = placeCreatedConnection({
+      explicitIds,
+      checkedIds,
+      createdId: added.id,
+    });
+    if ("persist" in placed) {
+      await persist(placed.persist);
+      return;
+    }
+    // The menu closed on the connect click; reopen it on the new tick so "Valider" is at hand.
+    await refresh();
+    setDraft(placed.draft);
+    setOpen(true);
   };
 
-  const triggerLabel = displayConn
-    ? connectionDisplayLabel(displayConn)
-    : overrideMode
-      ? t("detail.integrationMemberPicker.inherit")
-      : status === "must_choose"
-        ? t("detail.integrationMemberPicker.chooseLabel")
-        : status === "stale"
-          ? t("detail.integrationMemberPicker.reconfigureLabel")
-          : t("detail.integrationMemberPicker.connectLabel");
-  // Warning visuals when there's no usable connection OR the displayed one is
-  // under-scoped (run would be blocked). In override mode "no pick" is a valid
-  // inherit state, so only the under-scoped case warns.
-  //
-  // The trigger paints amber on exactly the states that gate a run. In pin mode
-  // it reads the server's authoritative `run_blocking` flag (the same bulk
-  // connection-readiness query the launch badge uses — and the same resolver the
-  // run-kickoff 409 runs, including the required-auth carve-out for inert
-  // integrations), so the picker can never disagree with the badge.
-  //
-  // Override mode (schedule editor) keeps its own rule: "no pick" = inherit is
-  // valid, so only the SELECTED override connection being under-scoped warns.
-  const triggerWarn = overrideMode ? underScoped : (runBlocking ?? false);
-  const TriggerIcon = triggerWarn ? AlertTriangle : displayConn ? Users : Plus;
+  const triggerLabel =
+    unavailableIds.length > 0
+      ? setLabel(storedIds, unavailableIds)
+      : displayConns.length === 1
+        ? displayConns[0]!.label
+        : displayConns.length > 1
+          ? t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length })
+          : overrideMode
+            ? t("detail.integrationMemberPicker.inherit")
+            : emptyPickerPrompt === "choose"
+              ? t("detail.integrationMemberPicker.chooseLabel")
+              : t("detail.integrationMemberPicker.connectLabel");
+  // Amber on exactly the states that gate a run: pin mode reads the server's
+  // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
+  // override mode an empty pick inherits, so only an under-scoped, unavailable or dead set warns.
+  const triggerWarn = overrideMode
+    ? underScopedConns.length > 0 || unavailableIds.length > 0 || deadConns.length > 0
+    : (runBlocking ?? false);
+  const TriggerIcon = triggerWarn ? AlertTriangle : displayConns.length > 0 ? Users : Plus;
 
   // Blocked for this member AND nothing to pick → dead end. Show a
   // disabled, explanatory button instead of an empty dropdown.
-  if (!canAddConnection && !hasCandidates) {
+  // Unless a stored set is left to clear: the menu's reset item is the way out.
+  if (!canAddConnection && !hasCandidates && explicitIds.length === 0) {
     return (
       <div data-testid={`member-picker-${integrationId}`}>
         <Button
@@ -332,8 +437,9 @@ export function IntegrationConnectionPicker({
 
   // No existing connection AND no auth the actor can connect on (every
   // oauth2 auth lacks an admin-registered OAuth client) → point at the
-  // admin setup instead of an empty dropdown that would only 403.
-  if (!hasCandidates && authKeys.length === 0) {
+  // admin setup instead of an empty dropdown that would only 403 — unless a
+  // stored set is left to clear, as above.
+  if (!hasCandidates && authKeys.length === 0 && explicitIds.length === 0) {
     return (
       <div data-testid={`member-picker-${integrationId}`}>
         <span
@@ -358,17 +464,17 @@ export function IntegrationConnectionPicker({
 
   return (
     <div data-testid={`member-picker-${integrationId}`}>
-      <DropdownMenu>
+      <DropdownMenu open={open} onOpenChange={onOpenChange}>
         <DropdownMenuTrigger asChild>
           <Button
             variant="outline"
             size="sm"
-            className={`h-7 justify-start gap-1.5 text-xs ${triggerWarn ? "text-amber-600 dark:text-amber-400" : ""}`}
+            className={`h-7 justify-start gap-1.5 text-xs ${triggerWarn ? AMBER_TEXT : ""}`}
             data-testid={`member-pick-${integrationId}`}
           >
             <TriggerIcon className="size-3" />
             <span className="max-w-[14rem] truncate">{triggerLabel}</span>
-            {!overrideMode && status === "auto" && (
+            {!overrideMode && byDefault && (
               <span className="text-muted-foreground/70">
                 {t("detail.integrationMemberPicker.defaultBadge")}
               </span>
@@ -382,7 +488,10 @@ export function IntegrationConnectionPicker({
           </DropdownMenuLabel>
           {candidates.map((c) => {
             const tl = typeLabel(c.auth_key);
-            const isDefault = !explicitId && resolvedConnectionId === c.id;
+            const isChecked = checkedIds.includes(c.id);
+            const isDefault =
+              explicitIds.length === 0 &&
+              (resolvedConnectionIds.includes(c.id) || softDefaultIds.includes(c.id));
             // Only the connection owner can renew via OAuth — a foreign
             // shared connection's tokens belong to someone else. We still
             // let the actor pin a foreign needs_reconnection row (their
@@ -395,13 +504,33 @@ export function IntegrationConnectionPicker({
             return (
               <DropdownMenuItem
                 key={c.id}
-                onSelect={() => void applyPick(c.id)}
+                // The row is the checkbox a screen reader sees; the box is a glyph.
+                {...(oneClick ? {} : { role: "menuitemcheckbox", "aria-checked": isChecked })}
+                disabled={!oneClick && atCap && !isChecked}
+                // Toggling must not close the menu — "Valider" writes.
+                onSelect={(e) => {
+                  if (oneClick) {
+                    void persist([c.id]);
+                    return;
+                  }
+                  e.preventDefault();
+                  toggle(c.id);
+                }}
                 data-testid={`member-pick-option-${c.id}`}
               >
-                <Check className={`size-3.5 ${checkId === c.id ? "" : "opacity-0"}`} />
+                {oneClick ? (
+                  <Check className={`size-3.5 ${isChecked ? "" : "opacity-0"}`} />
+                ) : (
+                  <Checkbox
+                    checked={isChecked}
+                    aria-hidden
+                    tabIndex={-1}
+                    className="pointer-events-none"
+                  />
+                )}
                 <div className="flex min-w-0 flex-1 flex-col">
                   <div className="flex items-center gap-1.5">
-                    <span className="truncate font-medium">{connectionDisplayLabel(c)}</span>
+                    <span className="truncate font-medium">{c.label}</span>
                     {tl && (
                       <Badge variant="outline" className="text-[0.6rem]">
                         {tl}
@@ -437,7 +566,7 @@ export function IntegrationConnectionPicker({
                     disabled={oauthPending}
                     onClick={(e) => {
                       // Block the DropdownMenuItem's onSelect so the renew
-                      // click doesn't also pick the dead row.
+                      // click doesn't also toggle the dead row.
                       e.preventDefault();
                       e.stopPropagation();
                       void triggerConnect(c.auth_key, { connectionId: c.id });
@@ -452,9 +581,61 @@ export function IntegrationConnectionPicker({
               </DropdownMenuItem>
             );
           })}
-          {explicitId && (
+          {unavailableIds.map((id) => (
             <DropdownMenuItem
-              onSelect={() => void clearPick()}
+              key={id}
+              disabled
+              {...(oneClick ? {} : { role: "menuitemcheckbox", "aria-checked": false })}
+              data-testid={`member-pick-unavailable-${id}`}
+            >
+              {oneClick ? (
+                <Check className="size-3.5 opacity-0" />
+              ) : (
+                <Checkbox
+                  checked={false}
+                  aria-hidden
+                  tabIndex={-1}
+                  className="pointer-events-none"
+                />
+              )}
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate font-medium line-through">
+                  {t("detail.integrationMemberPicker.unavailableRow")}
+                </span>
+                <span className="text-muted-foreground truncate text-[0.65rem]">
+                  {t("detail.integrationMemberPicker.unavailableRowHint")}
+                </span>
+              </div>
+            </DropdownMenuItem>
+          ))}
+          {!oneClick && hasCandidates && (
+            <DropdownMenuItem
+              disabled={!canApply}
+              onSelect={(e) => {
+                // Stays open on a refused write, so the ticks stay editable.
+                e.preventDefault();
+                void persist(checkedIds).then((ok) => {
+                  if (ok) setOpen(false);
+                });
+              }}
+              data-testid={`member-pick-apply-${integrationId}`}
+            >
+              <Check className="size-3.5" />
+              <span className="font-medium">
+                {t("detail.integrationMemberPicker.apply", { count: checkedIds.length })}
+              </span>
+            </DropdownMenuItem>
+          )}
+          {atCap && (
+            <DropdownMenuLabel className="text-muted-foreground text-[0.65rem] font-normal">
+              {t("detail.integrationMemberPicker.maxReached", {
+                max: MAX_CONNECTIONS_PER_INTEGRATION,
+              })}
+            </DropdownMenuLabel>
+          )}
+          {explicitIds.length > 0 && (
+            <DropdownMenuItem
+              onSelect={() => void persist([])}
               data-testid={`member-pick-reset-${integrationId}`}
             >
               <Check className="size-3.5 opacity-0" />
@@ -500,28 +681,49 @@ export function IntegrationConnectionPicker({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
-      {/* Displayed connection is under-scoped → the run is blocked
-          server-side (insufficient_scopes). Owner can upgrade via
-          incremental consent; a foreign owner can only be flagged. */}
-      {underScoped && displayConn && (
+      {/* A stored member is unusable: the run is refused until the set is re-picked
+          — or, for the space default, until the member picks their own or an
+          admin fixes the default. */}
+      {unavailableIds.length > 0 && (
+        <PickerWarning testId={`member-pick-unavailable-warning-${integrationId}`}>
+          {t(
+            fromDefault
+              ? "detail.integrationMemberPicker.defaultUnavailableWarning"
+              : "detail.integrationMemberPicker.unavailableWarning",
+            { count: unavailableIds.length },
+          )}
+        </PickerWarning>
+      )}
+      {/* A dead member fails every run that binds it until its owner reconnects it. */}
+      {deadConns.length > 0 && (
+        <PickerWarning testId={`member-pick-dead-warning-${integrationId}`}>
+          {t("detail.integrationMemberPicker.needsReconnectionWarning", {
+            count: deadConns.length,
+          })}
+        </PickerWarning>
+      )}
+      {/* Under-scoped → blocked server-side. The owner can upgrade in place;
+          a foreign owner can only be flagged. */}
+      {underScopedConns.map((conn) => (
         <div
+          key={conn.id}
           className="mt-1.5 flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
-          data-testid={`member-pick-scope-warning-${integrationId}`}
+          data-testid={`member-pick-scope-warning-${conn.id}`}
         >
           <div className="flex items-center gap-1.5">
             <AlertTriangle className="size-3 shrink-0" />
             <span>
-              {displayOwnedByActor
+              {conn.is_own
                 ? t("detail.integrationMemberPicker.missingScopesOwn")
                 : t("detail.integrationMemberPicker.missingScopesForeign", {
-                    owner: ownerLabel(displayConn),
+                    owner: ownerLabel(conn),
                   })}
             </span>
           </div>
           <span className="text-foreground/80 font-mono text-[0.65rem] break-words">
-            {displayMissingScopes.join(" ")}
+            {conn.missing_scopes.join(" ")}
           </span>
-          {canConnect && displayOwnedByActor && auths[displayConn.auth_key]?.type === "oauth2" && (
+          {canConnect && conn.is_own && auths[conn.auth_key]?.type === "oauth2" && (
             <div>
               <Button
                 size="sm"
@@ -529,16 +731,16 @@ export function IntegrationConnectionPicker({
                 onClick={async () => {
                   await openPopup({
                     packageId: integrationId,
-                    authKey: displayConn.auth_key,
-                    scopes: displayMissingScopes,
-                    connectionId: displayConn.id,
+                    authKey: conn.auth_key,
+                    scopes: conn.missing_scopes,
+                    connectionId: conn.id,
                   });
                   // The OAuth callback updated the connection's granted
                   // scopes server-side; refetch so the badge clears
                   // instead of waiting for a window-focus refetch.
                   await refresh();
                 }}
-                data-testid={`member-pick-upgrade-${integrationId}`}
+                data-testid={`member-pick-upgrade-${conn.id}`}
               >
                 <RefreshCw className="mr-1 size-3" />
                 {t("detail.integrationMemberPicker.upgradeButton")}
@@ -546,7 +748,7 @@ export function IntegrationConnectionPicker({
             </div>
           )}
         </div>
-      )}
+      ))}
     </div>
   );
 }

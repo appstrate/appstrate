@@ -311,10 +311,12 @@ function contextFilesArgument(args: Record<string, unknown>): {
   return value.length > 0 ? { uris: value } : {};
 }
 
+const CONNECTION_OVERRIDES_SHAPE = '`{"@scope/integration": ["<connection_id>", ...]}`';
+
 /**
  * The tool's `connection_overrides` argument — the documented remedy for a
- * `409 must_choose_connection`, where the model must name one connection per
- * ambiguous integration and retry.
+ * `409 must_choose_connection`, where the model must name the connections to
+ * bind on each ambiguous integration and retry.
  *
  * Refused before dispatch whenever it is present but does not resolve to a
  * plain object. The MCP transport does not validate tool arguments, so a
@@ -334,8 +336,8 @@ function connectionOverridesArgument(args: Record<string, unknown>): {
   if (typeof args.connection_overrides === "string") {
     return {
       error:
-        "`connection_overrides` must be a JSON object mapping each integration id to a " +
-        'connection id (`{"@scope/integration": "<connection_id>"}`), not a string. Pass the ' +
+        "`connection_overrides` must be a JSON object mapping each integration id to an array " +
+        `of connection ids (${CONNECTION_OVERRIDES_SHAPE}), not a string. Pass the ` +
         "object itself — do not JSON-encode it.",
     };
   }
@@ -343,8 +345,8 @@ function connectionOverridesArgument(args: Record<string, unknown>): {
   if (!overrides && present) {
     return {
       error:
-        "`connection_overrides` must be a JSON object mapping each integration id to a " +
-        'connection id (`{"@scope/integration": "<connection_id>"}`). Omit the argument ' +
+        "`connection_overrides` must be a JSON object mapping each integration id to an array " +
+        `of connection ids (${CONNECTION_OVERRIDES_SHAPE}). Omit the argument ` +
         "entirely when you have no connection to pin.",
     };
   }
