@@ -17,34 +17,38 @@ consumer's publish rather than the first user's `npm install`.
 ### Added
 
 - **`isHostUnboundedUriPattern`** (`./credential-template`): whether an
-  `authorized_uris` entry leaves the host to the caller (a wildcard in either
-  of the host's last two labels, or no `scheme://`). (#1641)
+  `authorized_uris` entry leaves the host to the caller — no literal
+  `scheme://` (`**://api.example.com/**`), an empty host (`https:///**`), or
+  a wildcard in either of the host's last two labels (`https://**`,
+  `https://*.com./**`). A public suffix (`https://*.co.uk/**`) is not
+  detected. (#1641)
+- **`parseCredentialRef`**, **`templateExpressions`** and
+  **`unsupportedTemplateExpressions`** (`./credential-template`): the field a
+  lone `{$credential.<field>}` names, and a template's (unsupported) `{$…}`
+  expressions. (#1641)
 - **`injectsHttpCredential`** and **`AUTH_TYPE_HTTP_DEFAULTS`**
   (`./delivery-http`): whether an auth's HTTP delivery names a header the proxy
-  fills with a credential, and the per-auth-type default table it reads (moved
-  from `@appstrate/afps-runtime`). (#1641)
-
-- **`parseCredentialRef`**, **`templateExpressions`**,
-  **`unsupportedTemplateExpressions`** and
-  **`UnsupportedTemplateExpressionError`** (`./credential-template`). (#1641)
+  fills with a credential, and the per-auth-type default table it reads.
+  (#1641)
 - **`./runtime-expression`**: `parseResponseExpression`,
   `isResponseTextExpression` — the Arazzo response expressions a
   `connect.login` block may use — and `simpleCriterionOperands` and
   `loginBlockIssues` (with `LoginBlockView`, `LoginBlockIssue`): the one rule
   of which `connect.login` expressions are evaluable, shared by the login
   engine and import validation. (#1641)
-- **`guardedFetchChain`** (`./guarded-fetch`): `guardedFetch` that also
-  returns the terminal logical URL and the number of redirects followed.
-  `GuardedFetchOptions` gains `forwardCredentials` (a cross-origin hop it
-  approves keeps the credential headers, Cookie and body) and
-  `followRedirects: false`; `SsrfBlockedError.hop` names the refused hop.
-  (#1641)
+- **`guardedFetchChain`** and **`GuardedFetchResult`** (`./guarded-fetch`):
+  `guardedFetch` that also returns the terminal logical URL and the number of
+  redirects followed. `GuardedFetchOptions` gains `forwardCredentials` (a
+  cross-origin hop it approves keeps the credential headers, Cookie and body;
+  never an https→http hop) and `followRedirects: false`;
+  `SsrfBlockedError.hop` names the refused hop. (#1641)
 
 ### Changed
 
-- **BREAKING: `renderCredentialTemplate` throws
-  `UnsupportedTemplateExpressionError` on any `{$…}` other than
-  `{$credential.<field>}`**, and no longer reads inherited properties. (#1641)
+- **BREAKING: `renderCredentialTemplate` throws on anything but
+  `{$credential.<field>}`**: an api_call `{{…}}` placeholder or any other
+  `{$…}` expression in the template is an `Error`, never sent as text. It no
+  longer reads inherited properties. (#1641)
 - **BREAKING: `projectHttpDeliveryConfig` carries `value` verbatim** as
   `valueFrom: { template, encoding? }` in the `{$credential.<field>}`
   grammar; no bare-field lowering, no `{{field}}` rewrite. (#1641)

@@ -21,8 +21,11 @@
 import { loadModel, type ResolvedModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
-import { proxyErrorStatus, relayedProxyStatus } from "../../lib/proxy-status.ts";
-import { upstreamFailure, type UpstreamFailureCode } from "../../lib/proxy-upstream-failure.ts";
+import {
+  proxyProblem,
+  relayedProxyStatus,
+  type UpstreamFailureCode,
+} from "../../lib/proxy-status.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
 import { lookupResponse } from "./response-cache.ts";
 import {
@@ -335,7 +338,11 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   // Only an org's own credential can be revoked from under it; the headers
   // that could forge a 401 are never forwarded (`forwardedLlmRequestHeaders`).
   if (upstream.status === 401 && resolved.credentialId) {
-    await recordModelCredentialRejection(inputs.principal.orgId, resolved.credentialId);
+    await recordModelCredentialRejection(
+      inputs.principal.orgId,
+      resolved.credentialId,
+      resolved.apiKey,
+    );
   }
 
   // Forward + meter, weaving in the alias-swap (every branch) and the
@@ -366,13 +373,10 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
 
 /** The model's upstream resolves into a blocked range: never names the host or the reason. */
 function blockedUpstream(presetId: string): ApiError {
-  return new ApiError({
-    status: 400,
-    code: "invalid_request",
-    title: "Invalid Request",
-    detail: `Model "${presetId}" resolves to a blocked address — refusing to proxy.`,
-    headers: { "Proxy-Status": proxyErrorStatus("destination_ip_prohibited") },
-  });
+  return proxyProblem(
+    "blocked_target",
+    `Model "${presetId}" resolves to a blocked address — refusing to proxy.`,
+  );
 }
 
 const UPSTREAM_FAILURE_DETAIL: Record<UpstreamFailureCode, string> = {
@@ -383,7 +387,7 @@ const UPSTREAM_FAILURE_DETAIL: Record<UpstreamFailureCode, string> = {
 
 /** The model's upstream failed at transport level (502 / 504); names neither host nor cause. */
 function unreachableUpstream(presetId: string, code: UpstreamFailureCode): ApiError {
-  return upstreamFailure(
+  return proxyProblem(
     code,
     `The upstream of model "${presetId}" ${UPSTREAM_FAILURE_DETAIL[code]}.`,
   );

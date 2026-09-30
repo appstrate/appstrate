@@ -8,11 +8,10 @@
 import { describe, it, expect } from "bun:test";
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { I18nextProvider } from "react-i18next";
+import { I18nextProvider, useTranslation } from "react-i18next";
 import i18n, { i18nReady } from "../../i18n.ts";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
 import { ScheduleStatusBadge } from "../schedule-status-badge.tsx";
-import { useScheduleDisabledReason } from "../../hooks/use-schedule-disabled-reason.ts";
 
 await i18nReady;
 
@@ -26,7 +25,8 @@ const REASONS = Object.keys({
 } satisfies Record<Reason, true>) as Reason[];
 
 function ReasonText({ reason }: { reason: ScheduleWireDto["disabled_reason"] }) {
-  return <>{useScheduleDisabledReason(reason) ?? "none"}</>;
+  const { t } = useTranslation(["agents"]);
+  return <>{reason ? t(`schedule.disabledReason.${reason}`) : "none"}</>;
 }
 
 const render = (node: ReactElement) =>

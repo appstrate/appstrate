@@ -397,7 +397,12 @@ export async function guardedFetchChain(
       opts?.validateHop?.(next, hop + 1);
       const nextPin = await checkHost(next, hop + 1, opts);
 
-      if (next.origin !== current.origin && opts?.forwardCredentials?.(next) !== true) {
+      // A downgrade would re-send every secret in cleartext: no allowlist may authorize it.
+      const schemeDowngrade = current.protocol === "https:" && next.protocol === "http:";
+      if (
+        next.origin !== current.origin &&
+        (schemeDowngrade || opts?.forwardCredentials?.(next) !== true)
+      ) {
         for (const h of sensitiveHeaderNames) headers.delete(h);
         cookieBase = null;
         // A 307/308 preserves method+body by spec, but re-sending a
@@ -415,7 +420,6 @@ export async function guardedFetchChain(
         // credential-bearing exchange by definition (that is why the caller
         // scoped it), so belt-and-braces: ANY origin change drops the body,
         // including the same-host scheme/port cases kept above.
-        const schemeDowngrade = current.protocol === "https:" && next.protocol === "http:";
         const hasHopContract = opts?.validateHop !== undefined;
         if (
           body !== undefined &&

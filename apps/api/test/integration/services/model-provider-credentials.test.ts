@@ -414,11 +414,11 @@ describe("model-provider-credentials service — upstream rejections of an api k
 
   it("flags the key at INTEGRATION_REFRESH_MAX_FAILURES rejections, and a rotation clears it", async () => {
     const { orgId, id } = await apiKeyCredential("mpc-reject-flag");
-    for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id);
+    for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
     expect(await flagged(orgId, id)).toBe(false);
     expect(await loadInferenceCredentials(orgId, id)).not.toBeNull();
 
-    await recordModelCredentialRejection(orgId, id);
+    await recordModelCredentialRejection(orgId, id, PLAINTEXT);
     expect(await flagged(orgId, id)).toBe(true);
     expect(await loadInferenceCredentials(orgId, id)).toBeNull();
 
@@ -435,15 +435,44 @@ describe("model-provider-credentials service — upstream rejections of an api k
     expect(row).toEqual({ count: 0, since: null });
   });
 
+  it("counts nothing for a key the row no longer holds: a rotation in flight flags nothing", async () => {
+    const { orgId, id } = await apiKeyCredential("mpc-reject-rotated");
+    for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+    await updateModelProviderCredential(orgId, id, { apiKey: "sk-rotated" });
+    for (let i = 0; i < 6; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+    expect(await flagged(orgId, id)).toBe(false);
+    const [row] = await db
+      .select({ count: modelProviderCredentials.refreshFailureCount })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, id));
+    expect(row!.count).toBe(0);
+  });
+
+  it("never flags the rotated key when the threshold rejection interleaves with the rotation", async () => {
+    const { orgId, id } = await apiKeyCredential("mpc-reject-race");
+    for (let round = 0; round < 10; round++) {
+      const key = `sk-round-${round}`;
+      await updateModelProviderCredential(orgId, id, { apiKey: key });
+      for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id, key);
+      const next = `sk-round-${round}-next`;
+      await Promise.all([
+        recordModelCredentialRejection(orgId, id, key),
+        updateModelProviderCredential(orgId, id, { apiKey: next }),
+      ]);
+      expect((await loadInferenceCredentials(orgId, id))?.apiKey).toBe(next);
+      expect(await flagged(orgId, id)).toBe(false);
+    }
+  });
+
   it("starts a new count once the window has passed", async () => {
     const { orgId, id } = await apiKeyCredential("mpc-reject-window");
-    for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id);
+    for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
     await db
       .update(modelProviderCredentials)
       .set({ refreshFailuresSince: new Date(Date.now() - 2 * 60 * 60 * 1000) })
       .where(eq(modelProviderCredentials.id, id));
 
-    await recordModelCredentialRejection(orgId, id);
+    await recordModelCredentialRejection(orgId, id, PLAINTEXT);
     expect(await flagged(orgId, id)).toBe(false);
     const [row] = await db
       .select({ count: modelProviderCredentials.refreshFailureCount })
@@ -468,7 +497,7 @@ describe("model-provider-credentials service — upstream rejections of an api k
       .set({ refreshFailureCount: 2 })
       .where(eq(modelProviderCredentials.id, id));
 
-    for (let i = 0; i < 6; i++) await recordModelCredentialRejection(ctx.orgId, id);
+    for (let i = 0; i < 6; i++) await recordModelCredentialRejection(ctx.orgId, id, "access-1");
 
     const [row] = await db
       .select({

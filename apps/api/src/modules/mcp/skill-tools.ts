@@ -12,6 +12,7 @@ import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import { ApiError, notFound } from "../../lib/errors.ts";
 import { classifyPackageFile, snapshotFile } from "../../services/package-files.ts";
 import { readSkillSnapshot, type SkillSnapshot } from "../../services/skill-read.ts";
+import { VERSION_SELECTOR_DRAFT } from "../../services/agent-version-resolver.ts";
 import { assertPermission } from "../../middleware/require-permission.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import type { AppEnv } from "../../types/index.ts";
@@ -42,11 +43,16 @@ export function skillReaderFor(
 const SKILL_ENTRY = PACKAGE_CONTENT_ENTRY.skill!.path;
 const OVERSIZED_NOTE = "Content omitted — it exceeds the inline size limit.";
 
-/** The `GET …/files/content` URL serving `path` of the definition read. */
+/**
+ * The `GET …/files/content` URL serving `path` of the definition read. A draft is named
+ * `version=draft`: omitted, the route serves the latest published version to a non-author.
+ * A system package's tree takes no selector.
+ */
 function fileContentUrl(origin: string, skill: SkillSnapshot, path: string): string {
   const url = new URL(`/api/packages/${skill.packageId}/files/content`, origin);
   url.searchParams.set("path", path);
-  if (skill.version !== null) url.searchParams.set("version", skill.version);
+  const version = skill.version ?? (skill.definition === "draft" ? VERSION_SELECTOR_DRAFT : null);
+  if (version !== null) url.searchParams.set("version", version);
   return url.toString();
 }
 

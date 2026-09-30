@@ -1005,7 +1005,16 @@ export async function updateIntegrationOAuthClient(
   // `null` = the secret field was not submitted → keep the stored credential
   // and its declared method exactly as they are. Rotating only the redirect URI
   // must not silently clear the secret (nor flip a confidential client public).
-  const clientAuth = encodeClientAuthForStorage(input);
+  // A new secret with no method rotates the credential, not its transport: the
+  // stored secret-based method stays (a public client's `"none"` cannot).
+  const keptMethod =
+    input.clientSecret && existing.tokenEndpointAuthMethod !== "none"
+      ? (existing.tokenEndpointAuthMethod ?? undefined)
+      : undefined;
+  const clientAuth = encodeClientAuthForStorage({
+    ...input,
+    tokenEndpointAuthMethod: input.tokenEndpointAuthMethod ?? keptMethod,
+  });
 
   // …with one exception, which the preserve sentinel alone gets wrong. An
   // ABSENT secret alongside an EXPLICITLY declared secret-based method is not
@@ -1114,38 +1123,18 @@ function moveClientToOrg(
  */
 interface ResolvedConnectClient {
   clientId: string;
-  clientSecret: string;
   /** Pre-registered redirect URI override, or null to use the platform default. */
   redirectUri: string | null;
   clientRef: string;
-  /**
-   * Client-authentication method this client actually uses, already reconciled
-   * with the secret: `"none"` with an empty secret for a public client, the
-   * declared method with a non-empty one otherwise. `undefined` means the
-   * client declares none and the manifest's value applies.
-   *
-   * Travels WITH the credentials so no caller has to pair a manifest-declared
-   * method with a separately-resolved secret — the mismatch that sent
-   * `client_secret=` (present but empty) to providers that reject it.
-   */
-  tokenEndpointAuthMethod: string | undefined;
 }
 
 /** Project a registered system client into the connect-time resolved shape. */
 function systemConnectClient(def: SystemIntegrationClientDefinition): ResolvedConnectClient {
   return {
     clientId: def.clientId,
-    // `?? ""` is reachable only for a DECLARED public client: the registry
-    // schema refuses an absent secret under any other method (boot crash), so
-    // the blank never stands in for one the operator meant to supply.
-    clientSecret: def.clientSecret ?? "",
     // System clients use the platform default redirect URI (no per-client override).
     redirectUri: null,
     clientRef: def.id,
-    // The entry's own declaration; `undefined` defers to the manifest. NOT
-    // derived from the secret's emptiness — that inference is what sent
-    // `client_secret=` (present but empty) to providers that reject it.
-    tokenEndpointAuthMethod: def.tokenEndpointAuthMethod,
   };
 }
 
@@ -1191,12 +1180,8 @@ function customConnectClient(client: IntegrationOAuthClientWithSecret): Resolved
   assertConnectClientUsable(client);
   return {
     clientId: client.client_id,
-    clientSecret: client.clientSecret,
     redirectUri: client.redirect_uri ?? null,
     clientRef: client.id,
-    // The guard above leaves only coherent rows: a declared `"none"` with no
-    // secret, or a readable secret with the row's (or the manifest's) method.
-    tokenEndpointAuthMethod: client.token_endpoint_auth_method ?? undefined,
   };
 }
 
@@ -2931,8 +2916,9 @@ export function scheduleOverridesName(connectionId: string): SQL {
 }
 
 /**
- * Remove `connectionId` from `actor`'s OWN schedule overrides; emptying a set disables the
- * schedule (a fallback would silently change its account). Returns the disabled ids.
+ * Remove `connectionId` from `actor`'s OWN schedule overrides; emptying a set disables an enabled
+ * schedule (a fallback would silently change its account) — a disabled one keeps its reason.
+ * Returns the ids it disabled.
  */
 async function dropConnectionFromOwnSchedules(
   tx: Tx,
@@ -2940,28 +2926,32 @@ async function dropConnectionFromOwnSchedules(
   actor: Actor,
 ): Promise<string[]> {
   const held = await tx
-    .select({ id: schedules.id, connectionOverrides: schedules.connectionOverrides })
+    .select({
+      id: schedules.id,
+      enabled: schedules.enabled,
+      connectionOverrides: schedules.connectionOverrides,
+    })
     .from(schedules)
     .where(and(actorFilter(actor, schedules), scheduleOverridesName(connectionId)))
     .for("update");
   const disabled: string[] = [];
-  for (const { id, connectionOverrides } of held) {
+  for (const { id, enabled, connectionOverrides } of held) {
     const kept = Object.entries(connectionOverrides ?? {}).flatMap(([integrationId, ids]) => {
       const rest = ids.filter((c) => c !== connectionId);
       return rest.length > 0 ? [[integrationId, rest] as const] : [];
     });
-    const emptiedASet = kept.length < Object.keys(connectionOverrides ?? {}).length;
+    const disables = enabled && kept.length < Object.keys(connectionOverrides ?? {}).length;
     await tx
       .update(schedules)
       .set({
         connectionOverrides: kept.length > 0 ? Object.fromEntries(kept) : null,
-        ...(emptiedASet
+        ...(disables
           ? { enabled: false, disabledReason: "connection_deleted" as const, nextRunAt: null }
           : {}),
         updatedAt: new Date(),
       })
       .where(eq(schedules.id, id));
-    if (emptiedASet) disabled.push(id);
+    if (disables) disabled.push(id);
   }
   return disabled;
 }

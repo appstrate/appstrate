@@ -1815,18 +1815,10 @@ export function matchesAuthorizedUriSpec(pattern: string, target: string): boole
 
 /**
  * Strip userinfo (`user:pass@`) and fragment (`#…`) from a URL, returning the
- * WHATWG-normalised serialisation. Mirrors Fetch `Response.url` sanitisation.
- * Two callers, both policy gates: {@link matchesAuthorizedUriSpec} normalises
- * every target before allowlist matching, and the redirect-follower runs it on
- * every hop before policy checks / re-fetch (block attacker-injected
- * basic-auth, keep the allowlist matcher host-based).
- *
- * Returns `undefined` when the input does not parse as a URL. The matcher
- * treats that as "no match" (fail closed); the redirect-follower resolves the
- * `Location` through `new URL()` first, so for it that arm is defensive and it
- * falls back to the unstripped string rather than dropping the hop.
+ * WHATWG-normalised serialisation the allowlist matchers compare (a target, a
+ * pattern). `undefined` when the input does not parse: the matchers fail closed.
  */
-export function stripUserInfoAndFragment(url: string): string | undefined {
+function stripUserInfoAndFragment(url: string): string | undefined {
   try {
     const u = new URL(url);
     u.username = "";
@@ -1890,7 +1882,25 @@ function compileUriComponent(part: string, crossSlash: boolean): string {
   return escapeUriLiteral(part).replace(/\*\*|\*/g, (m) => (m === "**" ? doubleStar : "[^/]*"));
 }
 
-const URI_PATTERN_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
+/** `scheme://`, the scheme possibly globbed (`**://`): compiled as a scheme, never as a path. */
+const URI_PATTERN_SCHEME_RE = /^[a-zA-Z*][a-zA-Z0-9+.*-]*:\/\//;
+
+/** A scheme glob matches scheme characters only, so it cannot reach into a query. */
+function compileUriScheme(scheme: string): string {
+  return escapeUriLiteral(scheme.toLowerCase()).replace(/\*\*|\*/g, "[a-z0-9+.-]*");
+}
+
+function countWildcards(part: string): number {
+  return part.split("*").length - 1;
+}
+
+function splitAuthority(pattern: string, scheme: string): { authority: string; rest: string } {
+  const afterScheme = pattern.slice(scheme.length);
+  const slashIdx = afterScheme.indexOf("/");
+  return slashIdx === -1
+    ? { authority: afterScheme, rest: "" }
+    : { authority: afterScheme.slice(0, slashIdx), rest: afterScheme.slice(slashIdx) };
+}
 
 /**
  * Count non-overlapping occurrences of `needle` in `haystack`.
@@ -1995,25 +2005,20 @@ function splitAuthorizedUriPattern(
     // Scheme is case-insensitive and the target's is lowercased by `URL`.
     return { scheme: rawSchemeMatch[0].toLowerCase(), authority: null, rest: "" };
   }
-  // Fall back to the raw pattern when it cannot be canonicalised — a pattern
-  // we cannot normalise matches strictly LESS than before, never more, since
-  // the target side stays normalised either way.
-  const pattern = normalizeAuthorizedUriPattern(rawPattern) ?? rawPattern;
-  const schemeMatch = pattern.match(URI_PATTERN_SCHEME_RE);
-  const scheme = schemeMatch ? schemeMatch[0] : rawSchemeMatch[0];
-  const afterScheme = pattern.slice(scheme.length);
-  const slashIdx = afterScheme.indexOf("/");
-  // The bare `scheme://**` catch-all ("any host, any path", relied on by the
-  // SSRF-gate branch tests) is handled above, on the raw pattern. Anything
-  // WITH a path (`https://**/health`) keeps the authority boundary-contained:
-  // `**` in the host is `[^/]*` and cannot swallow the `/` that ends the
-  // authority. It carries no literal host suffix either, so there is nothing
-  // for an attacker to smuggle past (the authority-confusion attack needs a
-  // fixed suffix like `.example.com` AFTER the `**`), and any actual internal
-  // host it admits is still refused downstream by the SSRF gate.
-  const authority = slashIdx === -1 ? afterScheme : afterScheme.slice(0, slashIdx);
-  const rest = slashIdx === -1 ? "" : afterScheme.slice(slashIdx);
-  return { scheme, authority, rest };
+  // Fall back to the raw pattern when it cannot be canonicalised — a pattern we cannot
+  // normalise matches strictly LESS, never more, since the target side stays normalised — or
+  // when normalising moved a wildcard into the authority (`https:///**` → `https://**/`).
+  // Within the authority `**` is `[^/]*`: it cannot swallow the `/` that ends it.
+  const raw = splitAuthority(rawPattern, rawSchemeMatch[0]);
+  const normalized = normalizeAuthorizedUriPattern(rawPattern);
+  const scheme = normalized?.match(URI_PATTERN_SCHEME_RE)?.[0];
+  if (normalized !== undefined && scheme !== undefined) {
+    const parts = splitAuthority(normalized, scheme);
+    if (countWildcards(parts.authority) === countWildcards(raw.authority)) {
+      return { scheme, ...parts };
+    }
+  }
+  return { scheme: rawSchemeMatch[0], ...raw };
 }
 
 function compileAuthorizedUriPattern(rawPattern: string): string {
@@ -2022,9 +2027,9 @@ function compileAuthorizedUriPattern(rawPattern: string): string {
     // No `scheme://authority` prefix: compile the whole pattern as a path.
     return compileUriComponent(rawPattern, true);
   }
-  if (parts.authority === null) return escapeUriLiteral(parts.scheme) + ".*";
+  if (parts.authority === null) return compileUriScheme(parts.scheme) + ".*";
   return (
-    escapeUriLiteral(parts.scheme) +
+    compileUriScheme(parts.scheme) +
     compileUriComponent(parts.authority, false) +
     compileUriComponent(parts.rest, true)
   );
@@ -2067,8 +2072,8 @@ export function compileEgressPolicy(input: {
   }[] = [];
   for (const pattern of input.authorizedUris) {
     const parts = splitAuthorizedUriPattern(pattern);
-    // Scheme-less patterns name no transport: they grant nothing at TCP level.
-    if (!parts) continue;
+    // Scheme-less or scheme-globbed patterns name no transport: nothing at TCP level.
+    if (!parts || parts.scheme.includes("*")) continue;
     if (parts.authority === null) {
       anyAuthority = true;
       continue;

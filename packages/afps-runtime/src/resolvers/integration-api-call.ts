@@ -53,13 +53,7 @@ import {
   allocateMcpToolNamespace,
   normaliseMcpToolNamespace,
 } from "@appstrate/afps-shared/mcp-naming";
-import {
-  declaredLiteralHosts,
-  fetchApiCall,
-  PreflightError,
-  RedirectBlockedError,
-  type HostResolver,
-} from "./api-call-engine.ts";
+import { classifyApiCallFailure, fetchApiCall, type HostResolver } from "./api-call-engine.ts";
 import { AuthorizedUrisError, ResolverError } from "../errors.ts";
 import {
   planHttpDeliveryInjection,
@@ -521,10 +515,6 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
           credentialHeaders: injectedCredentialHeader
             ? [...credentialHeaders, injectedCredentialHeader]
             : credentialHeaders,
-          trustedHost: declaredLiteralHosts({
-            declaredUris: meta.authorizedUris,
-            allowAllUris: policy.allowAllUris,
-          }),
           integrationId: meta.name,
           ...(this.fetchImpl ? { fetchFn: this.fetchImpl } : {}),
           ...(this.resolveHost ? { resolveHost: this.resolveHost } : {}),
@@ -533,28 +523,27 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         res = result.response;
       } catch (err) {
         // Typed resolver errors; hosts are redacted (a redirect target may carry `?token=…`).
-        if (err instanceof PreflightError) {
-          if (err.reason === "not_authorized") {
-            throw new AuthorizedUrisError(
-              "AUTHORIZED_URIS_MISMATCH",
-              `Integration ${meta.name}: ${err.message}`,
-              { integration: meta.name, target: req.target, allowlist: meta.authorizedUris },
-            );
-          }
-          throw new ResolverError(
-            "RESOLVER_URL_BLOCKED",
-            `Integration ${meta.name}: ${err.message}`,
-            { integration: meta.name, target: req.target },
-          );
-        }
-        if (err instanceof RedirectBlockedError) {
+        const failure = classifyApiCallFailure(err);
+        if (failure.kind === "timeout" || failure.kind === "transport") throw err;
+        if (failure.redirect) {
           throw new ResolverError(
             "RESOLVER_REDIRECT_BLOCKED",
-            `Integration ${meta.name}: redirect blocked (${err.reason})`,
+            `Integration ${meta.name}: redirect blocked (${failure.kind})`,
             { integration: meta.name },
           );
         }
-        throw err;
+        if (failure.kind === "not_authorized") {
+          throw new AuthorizedUrisError(
+            "AUTHORIZED_URIS_MISMATCH",
+            `Integration ${meta.name}: ${failure.message}`,
+            { integration: meta.name, target: req.target, allowlist: meta.authorizedUris },
+          );
+        }
+        throw new ResolverError(
+          "RESOLVER_URL_BLOCKED",
+          `Integration ${meta.name}: ${failure.message}`,
+          { integration: meta.name, target: req.target },
+        );
       }
 
       return serializeFetchResponse(res, {

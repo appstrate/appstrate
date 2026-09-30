@@ -34,13 +34,12 @@ import {
   credentialCarryingHeader,
 } from "@appstrate/connect/proxy-primitives";
 import {
+  classifyApiCallFailure,
   cookieScope,
   credentialUrlPolicy,
   fetchApiCall,
-  PreflightError,
   redactCredentialHost,
   redactionFields,
-  RedirectBlockedError,
   urlPolicyRefusalMessage,
   type CookieJar,
   type HostResolver,
@@ -48,7 +47,7 @@ import {
 } from "@appstrate/afps-runtime/resolvers";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
-import type { UpstreamFailureCode } from "../../lib/proxy-upstream-failure.ts";
+import type { ProxyProblemCode } from "../../lib/proxy-status.ts";
 import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
@@ -158,22 +157,13 @@ interface ProxyCallResult {
   authRefreshed?: boolean;
 }
 
-/** Stable problem `code` of each call the proxy refuses or cannot relay. */
-export type ProxyErrorCode =
-  | "unauthorized_target"
-  | "blocked_target"
-  | "credential_exfiltration_refused"
-  | "credential_not_found"
-  | "unresolved_placeholder"
-  | UpstreamFailureCode;
-
 /**
  * A call the proxy answered itself. The route reflects `message` to the caller and logs it, so
  * it MUST NEVER contain a substituted credential value — build it from redacted hosts only.
  */
 export class ProxyCallError extends Error {
   constructor(
-    readonly code: ProxyErrorCode,
+    readonly code: ProxyProblemCode,
     message: string,
   ) {
     super(message);
@@ -181,7 +171,7 @@ export class ProxyCallError extends Error {
   }
 }
 
-const REFUSAL_CODE: Record<UrlPolicyRefusal, ProxyErrorCode> = {
+const REFUSAL_CODE: Record<UrlPolicyRefusal, ProxyProblemCode> = {
   unrendered: "unauthorized_target",
   unauthorized: "unauthorized_target",
   exfiltration: "credential_exfiltration_refused",
@@ -211,7 +201,12 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     resolved = result.payload;
     declaredUris = result.declaredUris;
     connectionId = result.connectionId;
-    refreshSelection = { ...selection, connectionId };
+    // The refresh re-checks the run: one that finished since this read must not refresh.
+    refreshSelection = {
+      ...selection,
+      connectionId,
+      ...(input.run ? { run: input.run.reread() } : {}),
+    };
   } catch (err) {
     if (err instanceof IntegrationCredentialNotFoundError) {
       throw new ProxyCallError("credential_not_found", err.message);
@@ -471,28 +466,23 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
 }
 
 /** `fetchApiCall`'s refusals and transport faults, as the proxy's typed errors. */
-function toProxyCallError(err: unknown, integrationId: string, redactedHost: string): unknown {
-  if (err instanceof PreflightError) {
-    if (err.reason === "unresolvable") {
-      return new ProxyCallError("upstream_unresolvable", err.message);
-    }
-    return new ProxyCallError(
-      err.reason === "ssrf" ? "blocked_target" : "unauthorized_target",
-      `Integration ${integrationId}: ${err.message} (host ${redactedHost})`,
-    );
+function toProxyCallError(err: unknown, integrationId: string, redactedHost: string): Error {
+  const failure = classifyApiCallFailure(err);
+  switch (failure.kind) {
+    case "not_authorized":
+    case "ssrf":
+      return new ProxyCallError(
+        failure.kind === "ssrf" ? "blocked_target" : "unauthorized_target",
+        `Integration ${integrationId}: ${failure.message}` +
+          (failure.redirect ? "" : ` (host ${redactedHost})`),
+      );
+    case "unresolvable":
+      return new ProxyCallError("upstream_unresolvable", failure.message);
+    case "timeout":
+      return new ProxyCallError("upstream_timeout", `${redactedHost} did not answer in time`);
+    case "transport":
+      return new ProxyCallError("upstream_unreachable", `${redactedHost} could not be reached`);
   }
-  if (err instanceof RedirectBlockedError) {
-    return new ProxyCallError(
-      err.reason === "ssrf" ? "blocked_target" : "unauthorized_target",
-      `Integration ${integrationId}: ${err.message}`,
-    );
-  }
-  if (err instanceof Error) {
-    return err.name === "TimeoutError"
-      ? new ProxyCallError("upstream_timeout", `${redactedHost} did not answer in time`)
-      : new ProxyCallError("upstream_unreachable", `${redactedHost} could not be reached`);
-  }
-  return err;
 }
 
 /**

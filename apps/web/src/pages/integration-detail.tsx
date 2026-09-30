@@ -152,12 +152,12 @@ import { isOauthAuthConnectable } from "../components/integration-connect/connec
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 
 // ─────────────────────────────────────────────
-// OAuth client (admin) — create / rotate modal
+// OAuth client (admin) — create / edit modal
 // ─────────────────────────────────────────────
 
 /**
- * Register a new custom OAuth client (`mode: "create"`) or rotate an existing
- * one in place (`mode: "rotate"`, preloaded from its descriptor). The parent
+ * Register a new custom OAuth client (`mode: "create"`) or edit an existing
+ * one in place (`mode: "edit"`, preloaded from its descriptor). The parent
  * mounts this only while open, keyed by mode+clientRef, so field state resets
  * cleanly between invocations. The client secret is write-only — never echoed
  * back, shown as a placeholder when one is already set.
@@ -176,7 +176,7 @@ function OAuthClientModal({
   packageId: string;
   authKey: string;
   authDecl?: IntegrationManifestAuth;
-  mode: "create" | "rotate";
+  mode: "create" | "edit";
   existing?: IntegrationClient;
   platformRedirectUri: string;
   onClose: () => void;
@@ -205,7 +205,7 @@ function OAuthClientModal({
   // rather than in a toast, and — more importantly — stops the form from
   // sending an inferred `""`, which used to register a PUBLIC client from an
   // admin who never declared one and then showed the box ticked on reopen.
-  // Rotation is exempt: there an untouched secret field means PRESERVE.
+  // An edit is exempt: there an untouched secret field means PRESERVE.
   const secretMissing = mode === "create" && !publicClient && clientSecret === "";
   // "Reward early, punish late" (same rule as `useAppForm`'s `showError`): the
   // message appears once the admin has touched the field or tried to submit,
@@ -218,7 +218,7 @@ function OAuthClientModal({
     setAttempted(true);
     if (secretMissing) return;
     // Declared, not inferred: the server records `none` instead of guessing
-    // from a blank secret. And on rotation an untouched secret field is OMITTED
+    // from a blank secret. And on an edit an untouched secret field is OMITTED
     // rather than sent as `""` — sending it would clear the stored credential
     // and flip a confidential client public, for an edit that only meant to
     // change the redirect URI.
@@ -260,7 +260,7 @@ function OAuthClientModal({
       title={
         mode === "create"
           ? t("integration.oauthClient.modalCreateTitle")
-          : t("integration.oauthClient.modalRotateTitle")
+          : t("integration.oauthClient.modalEditTitle")
       }
     >
       <form
@@ -276,7 +276,7 @@ function OAuthClientModal({
             id={`cid-${authKey}`}
             value={clientId}
             onChange={(e) => setClientId(e.target.value)}
-            disabled={mode === "rotate"}
+            disabled={mode === "edit"}
             data-testid={`oauth-clientid-${authKey}`}
           />
         </div>
@@ -357,7 +357,7 @@ function OAuthClientModal({
           >
             {mode === "create"
               ? t("integration.oauthClient.btnRegister")
-              : t("integration.oauthClient.btnRotate")}
+              : t("integration.oauthClient.btnEdit")}
           </Button>
         </div>
       </form>
@@ -374,7 +374,7 @@ function OAuthClientModal({
  * connection — the platform's system client(s) (`SYSTEM_INTEGRATIONS`,
  * read-only) plus N custom (BYO-app) clients — with which is the
  * default. Multi-client: an admin registers as many custom clients as needed,
- * rotates or deletes each by id, and picks the default (the model-provider
+ * edits or deletes each by id, and picks the default (the model-provider
  * pattern). Auto-provisioned (remote MCP DCR/CIMD) auths keep ONE machine
  * client, shown read-only with a delete action that re-triggers registration;
  * a manual escape hatch (opt-in) covers the rare server needing a pre-registered
@@ -406,7 +406,7 @@ function ClientsTable({
   const promote = usePromoteIntegrationOAuthClient();
   const { can } = usePermissions();
   const [modal, setModal] = useState<
-    { mode: "create" } | { mode: "rotate"; client: IntegrationClient } | null
+    { mode: "create" } | { mode: "edit"; client: IntegrationClient } | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState<IntegrationClient | null>(null);
   const [confirmPromote, setConfirmPromote] = useState<IntegrationClient | null>(null);
@@ -566,9 +566,9 @@ function ClientsTable({
                             size="sm"
                             variant="ghost"
                             className="h-7 w-7 p-0"
-                            onClick={() => setModal({ mode: "rotate", client })}
-                            data-testid={tid(`oauth-client-rotate-${client.client_ref}`)}
-                            aria-label={t("integration.oauthClient.btnRotate")}
+                            onClick={() => setModal({ mode: "edit", client })}
+                            data-testid={tid(`oauth-client-edit-${client.client_ref}`)}
+                            aria-label={t("integration.oauthClient.btnEdit")}
                           >
                             <Pencil size={14} />
                           </Button>
@@ -612,13 +612,13 @@ function ClientsTable({
 
       {modal && (
         <OAuthClientModal
-          key={modal.mode === "rotate" ? modal.client.client_ref : "create"}
+          key={modal.mode === "edit" ? modal.client.client_ref : "create"}
           tier={tier}
           packageId={packageId}
           authKey={authKey}
           authDecl={authDecl}
           mode={modal.mode}
-          existing={modal.mode === "rotate" ? modal.client : undefined}
+          existing={modal.mode === "edit" ? modal.client : undefined}
           platformRedirectUri={platformRedirectUri}
           onClose={() => setModal(null)}
         />
@@ -768,7 +768,7 @@ function ConnectAuthBlock({
 /**
  * Per-auth admin configuration: the declared auth metadata (scopes, resource,
  * authorized URIs) plus the OAuth clients table (system + custom) and the
- * registration form to add/rotate/delete the org's own (BYO-app) client.
+ * registration form to add/edit/delete the org's own (BYO-app) client.
  * Separated from the runtime connections view (see {@link ConnectAuthBlock}).
  */
 function ConfigAuthBlock({
@@ -818,7 +818,7 @@ function ConfigAuthBlock({
         </div>
       )}
 
-      {/* OAuth clients (system + org + space) — list, register, rotate, delete, default. */}
+      {/* OAuth clients (system + org + space) — list, register, edit, delete, default. */}
       {isOAuth && (
         <ClientsTable
           tier="space"

@@ -37,6 +37,20 @@ export function withConnectionOverride(
   return Object.keys(next).length > 0 ? { ...rest, connection_overrides: next } : rest;
 }
 
+/**
+ * `overrides` with `connection_overrides` narrowed to the integrations the definition declares:
+ * the server refuses any other key (400). `declared` unknown (not loaded) keeps every key.
+ */
+export function withDeclaredConnections(
+  overrides: RunOverridesValue,
+  declared: readonly string[] | undefined,
+): RunOverridesValue {
+  const { connection_overrides: picks, ...rest } = overrides;
+  if (!picks || !declared) return overrides;
+  const kept = Object.entries(picks).filter(([id]) => declared.includes(id));
+  return kept.length > 0 ? { ...rest, connection_overrides: Object.fromEntries(kept) } : rest;
+}
+
 export function keepAvailable(ids: string[], availableIds: string[]): string[] {
   return ids.filter((id) => availableIds.includes(id));
 }

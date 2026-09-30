@@ -791,7 +791,7 @@ describe("integration OAuth clientRef round-trip", () => {
       stub,
     ).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(OAuthCallbackError);
-    expect((err as OAuthCallbackError).kind).toBe("revoked");
+    expect((err as OAuthCallbackError).kind).toBe("client_unavailable");
     expect(fetched).toBe(false);
     expect(await store.get(state)).toBeNull();
   });

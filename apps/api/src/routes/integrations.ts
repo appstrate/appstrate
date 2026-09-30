@@ -117,10 +117,11 @@ import { partitionScopesByAuthCatalog, scopesNotCovered } from "@appstrate/core/
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
 import { CONNECTION_LABEL_MAX, connectionLabelProblem } from "../lib/connection-label.ts";
 import {
-  deleteIntegrationPin,
+  deletePin,
   listAgentsConsumingIntegration,
   listIntegrationPins,
   loadConnectionOwnership,
+  pinAudit,
   pinAuditResourceId,
   setBlockUserConnections,
   updateConnectionMetadata,
@@ -526,11 +527,7 @@ async function assertConnectionBelongsToActor(
   }
 }
 
-/** The audited view of a pin set or an org default. */
-function pinAudit(connectionIds: string[] | null): AuditPayload | null {
-  return connectionIds ? { connectionIds } : null;
-}
-
+/** The audited view of an org default. */
 function orgDefaultAudit(
   def: { connection_ids: string[]; enforce: boolean } | null,
 ): AuditPayload | null {
@@ -683,10 +680,14 @@ export function createIntegrationsRouter() {
         // can actually fix — a `redirect_uri` the provider does not know, a
         // rejected `token_endpoint_auth_method` — are invisible.
         const diagnostic = oauthDiagnosticSuffix(err.oauthError, err.status);
-        const userMessage =
-          err.kind === "revoked"
-            ? `The authorization expired before it could be exchanged. Please retry the connection.${diagnostic}`
-            : `Could not complete the connection. Please try again in a moment.${diagnostic}`;
+        const reason = {
+          revoked:
+            "The authorization expired before it could be exchanged. Please retry the connection.",
+          client_unavailable:
+            "The OAuth client this connection was started with is no longer available. Ask an administrator to check the integration's OAuth clients, then connect again.",
+          transient: "Could not complete the connection. Please try again in a moment.",
+        }[err.kind];
+        const userMessage = `${reason}${diagnostic}`;
         logger.error("Integration OAuth callback failed", {
           subjectId: err.subjectId,
           kind: err.kind,
@@ -1350,7 +1351,7 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
-      const { previous } = await deleteIntegrationPin(scope, packageId, agentPackageId);
+      const { previous } = await deletePin(scope, agentPackageId, packageId, null);
       if (previous) {
         await recordAuditFromContext(c, {
           action: "integration.pin.deleted",

@@ -18,7 +18,7 @@
  *     service is concerned only with org-owned credentials.
  */
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { countUpstreamRejection } from "../upstream-rejection-window.ts";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
@@ -503,6 +503,9 @@ interface UpdateOAuthCredentialTokensInput {
   accountId?: string;
 }
 
+/** Compare-and-swap rounds of a blob write before it gives up under contention. */
+const MAX_CAS_ATTEMPTS = 5;
+
 /**
  * Shared blob read-modify-write: select → decrypt → apply `mutate` →
  * re-encrypt → update (org-scoped). `mutate` returns the next blob, or `null`
@@ -528,7 +531,6 @@ async function updateBlob(
   // envelope uses a random GCM IV, every write produces a DISTINCT ciphertext,
   // so a racing writer's value makes our WHERE match zero rows. On a 0-row
   // outcome we re-read and re-apply the mutation against the fresh blob.
-  const MAX_CAS_ATTEMPTS = 5;
   for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
     const [row] = await db
       .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
@@ -683,33 +685,57 @@ export async function recordModelCredentialRefreshFailure(
 }
 
 /**
- * Count an upstream 401 on an api-key credential: the `INTEGRATION_REFRESH_MAX_FAILURES`-th
- * within one rejection window flags it `needsReconnection`. OAuth credentials are left alone
- * (their counter is the transient-refresh streak).
+ * Count an upstream 401 against the api key the request sent: once the row holds another key
+ * (a rotation raced the call), the rejection counts for nothing. The
+ * `INTEGRATION_REFRESH_MAX_FAILURES`-th within one rejection window flags the key
+ * `needsReconnection` in the same UPDATE, conditioned on the ciphertext that holds it. OAuth
+ * credentials are left alone (their counter is the transient-refresh streak).
  */
-export async function recordModelCredentialRejection(orgId: string, id: string): Promise<void> {
-  const loaded = await loadCredentialRow(id, orgId);
-  if (loaded?.blob?.kind !== "api_key") return;
+export async function recordModelCredentialRejection(
+  orgId: string,
+  id: string,
+  rejectedApiKey: string,
+): Promise<void> {
   const counted = countUpstreamRejection(
     modelProviderCredentials.refreshFailureCount,
     modelProviderCredentials.refreshFailuresSince,
   );
-  const [row] = await db
-    .update(modelProviderCredentials)
-    .set({ refreshFailureCount: counted.failures, refreshFailuresSince: counted.since })
-    .where(
-      scopedWhere(modelProviderCredentials, {
-        orgId,
-        extra: [eq(modelProviderCredentials.id, id)],
-      }),
-    )
-    .returning({ failures: modelProviderCredentials.refreshFailureCount });
-  if (!row || row.failures < getEnv().INTEGRATION_REFRESH_MAX_FAILURES) return;
-  logger.warn("model provider: api key rejected upstream, flagging needsReconnection", {
-    credentialId: id,
-    failures: row.failures,
+  const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+  const byId = scopedWhere(modelProviderCredentials, {
+    orgId,
+    extra: [eq(modelProviderCredentials.id, id)],
   });
-  await markCredentialNeedsReconnection(orgId, id);
+  for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+    const [row] = await db
+      .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
+      .from(modelProviderCredentials)
+      .where(byId)
+      .limit(1);
+    if (!row) return;
+    const blob = decryptBlob(row.credentialsEncrypted);
+    if (blob?.kind !== "api_key" || blob.apiKey !== rejectedApiKey || blob.needsReconnection) {
+      return;
+    }
+    const flagged = encryptCredentials({ ...blob, needsReconnection: true });
+    const [updated] = await db
+      .update(modelProviderCredentials)
+      .set({
+        refreshFailureCount: counted.failures,
+        refreshFailuresSince: counted.since,
+        credentialsEncrypted: sql`CASE WHEN ${counted.failures} >= ${maxFailures} THEN ${flagged} ELSE ${modelProviderCredentials.credentialsEncrypted} END`,
+      })
+      .where(and(byId, eq(modelProviderCredentials.credentialsEncrypted, row.credentialsEncrypted)))
+      .returning({ failures: modelProviderCredentials.refreshFailureCount });
+    if (!updated) continue;
+    if (updated.failures >= maxFailures) {
+      logger.warn("model provider: api key rejected upstream, flagging needsReconnection", {
+        credentialId: id,
+        failures: updated.failures,
+      });
+      clearResolvedModelCache();
+    }
+    return;
+  }
 }
 
 // ─── Delete ────────────────────────────────────────────────────────────────

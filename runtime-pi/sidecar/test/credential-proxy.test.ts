@@ -672,6 +672,37 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     expect(fetchFn).toHaveBeenCalledTimes(11);
   });
 
+  it.each([
+    [
+      "a silent upstream",
+      new DOMException("deadline exceeded", "TimeoutError"),
+      504,
+      "Upstream timeout: api.example.com did not answer in time",
+    ],
+    [
+      "a refused connection",
+      Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" }),
+      502,
+      "Upstream request failed: ECONNREFUSED (api.example.com)",
+    ],
+  ])("answers %s with the platform proxy's status", async (_, thrown, status, error) => {
+    const fetchFn = mock(async () => {
+      throw thrown;
+    });
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/v1",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+    );
+    expect(result).toEqual({ ok: false, status, error });
+  });
+
   it("holds an injected credential to authorized_uris on a redirect under allow_all_uris", async () => {
     const authHeadersSeen: { auth: string | null; apiKey: string | null }[] = [];
     const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {

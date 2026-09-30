@@ -8,7 +8,6 @@ import {
   isBlockedUrl,
   substituteVars,
   findUnresolvedPlaceholders,
-  matchesAuthorizedUri,
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   INTEGRATION_ID_RE,
@@ -272,47 +271,6 @@ describe("findUnresolvedPlaceholders", () => {
 
   it("handles empty string", () => {
     expect(findUnresolvedPlaceholders("")).toEqual([]);
-  });
-});
-
-// --- matchesAuthorizedUri ---
-
-describe("matchesAuthorizedUri", () => {
-  it("matches exact URL", () => {
-    expect(matchesAuthorizedUri("https://api.example.com/v1", ["https://api.example.com/v1"])).toBe(
-      true,
-    );
-  });
-
-  it("`**` matches any substring including path separators", () => {
-    expect(
-      matchesAuthorizedUri("https://api.example.com/v1/users", ["https://api.example.com/**"]),
-    ).toBe(true);
-  });
-
-  it("`*` matches a single path segment only", () => {
-    expect(
-      matchesAuthorizedUri("https://api.example.com/v1/users", ["https://api.example.com/*"]),
-    ).toBe(false);
-    expect(
-      matchesAuthorizedUri("https://api.example.com/users", ["https://api.example.com/*"]),
-    ).toBe(true);
-  });
-
-  it("rejects non-matching URL", () => {
-    expect(matchesAuthorizedUri("https://evil.com/api", ["https://api.example.com/**"])).toBe(
-      false,
-    );
-  });
-
-  it("rejects when patterns is empty", () => {
-    expect(matchesAuthorizedUri("https://api.example.com/v1", [])).toBe(false);
-  });
-
-  it("matches with multiple patterns", () => {
-    expect(
-      matchesAuthorizedUri("https://b.com/data", ["https://a.com/**", "https://b.com/**"]),
-    ).toBe(true);
   });
 });
 

@@ -1306,6 +1306,42 @@ describe("schedule disabled_reason", () => {
     expect(row).toMatchObject({ enabled: false, disabledReason: "connection_deleted" });
   });
 
+  it("a connection delete on an ALREADY disabled schedule drops the key, keeping its reason", async () => {
+    const integrationId = "@reasonorg/svc";
+    await seedPackage({ orgId: scope.orgId, id: integrationId, type: "integration" });
+    const [gone] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId,
+        authKey: "primary",
+        accountId: "gone",
+        spaceId: scope.spaceId,
+        userId: actor.id,
+        credentialsEncrypted: "x",
+        scopesGranted: [],
+        label: "gone",
+      })
+      .returning({ id: integrationConnections.id });
+    const created = await createSchedule(scope, packageId, actor, {
+      cronExpression: "0 * * * *",
+      connectionOverrides: { [integrationId]: [gone!.id] },
+    });
+    await db
+      .update(schedules)
+      .set({ enabled: false, disabledReason: "user", nextRunAt: null })
+      .where(eq(schedules.id, created.id));
+
+    const { disabledScheduleIds } = await deleteIntegrationConnection(scope, gone!.id, actor);
+
+    expect(disabledScheduleIds).toEqual([]);
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));
+    expect(row).toMatchObject({
+      enabled: false,
+      disabledReason: "user",
+      connectionOverrides: null,
+    });
+  });
+
   it("refuses a disabled row without a reason, and an enabled row with one", async () => {
     const created = await create();
     for (const set of [{ enabled: false }, { disabledReason: "user" as const }]) {

@@ -304,7 +304,7 @@ export const oauthClientUpdateBodySchema = {
       type: "string",
       enum: ["client_secret_post", "client_secret_basic", "none"],
       description:
-        "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Sent with a `client_secret`, omitting it leaves the method undeclared (the manifest's value applies); sent alone, it changes the method of the stored secret.",
+        "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omitted beside a new `client_secret`, the stored method is kept — except a public client's `none`, which gives way to the manifest's value; sent alone, it changes the method of the stored secret.",
     },
     redirect_uri: {
       type: ["string", "null"],

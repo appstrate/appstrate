@@ -39,14 +39,12 @@ import {
   type SidecarConfig,
 } from "./helpers.ts";
 import {
+  classifyApiCallFailure,
   cookieScope,
   credentialUrlPolicy,
-  declaredLiteralHosts,
   fetchApiCall,
-  PreflightError,
   redactionFields,
   redactCredentialHost,
-  RedirectBlockedError,
   urlPolicyRefusalMessage,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
@@ -510,10 +508,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       // The 4 policy, not the raw flag: a templated credential must not leave the allowlist.
       allowAllUris: policy.allowAllUris,
       credentialHeaders,
-      trustedHost: declaredLiteralHosts({
-        declaredUris: deps.declaredUris,
-        allowAllUris: policy.allowAllUris,
-      }),
       cookies,
       integrationId,
       ...(fetchFn ? { fetchFn } : {}),
@@ -639,8 +633,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 
 /**
  * Outbound refusals and faults as structured failures: a refused target or hop is a policy
- * 403, an unresolvable target or a network fault a 502. Hosts only, redacted — a redirect
- * target may itself encode capabilities (`?token=…`).
+ * 403, an unresolvable target or a network fault a 502, a silent upstream a 504 — the
+ * platform proxy's statuses. Hosts only, redacted: a redirect target may encode capabilities.
  */
 function wrapRequestError(
   err: unknown,
@@ -648,18 +642,31 @@ function wrapRequestError(
   resolvedUrl: string,
   fields: Readonly<Record<string, string>>,
 ): ApiCallFailure {
-  if (err instanceof PreflightError) {
-    return {
-      ok: false,
-      status: err.reason === "unresolvable" ? 502 : 403,
-      error: `Integration "${integrationId}": ${err.message}`,
-    };
+  const failure = classifyApiCallFailure(err);
+  const host = redactCredentialHost(resolvedUrl, fields);
+  switch (failure.kind) {
+    case "not_authorized":
+    case "ssrf":
+      return {
+        ok: false,
+        status: 403,
+        error: failure.redirect
+          ? failure.message
+          : `Integration "${integrationId}": ${failure.message}`,
+      };
+    case "unresolvable":
+      return {
+        ok: false,
+        status: 502,
+        error: `Integration "${integrationId}": ${failure.message}`,
+      };
+    case "timeout":
+      return { ok: false, status: 504, error: `Upstream timeout: ${host} did not answer in time` };
+    case "transport":
+      return {
+        ok: false,
+        status: 502,
+        error: `Upstream request failed${failure.code ? `: ${failure.code}` : ""} (${host})`,
+      };
   }
-  if (err instanceof RedirectBlockedError) return { ok: false, status: 403, error: err.message };
-  const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
-  return {
-    ok: false,
-    status: 502,
-    error: `Upstream request failed${code ? `: ${code}` : ""} (${redactCredentialHost(resolvedUrl, fields)})`,
-  };
 }

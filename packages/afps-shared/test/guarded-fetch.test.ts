@@ -819,6 +819,19 @@ describe("guardedFetchChain — terminus, credential forwarding, single-hop", ()
     expect(seen[1]!.body).toBe("payload");
   });
 
+  it("strips credentials, Cookie and body on an https→http downgrade forwardCredentials admits", async () => {
+    const { seen, fetchImpl } = serve([to("http://api.vendor.example/up", 307)]);
+    await guardedFetchChain(
+      "https://api.vendor.example/up",
+      { method: "POST", body: "payload", headers: { authorization: "Bearer t", cookie: "s=1" } },
+      { resolve, fetchImpl, forwardCredentials: () => true },
+    );
+    expect(seen[1]!.url).toBe("http://api.vendor.example/up");
+    expect(seen[1]!.headers.get("authorization")).toBeNull();
+    expect(seen[1]!.headers.get("cookie")).toBeNull();
+    expect(seen[1]!.body).toBeUndefined();
+  });
+
   it("strips them when forwardCredentials declines the hop", async () => {
     const { seen, fetchImpl } = serve([to("https://evil.example/")]);
     await guardedFetchChain(

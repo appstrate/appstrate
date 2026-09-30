@@ -322,7 +322,7 @@ export async function handleIntegrationOAuthCallback(
     await store.delete(state);
     throw new OAuthCallbackError(
       "The OAuth client this connection was started with no longer exists",
-      "revoked",
+      "client_unavailable",
       sentinel,
     );
   }

@@ -511,6 +511,21 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(res.headers.get("proxy-status")).toBe("appstrate; error=dns_error");
   });
 
+  it("refuses a model whose upstream is in a blocked range with 403 blocked_target", async () => {
+    const h = await buildHarness({ baseUrl: "http://169.254.169.254/v1" });
+    mockUpstream(async () => new Response("should not be called", { status: 599 }));
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+    });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("blocked_target");
+    expect(body.detail).not.toContain("169.254");
+    expect(res.headers.get("proxy-status")).toBe("appstrate; error=destination_ip_prohibited");
+  });
+
   it("rejects cookie sessions with 403 (bearer-only)", async () => {
     const h = await buildHarness();
     mockUpstream(async () => new Response("should not be called", { status: 599 }));

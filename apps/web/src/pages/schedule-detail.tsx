@@ -24,7 +24,6 @@ import { RunList } from "../components/run-list";
 import { NextRunPreview } from "../components/next-run-preview";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
-import { useScheduleDisabledReason } from "../hooks/use-schedule-disabled-reason";
 import { ActorLabel } from "../components/actor-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
@@ -53,10 +52,12 @@ export function ScheduleDetailPage() {
   const tabs: readonly ScheduleTab[] = readsRuns ? ["runs", "details"] : ["details"];
   const [activeTab, setActiveTab] = useTabWithHash(tabs, readsRuns ? "runs" : "details");
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const disabledReason = useScheduleDisabledReason(schedule?.disabled_reason ?? null);
 
   if (isLoading) return <LoadingState />;
   if (error || !schedule) return <ErrorState message={error?.message} />;
+  const disabledReason = schedule.disabled_reason
+    ? t(`schedule.disabledReason.${schedule.disabled_reason}`)
+    : null;
 
   const handleToggle = () => {
     updateSchedule.mutate(

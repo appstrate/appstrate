@@ -7,53 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed — a credential the proxy injects needs a host-bounded allowlist (#1641)
-
-- **BREAKING:** a call that carries a credential — substituted or injected by
-  the proxy — drops `allow_all_uris`, and is refused when `authorized_uris` is
-  empty or an entry leaves the host to the caller (`credentialUrlPolicy`,
-  below). `AUTH_TYPE_HTTP_DEFAULTS` moved to
-  `@appstrate/afps-shared/delivery-http`, and `resolveHttpDelivery` reads
-  `valueFrom` as a template only.
-
 ### Changed — one outbound engine for every api_call path (#1641)
 
 - **BREAKING:** `guardedFetch`, `fetchFollowingRedirectsCapturingCookies`,
-  `preflightUrl` and `MAX_REDIRECTS` are replaced by `fetchApiCall`: the
-  pinned transport by default, `API_CALL_TIMEOUT_MS` combined with the
-  caller's signal, the allowlist as the credential rule across redirects,
-  `trustedHost` (one predicate; `declaredLiteralHosts` for the sidecar and the
-  CLI), and `PreflightError` reason `unresolvable`.
-  `RedirectBlockedError(reason, redactedHost)`; `declaredLiteralHosts`,
-  `PreflightError`, `API_CALL_TIMEOUT_MS` and `HostResolver` are exported from
-  the resolvers barrel.
-- **BREAKING:** `fetchApiCall` refuses every target when there is no
-  allowlist and no `allow_all_uris`.
-- **BREAKING:** HTTP delivery renders manifest templates with
-  `renderCredentialTemplate` (`{$credential.<field>}` only); a
-  `{{field}}` in a delivery value is sent as the literal it is, and any
-  other `{$…}` throws.
+  `MAX_REDIRECTS`, `matchesAuthorizedUri`, `stripUserInfoAndFragment` and
+  `scrubTransportError` are no longer exported; `fetchApiCall` replaces the
+  first two. By default it pins every hop to its DNS-validated address. It
+  bounds the call with `API_CALL_TIMEOUT_MS` combined with the caller's
+  signal, keeps the credential across a redirect only to an origin the
+  allowlist names (never https→http), and refuses every target when there is
+  no allowlist and no `allow_all_uris`. `trustedHost` is optional: omitted,
+  the hosts the declared allowlist names literally skip the SSRF gate (none
+  under `allow_all_uris`).
+- New exports: `fetchApiCall`, `API_CALL_TIMEOUT_MS`, `PreflightError`
+  (reason `ssrf`, `not_authorized` or `unresolvable`), `HostResolver`, and
+  `classifyApiCallFailure` with `ApiCallFailureClass`: what `fetchApiCall`
+  threw, as `not_authorized`, `ssrf`, `unresolvable`, `timeout` or
+  `transport`, flagged when a redirect hop was refused.
+  `RedirectBlockedError` takes `(reason, redactedHost)`.
+- **BREAKING:** a call that carries a credential — substituted or injected by
+  the proxy — drops `allow_all_uris`, and `credentialUrlPolicy` refuses it
+  when `authorized_uris` is empty or an entry leaves the host to the caller
+  (below).
+- **BREAKING:** `resolveHttpDelivery` renders `valueFrom.template` with
+  `renderCredentialTemplate`: `{$credential.<field>}` only, and a `{{field}}`
+  or any other `{$…}` in a delivery value throws.
 
 ### Changed — `authorized_uris` rendered per connection; only declared hosts pin (#1627)
 
-- `fetchApiCall` takes a required `declaredUris`: the manifest's
-  declared, unrendered `authorized_uris`. `authorizedUris` (the list rendered for the
-  connection) decides what matches; only a host written literally in `declaredUris`
-  exempts a target from the SSRF net, and only those hosts share cookies across
-  origins. `hostLiterallyAllowlisted` never pins a templated host (`{…}`).
-- `LocalIntegrationResolver` renders each auth's `authorized_uris` with the creds
-  file's fields (`renderAuthorizedUris`, `@appstrate/afps-shared/credential-template`)
-  and enforces it on the substituted target, so `{{site_url}}/wp-json/…` matches a
-  `{$credential.site_url}/**` entry. The `api_call` schema accepts a target that
-  starts with a `{{field}}` followed by nothing or a `/` path; `apiCallRequestJsonSchema`
-  publishes it (`anyOf` a `uri` or that pattern), and the new `apiCallTargetJsonSchema`
-  export is its `target` property for tool schemas composed by hand.
-- A declared allowlist that renders to nothing for the connection (its URL field unset
-  or not an absolute http(s) URL) refuses every target: `credentialUrlPolicy`'s
-  `"unrendered"` refusal, on the local resolver, the sidecar and the platform proxy.
-- Off-allowlist refusals (`fetchApiCall` and the `api_call` tool's allowlist check) name
-  the DECLARED entries, never a rendered one — an exact-URL entry such as
-  `{$credential.webhook_url}` renders to a secret.
+- `fetchApiCall` takes a required `declaredUris`: the manifest's declared,
+  unrendered `authorized_uris`. `authorizedUris` (the list rendered for the
+  connection) decides what matches; only a host written literally in
+  `declaredUris` exempts a target from the SSRF net, and only those hosts
+  share cookies across origins. `hostLiterallyAllowlisted` never pins a
+  templated host (`{…}`).
+- `LocalIntegrationResolver` renders each auth's `authorized_uris` with the
+  creds file's fields (`renderAuthorizedUris`,
+  `@appstrate/afps-shared/credential-template`) and enforces it on the
+  substituted target, so `{{site_url}}/wp-json/…` matches a
+  `{$credential.site_url}/**` entry. The `api_call` schema accepts a target
+  that starts with a `{{field}}` followed by nothing or a `/` path;
+  `apiCallRequestJsonSchema` publishes it (`anyOf` a `uri` or that pattern),
+  and the new `apiCallTargetJsonSchema` export is its `target` property for
+  tool schemas composed by hand.
+- A declared allowlist that renders to nothing for the connection (its URL
+  field unset or not an absolute http(s) URL) refuses every target:
+  `credentialUrlPolicy`'s `"unrendered"` refusal, on the local resolver, the
+  sidecar and the platform proxy.
+- Off-allowlist refusals (`fetchApiCall` and the `api_call` tool's allowlist
+  check) name the DECLARED entries, never a rendered one — an exact-URL entry
+  such as `{$credential.webhook_url}` renders to a secret.
 
 ### Changed — `X-Run-Id` is a reserved transport header
 
@@ -429,10 +432,9 @@ the local resolver and the platform credential proxy:
   runtime as a workspace dependency and drives the same `PiRunner`
   code path — plus profile / credential-proxy / HMAC sink wiring the
   runtime CLI never had.
-  Migration: `appstrate run <bundle> --integrations=none --report=false
---model-source=env --model-api=<api> --model=<id> --llm-api-key=<key>
---snapshot <path> --input <json>` matches the previous `afps run`
-  surface without requiring an Appstrate instance.
+  Migration: the previous `afps run` surface, without an Appstrate instance,
+  is
+  `appstrate run <bundle> --integrations=none --report=false --model-source=env --model-api=<api> --model=<id> --llm-api-key=<key> --snapshot <path> --input <json>`.
 - **`afps test <bundle> --events <path>` is gone.** Scripted-replay of
   user events through `EventSink.handle` + `reduceEvents` is a
   10-line library call; the CLI wrapper added no behaviour. A ready

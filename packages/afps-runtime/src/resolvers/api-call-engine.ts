@@ -15,30 +15,13 @@ import {
   type GuardedFetchResult,
 } from "@appstrate/afps-shared/guarded-fetch";
 import type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
-import {
-  hostLiterallyAllowlisted,
-  matchesAuthorizedUriSpec,
-  stripUserInfoAndFragment,
-} from "./http-call-core.ts";
+import { hostLiterallyAllowlisted, matchesAuthorizedUriSpec } from "./http-call-core.ts";
 import { cookieScope, type CookieScope } from "./cookie-jar.ts";
-
-export { stripUserInfoAndFragment };
 
 export type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
 
 /** Deadline of one upstream `api_call` exchange, body included, on every path. */
 export const API_CALL_TIMEOUT_MS = 30_000;
-
-/**
- * Check a target URL against a list of `authorized_uris` patterns using
- * the AFPS spec semantics (`*` matches a single path segment, `**` matches
- * any substring). Thin `(url, patterns[])` wrapper over
- * {@link matchesAuthorizedUriSpec} — used both for the initial preflight
- * and for per-hop redirect re-checks.
- */
-export function matchesAuthorizedUri(url: string, patterns: readonly string[]): boolean {
-  return patterns.some((p) => matchesAuthorizedUriSpec(p, url));
-}
 
 /**
  * A redirect hop refused by the allowlist or the SSRF gate. The message names the hop's host
@@ -64,6 +47,38 @@ export class PreflightError extends Error {
     super(message);
     this.name = "PreflightError";
   }
+}
+
+/** Why an `api_call` exchange failed, on every path (platform proxy, sidecar, CLI). */
+export interface ApiCallFailureClass {
+  kind: "not_authorized" | "ssrf" | "unresolvable" | "timeout" | "transport";
+  /** A redirect hop was refused, not the initial target. */
+  redirect: boolean;
+  /** The refusal's message (hosts redacted); a transport error's own message. */
+  message: string;
+  /** The transport error's `code` (`ECONNREFUSED`, …), when it has one. */
+  code?: string;
+}
+
+/** Classify what {@link fetchApiCall} threw; each path maps the class to its own output. */
+export function classifyApiCallFailure(err: unknown): ApiCallFailureClass {
+  if (err instanceof PreflightError) {
+    return { kind: err.reason, redirect: false, message: err.message };
+  }
+  if (err instanceof RedirectBlockedError) {
+    const kind = err.reason === "ssrf" ? "ssrf" : "not_authorized";
+    return { kind, redirect: true, message: err.message };
+  }
+  const error = err instanceof Error ? err : new Error(String(err));
+  if (error.name === "TimeoutError")
+    return { kind: "timeout", redirect: false, message: error.message };
+  const code = (error as { code?: unknown }).code;
+  return {
+    kind: "transport",
+    redirect: false,
+    message: error.message,
+    ...(typeof code === "string" ? { code } : {}),
+  };
 }
 
 /** Extract hostname for audit logs, never throwing. */
@@ -123,18 +138,6 @@ function scrubTransportError(err: unknown, fields: Readonly<Record<string, strin
   return clean;
 }
 
-/**
- * The sidecar's and the CLI's SSRF exemption: a host the manifest names literally is the
- * operator's topology. None under allow_all_uris, where the caller picks the host.
- */
-export function declaredLiteralHosts(policy: {
-  declaredUris: readonly string[];
-  allowAllUris: boolean;
-}): (hostname: string) => boolean {
-  return (hostname) =>
-    !policy.allowAllUris && hostLiterallyAllowlisted(`http://${hostname}/`, policy.declaredUris);
-}
-
 interface ApiCallLogger {
   warn(message: string, fields?: Record<string, unknown>): void;
 }
@@ -151,8 +154,11 @@ export interface FetchApiCallOptions {
   allowAllUris: boolean;
   /** Names of the headers that carry a credential (injected or substituted). */
   credentialHeaders: readonly string[];
-  /** Hosts exempt from the SSRF gate: {@link declaredLiteralHosts} or the operator's own list. */
-  trustedHost: (hostname: string) => boolean;
+  /**
+   * Hosts exempt from the SSRF gate. Omitted = the hosts `declaredUris` names literally (the
+   * manifest's topology), none under `allowAllUris`, where the caller picks the host.
+   */
+  trustedHost?: (hostname: string) => boolean;
   /** The caller's cookie view; omitted = a jar living for this call's redirect chain only. */
   cookies?: CookieScope;
   integrationId: string;
@@ -175,7 +181,8 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
   if (!URL.canParse(opts.url)) throw new PreflightError("ssrf", "Invalid target URL");
   // An empty list matches nothing: without allow_all_uris, every target is refused.
   const gated = !allowAllUris;
-  const inAllowlist = (url: URL) => matchesAuthorizedUri(url.href, authorizedUris);
+  const inAllowlist = (url: URL) =>
+    authorizedUris.some((p) => matchesAuthorizedUriSpec(p, url.href));
   const warn = (message: string, hop: number, host: string) =>
     opts.logger?.warn(message, { integrationId: opts.integrationId, hop, host });
 
@@ -208,7 +215,10 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
               forwardCredentials: inAllowlist,
             }
           : {}),
-        allowHost: opts.trustedHost,
+        allowHost:
+          opts.trustedHost ??
+          ((hostname: string) =>
+            !allowAllUris && hostLiterallyAllowlisted(`http://${hostname}/`, declaredUris)),
         sensitiveHeaders: opts.credentialHeaders,
         cookies:
           opts.cookies ?? cookieScope(new Map(), opts.integrationId, gated ? declaredUris : null),

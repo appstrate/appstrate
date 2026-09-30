@@ -61,17 +61,8 @@ import {
   internalError,
   payloadTooLarge,
 } from "../lib/errors.ts";
-import {
-  proxyErrorStatus,
-  proxyStatusMarker,
-  relayedProxyStatus,
-  type ProxyErrorType,
-} from "../lib/proxy-status.ts";
-import {
-  proxyCall,
-  ProxyCallError,
-  type ProxyErrorCode,
-} from "../services/credential-proxy/core.ts";
+import { proxyProblem, proxyStatusMarker, relayedProxyStatus } from "../lib/proxy-status.ts";
+import { proxyCall, ProxyCallError } from "../services/credential-proxy/core.ts";
 import { auditForeignConnectionUse } from "../services/credential-proxy/connection-audit.ts";
 import { trackAudit } from "../services/audit.ts";
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
@@ -79,7 +70,6 @@ import { runBoundSelection } from "../services/credential-proxy/integration-reso
 import type { AppEnv } from "../types/index.ts";
 
 import { assertBearerOnly } from "../lib/bearer-only.ts";
-import { UPSTREAM_FAILURES } from "../lib/proxy-upstream-failure.ts";
 import { getCookieJarStore } from "../infra/index.ts";
 import { getCredentialProxyLimits } from "../services/proxy-limits.ts";
 
@@ -368,8 +358,8 @@ export function createCredentialProxyRouter() {
         // every non-Proxy* error as a 500 below.
         if (err instanceof ApiError) throw err;
         if (err instanceof ProxyCallError) {
-          const refusal = PROXY_ERRORS[err.code];
-          if (refusal.status === 403) {
+          const problem = proxyProblem(err.code, err.message);
+          if (problem.status === 403) {
             logger.warn("credential-proxy: call refused", {
               code: err.code,
               authMethod,
@@ -380,13 +370,7 @@ export function createCredentialProxyRouter() {
               target,
             });
           }
-          throw new ApiError({
-            status: refusal.status,
-            code: err.code,
-            title: refusal.title,
-            detail: err.message,
-            headers: { "Proxy-Status": proxyErrorStatus(refusal.proxyError) },
-          });
+          throw problem;
         }
         logger.error("credential-proxy: unexpected failure", {
           authMethod,
@@ -403,35 +387,6 @@ export function createCredentialProxyRouter() {
 
   return router;
 }
-
-/** Each refusal of `proxyCall`: HTTP status, problem title, RFC 9209 §2.3 error type. */
-const PROXY_ERRORS: Record<
-  ProxyErrorCode,
-  { status: number; title: string; proxyError: ProxyErrorType }
-> = {
-  unauthorized_target: {
-    status: 403,
-    title: "Unauthorized Target",
-    proxyError: "http_request_denied",
-  },
-  blocked_target: { status: 403, title: "Blocked Target", proxyError: "destination_ip_prohibited" },
-  credential_exfiltration_refused: {
-    status: 403,
-    title: "Credential Exfiltration Refused",
-    proxyError: "http_request_denied",
-  },
-  credential_not_found: {
-    status: 404,
-    title: "Credential Not Found",
-    proxyError: "proxy_internal_response",
-  },
-  unresolved_placeholder: {
-    status: 400,
-    title: "Unresolved Placeholder",
-    proxyError: "proxy_internal_response",
-  },
-  ...UPSTREAM_FAILURES,
-};
 
 /** Boolean control headers: `1` / `0`, absent = `0`, anything else a 400. */
 function readFlagHeader(c: Context<AppEnv>, name: string): boolean {

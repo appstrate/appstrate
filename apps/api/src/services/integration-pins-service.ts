@@ -15,6 +15,7 @@
  */
 
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import type { AuditPayload } from "@appstrate/core/module";
 import { db, toRows } from "@appstrate/db/client";
 import {
   spacePackages,
@@ -136,6 +137,11 @@ export async function setBlockUserConnections(
 /** A pin's audit `resourceId`: one format for admin and member rows; `action` tells them apart. */
 export function pinAuditResourceId(agentPackageId: string, integrationPackageId: string): string {
   return `${integrationPackageId}#${agentPackageId}`;
+}
+
+/** A pin's audited `before`/`after`: its set, or `null` for no row. */
+export function pinAudit(connectionIds: string[] | null): AuditPayload | null {
+  return connectionIds ? { connectionIds } : null;
 }
 
 function toPinSummary(pin: PinRow): PinSummary {
@@ -284,6 +290,10 @@ async function upsertPin(args: {
   )}]::uuid[]`;
   await validatePinTargets(scope, integrationId, connectionIds, args.validateOpts);
   return db.transaction(async (tx) => {
+    // The row lock below locks nothing on a FIRST write: two of them would each read "no pin"
+    // and the later upsert would audit `before: null` over the other's set.
+    const key = `integration-pin:${scope.spaceId}:${agentPackageId}:${integrationId}:${userIdValue ?? ""}`;
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key})::bigint)`);
     const [previous] = await tx
       .select({ connectionIds: integrationPins.connectionIds })
       .from(integrationPins)
@@ -325,8 +335,11 @@ async function upsertPin(args: {
   });
 }
 
-/** Delete one pin row; `previous` is the set it held, `null` when there was none. */
-async function deletePin(
+/**
+ * Delete one pin row — the admin pin for `userId: null`, else that member's; `previous` is the
+ * set it held, `null` when there was none.
+ */
+export async function deletePin(
   scope: SpaceScope,
   agentPackageId: string,
   integrationId: string,
@@ -337,14 +350,6 @@ async function deletePin(
     .where(pinKey(scope, agentPackageId, integrationId, userId))
     .returning({ connectionIds: integrationPins.connectionIds });
   return { previous: row?.connectionIds ?? null };
-}
-
-export function deleteIntegrationPin(
-  scope: SpaceScope,
-  integrationId: string,
-  agentPackageId: string,
-): Promise<{ previous: string[] | null }> {
-  return deletePin(scope, agentPackageId, integrationId, null);
 }
 
 /**
@@ -426,15 +431,6 @@ export async function upsertMemberPin(
     validateOpts: { allowOwnedBy: input.userId },
     createdBy: input.userId,
   });
-}
-
-export function deleteMemberPin(
-  scope: SpaceScope,
-  agentPackageId: string,
-  integrationId: string,
-  userId: string,
-): Promise<{ previous: string[] | null }> {
-  return deletePin(scope, agentPackageId, integrationId, userId);
 }
 
 /**

@@ -36,7 +36,12 @@ import {
   type StrictAuthorizationServer,
   type StrictAuthorizationServerOptions,
 } from "../../helpers/strict-authorization-server.ts";
-import { auditEvents, spacePackages, integrationConnections } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  spacePackages,
+  integrationConnections,
+  integrationOauthClients,
+} from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
 import {
@@ -539,6 +544,28 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     expect(replay.status).toBe(200);
     expect(await replay.text()).toMatch(/Could not complete the connection|try again/i);
     expect(provider.tokenRequests.length).toBe(before);
+  });
+
+  it("names the missing OAuth client when it is deleted between start and callback", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    const authUrl = await beginConnect(ctx);
+    await db.delete(integrationOauthClients);
+    const html = await consentAndCallback(authUrl);
+
+    expect(html).toContain("is no longer available");
+    expect(html).not.toContain("expired");
+    expect(provider.tokenRequests).toHaveLength(0);
+    expect(await storedConnection()).toBeNull();
   });
 
   it("surfaces the provider's error code when client credentials are wrong", async () => {

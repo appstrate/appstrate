@@ -60,8 +60,9 @@ import { requireCeiling } from "../middleware/require-permission.ts";
 import { getSpaceScope, type ActorScope, type SpaceScope } from "../lib/scope.ts";
 import {
   upsertMemberPin,
-  deleteMemberPin,
+  deletePin,
   listMemberPinsForAgent,
+  pinAudit,
   pinAuditResourceId,
 } from "../services/integration-pins-service.ts";
 import {
@@ -305,8 +306,8 @@ router.put(
       action: "integration.member_pin.upserted",
       resourceType: "integration_pin",
       resourceId: pinAuditResourceId(agentPackageId, integrationPackageId),
-      before: previous ? { connectionIds: previous } : null,
-      after: { connectionIds: pin.connection_ids },
+      before: pinAudit(previous),
+      after: pinAudit(pin.connection_ids),
     });
     return c.json(pin);
   },
@@ -321,13 +322,13 @@ router.delete(
     const agentPackageId = c.req.param("agentPackageId")!;
     const integrationPackageId = c.req.param("integrationPackageId")!;
     const scope = getSpaceScope(c);
-    const { previous } = await deleteMemberPin(scope, agentPackageId, integrationPackageId, userId);
+    const { previous } = await deletePin(scope, agentPackageId, integrationPackageId, userId);
     if (previous) {
       await recordAuditFromContext(c, {
         action: "integration.member_pin.deleted",
         resourceType: "integration_pin",
         resourceId: pinAuditResourceId(agentPackageId, integrationPackageId),
-        before: { connectionIds: previous },
+        before: pinAudit(previous),
       });
     }
     return c.body(null, 204);

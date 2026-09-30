@@ -8,6 +8,7 @@
 
 import type { MiddlewareHandler } from "hono";
 import type { AppEnv } from "../types/index.ts";
+import { ApiError } from "./errors.ts";
 
 /** This intermediary's member name in `Proxy-Status`. */
 const PROXY_NAME = "appstrate";
@@ -28,6 +29,53 @@ export function relayedProxyStatus(receivedStatus: number): string {
 
 export function proxyErrorStatus(type: ProxyErrorType): string {
   return `${PROXY_NAME}; error=${type}`;
+}
+
+/**
+ * Each problem a platform proxy answers itself: status, title, and the RFC 9209 §2.3 error type
+ * when it is more precise than the one {@link proxyStatusMarker} appends for the status.
+ */
+const PROXY_PROBLEMS = {
+  unauthorized_target: {
+    status: 403,
+    title: "Unauthorized Target",
+    proxyError: "http_request_denied",
+  },
+  blocked_target: { status: 403, title: "Blocked Target", proxyError: "destination_ip_prohibited" },
+  credential_exfiltration_refused: {
+    status: 403,
+    title: "Credential Exfiltration Refused",
+    proxyError: "http_request_denied",
+  },
+  credential_not_found: { status: 404, title: "Credential Not Found" },
+  unresolved_placeholder: { status: 400, title: "Unresolved Placeholder" },
+  upstream_unresolvable: { status: 502, title: "Upstream Unresolvable", proxyError: "dns_error" },
+  upstream_unreachable: {
+    status: 502,
+    title: "Upstream Unreachable",
+    proxyError: "destination_unavailable",
+  },
+  upstream_timeout: { status: 504, title: "Upstream Timeout", proxyError: "http_response_timeout" },
+} as const satisfies Record<string, { status: number; title: string; proxyError?: ProxyErrorType }>;
+
+export type ProxyProblemCode = keyof typeof PROXY_PROBLEMS;
+
+/** A proxy's upstream that could not be resolved, reached, or did not answer in time. */
+export type UpstreamFailureCode = Extract<ProxyProblemCode, `upstream_${string}`>;
+
+/** The problem a proxy answers for `code`; `detail` never names a secret. */
+export function proxyProblem(code: ProxyProblemCode, detail: string): ApiError {
+  const problem: { status: number; title: string; proxyError?: ProxyErrorType } =
+    PROXY_PROBLEMS[code];
+  return new ApiError({
+    status: problem.status,
+    code,
+    title: problem.title,
+    detail,
+    ...(problem.proxyError
+      ? { headers: { "Proxy-Status": proxyErrorStatus(problem.proxyError) } }
+      : {}),
+  });
 }
 
 /** This proxy's member: the LAST one (RFC 9209 §2 — each intermediary appends its own). */

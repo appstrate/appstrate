@@ -858,7 +858,7 @@ describe("findUnboundedInjectedCredentials — write-path allowlist bound", () =
   it("accepts an injecting auth whose authorized_uris name the host", () => {
     for (const authorized_uris of [
       ["https://api.zoom.us/**"],
-      ["https://*.salesforce.com/**", "**://api.example.com/v1/*"],
+      ["https://*.salesforce.com/**", "https://*.example.com./v1/*"],
       ["{$credential.site_url}/**", "https://{$credential.subdomain}.zendesk.com/**"],
     ]) {
       expect(paths({ type: "custom", authorized_uris, delivery: HTTP })).toEqual([]);
@@ -891,9 +891,12 @@ describe("findUnboundedInjectedCredentials — write-path allowlist bound", () =
       "https://*.com/**",
       "https://example.*/**",
       "https://*:443/**",
+      "**://api.example.com/**",
+      "https:///**",
+      "https://*.com./**",
     ];
     expect(paths({ type: "api_key", authorized_uris })).toEqual(
-      [1, 2, 3, 4, 5, 6].map((i) => `auths.primary.authorized_uris.${i}`),
+      [1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => `auths.primary.authorized_uris.${i}`),
     );
   });
 

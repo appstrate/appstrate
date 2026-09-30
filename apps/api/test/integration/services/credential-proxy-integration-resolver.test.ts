@@ -23,7 +23,12 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPublishedVersion, seedRun } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
+import {
+  integrationConnections,
+  integrationOauthClients,
+  packages,
+  runs,
+} from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
 import {
@@ -674,6 +679,18 @@ describe("credential-proxy integration-resolver", () => {
       expect(underRun.declaredUris).toEqual(["https://api.example.com/*"]);
       const withoutRun = await resolveIntegrationProxyCredentials(input());
       expect(withoutRun.declaredUris).toEqual(["https://later.example.com/**"]);
+
+      // One read of the run per selection: both halves answer from the same snapshot.
+      const run2 = runBoundSelection({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId: run.id,
+        integrationId: INTEGRATION_ID,
+        actor,
+      });
+      expect(await run2.boundSet()).toHaveLength(1);
+      await db.update(runs).set({ status: "success" }).where(eq(runs.id, run.id));
+      expect(await run2.frozenVersion()).toEqual({ version: "1.0.0", source: "version" });
     });
   });
 });

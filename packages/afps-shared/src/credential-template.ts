@@ -29,13 +29,8 @@ const SINGLE_CREDENTIAL_REF = new RegExp(`^${CREDENTIAL_REF.source}$`);
 /** Any `{$…}` runtime expression embedded in a template (AFPS §7.7). */
 const EMBEDDED_EXPRESSION = /\{\$[^{}]*\}/g;
 
-/** A `{$…}` expression a credential template cannot render. */
-export class UnsupportedTemplateExpressionError extends Error {
-  override readonly name = "UnsupportedTemplateExpressionError";
-  constructor(readonly expression: string) {
-    super(`unsupported template expression '${expression}' — only {$credential.<field>} renders`);
-  }
-}
+/** The `{{…}}` placeholder of the api_call grammar, which a credential template never renders. */
+const API_CALL_PLACEHOLDER = /\{\{[^{}]*\}\}/;
 
 /** The field `expression` names when it is exactly one `{$credential.<field>}`, else `null`. */
 export function parseCredentialRef(expression: string): string | null {
@@ -75,13 +70,26 @@ export function renderCredentialTemplate(
   credential: Readonly<Record<string, string>>,
   opts: RenderCredentialTemplateOptions = {},
 ): string | null {
-  const rendered = template.replace(EMBEDDED_EXPRESSION, (expression) => {
-    const field = parseCredentialRef(expression);
-    if (field === null) throw new UnsupportedTemplateExpressionError(expression);
-    return Object.prototype.hasOwnProperty.call(credential, field) ? credential[field]! : "";
-  });
+  const unsupported =
+    API_CALL_PLACEHOLDER.exec(template)?.[0] ?? unsupportedTemplateExpressions(template)[0];
+  if (unsupported !== undefined) {
+    throw new Error(
+      `unsupported template expression '${unsupported}' — only {$credential.<field>} renders`,
+    );
+  }
+  const rendered = substituteCredentialRefs(template, credential);
   if (opts.emptyAs === "null") return rendered.length === 0 ? null : rendered;
   return rendered;
+}
+
+/** Each `{$credential.<field>}` → its value; a missing or inherited field renders empty. */
+function substituteCredentialRefs(
+  template: string,
+  credential: Readonly<Record<string, unknown>>,
+): string {
+  return template.replace(CREDENTIAL_REF, (_m, field: string) =>
+    Object.prototype.hasOwnProperty.call(credential, field) ? String(credential[field]) : "",
+  );
 }
 
 /** Field names referenced by `{$credential.<name>}` placeholders, in order, deduplicated. */
@@ -108,19 +116,25 @@ export function parseUrlFormPattern(pattern: string): { field: string; suffix: s
   return { field: head[1]!, suffix };
 }
 
-/** `scheme://authority` of an `authorized_uris` entry; the scheme may be a `*`/`**` glob. */
-const PATTERN_AUTHORITY = /^(?:[A-Za-z][A-Za-z0-9+.-]*|\*{1,2}):\/\/([^/?#]*)/;
+/** Literal `scheme://authority` of an `authorized_uris` entry (WHATWG also ends it at `\\`). */
+const PATTERN_AUTHORITY = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/\\?#]*)/;
 
 /**
- * Whether an `authorized_uris` entry lets the caller pick the host: a wildcard in either of its
- * last two labels (`https://**`, `https://*.com/**`), or no `scheme://`.
+ * Whether an `authorized_uris` entry lets the caller pick the host: no literal `scheme://`
+ * (`**://api.example.com/**`), an empty host (`https:///**`), or a wildcard in either of its
+ * last two labels (`https://**`, `https://*.com./**`). A public suffix (`*.co.uk`) is not
+ * detected.
  */
 export function isHostUnboundedUriPattern(pattern: string): boolean {
   if (parseUrlFormPattern(pattern)) return false;
   const literal = pattern.replace(CREDENTIAL_REF, "x");
   const authority = PATTERN_AUTHORITY.exec(literal)?.[1];
   if (authority === undefined) return literal.includes("*");
-  const host = authority.replace(/^[^@]*@/, "").replace(/:[^:\]]*$/, "");
+  const host = authority
+    .replace(/^[^@]*@/, "")
+    .replace(/:[^:\]]*$/, "")
+    .replace(/\.+$/, "");
+  if (host === "") return true;
   if (!host.includes("*")) return false;
   const labels = host.split(".");
   return labels.length < 3 || labels.slice(-2).some((label) => label.includes("*"));
@@ -178,8 +192,8 @@ function renderPattern(
     return typeof value !== "string" || !AUTHORITY_VALUE.test(value);
   });
   if (bad !== undefined) return { field: bad, expected: EXPECTED_AUTHORITY };
-  // Every referenced value was just checked to be a string.
-  return { uri: renderCredentialTemplate(pattern, fields as Readonly<Record<string, string>>) };
+  // A pattern is not a delivery template: anything but a checked field stays literal, narrowing it.
+  return { uri: substituteCredentialRefs(pattern, fields) };
 }
 
 /**

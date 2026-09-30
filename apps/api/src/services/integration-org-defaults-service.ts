@@ -16,7 +16,7 @@
  * can't coerce a member's personal connection.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationOrgDefaults } from "@appstrate/db/schema";
 import type { IntegrationOrgDefault } from "@appstrate/shared-types";
@@ -89,7 +89,8 @@ function orgDefaultKey(scope: SpaceScope, integrationId: string) {
 
 /**
  * Set or replace the org default for (space, integration). `previous` is the
- * default it replaced, read under a row lock in the same transaction.
+ * default it replaced, read in the same transaction under a lock on the key —
+ * the row lock alone locks nothing while no default exists yet.
  */
 export async function upsertOrgDefault(
   scope: SpaceScope,
@@ -99,6 +100,8 @@ export async function upsertOrgDefault(
   await validatePinTargets(scope, integrationId, input.connectionIds);
   const now = new Date();
   return db.transaction(async (tx) => {
+    const key = `integration-org-default:${scope.spaceId}:${integrationId}`;
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key})::bigint)`);
     const [previous] = await tx
       .select()
       .from(integrationOrgDefaults)

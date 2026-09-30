@@ -140,6 +140,20 @@ describe("read_skill", () => {
     expect(oversized.content).toHaveLength(1);
   });
 
+  it("names the draft in the resource uri when the draft was read, nothing for a system tree", async () => {
+    const uriOf = async (read: Partial<SkillSnapshot>) => {
+      const { call } = tool(async () => ({ ...snapshot(files), ...read }));
+      const result = await call({ id: "@acme/tone", path: "assets/logo.bin" });
+      return (result.content[1] as { resource: { uri: string } }).resource.uri;
+    };
+    expect(await uriOf({ version: null, definition: "draft" })).toBe(
+      "https://test.local/api/packages/@acme/tone/files/content?path=assets%2Flogo.bin&version=draft",
+    );
+    expect(await uriOf({ version: null, definition: "published" })).toBe(
+      "https://test.local/api/packages/@acme/tone/files/content?path=assets%2Flogo.bin",
+    );
+  });
+
   it("carries every success as structuredContent, errors as text only", async () => {
     const { call } = tool(async () => snapshot(files));
     for (const args of [

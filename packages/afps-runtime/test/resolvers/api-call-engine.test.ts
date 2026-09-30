@@ -10,7 +10,7 @@
 import { describe, it, expect, mock, afterEach } from "bun:test";
 import {
   API_CALL_TIMEOUT_MS,
-  declaredLiteralHosts,
+  classifyApiCallFailure,
   fetchApiCall,
   PreflightError,
   RedirectBlockedError,
@@ -37,7 +37,6 @@ async function gate(
       declaredUris,
       allowAllUris,
       credentialHeaders: [],
-      trustedHost: declaredLiteralHosts({ declaredUris, allowAllUris }),
       integrationId: "i",
       fetchFn,
       ...opts,
@@ -222,6 +221,15 @@ describe("fetchApiCall — initial-target gate per branch", () => {
     });
     expect(err).toBeNull();
     expect(resolveHost).not.toHaveBeenCalled();
+  });
+
+  it("under allow_all_uris no declared host is exempt by default: the caller picks the host", async () => {
+    const err = await gate("https://intranet.corp/api", {
+      allowAllUris: true,
+      declaredUris: ["https://intranet.corp/**"],
+      resolveHost: internalResolver,
+    });
+    expect(err?.reason).toBe("ssrf");
   });
 
   it("a path that does not trust declared hosts keeps them behind the SSRF gate", async () => {
@@ -467,5 +475,24 @@ describe("fetchApiCall — transport", () => {
     expect(signal!.aborted).toBe(false);
     caller.abort();
     expect(signal!.aborted).toBe(true);
+  });
+});
+
+describe("classifyApiCallFailure", () => {
+  it("names what every path maps: refusal, redirect, timeout, transport", () => {
+    expect(classifyApiCallFailure(new PreflightError("unresolvable", "m"))).toEqual({
+      kind: "unresolvable",
+      redirect: false,
+      message: "m",
+    });
+    expect(classifyApiCallFailure(new RedirectBlockedError("unauthorized", "h"))).toMatchObject({
+      kind: "not_authorized",
+      redirect: true,
+    });
+    expect(classifyApiCallFailure(new RedirectBlockedError("ssrf", "h")).kind).toBe("ssrf");
+    expect(classifyApiCallFailure(new DOMException("late", "TimeoutError")).kind).toBe("timeout");
+    expect(
+      classifyApiCallFailure(Object.assign(new Error("refused"), { code: "ECONNREFUSED" })),
+    ).toEqual({ kind: "transport", redirect: false, message: "refused", code: "ECONNREFUSED" });
   });
 });

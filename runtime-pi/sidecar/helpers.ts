@@ -366,15 +366,6 @@ export {
   STREAM_IDLE,
 } from "@appstrate/connect/proxy-primitives";
 
-// `matchesAuthorizedUri` (`(url, patterns[])` allowlist check, AFPS spec
-// `*`/`**` semantics) and `stripUserInfoAndFragment` (WHATWG-style URL
-// sanitisation used on redirect hops) are
-// single-sourced from the shared outbound-HTTP engine in
-// `@appstrate/afps-runtime/resolvers` — the same module the sidecar's
-// `executeApiCall` redirect-follower uses, so allowlist matching can never
-// drift between the preflight here and the per-hop checks there.
-export { matchesAuthorizedUri, stripUserInfoAndFragment } from "@appstrate/afps-runtime/resolvers";
-
 /** Deadline for an egress listener's pre-splice phase; the relay's idle timeout governs after. */
 export const PREAMBLE_TIMEOUT_MS = 10_000;
 

@@ -13290,7 +13290,7 @@ export interface operations {
                     /** @description OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. */
                     client_secret?: string;
                     /**
-                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Sent with a `client_secret`, omitting it leaves the method undeclared (the manifest's value applies); sent alone, it changes the method of the stored secret.
+                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omitted beside a new `client_secret`, the stored method is kept — except a public client's `none`, which gives way to the manifest's value; sent alone, it changes the method of the stored secret.
                      * @enum {string}
                      */
                     token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
@@ -13794,7 +13794,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
             400: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -13829,7 +13829,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). */
+            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). `blocked_target` — the model's upstream resolves into a blocked network range (`Proxy-Status` error `destination_ip_prohibited`). */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -13939,7 +13939,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
             400: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -13974,7 +13974,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). */
+            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). `blocked_target` — the model's upstream resolves into a blocked network range (`Proxy-Status` error `destination_ip_prohibited`). */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -14084,7 +14084,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
             400: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -14119,7 +14119,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). */
+            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). `blocked_target` — the model's upstream resolves into a blocked network range (`Proxy-Status` error `destination_ip_prohibited`). */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -14229,7 +14229,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
             400: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -14264,7 +14264,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). */
+            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). `blocked_target` — the model's upstream resolves into a blocked network range (`Proxy-Status` error `destination_ip_prohibited`). */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -16984,7 +16984,7 @@ export interface operations {
                     /** @description OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. */
                     client_secret?: string;
                     /**
-                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Sent with a `client_secret`, omitting it leaves the method undeclared (the manifest's value applies); sent alone, it changes the method of the stored secret.
+                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omitted beside a new `client_secret`, the stored method is kept — except a public client's `none`, which gives way to the manifest's value; sent alone, it changes the method of the stored secret.
                      * @enum {string}
                      */
                     token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";

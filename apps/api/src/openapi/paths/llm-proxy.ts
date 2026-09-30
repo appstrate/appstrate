@@ -103,9 +103,8 @@ const baseResponses = {
       "endpoint for its protocol instead), the preset's provider is an " +
       "OAuth subscription with no proxyable gateway (connect an API-key " +
       "provider instead), or request body exceeds " +
-      "the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model " +
-      "whose upstream resolves into a blocked range carries `Proxy-Status` error " +
-      "`destination_ip_prohibited`. `usage_context_required` — a platform-provided model " +
+      "the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). " +
+      "`usage_context_required` — a platform-provided model " +
       "called without a valid `X-Run-Id` or the first-party chat loopback while a metering " +
       "module is loaded.",
     headers: PROXY_STATUS_HEADER,
@@ -124,7 +123,9 @@ const baseResponses = {
       "Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth " +
       "method was used (cookie sessions and any unknown/unrecognized auth " +
       "strategy are rejected; bearer only), or a metering module's `beforeUsage` hook " +
-      "refused the call on another ground (`code` is the module's).",
+      "refused the call on another ground (`code` is the module's). `blocked_target` — the " +
+      "model's upstream resolves into a blocked network range (`Proxy-Status` error " +
+      "`destination_ip_prohibited`).",
     headers: PROXY_STATUS_HEADER,
     content: problem,
   },

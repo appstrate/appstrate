@@ -37,6 +37,15 @@ describe("compileEgressPolicy — allowsAuthority", () => {
     expect(policy("sftp://h.com").allowsAuthority("h.com", 2222)).toBe(false);
   });
 
+  it("grants no host through an empty authority or a globbed scheme", () => {
+    for (const pattern of ["https:///**", "**://**", "*://api.example.com/**"]) {
+      const p = policy(pattern);
+      expect(p.allowsAuthority("evil.com", 443)).toBe(false);
+      expect(p.allowsAuthority("api.example.com", 443)).toBe(false);
+    }
+    expect(policy("https:///**").allowsUrl("https://evil.com/x")).toBe(false);
+  });
+
   it("requires an explicit port to equal the target port", () => {
     const p = policy("ssh://h.example.com:2222");
     expect(p.allowsAuthority("h.example.com", 2222)).toBe(true);

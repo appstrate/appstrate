@@ -9,7 +9,6 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { UnsupportedTemplateExpressionError } from "@appstrate/afps-shared/credential-template";
 import {
   planHttpDeliveryInjection,
   resolveHttpDelivery,
@@ -93,13 +92,14 @@ describe("resolveHttpDelivery — explicit overrides", () => {
     expect(plan!.value).toBe("pierre@example.com/");
   });
 
-  it("sends a {{field}} in a template as the literal it is — the agent grammar is not rendered", () => {
-    const plan = resolveHttpDelivery(
-      "api_key",
-      { api_key: "k" },
-      { valueFrom: { template: "{{api_key}}:{$credential.api_key}" } },
-    );
-    expect(plan!.value).toBe("{{api_key}}:k");
+  it("refuses a {{field}} placeholder instead of sending it upstream as a literal", () => {
+    expect(() =>
+      resolveHttpDelivery(
+        "api_key",
+        { api_key: "k" },
+        { valueFrom: { template: "Bearer {{api_key}}" } },
+      ),
+    ).toThrow("unsupported template expression '{{api_key}}'");
   });
 
   it("refuses a {$…} expression it cannot render instead of sending it upstream", () => {
@@ -109,7 +109,7 @@ describe("resolveHttpDelivery — explicit overrides", () => {
         { token: "t" },
         { headerName: "Authorization", valueFrom: { template: "Bearer {$outputs.token}" } },
       ),
-    ).toThrow(UnsupportedTemplateExpressionError);
+    ).toThrow("unsupported template expression '{$outputs.token}'");
   });
 
   it("allowServerOverride flag is reflected in the plan", () => {

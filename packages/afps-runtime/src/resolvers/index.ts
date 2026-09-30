@@ -97,14 +97,13 @@ export {
 // redirects, cookie capture, deadline.
 export {
   API_CALL_TIMEOUT_MS,
-  declaredLiteralHosts,
+  classifyApiCallFailure,
   fetchApiCall,
-  matchesAuthorizedUri,
-  stripUserInfoAndFragment,
   redactHost,
   redactCredentialHost,
   PreflightError,
   RedirectBlockedError,
+  type ApiCallFailureClass,
   type HostResolver,
 } from "./api-call-engine.ts";
 

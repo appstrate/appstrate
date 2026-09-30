@@ -354,6 +354,25 @@ describe("matchesAuthorizedUriSpec", () => {
       ).toBe(true);
     });
 
+    it("a globbed scheme stays a scheme: it cannot match a host named inside a query", () => {
+      const pat = "**://api.example.com/**";
+      expect(matchesAuthorizedUriSpec(pat, "https://evil.com/x?y=://api.example.com/")).toBe(false);
+      expect(
+        matchesAuthorizedUriSpec("*://api.example.com/**", "https://evil.com/?://api.example.com/"),
+      ).toBe(false);
+      expect(matchesAuthorizedUriSpec(pat, "https://api.example.com/v1?q=1")).toBe(true);
+      expect(matchesAuthorizedUriSpec("*://**", "http://any.example/a")).toBe(true);
+    });
+
+    it("normalisation never moves a wildcard into an empty authority", () => {
+      expect(matchesAuthorizedUriSpec("https:///**", "https://evil.com/")).toBe(false);
+      expect(matchesAuthorizedUriSpec("https:///*", "https://evil.com/")).toBe(false);
+      // A literal `https:///host` still names its host, as `new URL` reads it.
+      expect(
+        matchesAuthorizedUriSpec("https:///api.example.com/x", "https://api.example.com/x"),
+      ).toBe(true);
+    });
+
     it("a pattern that already contains the wildcard placeholder still compiles", () => {
       // The masking placeholder is chosen to be absent from the pattern, so a
       // pattern spelling it literally cannot have a wildcard forged into it.

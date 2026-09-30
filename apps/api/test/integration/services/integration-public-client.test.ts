@@ -142,6 +142,17 @@ describe("public OAuth client is declared, not inferred", () => {
     return resolveConnectClient(INTEGRATION, AUTH_KEY, MANIFEST, auth, resolved);
   }
 
+  /** What the token exchange reads back from the `clientRef` the connect flow pinned. */
+  function credentialsOf(clientRef: string) {
+    return resolveIntegrationClientById(
+      clientRef,
+      ctx.defaultSpaceId,
+      INTEGRATION,
+      AUTH_KEY,
+      "client_secret_post",
+    );
+  }
+
   describe("encodeClientAuthForStorage writes both halves together", () => {
     // The last inference, now closed. A blank secret with NO method declared
     // used to be read as the RFC 7591 §3.2.1 registration answer and stored as
@@ -330,6 +341,40 @@ describe("public OAuth client is declared, not inferred", () => {
       expect(row.clientSecretEncrypted).toBe(before);
     });
 
+    // The UI's edit form sends a new secret with no method: that rotates the
+    // credential, it must not reset a `client_secret_post` client to the default.
+    it("keeps the stored method when a new secret arrives without one", async () => {
+      const created = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
+        clientId: "cid",
+        clientSecret: "shh",
+        tokenEndpointAuthMethod: "client_secret_post",
+      });
+      const { client: updated } = await updateIntegrationOAuthClient(
+        scope,
+        INTEGRATION,
+        created.id,
+        { clientSecret: "new-secret" },
+      );
+      expect(updated.token_endpoint_auth_method).toBe("client_secret_post");
+      expect(updated.clientSecret).toBe("new-secret");
+    });
+
+    it("a public client given a secret without a method stops being public", async () => {
+      const created = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
+        clientId: "cid",
+        clientSecret: "",
+        tokenEndpointAuthMethod: "none",
+      });
+      const { client: updated } = await updateIntegrationOAuthClient(
+        scope,
+        INTEGRATION,
+        created.id,
+        { clientSecret: "shh" },
+      );
+      expect(updated.token_endpoint_auth_method).toBeNull();
+      expect(updated.has_client_secret).toBe(true);
+    });
+
     it("refuses to make a public client confidential without a secret", async () => {
       const created = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
         clientId: "cid",
@@ -381,7 +426,7 @@ describe("public OAuth client is declared, not inferred", () => {
       });
       const out = await resolveForConnect();
       expect(out.clientId).toBe("cid");
-      expect(out.clientSecret).toBe("shh");
+      expect((await credentialsOf(out.clientRef))?.clientSecret).toBe("shh");
     });
 
     it("still resolves a declared public client", async () => {
@@ -391,8 +436,10 @@ describe("public OAuth client is declared, not inferred", () => {
         tokenEndpointAuthMethod: "none",
       });
       const out = await resolveForConnect();
-      expect(out.clientSecret).toBe("");
-      expect(out.tokenEndpointAuthMethod).toBe("none");
+      expect(await credentialsOf(out.clientRef)).toMatchObject({
+        clientSecret: "",
+        tokenEndpointAuthMethod: "none",
+      });
     });
   });
 
