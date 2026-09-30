@@ -17,8 +17,8 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { resolve } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
-import { replayJournal } from "../helpers/journal.ts";
+import type { PGlite } from "@electric-sql/pglite";
+import { journalPGlite } from "../helpers/journal.ts";
 import { CONNECTION_LABEL_MAX, connectionLabelProblem } from "../../src/lib/connection-label.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
@@ -83,7 +83,7 @@ const FORBIDDEN = (() => {
   return out;
 })();
 
-const pg = new PGlite();
+let pg: PGlite;
 let afterFirstRun = "";
 let afterSecondRun = "";
 let firstRunCounts: Record<string, number> = {};
@@ -142,7 +142,7 @@ async function snapshot(): Promise<string> {
 }
 
 beforeAll(async () => {
-  await replayJournal(pg, REPLAY_THROUGH);
+  pg = await journalPGlite({ through: REPLAY_THROUGH });
 
   // Every label-only row is unhealthy and unshared, so none of them is a
   // candidate the freeze's "only healthy connection the user can reach" test
@@ -382,7 +382,7 @@ beforeAll(async () => {
   afterFirstRun = await snapshot();
   secondRunCounts = await runScript(script);
   afterSecondRun = await snapshot();
-  // A journal replay runs past the 15s default in `bunfig.toml`.
+  // A journal replay runs past the 15s default the preload sets.
 }, 300_000);
 
 afterAll(async () => {

@@ -15,9 +15,9 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { resolve } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
-import { replayJournal } from "../helpers/journal.ts";
+import { journalPGlite } from "../helpers/journal.ts";
 
 const MIGRATIONS_DIR = resolve(import.meta.dir, "../../../../packages/db/drizzle");
 const MIGRATION = `${MIGRATIONS_DIR}/0077_connection_sets.sql`;
@@ -36,7 +36,7 @@ const conn = (n: number) => `c0770000-0000-4000-8000-${String(n).padStart(12, "0
 const NEXT_STEPS =
   "Run scripts/migration/0033-unshare-space-access-loss.ts --apply, then scripts/migration/0032-connection-sets.sql, then redeploy.";
 
-const pg = new PGlite();
+let pg: PGlite;
 
 interface ApplyError {
   code?: string;
@@ -87,7 +87,7 @@ async function errorCode(sql: string): Promise<string | null> {
 }
 
 beforeAll(async () => {
-  await replayJournal(pg, REPLAY_THROUGH);
+  pg = await journalPGlite({ through: REPLAY_THROUGH });
   const connection = (n: number, integ: string, owner: string, label: string | null, at: string) =>
     `('${conn(n)}', '${integ}', 'primary', 'acct-${n}', '${SPACE}', '${owner}', 'x', ${
       label === null ? "NULL" : `'${label}'`
@@ -155,7 +155,7 @@ beforeAll(async () => {
   skippedScriptError = await applyError();
   await pg.exec(`DELETE FROM integration_connections WHERE id = '${conn(7)}'`);
   await applyMigration();
-  // A journal replay runs past the 15s default in `bunfig.toml`.
+  // A journal replay runs past the 15s default the preload sets.
 }, 300_000);
 
 afterAll(async () => {

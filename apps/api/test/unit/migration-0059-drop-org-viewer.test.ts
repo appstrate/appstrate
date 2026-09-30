@@ -38,8 +38,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { resolve } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
-import { replayJournal } from "../helpers/journal.ts";
+import type { PGlite } from "@electric-sql/pglite";
+import { journalPGlite } from "../helpers/journal.ts";
 import { ORG_ROLES } from "@appstrate/core/permissions";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
@@ -59,7 +59,7 @@ const SPACE = "spc_d0590000-0000-4000-8000-000000000001";
 const VIEWER = "usr_0059_viewer";
 const MEMBER = "usr_0059_member";
 
-const pg = new PGlite();
+let pg: PGlite;
 
 /**
  * Apply `0059` the way the runner does. The transaction is not decoration: the
@@ -178,10 +178,10 @@ async function seedRollout(pg: PGlite): Promise<void> {
 }
 
 beforeAll(async () => {
-  await replayJournal(pg, REPLAY_THROUGH);
+  pg = await journalPGlite({ through: REPLAY_THROUGH });
   await seedRollout(pg);
   // A journal replay is the expensive part of every test in this directory, and
-  // it runs past the 15s default in `bunfig.toml`. An abandoned `beforeAll`
+  // it runs past the 15s default the preload sets. An abandoned `beforeAll`
   // does not stop — it keeps replaying into an instance the next hook run then
   // replays into AGAIN, which surfaces as
   // `type "invitation_status" already exists` rather than as a timeout, so the

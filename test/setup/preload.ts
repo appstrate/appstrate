@@ -25,8 +25,8 @@
  * one exception is a module whose requirements the current tier cannot meet.
  */
 import { resolve, join, relative } from "path";
-import { existsSync, mkdtempSync, rmSync } from "fs";
-import { tmpdir } from "os";
+import { existsSync } from "fs";
+import { setDefaultTimeout } from "bun:test";
 import type { AppstrateModule } from "@appstrate/core/module";
 import {
   TEST_DB_NAME,
@@ -40,6 +40,14 @@ import {
   skipsInTier,
   type DiscoveredModule,
 } from "./modules.ts";
+import { makeTempDir, sweepOrphanedTempDirs } from "./temp-dirs.ts";
+
+// ─── Per-test timeout ───────────────────────────────────────
+// 15 s for every test the root preload serves. It lives here because bunfig has
+// no such setting: `[test] timeout` is not a key Bun reads, so the value that
+// sat there for months was silently ignored and every test ran under Bun's
+// built-in 5 s. `--timeout` on the command line still overrides this.
+setDefaultTimeout(15_000);
 
 // ─── Tier selection ─────────────────────────────────────────
 // tier0 (TEST_TIER=0): fast in-memory dev mode — PGlite (throwaway temp dir),
@@ -119,18 +127,9 @@ if (TIER0) {
   delete process.env.S3_PUBLIC_ENDPOINT;
   delete process.env.AWS_ACCESS_KEY_ID;
   delete process.env.AWS_SECRET_ACCESS_KEY;
-  const pgliteDir = mkdtempSync(join(tmpdir(), "appstrate-test-pglite-"));
-  process.env.PGLITE_DATA_DIR = pgliteDir;
-  process.env.FS_STORAGE_PATH = mkdtempSync(join(tmpdir(), "appstrate-test-storage-"));
-  const storageDir = process.env.FS_STORAGE_PATH;
-  process.on("exit", () => {
-    try {
-      rmSync(pgliteDir, { recursive: true, force: true });
-      if (storageDir) rmSync(storageDir, { recursive: true, force: true });
-    } catch {
-      // Best-effort cleanup — never let teardown failure mask the test outcome.
-    }
-  });
+  sweepOrphanedTempDirs();
+  process.env.PGLITE_DATA_DIR = makeTempDir("pglite");
+  process.env.FS_STORAGE_PATH = makeTempDir("storage");
 } else {
   // tier3: real external services from docker-compose.test.yml.
   process.env.DATABASE_URL = TEST_DATABASE_URL;
@@ -178,9 +177,16 @@ Object.defineProperty(process.stderr, "isTTY", { value: false, configurable: tru
 
 if (TIER0) {
   // ─── tier0 core migrations ─────────────────────────────────
-  // Importing the db client initializes the throwaway PGlite database; then
-  // apply the core Drizzle migrations against it in-process. Shares the same
-  // migration walker as the embedded boot path (no drift).
+  // The throwaway data directory starts as a copy of a cached, already-migrated
+  // cluster (`journalDump`, keyed on the migration files): a fresh initdb plus
+  // the full replay cost ~6 s per test process, the copy well under one.
+  // Importing the db client then opens it, and the core Drizzle migrations are
+  // applied in-process exactly as before — against a seeded directory every
+  // ledger entry is already recorded, so the walker applies nothing, and it
+  // still applies whatever the dump did not hold. Shares the same migration
+  // walker as the embedded boot path (no drift).
+  const { seedMigratedDataDir } = await import("../../apps/api/test/helpers/journal.ts");
+  await seedMigratedDataDir(process.env.PGLITE_DATA_DIR!);
   // migrate.ts lives under apps/api where the @appstrate/db/client alias
   // resolves; its own alias import initializes the (single, shared) PGlite
   // instance that the test helpers + app code also use. Importing the client
