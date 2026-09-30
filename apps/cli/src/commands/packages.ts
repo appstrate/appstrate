@@ -76,6 +76,7 @@ import {
   type PackageFiles,
 } from "../lib/packages.ts";
 import { SKILL_ENTRY } from "../lib/skills-sync/materialize.ts";
+import { shellQuote } from "../lib/skills-sync/targets.ts";
 
 interface Session {
   profileName: string;
@@ -749,7 +750,7 @@ export async function packagesPushCommand(
     io.stdout.write(`Pushed ${summary} to the draft of ${packageId}.\n`);
     io.stderr.write(
       type === "skill"
-        ? `Test it here: appstrate code sync --target claude-user --source draft. Then: appstrate packages publish ${packageId}\n`
+        ? `Try it before publishing: claude --plugin-dir ${shellQuote(dir)}. Then: appstrate packages publish ${packageId}\n`
         : `Test the draft on Appstrate, then: appstrate packages publish ${packageId}\n`,
     );
   } catch (err) {

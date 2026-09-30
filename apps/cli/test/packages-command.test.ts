@@ -722,6 +722,18 @@ describe("packages push", () => {
     expect(status.stdout()).toContain("clean");
   });
 
+  it("points a pushed skill at its own folder, quoted for the shell", async () => {
+    const dir = join(root, "my pdf");
+    await pulled(skill(), dir);
+    await writeFile(join(dir, "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\nEdited.\n");
+    const { io, stderr } = createMemoryIO();
+
+    await packagesPushCommand({ dir }, io);
+
+    expect(stderr()).toMatch(/Try it before publishing: claude --plugin-dir '[^']*\/my pdf'\. /);
+    expect(stderr()).not.toContain("code sync");
+  });
+
   it("says the draft moved elsewhere on 412", async () => {
     const pkg = skill();
     const dir = join(root, "pdf");
