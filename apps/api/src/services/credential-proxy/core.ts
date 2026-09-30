@@ -32,6 +32,7 @@ import {
   applyInjectedCredentialHeaderToHeaders,
   normalizeAuthSchemeTemplate,
 } from "@appstrate/connect";
+import { buildInjectedCredentialHeader } from "@appstrate/connect/proxy-primitives";
 import {
   cookieScope,
   credentialUrlPolicy,
@@ -44,11 +45,11 @@ import {
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import type { Actor } from "../../lib/actor.ts";
-import type { RunBoundSelection } from "../integration-connections.ts";
 import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
   IntegrationCredentialNotFoundError,
+  type ProxyRunSelection,
 } from "./integration-resolver.ts";
 
 /**
@@ -70,6 +71,8 @@ interface CookieJarAdapter {
 }
 
 interface ProxyCallInput {
+  /** Org of the space — scopes the published integration version the call reads. */
+  orgId: string;
   /** Space that owns the credentials. */
   spaceId: string;
   /**
@@ -84,8 +87,8 @@ interface ProxyCallInput {
    * against the actor's accessible set).
    */
   connectionId?: string;
-  /** The run named by `X-Run-Id` — confines the call to the connections it bound. */
-  run?: RunBoundSelection;
+  /** The run named by `X-Run-Id` — confines the call to the connections and version it froze. */
+  run?: ProxyRunSelection;
 
   /** Scoped integration package name (e.g. `@afps/gmail`). */
   integrationId: string;
@@ -213,6 +216,7 @@ export class ProxySubstitutionError extends Error {
 export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult> {
   const selection = {
     integrationId: input.integrationId,
+    orgId: input.orgId,
     spaceId: input.spaceId,
     actor: input.actor,
     ...(input.connectionId ? { connectionId: input.connectionId } : {}),
@@ -263,6 +267,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     fields,
     allowAllUris: resolved.allowAllUris,
     authorizedUris,
+    injectsCredential: buildInjectedCredentialHeader(resolved) !== undefined,
   });
   // `target` carries decrypted values and goes on the wire only; messages name `redactedHost`.
   const redactFields = redactionFields(policy, fields);

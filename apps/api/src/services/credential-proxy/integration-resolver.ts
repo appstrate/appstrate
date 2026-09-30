@@ -41,13 +41,22 @@ import {
   type ResolvedConnectionRow,
   type RunBoundSelection,
 } from "../integration-connections.ts";
-import { fetchIntegrationManifest } from "../integration-service.ts";
+import {
+  readIntegrationManifestForProxy,
+  type ResolvedIntegrationVersion,
+} from "../integration-service.ts";
 import {
   buildIntegrationOAuthRefreshContext,
   decryptIntegrationConnectionFields,
   refreshAndClassify,
 } from "../integration-token-refresh.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+
+/** An `X-Run-Id` run, which also names the integration version the call is authorized against. */
+export interface ProxyRunSelection extends RunBoundSelection {
+  /** The version the run froze at kickoff for this integration; `null` when it froze none. */
+  frozenVersion: () => Promise<ResolvedIntegrationVersion | null>;
+}
 
 /** The `X-Run-Id` run, bound to the ACTOR: a caller borrows only the snapshot of its own run. */
 export function runBoundSelection(input: {
@@ -56,14 +65,14 @@ export function runBoundSelection(input: {
   runId: string;
   integrationId: string;
   actor: Actor;
-}): RunBoundSelection {
+}): ProxyRunSelection {
   const { orgId, spaceId, runId, integrationId, actor } = input;
+  const attributableRun = () => requireAttributableRun({ orgId, runId, spaceId, owner: actor });
   return {
     id: runId,
-    boundSet: async () => {
-      const run = await requireAttributableRun({ orgId, runId, spaceId, owner: actor });
-      return run.resolvedConnections?.[integrationId] ?? [];
-    },
+    boundSet: async () => (await attributableRun()).resolvedConnections?.[integrationId] ?? [],
+    frozenVersion: async () =>
+      (await attributableRun()).resolvedIntegrationVersions?.[integrationId] ?? null,
   };
 }
 
@@ -79,12 +88,13 @@ export class IntegrationCredentialNotFoundError extends Error {
 interface ResolveIntegrationProxyInput {
   /** Integration package id from `X-Integration-Id` (`@scope/name`). */
   integrationId: string;
+  orgId: string;
   spaceId: string;
   actor: Actor;
   /** Optional connection id pin (from `X-Connection-Id`). */
   connectionId?: string;
-  /** The run named by `X-Run-Id` — confines the call to the connections it bound. */
-  run?: RunBoundSelection;
+  /** The run named by `X-Run-Id` — confines the call to the connections and version it froze. */
+  run?: ProxyRunSelection;
 }
 
 interface ResolvedIntegrationProxyCredentials {
@@ -104,7 +114,7 @@ interface ResolvedIntegrationProxyCredentials {
 export async function resolveIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
 ): Promise<ResolvedIntegrationProxyCredentials> {
-  const manifest = await loadManifest(input.integrationId);
+  const manifest = await loadManifest(input);
   await assertIntegrationActive(input.integrationId, input.spaceId);
 
   if (Object.keys(manifest.auths ?? {}).length === 0) {
@@ -152,7 +162,7 @@ export async function resolveIntegrationProxyCredentials(
 export async function forceRefreshIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
 ): Promise<ResolvedIntegrationProxyCredentials | null> {
-  const manifest = await loadManifest(input.integrationId);
+  const manifest = await loadManifest(input);
   const connection = await resolveConnection(input, manifest);
   if (!connection) return null;
 
@@ -270,12 +280,18 @@ export async function forceRefreshIntegrationProxyCredentials(
 // Helpers
 // ─────────────────────────────────────────────
 
-async function loadManifest(integrationId: string): Promise<IntegrationManifest> {
-  const res = await fetchIntegrationManifest(integrationId);
+async function loadManifest(input: ResolveIntegrationProxyInput): Promise<IntegrationManifest> {
+  const { integrationId } = input;
+  const frozen = input.run ? await input.run.frozenVersion() : null;
+  const res = await readIntegrationManifestForProxy(integrationId, input.orgId, frozen);
   if (res.ok) return res.manifest;
   switch (res.failure.kind) {
     case "not_found":
       throw new IntegrationCredentialNotFoundError(`Integration '${integrationId}' not found`);
+    case "not_published":
+      throw new IntegrationCredentialNotFoundError(
+        `Integration '${integrationId}' has no published version; publish it before calling it through the credential proxy`,
+      );
     case "not_integration":
       throw new IntegrationCredentialNotFoundError(
         `Package '${integrationId}' is not an integration`,

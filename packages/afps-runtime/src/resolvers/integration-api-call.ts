@@ -485,6 +485,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         fields,
         allowAllUris: meta.allowAllUris,
         authorizedUris,
+        injectsCredential: injectedCredentialHeader !== null,
       });
       if (policy.refuse) {
         throw new ResolverError(

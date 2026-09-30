@@ -24,7 +24,10 @@ import { substituteVars } from "./template-vars.ts";
 // (the canonical `delivery.http` projection target). Re-export it here so
 // consumers importing from `@appstrate/afps-runtime/resolvers` keep their path.
 export type { HttpDeliveryConfig } from "@appstrate/afps-shared/delivery-http";
-import type { HttpDeliveryConfig } from "@appstrate/afps-shared/delivery-http";
+import {
+  AUTH_TYPE_HTTP_DEFAULTS,
+  type HttpDeliveryConfig,
+} from "@appstrate/afps-shared/delivery-http";
 
 /**
  * Plan returned by {@link resolveHttpDelivery}. The proxy uses this to decide
@@ -93,24 +96,6 @@ export function planHttpDeliveryInjection(
     },
   };
 }
-
-/**
- * Auth-type defaults for `delivery.http`. `valueFrom` names the credential
- * field to inject, using the **canonical snake_case storage keys** — the same
- * convention the OAuth2 strategy persists (`access_token`) and the AFPS spec
- * documents (`{{api_key}}`). Manifest `valueFrom` / template `{{var}}` refs
- * must match the stored field name exactly; there is no casing aliasing.
- *
- * Source: AFPS spec §4.1.3 (fields exposed implicitly by auth type).
- */
-const AUTH_TYPE_HTTP_DEFAULTS: Readonly<
-  Record<string, { headerName: string; headerPrefix: string; valueFrom: string }>
-> = {
-  oauth2: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "access_token" },
-  api_key: { headerName: "X-Api-Key", headerPrefix: "", valueFrom: "api_key" },
-  basic: { headerName: "Authorization", headerPrefix: "Basic ", valueFrom: "" },
-  custom: { headerName: "", headerPrefix: "", valueFrom: "" },
-};
 
 function renderTemplate(
   template: string,

@@ -862,10 +862,11 @@ describe("LocalIntegrationResolver", () => {
 // it did a raw `fetch(target, …)` with default `redirect: "follow"` and NO
 // SSRF check — these tests pin the closed gap.
 describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on the CLI path)", () => {
-  function allowAllManifest(name: `@${string}/${string}`) {
+  /** allow_all_uris is open only to an auth the proxy injects no credential for. */
+  function allowAllManifest(name: `@${string}/${string}`, headerName = "") {
     return makePackage(name, "1.0.0", "integration", {
       "integration.json": JSON.stringify(
-        apiKeyIntegrationManifest(name, { allowAllUris: true }).integration,
+        apiKeyIntegrationManifest(name, { allowAllUris: true, headerName }).integration,
       ),
     });
   }
@@ -1007,37 +1008,37 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
     expect(seen).toEqual(["https://public.example.com/start"]);
   });
 
-  it("strips the injected credential header on an off-boundary cross-origin redirect (allow_all_uris)", async () => {
-    const inits: { url: string; headers: Record<string, string> }[] = [];
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const bundle = makeBundle(root, [allowAllManifest("@acme/api")]);
-    const resolver = new LocalIntegrationResolver({
-      resolveHost: async () => ["203.0.113.7"],
-      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
-      fetch: ((url: string, init: RequestInit) => {
-        inits.push({ url, headers: { ...((init.headers as Record<string, string>) ?? {}) } });
-        if (url === "https://a.example.com/start") {
-          return Promise.resolve(
-            new Response(null, {
-              status: 302,
-              headers: { location: "https://b.example.com/next" },
-            }),
-          );
-        }
-        return Promise.resolve(new Response("{}", { status: 200 }));
-      }) as typeof fetch,
-    });
-    const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
-    const { ctx } = makeCtx();
-    await tools[0]!.execute({ method: "GET", target: "https://a.example.com/start" }, ctx);
-    // Hop 1 carries the injected credential; hop 2 (cross-origin, no
-    // declared allowlist) must have it stripped (WHATWG origin-strip).
-    const hop1 = inits.find((i) => i.url === "https://a.example.com/start")!;
-    const hop2 = inits.find((i) => i.url === "https://b.example.com/next")!;
-    const hop1Key = Object.entries(hop1.headers).find(([k]) => k.toLowerCase() === "x-api-key");
-    const hop2Key = Object.entries(hop2.headers).find(([k]) => k.toLowerCase() === "x-api-key");
-    expect(hop1Key?.[1]).toBe("secret");
-    expect(hop2Key).toBeUndefined();
+  it("holds an injected credential to authorized_uris under allow_all_uris, and refuses without one", async () => {
+    for (const [authorizedUris, error] of [
+      [["https://api.acme.com/**"], /not in authorized_uris allowlist/],
+      [[], /no authorized_uris allowlist that names its hosts/],
+    ] as const) {
+      let fetched = 0;
+      const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+      const manifest = apiKeyIntegrationManifest("@acme/api", {
+        allowAllUris: true,
+        authorizedUris: [...authorizedUris],
+      });
+      const bundle = makeBundle(root, [
+        makePackage("@acme/api", "1.0.0", "integration", {
+          "integration.json": JSON.stringify(manifest.integration),
+        }),
+      ]);
+      const resolver = new LocalIntegrationResolver({
+        resolveHost: async () => ["203.0.113.7"],
+        creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
+        fetch: (() => {
+          fetched += 1;
+          return Promise.resolve(new Response("{}", { status: 200 }));
+        }) as unknown as typeof fetch,
+      });
+      const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
+      const { ctx } = makeCtx();
+      await expect(
+        tools[0]!.execute({ method: "GET", target: "https://a.example.com/start" }, ctx),
+      ).rejects.toThrow(error);
+      expect(fetched).toBe(0);
+    }
   });
 
   it("refuses a {{field}} credential substitution toward a PUBLIC host when allow_all_uris is the only permission", async () => {

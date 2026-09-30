@@ -98,6 +98,33 @@ export function projectHttpDeliveryConfig(
 }
 
 /**
+ * Auth-type defaults for `delivery.http` (AFPS §4.1.4). `valueFrom` names the
+ * credential field to inject, by its canonical snake_case storage key.
+ * `resolveHttpDelivery` (`@appstrate/afps-runtime/resolvers`) applies them.
+ */
+export const AUTH_TYPE_HTTP_DEFAULTS: Readonly<
+  Record<string, { headerName: string; headerPrefix: string; valueFrom: string }>
+> = {
+  oauth2: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "access_token" },
+  api_key: { headerName: "X-Api-Key", headerPrefix: "", valueFrom: "api_key" },
+  basic: { headerName: "Authorization", headerPrefix: "Basic ", valueFrom: "" },
+  custom: { headerName: "", headerPrefix: "", valueFrom: "" },
+};
+
+/**
+ * Whether an auth's HTTP delivery names a header the proxy fills with a
+ * credential itself: an explicit `delivery.http.name`, else its type's default.
+ * The manifest-level form of `resolveHttpDelivery` returning a plan.
+ */
+export function injectsHttpCredential(
+  authType: string,
+  http: AfpsHttpDelivery | undefined,
+): boolean {
+  const name = projectHttpDeliveryConfig(http)?.headerName;
+  return (name ?? AUTH_TYPE_HTTP_DEFAULTS[authType]?.headerName ?? "").length > 0;
+}
+
+/**
  * Header names whose value is an RFC 9110 `credentials` production — an auth
  * scheme token, one SP, then the credentials. Only in these positions is a
  * bare token prefix a defect; anywhere else (`Cookie: session=`) it is an

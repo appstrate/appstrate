@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`findUnboundedInjectedCredentials`** and
+  **`UnboundedInjectedCredentialViolation`** (`@appstrate/core/integration`):
+  the write-path rule listing each auth that injects a credential under
+  `allow_all_uris` or an `authorized_uris` entry that leaves the host to the
+  caller. Needs `@appstrate/afps-shared` `isHostUnboundedUriPattern` /
+  `injectsHttpCredential`. (#1641)
+
 ## [13.0.0] — 2026-09-30
 
 ### Added

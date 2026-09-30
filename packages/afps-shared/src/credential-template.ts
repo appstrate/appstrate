@@ -76,6 +76,26 @@ export function parseUrlFormPattern(pattern: string): { field: string; suffix: s
   return { field: head[1]!, suffix };
 }
 
+/** `scheme://authority` of an `authorized_uris` entry; the scheme may be a `*`/`**` glob. */
+const PATTERN_AUTHORITY = /^(?:[A-Za-z][A-Za-z0-9+.-]*|\*{1,2}):\/\/([^/?#]*)/;
+
+/**
+ * Whether an `authorized_uris` entry lets the caller pick the host: a wildcard in either of the
+ * host's last two labels (`https://**`, `*://*`, `https://*.com/**`, `https://example.*`), or a
+ * glob with no `scheme://` at all. A `{$credential.<field>}` host is bounded: the connection, not
+ * the call, supplies it.
+ */
+export function isHostUnboundedUriPattern(pattern: string): boolean {
+  if (parseUrlFormPattern(pattern)) return false;
+  const literal = pattern.replace(CREDENTIAL_REF, "x");
+  const authority = PATTERN_AUTHORITY.exec(literal)?.[1];
+  if (authority === undefined) return literal.includes("*");
+  const host = authority.replace(/^[^@]*@/, "").replace(/:[^:\]]*$/, "");
+  if (!host.includes("*")) return false;
+  const labels = host.split(".");
+  return labels.length < 3 || labels.slice(-2).some((label) => label.includes("*"));
+}
+
 /**
  * Absolute http(s) URL, no userinfo/`#`/`*`/empty `?`, as origin + path (a root path drops). A
  * query is kept only for a bare entry (`allowQuery`), which is an exact match it cannot widen.

@@ -4,6 +4,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   credentialTemplateRefs,
+  isHostUnboundedUriPattern,
   parseUrlFormPattern,
   renderAuthorizedUris,
   unrenderableAuthorizedUriFields,
@@ -245,5 +246,44 @@ describe("unrenderableAuthorizedUriFields", () => {
 
   it("ignores untemplated patterns", () => {
     expect(unrenderableAuthorizedUriFields(["https://api.example.com/**"], {})).toEqual([]);
+  });
+});
+
+describe("isHostUnboundedUriPattern", () => {
+  it("is false when the entry names its host, a subdomain glob included", () => {
+    for (const pattern of [
+      "https://api.example.com/**",
+      "https://*.example.com/**",
+      "https://api-*.example.com:*/v1/*",
+      "**://api.example.com/**",
+      "http://[::1]:8080/**",
+      "https://{$credential.subdomain}.zendesk.com/**",
+      "https://{$credential.host}/**",
+      "{$credential.site_url}/**",
+      "{$credential.webhook_url}",
+      "api.example.com/path",
+    ]) {
+      expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, false]);
+    }
+  });
+
+  it("is true when the caller picks the registrable host", () => {
+    for (const pattern of [
+      "https://**",
+      "https://**/health",
+      "*://**",
+      "https://*",
+      "https://*.com/**",
+      "https://api*.io/**",
+      "https://example.*/**",
+      "https://*.*/**",
+      "https://user@*/**",
+      "https://*:443/",
+      "https://{$credential.name}.*/**",
+      "**",
+      "*/**",
+    ]) {
+      expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, true]);
+    }
   });
 });

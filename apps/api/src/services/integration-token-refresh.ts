@@ -230,11 +230,9 @@ async function doRefresh(
       // token is expired past the grace window, so a transient upstream blip on
       // a still-valid token never bricks the connection.
       const env = getEnv();
-      await recordIntegrationRefreshFailure(
-        connectionId,
-        env.INTEGRATION_REFRESH_MAX_FAILURES,
-        env.INTEGRATION_REFRESH_GRACE_SECONDS,
-      );
+      await recordIntegrationRefreshFailure(connectionId, env.INTEGRATION_REFRESH_MAX_FAILURES, {
+        graceSeconds: env.INTEGRATION_REFRESH_GRACE_SECONDS,
+      });
     }
     throw err;
   }

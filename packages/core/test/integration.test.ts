@@ -33,6 +33,7 @@ import {
   resolveIntegrationToolCatalog,
   selectedApiCallConfigs,
   findNonSnakeCaseIdentityClaimKeys,
+  findUnboundedInjectedCredentials,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
 import { TOOL_NAME_MAX_LEN } from "../src/naming.ts";
@@ -840,6 +841,65 @@ describe("findNonSnakeCaseIdentityClaimKeys — write-path identity key casing",
     expect(findNonSnakeCaseIdentityClaimKeys(withClaims({ account_id: "$.id" }))).toEqual([]);
     expect(findNonSnakeCaseIdentityClaimKeys(withLogin(["user_id"]))).toEqual([]);
     expect(findNonSnakeCaseIdentityClaimKeys(null)).toEqual([]);
+  });
+});
+
+describe("findUnboundedInjectedCredentials — write-path allowlist bound", () => {
+  const HTTP = { http: { in: "header", name: "Authorization", value: "{$credential.token}" } };
+  const withAuth = (auth: Record<string, unknown>) => ({ auths: { primary: auth } });
+  const paths = (auth: Record<string, unknown>) =>
+    findUnboundedInjectedCredentials(withAuth(auth)).map((v) => v.path.join("."));
+
+  it("accepts an injecting auth whose authorized_uris name the host", () => {
+    for (const authorized_uris of [
+      ["https://api.zoom.us/**"],
+      ["https://*.salesforce.com/**", "**://api.example.com/v1/*"],
+      ["{$credential.site_url}/**", "https://{$credential.subdomain}.zendesk.com/**"],
+    ]) {
+      expect(paths({ type: "custom", authorized_uris, delivery: HTTP })).toEqual([]);
+    }
+  });
+
+  it("refuses allow_all_uris on an explicit delivery.http or an auth-type default header", () => {
+    expect(paths({ type: "custom", allow_all_uris: true, delivery: HTTP })).toEqual([
+      "auths.primary.allow_all_uris",
+    ]);
+    for (const type of ["oauth2", "api_key", "basic"]) {
+      expect(paths({ type, allow_all_uris: true })).toEqual(["auths.primary.allow_all_uris"]);
+    }
+  });
+
+  it("refuses every authorized_uris entry that leaves the host to the caller", () => {
+    const authorized_uris = [
+      "https://api.example.com/**",
+      "https://**",
+      "*://**",
+      "**",
+      "https://*.com/**",
+      "https://example.*/**",
+      "https://*:443/**",
+    ];
+    expect(paths({ type: "api_key", authorized_uris })).toEqual(
+      [1, 2, 3, 4, 5, 6].map((i) => `auths.primary.authorized_uris.${i}`),
+    );
+  });
+
+  it("leaves an auth the proxy injects nothing for to the call-time guard", () => {
+    for (const delivery of [undefined, { http: { name: "" } }]) {
+      expect(
+        paths({ type: "custom", allow_all_uris: true, authorized_uris: ["https://**"], delivery }),
+      ).toEqual([]);
+    }
+  });
+
+  it("is not a read-path rule, and finds nothing on a non-manifest", () => {
+    const manifest = baseManifest();
+    const auths = manifest.auths as Record<string, Record<string, unknown>>;
+    for (const auth of Object.values(auths)) auth.allow_all_uris = true;
+    expect(validateManifest(manifest).valid).toBe(true);
+    expect(findUnboundedInjectedCredentials(manifest).length).toBeGreaterThan(0);
+    expect(findUnboundedInjectedCredentials(null)).toEqual([]);
+    expect(findUnboundedInjectedCredentials({ auths: { primary: null } })).toEqual([]);
   });
 });
 

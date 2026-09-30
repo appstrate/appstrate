@@ -37,9 +37,14 @@ import {
 } from "@appstrate/afps-shared/api-tool-naming";
 import {
   credentialTemplateRefs,
+  isHostUnboundedUriPattern,
   parseUrlFormPattern,
 } from "@appstrate/afps-shared/credential-template";
-import { isBareAuthSchemePrefix } from "@appstrate/afps-shared/delivery-http";
+import {
+  injectsHttpCredential,
+  isBareAuthSchemePrefix,
+  type AfpsHttpDelivery,
+} from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
@@ -178,6 +183,57 @@ export function findNonSnakeCaseIdentityClaimKeys(manifest: unknown): IdentityCl
         check(name, ["auths", authKey, "connect", "login", "identity_outputs", index]);
       });
     }
+  }
+  return found;
+}
+
+/** One auth whose proxy-injected credential is not held to a bounded set of hosts. */
+export interface UnboundedInjectedCredentialViolation {
+  authKey: string;
+  path: (string | number)[];
+  message: string;
+}
+
+/**
+ * List the auths that inject a credential over HTTP (`delivery.http`, or the auth type's default
+ * header) while declaring `allow_all_uris: true` or an `authorized_uris` entry whose host the
+ * caller picks (`isHostUnboundedUriPattern`). A WRITE-path policy, like
+ * {@link findNonSnakeCaseIdentityClaimKeys}; the credential proxies refuse the same calls at run
+ * time (`credentialUrlPolicy`, `@appstrate/afps-runtime/resolvers`).
+ */
+export function findUnboundedInjectedCredentials(
+  manifest: unknown,
+): UnboundedInjectedCredentialViolation[] {
+  if (typeof manifest !== "object" || manifest === null) return [];
+  const auths = (manifest as { auths?: unknown }).auths;
+  if (typeof auths !== "object" || auths === null) return [];
+  const found: UnboundedInjectedCredentialViolation[] = [];
+  for (const [authKey, auth] of Object.entries(auths)) {
+    const a = (auth ?? {}) as {
+      type?: unknown;
+      allow_all_uris?: unknown;
+      authorized_uris?: unknown;
+      delivery?: { http?: AfpsHttpDelivery };
+    };
+    if (!injectsHttpCredential(typeof a.type === "string" ? a.type : "", a.delivery?.http)) {
+      continue;
+    }
+    if (a.allow_all_uris === true) {
+      found.push({
+        authKey,
+        path: ["auths", authKey, "allow_all_uris"],
+        message: `auth '${authKey}' injects a credential, so it cannot set allow_all_uris; list its hosts in authorized_uris`,
+      });
+    }
+    if (!Array.isArray(a.authorized_uris)) continue;
+    a.authorized_uris.forEach((pattern, index) => {
+      if (typeof pattern !== "string" || !isHostUnboundedUriPattern(pattern)) return;
+      found.push({
+        authKey,
+        path: ["auths", authKey, "authorized_uris", index],
+        message: `authorized_uris entry "${pattern}" of auth '${authKey}', which injects a credential, does not bound the host; name it (https://api.example.com/**, https://*.example.com/**) or use "{$credential.<field>}/**"`,
+      });
+    });
   }
   return found;
 }

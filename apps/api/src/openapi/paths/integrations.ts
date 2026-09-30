@@ -237,7 +237,7 @@ export const oauthClientSchema = {
       type: "string",
       format: "uuid",
       description:
-        "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.",
+        "Row UUID — the `client_ref` handle passed to the update / delete / default-client routes.",
     },
     spaceId: {
       type: ["string", "null"],
@@ -283,21 +283,32 @@ export const oauthClientCreateBodySchema = {
 
 export const oauthClientUpdateBodySchema = {
   type: "object",
-  required: ["client_id"],
+  description:
+    "Merge semantics (RFC 7396): an absent field is left unchanged. `client_secret` and `token_endpoint_auth_method` are written together: sending neither keeps both.",
   properties: {
-    client_id: { type: "string", minLength: 1 },
+    client_id: {
+      type: "string",
+      minLength: 1,
+      description:
+        "Immutable. Accepted only when equal to the stored value; a different one is refused with 409 `client_id_immutable` — the connections this client minted can only refresh with the `client_id` their tokens were issued to. A new `client_id` is a new client: register it, make it the default, then delete this one.",
+    },
     client_secret: {
       type: "string",
       description:
-        "OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable.",
+        "OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400.",
     },
     token_endpoint_auth_method: {
       type: "string",
       enum: ["client_secret_post", "client_secret_basic", "none"],
       description:
-        "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies.",
+        "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Sent with a `client_secret`, omitting it leaves the method undeclared (the manifest's value applies); sent alone, it changes the method of the stored secret.",
     },
-    redirect_uri: { type: "string", format: "uri" },
+    redirect_uri: {
+      type: ["string", "null"],
+      format: "uri",
+      description:
+        "Omit to keep the stored value; `null` clears it (the platform callback applies).",
+    },
   },
   additionalProperties: false,
 } as const;
@@ -665,13 +676,14 @@ export const integrationsPaths = {
     },
   },
   "/api/integrations/{packageId}/oauth-clients/{clientId}": {
-    put: {
+    patch: {
       operationId: "rotateIntegrationOAuthClient",
       tags: ["Integrations"],
-      summary: "Rotate a custom OAuth client's credentials",
+      summary:
+        "Update a custom OAuth client (rotate its secret, change its redirect URI or method)",
       description:
-        "Rotates one of this space's custom clients in place, by its id (an " +
-        "org-level client id is a 404 here). Auto-provisioned " +
+        "Updates one of this space's custom clients in place, by its id (an " +
+        "org-level client id is a 404 here). Its `client_id` cannot change (409). Auto-provisioned " +
         "(DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -689,13 +701,23 @@ export const integrationsPaths = {
       },
       responses: {
         "200": {
-          description: "Rotated",
+          description: "Updated",
           headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: oauthClientSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`client_id_immutable` — the body names a different `client_id`; register it as a new client instead",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {

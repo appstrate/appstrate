@@ -23,6 +23,7 @@ import {
 import { seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { eq, and } from "drizzle-orm";
 import {
+  auditEvents,
   integrationConnections,
   integrationOauthClients,
   spacePackages,
@@ -977,15 +978,15 @@ describe("OAuth client CRUD", () => {
     const custom = clients.find((c) => c.source === "custom");
     expect(custom).toMatchObject({ client_id: "abc", is_default: true });
 
-    // Rotate by id
+    // Rotate the secret by id
     const rotate = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: "abc2", client_secret: "different" }),
+      body: JSON.stringify({ client_secret: "different" }),
     });
     expect(rotate.status).toBe(200);
     clients = await listClients();
-    expect(clients.find((c) => c.source === "custom")?.client_id).toBe("abc2");
+    expect(clients.find((c) => c.source === "custom")?.client_id).toBe("abc");
 
     // Delete by id
     const del = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
@@ -1222,9 +1223,9 @@ describe("OAuth client CRUD", () => {
       .where(eq(integrationOauthClients.id, created.id));
 
     const rotate = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: "abc", redirect_uri: "https://example.com/cb" }),
+      body: JSON.stringify({ redirect_uri: "https://example.com/cb" }),
     });
     expect(rotate.status).toBe(200);
 
@@ -1237,10 +1238,95 @@ describe("OAuth client CRUD", () => {
     expect(after!.redirectUri).toBe("https://example.com/cb");
   });
 
+  it("PATCH keeps an absent redirect_uri and clears a null one; PUT is gone", async () => {
+    const created = await createClient("abc", "shh");
+    const patch = (body: Record<string, unknown>, method = "PATCH") =>
+      app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
+        method,
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const redirectUri = async () =>
+      (
+        await db
+          .select({ redirectUri: integrationOauthClients.redirectUri })
+          .from(integrationOauthClients)
+          .where(eq(integrationOauthClients.id, created.id))
+      )[0]!.redirectUri;
+
+    expect((await patch({ redirect_uri: "https://example.com/cb" })).status).toBe(200);
+    expect((await patch({ client_secret: "rotated" })).status).toBe(200);
+    expect(await redirectUri()).toBe("https://example.com/cb");
+    expect((await patch({ redirect_uri: null })).status).toBe(200);
+    expect(await redirectUri()).toBeNull();
+    expect((await patch({ client_secret: "again" }, "PUT")).status).toBe(404);
+  });
+
+  it("refuses a client_id change with 409 and accepts the stored value", async () => {
+    const created = await createClient("abc", "shh");
+    const patch = (body: Record<string, unknown>) =>
+      app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    const changed = await patch({ client_id: "abc2", client_secret: "new" });
+    expect(changed.status).toBe(409);
+    const problem = (await changed.json()) as { code?: string; detail?: string };
+    expect(problem.code).toBe("client_id_immutable");
+    expect(problem.detail).toContain("new OAuth client");
+    const [row] = await db
+      .select()
+      .from(integrationOauthClients)
+      .where(eq(integrationOauthClients.id, created.id));
+    expect(row!.clientId).toBe("abc");
+
+    expect((await patch({ client_id: "abc", client_secret: "new" })).status).toBe(200);
+  });
+
+  it("audits create, update and delete with before/after and never the secret", async () => {
+    const created = await createClient("abc", "first-secret");
+    await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_secret: "second-secret",
+        redirect_uri: "https://example.com/cb",
+      }),
+    });
+    await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+
+    const rows = await db.select().from(auditEvents).where(eq(auditEvents.orgId, ctx.orgId));
+    const byAction = (action: string) => rows.find((r) => r.action === action);
+    const snapshot = { clientId: "abc", tokenEndpointAuthMethod: null, hasClientSecret: true };
+    expect(byAction("integration.oauth_client.created")?.after).toEqual({
+      ...snapshot,
+      redirectUri: null,
+    });
+    const updated = byAction("integration.oauth_client.updated");
+    expect(updated?.before).toEqual({ ...snapshot, redirectUri: null });
+    expect(updated?.after).toEqual({
+      ...snapshot,
+      redirectUri: "https://example.com/cb",
+      clientSecretReplaced: true,
+    });
+    expect(byAction("integration.oauth_client.deleted")?.before).toEqual({
+      ...snapshot,
+      redirectUri: "https://example.com/cb",
+    });
+    const serialized = JSON.stringify(rows);
+    expect(serialized).not.toContain("first-secret");
+    expect(serialized).not.toContain("second-secret");
+  });
+
   it("rotation with an empty client_secret and no public declaration is refused (400)", async () => {
     const created = await createClient("abc", "shh");
     const rotate = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ client_id: "abc", client_secret: "" }),
     });
@@ -1259,9 +1345,9 @@ describe("OAuth client CRUD", () => {
     const res = await app.request(
       "/api/integrations/@myorg/gmail/oauth-clients/11111111-1111-4111-8111-111111111111",
       {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ client_id: "x", client_secret: "y" }),
+        body: JSON.stringify({ client_secret: "y" }),
       },
     );
     expect(res.status).toBe(404);

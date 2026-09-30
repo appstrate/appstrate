@@ -31,7 +31,13 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { flushRedis } from "../../helpers/redis.ts";
-import { seedApiKey, seedPackage, seedRun, seedSpace } from "../../helpers/seed.ts";
+import {
+  seedApiKey,
+  seedPackage,
+  seedRun,
+  seedSpace,
+  seedPublishedVersion,
+} from "../../helpers/seed.ts";
 import {
   spacePackages,
   integrationConnections,
@@ -103,6 +109,7 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
     homeSpaceId: ctx.defaultSpaceId,
     draftManifest: gmailManifest(),
   });
+  await seedPublishedVersion(INTEGRATION_ID, "1.0.0");
   // Activate the integration in the default space.
   await db.insert(spacePackages).values({
     spaceId: ctx.defaultSpaceId,
@@ -360,6 +367,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
       homeSpaceId: ctx.defaultSpaceId,
       draftManifest: gmailManifest(),
     });
+    await seedPublishedVersion(INTEGRATION_ID, "1.0.0");
     await db.insert(spacePackages).values({
       spaceId: ctx.defaultSpaceId,
       packageId: INTEGRATION_ID,
@@ -398,6 +406,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
       source: "local",
       draftManifest: gmailManifest(),
     });
+    await seedPublishedVersion(INTEGRATION_ID, "1.0.0");
 
     let upstreamCalls = 0;
     mockUpstream(async () => {
@@ -771,6 +780,7 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
       homeSpaceId: ctx.defaultSpaceId,
       draftManifest: gmailManifest(),
     });
+    await seedPublishedVersion(INTEGRATION_ID, "1.0.0");
     await db
       .insert(spacePackages)
       .values({ spaceId: ctx.defaultSpaceId, packageId: INTEGRATION_ID });

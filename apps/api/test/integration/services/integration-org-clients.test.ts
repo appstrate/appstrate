@@ -444,7 +444,7 @@ describe("org-level integration OAuth clients", () => {
   });
 
   describe("update / delete by id", () => {
-    const input = { clientId: "rotated", clientSecret: "new" };
+    const input = { clientSecret: "new", redirectUri: "https://example.com/cb" };
 
     it("update matches the tier and the integration (404 otherwise)", async () => {
       const orgRow = await seedClient({ spaceId: null, clientId: "org-client" });
@@ -459,8 +459,21 @@ describe("org-level integration OAuth clients", () => {
           status: 404,
         });
       }
-      const rotated = await updateIntegrationOAuthClient(org, INTEGRATION, orgRow, input);
-      expect(rotated).toMatchObject({ client_id: "rotated", spaceId: null });
+      const { previous, client } = await updateIntegrationOAuthClient(
+        org,
+        INTEGRATION,
+        orgRow,
+        input,
+      );
+      expect(previous).toMatchObject({ client_id: "org-client", redirect_uri: null });
+      expect(client).toMatchObject({
+        client_id: "org-client",
+        redirect_uri: "https://example.com/cb",
+        spaceId: null,
+      });
+      await expect(
+        updateIntegrationOAuthClient(org, INTEGRATION, orgRow, { clientId: "other" }),
+      ).rejects.toMatchObject({ status: 409, code: "client_id_immutable" });
     });
 
     it("delete matches the tier and the integration (404 otherwise)", async () => {
@@ -475,7 +488,8 @@ describe("org-level integration OAuth clients", () => {
           status: 404,
         });
       }
-      expect(await deleteIntegrationOAuthClient(spaceA, INTEGRATION, spaceRow)).toEqual({
+      expect(await deleteIntegrationOAuthClient(spaceA, INTEGRATION, spaceRow)).toMatchObject({
+        client: { id: spaceRow, client_id: "space-a" },
         deletedConnections: 0,
         disabledScheduleIds: [],
       });
@@ -486,7 +500,7 @@ describe("org-level integration OAuth clients", () => {
       await seedConnection(spaceA.spaceId, ctx.user.id, orgRow);
       await seedConnection(spaceB.spaceId, ctx.user.id, orgRow);
       await seedConnection(otherSpace.spaceId, other.user.id, orgRow);
-      expect(await deleteIntegrationOAuthClient(org, INTEGRATION, orgRow)).toEqual({
+      expect(await deleteIntegrationOAuthClient(org, INTEGRATION, orgRow)).toMatchObject({
         deletedConnections: 2,
         disabledScheduleIds: [],
       });

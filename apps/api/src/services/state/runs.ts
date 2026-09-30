@@ -1027,6 +1027,8 @@ export async function getRunAttribution(
   apiKeyId: string | null;
   /** The kickoff's connection snapshot — what a credential-proxy call naming this run may reach. */
   resolvedConnections: typeof runs.$inferSelect.resolvedConnections;
+  /** The kickoff's frozen integration versions — what a credential-proxy call naming this run reads. */
+  resolvedIntegrationVersions: typeof runs.$inferSelect.resolvedIntegrationVersions;
 } | null> {
   const [row] = await db
     .select({
@@ -1040,6 +1042,7 @@ export async function getRunAttribution(
       endUserId: runs.endUserId,
       apiKeyId: runs.apiKeyId,
       resolvedConnections: runs.resolvedConnections,
+      resolvedIntegrationVersions: runs.resolvedIntegrationVersions,
     })
     .from(runs)
     .where(and(eq(runs.id, runId), eq(runs.orgId, orgId)))

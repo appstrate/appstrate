@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 import { loadSystemRegistry } from "../lib/system-registry.ts";
+import { isUuid } from "../lib/db-helpers.ts";
 import { modelCostSchema, modelInputModalitySchema } from "@appstrate/core/module";
 import { checkAliasInvariants } from "@appstrate/core/model-swap";
 import type { ModelMetadata } from "@appstrate/shared-types";
@@ -71,6 +72,19 @@ let systemModelProviderCredentials: Map<string, SystemModelProviderCredentialDef
 let systemModels: Map<string, ModelDefinition> | null = null;
 
 // --- Parsing ---
+
+/**
+ * System ids resolve before org rows (`loadModel`, `loadInferenceCredentials`), and an org row's
+ * id is a UUID: a UUID-shaped system id would shadow it. Boot crash, like the other declared-but-
+ * invalid entries.
+ */
+function assertSystemIdNotUuid(id: string, what: string): void {
+  if (!isUuid(id)) return;
+  throw new Error(
+    `[model-registry] SYSTEM_PROVIDER_KEYS ${what} id "${id}" is UUID-shaped, the shape of an ` +
+      `organization's own ${what} ids, which it would shadow. Rename it.`,
+  );
+}
 
 const rawModelSchema = z.object({
   id: z.string().optional(),
@@ -177,6 +191,7 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
       return { ...e, apiKey: e.apiKey ? "***" : undefined };
     },
     toDefinition: (validCredential) => {
+      assertSystemIdNotUuid(validCredential.id, "model provider credential");
       const provider = getModelProvider(validCredential.providerId);
       if (!provider) {
         logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping entry — unknown providerId", {
@@ -232,6 +247,7 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
             continue;
           }
           const validM = mResult.data;
+          if (validM.id !== undefined) assertSystemIdNotUuid(validM.id, "model");
           if (restrictsToOffer(provider) && !lookupCatalogModel(provider, validM.modelId)) {
             throw new Error(
               `[model-registry] SYSTEM_PROVIDER_KEYS entry "${validCredential.id}" declares model ` +

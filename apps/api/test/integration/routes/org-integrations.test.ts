@@ -174,12 +174,18 @@ describe("/api/org-integrations — org-level OAuth clients", () => {
     expect(relisted.filter((c) => c.is_default).map((c) => c.client_ref)).toEqual([b]);
 
     const rotated = await app.request(`${ORG_BASE}/oauth-clients/${a}`, {
-      method: "PUT",
+      method: "PATCH",
+      headers: json,
+      body: JSON.stringify({ client_secret: "rotated" }),
+    });
+    expect(rotated.status).toBe(200);
+    expect(((await rotated.json()) as { client_id: string }).client_id).toBe("org-a");
+    const renamed = await app.request(`${ORG_BASE}/oauth-clients/${a}`, {
+      method: "PATCH",
       headers: json,
       body: JSON.stringify({ client_id: "org-a-2" }),
     });
-    expect(rotated.status).toBe(200);
-    expect(((await rotated.json()) as { client_id: string }).client_id).toBe("org-a-2");
+    expect(renamed.status).toBe(409);
 
     const deleted = await app.request(`${ORG_BASE}/oauth-clients/${a}`, {
       method: "DELETE",

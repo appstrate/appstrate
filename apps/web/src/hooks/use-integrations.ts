@@ -301,8 +301,8 @@ function orgClientPath({ packageId, clientId }: ClientPath["path"]) {
 }
 type CreateOAuthClientBody =
   paths["/api/integrations/{packageId}/auths/{authKey}/oauth-clients"]["post"]["requestBody"]["content"]["application/json"];
-type RotateOAuthClientBody =
-  paths["/api/integrations/{packageId}/oauth-clients/{clientId}"]["put"]["requestBody"]["content"]["application/json"];
+type UpdateOAuthClientBody =
+  paths["/api/integrations/{packageId}/oauth-clients/{clientId}"]["patch"]["requestBody"]["content"]["application/json"];
 type SetDefaultClientBody =
   paths["/api/integrations/{packageId}/auths/{authKey}/default-client"]["put"]["requestBody"]["content"]["application/json"];
 
@@ -375,15 +375,15 @@ export function useCreateIntegrationOAuthClient(tier: IntegrationClientTier) {
   });
 }
 
-/** Rotate one custom client's credentials in place, by its id. */
-export function useRotateIntegrationOAuthClient(tier: IntegrationClientTier) {
+/** Update one custom client in place, by its id (its `client_id` is immutable). */
+export function useUpdateIntegrationOAuthClient(tier: IntegrationClientTier) {
   const onSuccess = useClientMutationSuccess("integration.oauthClient.save.success");
   return useMutation({
-    mutationFn: async (vars: { params: ClientPath; body: RotateOAuthClientBody }) => {
+    mutationFn: async (vars: { params: ClientPath; body: UpdateOAuthClientBody }) => {
       const { data } =
         tier === "space"
-          ? await client.PUT("/api/integrations/{packageId}/oauth-clients/{clientId}", vars)
-          : await client.PUT("/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}", {
+          ? await client.PATCH("/api/integrations/{packageId}/oauth-clients/{clientId}", vars)
+          : await client.PATCH("/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}", {
               params: { path: orgClientPath(vars.params.path) },
               body: vars.body,
             });

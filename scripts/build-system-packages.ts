@@ -22,7 +22,8 @@
  * only place that notices a spec bump leaving them behind.
  *
  * No source may inject a credential over HTTP (`delivery.http` or the auth-type
- * default) under `allow_all_uris: true` (`findAllowAllInjectedCredential`, #1628).
+ * default) without an allowlist that names its hosts (`findUnboundedInjectedCredentials`,
+ * `@appstrate/core/integration` — the rule every manifest write path applies).
  *
  * Usage:
  *   bun run scripts/build-system-packages.ts           # build archives
@@ -33,7 +34,7 @@ import { join, posix, relative, sep } from "node:path";
 import { AFPS_SCHEMA_VERSION, validateManifest } from "@appstrate/core/validation";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { resolveAfpsHttpDelivery, type AfpsHttpDelivery } from "@appstrate/connect/afps-delivery";
+import { findUnboundedInjectedCredentials } from "@appstrate/core/integration";
 
 /**
  * Recursively collect every regular file under `root` into the zip
@@ -89,35 +90,6 @@ export function findSchemaVersionDrift(
   return drift;
 }
 
-type GatedAuth = {
-  type?: unknown;
-  allow_all_uris?: unknown;
-  delivery?: { http?: AfpsHttpDelivery };
-};
-
-/**
- * Every auth that injects a credential over HTTP while declaring `allow_all_uris: true` — the
- * proxy would send that secret to any host a caller names (#1628). "Injects" is what the delivery
- * engine plans: an explicit `delivery.http`, or its auth-type default (oauth2 Bearer, api_key
- * X-Api-Key, basic). Pure, like `findSchemaVersionDrift`.
- */
-export function findAllowAllInjectedCredential(
-  manifests: Iterable<readonly [dirName: string, manifest: unknown]>,
-) {
-  const offenders: { dirName: string; authKey: string }[] = [];
-  for (const [dirName, manifest] of manifests) {
-    const auths = (manifest as { auths?: unknown } | null)?.auths;
-    if (typeof auths !== "object" || auths === null) continue;
-    for (const [authKey, auth] of Object.entries(auths)) {
-      const a = auth as GatedAuth | null;
-      if (a?.allow_all_uris !== true) continue;
-      const type = typeof a.type === "string" ? a.type : "";
-      if (resolveAfpsHttpDelivery(type, {}, a.delivery?.http)) offenders.push({ dirName, authKey });
-    }
-  }
-  return offenders;
-}
-
 const checkOnly = process.argv.includes("--check");
 const SOURCES_DIR = join(import.meta.dir, "system-packages");
 const OUTPUT_DIR = join(import.meta.dir, "../system-packages");
@@ -164,17 +136,17 @@ async function main() {
     process.exit(1);
   }
 
-  const openInjection = findAllowAllInjectedCredential(manifests);
+  const openInjection = [...manifests].flatMap(([dirName, manifest]) =>
+    findUnboundedInjectedCredentials(manifest).map((v) => ({ dirName, ...v })),
+  );
   if (openInjection.length > 0) {
     console.error(
-      `\nALLOW ALL URIS: ${openInjection.length} auth(s) inject a credential over HTTP under allow_all_uris: true:`,
+      `\nUNBOUNDED ALLOWLIST: ${openInjection.length} violation(s) of an auth that injects a credential over HTTP:`,
     );
-    for (const { dirName, authKey } of openInjection) {
-      console.error(`  - ${dirName} auths.${authKey}`);
-    }
+    for (const { dirName, message } of openInjection) console.error(`  - ${dirName}: ${message}`);
     console.error(
-      `\nThe proxy would send that credential to any host a caller names. Replace allow_all_uris\n` +
-        `with authorized_uris — a literal host, or "{$credential.<field>}/**" for a per-connection one.\n`,
+      `\nThe proxy would send that credential to a host the caller names. Declare authorized_uris\n` +
+        `with a named host, or "{$credential.<field>}/**" for a per-connection one.\n`,
     );
     process.exit(1);
   }

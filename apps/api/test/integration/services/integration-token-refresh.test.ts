@@ -449,7 +449,8 @@ describe("integration refresh-failure escalation", () => {
     const connId = await seedConn({ expiresAt: new Date(Date.now() + HOUR_MS) });
 
     // Drive the streak to (and past) the threshold.
-    for (let i = 0; i < 4; i++) await recordIntegrationRefreshFailure(connId, 3, 3600);
+    for (let i = 0; i < 4; i++)
+      await recordIntegrationRefreshFailure(connId, 3, { graceSeconds: 3600 });
 
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(4);
@@ -460,7 +461,8 @@ describe("integration refresh-failure escalation", () => {
     // Expired 10 min ago; grace is 1h → not yet escalatable.
     const connId = await seedConn({ expiresAt: new Date(Date.now() - 10 * 60_000) });
 
-    for (let i = 0; i < 5; i++) await recordIntegrationRefreshFailure(connId, 3, 3600);
+    for (let i = 0; i < 5; i++)
+      await recordIntegrationRefreshFailure(connId, 3, { graceSeconds: 3600 });
 
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(5);
@@ -471,11 +473,11 @@ describe("integration refresh-failure escalation", () => {
     // Expired 2h ago, grace 1h → past grace.
     const connId = await seedConn({ expiresAt: new Date(Date.now() - 2 * HOUR_MS) });
 
-    await recordIntegrationRefreshFailure(connId, 3, 3600); // 1 — below threshold
+    await recordIntegrationRefreshFailure(connId, 3, { graceSeconds: 3600 }); // 1 — below threshold
     expect((await readRow(connId)).needsReconnection).toBe(false);
-    await recordIntegrationRefreshFailure(connId, 3, 3600); // 2 — below threshold
+    await recordIntegrationRefreshFailure(connId, 3, { graceSeconds: 3600 }); // 2 — below threshold
     expect((await readRow(connId)).needsReconnection).toBe(false);
-    await recordIntegrationRefreshFailure(connId, 3, 3600); // 3 — hits threshold
+    await recordIntegrationRefreshFailure(connId, 3, { graceSeconds: 3600 }); // 3 — hits threshold
 
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(3);
@@ -488,7 +490,7 @@ describe("integration refresh-failure escalation", () => {
       needsReconnection: true, // but already flagged (e.g. revoke)
     });
 
-    await recordIntegrationRefreshFailure(connId, 3, 3600);
+    await recordIntegrationRefreshFailure(connId, 3, { graceSeconds: 3600 });
 
     expect((await readRow(connId)).needsReconnection).toBe(true);
   });

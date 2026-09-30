@@ -248,6 +248,7 @@ export function createCredentialProxyRouter() {
         // duplex: "half" and 401-retry is suppressed (body unreplayable);
         // authRefreshed is surfaced on the result instead.
         const result = await proxyCall({
+          orgId,
           spaceId,
           actor,
           ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),

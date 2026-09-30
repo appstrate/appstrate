@@ -790,9 +790,9 @@ describe("integrations:configure is never grantable to an API key", () => {
     const clientId = ((await registered.json()) as { id: string }).id;
 
     const rotated = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${clientId}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: asKey,
-      body: JSON.stringify({ client_id: "abc2", client_secret: "shh2" }),
+      body: JSON.stringify({ client_secret: "shh2" }),
     });
     expect(rotated.status).toBe(403);
 
@@ -825,9 +825,9 @@ describe("integrations:configure is never grantable to an API key", () => {
     const client = (await created.json()) as { id: string };
 
     const rotated = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${client.id}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: "abc2", client_secret: "shh2" }),
+      body: JSON.stringify({ client_secret: "shh2" }),
     });
     expect(rotated.status).toBe(200);
 

@@ -277,10 +277,12 @@ describe("public OAuth client is declared, not inferred", () => {
         clientId: "cid",
         clientSecret: "shh",
       });
-      const rotated = await updateIntegrationOAuthClient(scope, INTEGRATION, created.id, {
-        clientId: "cid",
-        redirectUri: "https://example.com/cb",
-      });
+      const { client: rotated } = await updateIntegrationOAuthClient(
+        scope,
+        INTEGRATION,
+        created.id,
+        { redirectUri: "https://example.com/cb" },
+      );
       expect(rotated.has_client_secret).toBe(true);
       expect(rotated.token_endpoint_auth_method).toBeNull();
       const row = await storedRow(created.id);
@@ -293,10 +295,12 @@ describe("public OAuth client is declared, not inferred", () => {
         clientId: "cid",
         clientSecret: "shh",
       });
-      const rotated = await updateIntegrationOAuthClient(scope, INTEGRATION, created.id, {
-        clientId: "cid",
-        tokenEndpointAuthMethod: "none",
-      });
+      const { client: rotated } = await updateIntegrationOAuthClient(
+        scope,
+        INTEGRATION,
+        created.id,
+        { tokenEndpointAuthMethod: "none" },
+      );
       expect(rotated.has_client_secret).toBe(false);
       expect(rotated.token_endpoint_auth_method).toBe("none");
       expect((await storedRow(created.id)).clientSecretEncrypted).toBe("");
@@ -312,10 +316,12 @@ describe("public OAuth client is declared, not inferred", () => {
         clientSecret: "shh",
       });
       const before = (await storedRow(created.id)).clientSecretEncrypted;
-      const updated = await updateIntegrationOAuthClient(scope, INTEGRATION, created.id, {
-        clientId: "cid",
-        tokenEndpointAuthMethod: "client_secret_basic",
-      });
+      const { client: updated } = await updateIntegrationOAuthClient(
+        scope,
+        INTEGRATION,
+        created.id,
+        { tokenEndpointAuthMethod: "client_secret_basic" },
+      );
       expect(updated.token_endpoint_auth_method).toBe("client_secret_basic");
       expect(updated.has_client_secret).toBe(true);
       const row = await storedRow(created.id);
@@ -332,7 +338,6 @@ describe("public OAuth client is declared, not inferred", () => {
       });
       await expect(
         updateIntegrationOAuthClient(scope, INTEGRATION, created.id, {
-          clientId: "cid",
           tokenEndpointAuthMethod: "client_secret_post",
         }),
       ).rejects.toThrow(/Send the client_secret together with the method/);

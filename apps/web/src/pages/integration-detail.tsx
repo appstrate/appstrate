@@ -116,7 +116,7 @@ import {
   useIntegrationClients,
   useSetDefaultIntegrationClient,
   useCreateIntegrationOAuthClient,
-  useRotateIntegrationOAuthClient,
+  useUpdateIntegrationOAuthClient,
   useDeleteIntegrationOAuthClient,
   usePromoteIntegrationOAuthClient,
   useUpdateIntegrationConnection,
@@ -183,8 +183,8 @@ function OAuthClientModal({
 }) {
   const { t } = useTranslation("settings");
   const create = useCreateIntegrationOAuthClient(tier);
-  const rotate = useRotateIntegrationOAuthClient(tier);
-  const pending = mode === "create" ? create.isPending : rotate.isPending;
+  const update = useUpdateIntegrationOAuthClient(tier);
+  const pending = mode === "create" ? create.isPending : update.isPending;
   const [clientId, setClientId] = useState(existing?.client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [redirectUri, setRedirectUri] = useState(existing?.redirect_uri ?? "");
@@ -222,28 +222,31 @@ function OAuthClientModal({
     // rather than sent as `""` — sending it would clear the stored credential
     // and flip a confidential client public, for an edit that only meant to
     // change the redirect URI.
-    const common = {
-      client_id: clientId,
-      ...(publicClient ? { token_endpoint_auth_method: "none" as const } : {}),
-      ...(redirectUri ? { redirect_uri: redirectUri } : {}),
-    };
+    const method = publicClient ? { token_endpoint_auth_method: "none" as const } : {};
     if (mode === "create") {
       // A public client declares itself with `token_endpoint_auth_method: none`
       // and sends NO secret; a confidential one sends the typed secret. Neither
       // branch ships a blank the server would have to interpret.
+      const common = {
+        client_id: clientId,
+        ...method,
+        ...(redirectUri ? { redirect_uri: redirectUri } : {}),
+      };
       const body = publicClient ? common : { ...common, client_secret: clientSecret };
       create.mutate({ params: { path: { packageId, authKey } }, body }, { onSuccess: onClose });
     } else {
-      // Rotation OMITS an untouched secret field rather than sending `""`.
+      // PATCH: `client_id` is immutable and never sent; a cleared redirect URI
+      // is `null`; an untouched secret field is OMITTED rather than sent as `""`.
       const body = {
-        ...common,
+        ...method,
+        redirect_uri: redirectUri || null,
         ...(publicClient
           ? { client_secret: "" }
           : clientSecret
             ? { client_secret: clientSecret }
             : {}),
       };
-      rotate.mutate(
+      update.mutate(
         { params: { path: { packageId, clientId: existing!.client_ref } }, body },
         { onSuccess: onClose },
       );
@@ -273,6 +276,7 @@ function OAuthClientModal({
             id={`cid-${authKey}`}
             value={clientId}
             onChange={(e) => setClientId(e.target.value)}
+            disabled={mode === "rotate"}
             data-testid={`oauth-clientid-${authKey}`}
           />
         </div>

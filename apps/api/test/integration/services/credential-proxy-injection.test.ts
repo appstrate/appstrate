@@ -79,6 +79,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -121,6 +122,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -165,6 +167,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -206,6 +209,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -261,6 +265,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -310,6 +315,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
     await expect(
       proxyCall({
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         actor: { type: "user", id: ctx.user.id },
         integrationId: packageId,

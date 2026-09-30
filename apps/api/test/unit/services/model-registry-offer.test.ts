@@ -55,4 +55,16 @@ describe("initSystemModelProviderKeys — offer check", () => {
     expect(getSystemModels().has("m-openrouter")).toBe(true);
     expect(getSystemModels().has("m-openai-compatible")).toBe(true);
   });
+
+  it("fails boot on a UUID-shaped system model or credential id, which would shadow an org row", () => {
+    const uuid = "0b9d6f0e-3a51-4c1e-9f55-2f6d8c1a7e42";
+    expect(() =>
+      initSystemModelProviderKeys([
+        { ...key("anthropic", "claude-opus-5"), models: [{ id: uuid, modelId: "claude-opus-5" }] },
+      ]),
+    ).toThrow(`model id "${uuid}" is UUID-shaped`);
+    expect(() =>
+      initSystemModelProviderKeys([{ ...key("anthropic", "claude-opus-5"), id: uuid }]),
+    ).toThrow(`model provider credential id "${uuid}" is UUID-shaped`);
+  });
 });

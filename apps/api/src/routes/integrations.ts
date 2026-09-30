@@ -15,7 +15,7 @@
  *   - `GET    /:packageId/auths/:authKey/clients`    — admin: list available OAuth clients
  *   - `PUT    /:packageId/auths/:authKey/default-client` — admin: choose the default client
  *   - `POST   /:packageId/auths/:authKey/oauth-clients`  — admin: register a custom OAuth client
- *   - `PUT    /:packageId/oauth-clients/:clientId`   — admin: rotate a custom OAuth client
+ *   - `PATCH  /:packageId/oauth-clients/:clientId`   — admin: update a custom OAuth client
  *   - `DELETE /:packageId/oauth-clients/:clientId`   — admin: delete a custom OAuth client
  *   - `POST   /:packageId/oauth-clients/:clientId/promote` — admin: move it to the org tier
  *   - `POST   /:packageId/auths/:authKey/connect/session` — Porte A: mint a hosted
@@ -50,8 +50,10 @@ import {
   handleIntegrationOAuthCallback,
   OAuthCallbackError,
   type IntegrationOAuthCallbackResult,
+  type OAuthClientResolver,
 } from "@appstrate/connect";
 import type { AppEnv } from "../types/index.ts";
+import type { IntegrationOAuthClient } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import {
   ApiError,
@@ -88,6 +90,7 @@ import {
   promoteIntegrationOAuthClient,
   readIntegrationAuth,
   resolveIntegrationActivations,
+  resolveIntegrationClientById,
   serializeIntegrationConnection,
   setDefaultIntegrationClient,
   toPublicClient,
@@ -108,6 +111,7 @@ import { removeScheduleJobs } from "../services/scheduler.ts";
 import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
+  toSupportedTokenEndpointAuthMethod,
 } from "../services/integration-manifest-helpers.ts";
 import { partitionScopesByAuthCatalog, scopesNotCovered } from "@appstrate/core/integration";
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
@@ -303,20 +307,21 @@ export const oauthClientCreateSchema = oauthClientSchema
   });
 
 /**
- * Rotation body. `client_secret` is OPTIONAL and its absence means PRESERVE —
- * the rotate form submits an empty secret input whenever the admin only meant
- * to change the redirect URI, and treating that as "clear it" destroyed the
- * credential and flipped the client public.
+ * Update body, merge semantics: an absent field is left unchanged and `null`
+ * clears `redirect_uri`. `client_secret` and `token_endpoint_auth_method` are
+ * written as a pair (see `encodeClientAuthForStorage`). `client_id` may only
+ * repeat the stored value — a different one is a 409 in the service.
  */
 export const oauthClientUpdateSchema = oauthClientSchema
+  .partial({ client_id: true })
+  .extend({ redirect_uri: z.url().nullable().optional() })
   .refine(noSecretWithPublicClient, {
     message: PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
     path: ["client_secret"],
   })
   // An EXPLICIT empty string is a destructive statement — it clears the stored
   // ciphertext — so it is only accepted alongside the declaration that makes it
-  // coherent. Absence stays untouched by this rule: it is the preserve path
-  // above, and the rotate form relies on it.
+  // coherent. Absence stays untouched by this rule: it is the preserve path.
   .refine((b) => !(b.client_secret === "" && b.token_endpoint_auth_method !== "none"), {
     message:
       "an empty client_secret clears the stored credential and is only accepted together with token_endpoint_auth_method='none'; omit the field entirely to preserve the stored secret",
@@ -339,12 +344,22 @@ function toOAuthClientCreateInput(body: z.infer<typeof oauthClientCreateSchema>)
 
 function toOAuthClientUpdateInput(body: z.infer<typeof oauthClientUpdateSchema>) {
   return {
-    clientId: body.client_id,
+    ...(body.client_id !== undefined ? { clientId: body.client_id } : {}),
     ...(body.client_secret !== undefined ? { clientSecret: body.client_secret } : {}),
     ...(body.token_endpoint_auth_method !== undefined
       ? { tokenEndpointAuthMethod: body.token_endpoint_auth_method }
       : {}),
     ...(body.redirect_uri !== undefined ? { redirectUri: body.redirect_uri } : {}),
+  };
+}
+
+/** The audited view of a client: never the secret, only whether one is stored. */
+function auditedClient(client: IntegrationOAuthClient) {
+  return {
+    clientId: client.client_id,
+    tokenEndpointAuthMethod: client.token_endpoint_auth_method,
+    redirectUri: client.redirect_uri,
+    hasClientSecret: client.has_client_secret,
   };
 }
 
@@ -404,24 +419,30 @@ export function oauthClientHandlers(
         action: "integration.oauth_client.created",
         resourceType: "integration",
         resourceId: `${packageId}#${authKey}#${client.id}`,
+        after: auditedClient(client),
       });
       return c.json(toPublicClient(client), 201);
     },
 
-    async rotate(c: Context<AppEnv>) {
+    async update(c: Context<AppEnv>) {
       const packageId = packageIdOf(c);
       const clientId = assertOAuthClientRowId(c.req.param("clientId")!);
       const body = await readJsonBody(c, oauthClientUpdateSchema);
-      const client = await updateIntegrationOAuthClient(
+      const { previous, client } = await updateIntegrationOAuthClient(
         scopeOf(c),
         packageId,
         clientId,
         toOAuthClientUpdateInput(body),
       );
       await recordAuditFromContext(c, {
-        action: "integration.oauth_client.rotated",
+        action: "integration.oauth_client.updated",
         resourceType: "integration",
         resourceId: `${packageId}#${client.auth_key}#${clientId}`,
+        before: auditedClient(previous),
+        after: {
+          ...auditedClient(client),
+          clientSecretReplaced: body.client_secret !== undefined,
+        },
       });
       return c.json(toPublicClient(client));
     },
@@ -429,16 +450,14 @@ export function oauthClientHandlers(
     async remove(c: Context<AppEnv>) {
       const packageId = packageIdOf(c);
       const clientId = assertOAuthClientRowId(c.req.param("clientId")!);
-      const { deletedConnections, disabledScheduleIds } = await deleteIntegrationOAuthClient(
-        scopeOf(c),
-        packageId,
-        clientId,
-      );
+      const { client, deletedConnections, disabledScheduleIds } =
+        await deleteIntegrationOAuthClient(scopeOf(c), packageId, clientId);
       await removeScheduleJobs(disabledScheduleIds);
       await recordAuditFromContext(c, {
         action: "integration.oauth_client.deleted",
         resourceType: "integration",
         resourceId: `${packageId}#${clientId}`,
+        before: auditedClient(client),
         after: { deletedConnections, disabledScheduleIds },
       });
       return c.body(null, 204);
@@ -551,6 +570,29 @@ function connectionPersistedAudit(
   };
 }
 
+/** The OAuth state holds only `clientRef`; the callback resolves it as token refresh does. */
+const resolveCallbackClient: OAuthClientResolver = async (ref) => {
+  const { auth } = await readIntegrationAuth(
+    { orgId: ref.orgId, spaceId: ref.spaceId },
+    ref.packageId,
+    ref.authKey,
+  );
+  const client = await resolveIntegrationClientById(
+    ref.clientRef,
+    ref.spaceId,
+    ref.packageId,
+    ref.authKey,
+    auth.token_endpoint_auth_method,
+  );
+  if (!client) return null;
+  const method = toSupportedTokenEndpointAuthMethod(client.tokenEndpointAuthMethod);
+  return {
+    clientId: client.clientId,
+    clientSecret: client.clientSecret,
+    ...(method ? { tokenEndpointAuthMethod: method } : {}),
+  };
+};
+
 // ─────────────────────────────────────────────
 // Router
 // ─────────────────────────────────────────────
@@ -624,7 +666,12 @@ export function createIntegrationsRouter() {
     }
     let result: IntegrationOAuthCallbackResult;
     try {
-      result = await handleIntegrationOAuthCallback(oauthStateStore, code, state);
+      result = await handleIntegrationOAuthCallback(
+        oauthStateStore,
+        resolveCallbackClient,
+        code,
+        state,
+      );
     } catch (err) {
       if (err instanceof OAuthCallbackError) {
         // Append the provider's OAuth error code (never its free-text
@@ -733,7 +780,7 @@ export function createIntegrationsRouter() {
     clients.setDefault,
   );
   router.post("/:packageId{@[^/]+/[^/]+}/auths/:authKey/oauth-clients", configure, clients.create);
-  router.put("/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId", configure, clients.rotate);
+  router.patch("/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId", configure, clients.update);
   router.delete("/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId", configure, clients.remove);
 
   // Move one of this space's clients to the org tier; its row id is kept, so

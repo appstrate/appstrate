@@ -109,6 +109,7 @@ describe("proxyCall — credential-exfiltration guard", () => {
     extra: { headers?: Record<string, string>; body?: string; substituteBody?: boolean } = {},
   ) =>
     proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: PACKAGE_ID,
@@ -180,11 +181,11 @@ describe("proxyCall — credential-exfiltration guard", () => {
       expect(up.hits.some((u) => u.startsWith(ATTACKER))).toBe(false);
     });
 
-    it("still reaches any public host without templating", async () => {
+    it("holds the injected credential to the allowlist without templating", async () => {
       const up = upstream();
-      const res = await call(up.fetchImpl, `${ATTACKER}/anything`);
-      expect(res.status).toBe(200);
-      expect(up.hits).toEqual([`${ATTACKER}/anything`]);
+      await expectRefused(call(up.fetchImpl, `${ATTACKER}/anything`));
+      expect(up.hits).toEqual([]);
+      expect((await call(up.fetchImpl, `${ALLOWED}/anything`)).status).toBe(200);
     });
   });
 
@@ -292,12 +293,19 @@ describe("proxyCall — credential-exfiltration guard", () => {
       expect(up.hits).toEqual([]);
     });
 
-    it("still reaches any public host without templating", async () => {
+    it("refuses the injected credential without templating", async () => {
       const up = upstream();
-      const res = await call(up.fetchImpl, `${ATTACKER}/anything`);
-      expect(res.status).toBe(200);
-      expect(up.hits).toEqual([`${ATTACKER}/anything`]);
+      const message = await expectRefused(call(up.fetchImpl, `${ATTACKER}/anything`));
+      expect(message).toContain("credential exfiltration");
+      expect(up.hits).toEqual([]);
     });
+  });
+
+  it("refuses an injected credential whose allowlist leaves the host to the caller", async () => {
+    await seedIntegration(ctx, [`${ALLOWED}/**`, "https://**"]);
+    const up = upstream();
+    await expectRefused(call(up.fetchImpl, `${ALLOWED}/anything`));
+    expect(up.hits).toEqual([]);
   });
 
   it("scrubs the substituted secret from a transport error", async () => {

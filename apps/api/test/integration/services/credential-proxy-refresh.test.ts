@@ -14,7 +14,12 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageShare, seedRun } from "../../helpers/seed.ts";
+import {
+  seedPackage,
+  seedPackageShare,
+  seedRun,
+  seedPublishedVersion,
+} from "../../helpers/seed.ts";
 import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
 import { runBoundSelection } from "../../../src/services/credential-proxy/integration-resolver.ts";
 import { LocalCookieJarStore } from "../../../src/infra/cookie-jar/local-cookie-jar.ts";
@@ -80,6 +85,7 @@ async function setup(
     source: "local",
     draftManifest: oauthManifest(packageId, delivery),
   });
+  await seedPublishedVersion(packageId, "1.0.0");
   // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
   // the package is placed in, so switching an unplaced integration on leaves it
   // inactive.
@@ -137,6 +143,7 @@ async function setupSystemPinned(
     source: "local",
     draftManifest: oauthManifest(packageId),
   });
+  await seedPublishedVersion(packageId, "1.0.0");
   // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
   // the package is placed in, so switching an unplaced integration on leaves it
   // inactive.
@@ -212,6 +219,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -269,6 +277,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -311,6 +320,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     const jar = new LocalCookieJarStore();
     const call = () =>
       proxyCall({
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         actor: { type: "user", id: ctx.user.id },
         integrationId: packageId,
@@ -348,6 +358,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -375,6 +386,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -417,6 +429,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     });
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -468,6 +481,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -545,6 +559,7 @@ describe("proxyCall — an X-Run-Id run is re-checked on the 401 refresh", () =>
     }) as unknown as typeof fetch;
     const actor = { type: "user" as const, id: ctx.user.id };
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor,
       integrationId: packageId,

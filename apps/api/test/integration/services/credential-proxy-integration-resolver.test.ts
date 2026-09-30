@@ -21,7 +21,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPublishedVersion, seedRun } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -30,6 +30,7 @@ import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
   IntegrationCredentialNotFoundError,
+  runBoundSelection,
 } from "../../../src/services/credential-proxy/integration-resolver.ts";
 import { selectAccessibleConnection } from "../../../src/services/integration-connections.ts";
 import { ApiError, type ResolutionFieldError } from "../../../src/lib/errors.ts";
@@ -120,6 +121,7 @@ describe("credential-proxy integration-resolver", () => {
       source: "local",
       draftManifest: gmailManifest(token.url),
     });
+    await seedPublishedVersion(INTEGRATION_ID, "1.0.0");
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION_ID);
     const [oauthClient] = await db
       .insert(integrationOauthClients)
@@ -235,6 +237,7 @@ describe("credential-proxy integration-resolver", () => {
         },
       },
     });
+    await seedPublishedVersion(NO_AUTH, "1.0.0");
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, NO_AUTH);
 
     await expect(
@@ -279,6 +282,7 @@ describe("credential-proxy integration-resolver", () => {
         },
       },
     });
+    await seedPublishedVersion(TENANT, "1.0.0");
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, TENANT);
     await db.insert(integrationConnections).values({
       integrationId: TENANT,
@@ -355,10 +359,9 @@ describe("credential-proxy integration-resolver", () => {
         },
       },
     };
-    await db
-      .update(packages)
-      .set({ draftManifest: issuerOnly })
-      .where(eq(packages.id, INTEGRATION_ID));
+    await seedPublishedVersion(INTEGRATION_ID, "1.0.1", {
+      manifest: { ...issuerOnly, version: "1.0.1" },
+    });
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
@@ -420,10 +423,9 @@ describe("credential-proxy integration-resolver", () => {
         },
       },
     };
-    await db
-      .update(packages)
-      .set({ draftManifest: issuerOnly })
-      .where(eq(packages.id, INTEGRATION_ID));
+    await seedPublishedVersion(INTEGRATION_ID, "1.0.1", {
+      manifest: { ...issuerOnly, version: "1.0.1" },
+    });
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
@@ -592,6 +594,82 @@ describe("credential-proxy integration-resolver", () => {
       // An undeclared auth key is never picked.
       const primaryOnly = await selectAccessibleConnection(INTEGRATION_ID, manifest, null, context);
       expect(primaryOnly!.id).toBe(primaryId);
+    });
+  });
+
+  describe("the manifest version a call is authorized against", () => {
+    /** The manifest with `primary.authorized_uris` replaced. */
+    const withUris = (version: string, uris: string[]) => {
+      const m = gmailManifest(token.url);
+      (m.auths as Record<string, Record<string, unknown>>).primary!.authorized_uris = uris;
+      return { ...m, version };
+    };
+
+    it("reads the latest published version, never a later draft edit", async () => {
+      await seedConnection({ userId: ctx.user.id });
+      await db
+        .update(packages)
+        .set({ draftManifest: withUris("1.0.0", ["https://draft.example.com/**"]) })
+        .where(eq(packages.id, INTEGRATION_ID));
+
+      const resolved = await resolveIntegrationProxyCredentials(input());
+      expect(resolved.declaredUris).toEqual(["https://api.example.com/*"]);
+    });
+
+    it("refuses an integration that has no published version", async () => {
+      const UNPUBLISHED = "@official/unpublished";
+      await seedPackage({
+        id: UNPUBLISHED,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: { ...gmailManifest(token.url), name: UNPUBLISHED },
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, UNPUBLISHED);
+
+      const err = await resolveIntegrationProxyCredentials({
+        ...input(),
+        integrationId: UNPUBLISHED,
+      }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(IntegrationCredentialNotFoundError);
+      expect((err as Error).message).toContain("no published version");
+    });
+
+    it("reads the version an X-Run-Id run froze, not a later published one", async () => {
+      const connectionId = await seedConnection({ userId: ctx.user.id });
+      await seedPublishedVersion(INTEGRATION_ID, "1.0.1", {
+        manifest: withUris("1.0.1", ["https://later.example.com/**"]),
+      });
+      await seedPackage({
+        id: "@official/agent",
+        orgId: ctx.orgId,
+        type: "agent",
+        source: "local",
+      });
+      const run = await seedRun({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        packageId: "@official/agent",
+        userId: ctx.user.id,
+        status: "running",
+        runOrigin: "remote",
+        resolvedConnections: { [INTEGRATION_ID]: [{ connectionId, source: "member_pin" }] },
+        resolvedIntegrationVersions: { [INTEGRATION_ID]: { version: "1.0.0", source: "version" } },
+      });
+      const actor = { type: "user" as const, id: ctx.user.id };
+      const run1 = runBoundSelection({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId: run.id,
+        integrationId: INTEGRATION_ID,
+        actor,
+      });
+
+      const underRun = await resolveIntegrationProxyCredentials({ ...input(), run: run1 });
+      expect(underRun.declaredUris).toEqual(["https://api.example.com/*"]);
+      const withoutRun = await resolveIntegrationProxyCredentials(input());
+      expect(withoutRun.declaredUris).toEqual(["https://later.example.com/**"]);
     });
   });
 });

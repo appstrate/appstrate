@@ -4,12 +4,13 @@
  * OAuth2 authorization-code + PKCE flow for AFPS integration `auths.{key}` of
  * type `oauth2` (AFPS §7.3).
  *
- * Pure module: takes pre-resolved endpoints + client credentials + an
+ * Pure module: takes pre-resolved endpoints + a client reference + an
  * {@link OAuthStateStore}, returns either an authorization URL (initiate)
  * or a parsed token response (callback). No DB, no HTTP-fetch
  * sourcing — the platform layer (`apps/api/src/services/integration-connections.ts`)
  * loads the manifest, resolves the registered OAuth client, and feeds
- * us. Exposes an initiate (authorization URL) and a callback (token
+ * us. The state never holds a client secret: the callback re-resolves the
+ * client by `clientRef` through an injected {@link OAuthClientResolver}. Exposes an initiate (authorization URL) and a callback (token
  * exchange) function for the integration OAuth flow.
  *
  * Notable AFPS inputs:
@@ -26,7 +27,7 @@
  * `grant_type=refresh_token` to the same `token_endpoint` (RFC 6749 §6).
  */
 
-import type { Actor, OAuthStateRecord, OAuthStateStore, TokenEndpointAuthMethod } from "./types.ts";
+import type { Actor, OAuthClientResolver, OAuthStateRecord, OAuthStateStore } from "./types.ts";
 import { OAuthCallbackError } from "./oauth.ts";
 import { randomBase64Url, sha256Base64Url } from "./pkce.ts";
 import { exchangeAuthorizationCode } from "./token-exchange.ts";
@@ -71,25 +72,8 @@ interface InitiateIntegrationOAuthInput {
    * discovery fails, the manifest's explicit endpoints (if any) are used.
    */
   issuer?: string;
-  /** OAuth2 client id registered by the admin. */
+  /** OAuth2 client id registered by the admin — sent on the authorize URL. */
   clientId: string;
-  /**
-   * OAuth2 client secret — empty string for public clients
-   * (`token_endpoint_auth_method=none`). Carried into state for the callback.
-   */
-  clientSecret: string;
-  /**
-   * Token endpoint client-auth method (`token_endpoint_auth_method`).
-   *
-   * AFPS (CC-10, §7.3, CHANGELOG): when the manifest does not specify
-   * a value, the default is now `"client_secret_basic"` — the RFC 8414 §2 /
-   * RFC 7591 §2 default. AFPS documented `"client_secret_post"` as the
-   * default; the flip aligns with the OAuth 2.1 ecosystem (Anthropic, Google,
-   * GitHub, Slack all accept Basic; some IdPs require it).
-   *
-   * Manifest-explicit values continue to work unchanged.
-   */
-  tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
   /** Scopes requested in the authorize URL (joined per `scopeSeparator`). */
   scopes?: string[];
   /** Scope joiner (`_meta["dev.appstrate/oauth"].scope_separator`) — defaults to single space (OAuth2 standard). */
@@ -119,11 +103,10 @@ interface InitiateIntegrationOAuthInput {
   /**
    * Which registered client this flow uses — a flat client id (system env id or
    * custom `integration_oauth_clients.id`). Carried into the state so the
-   * callback can stamp it on the connection row; token refresh later resolves
-   * the same client credentials by it. Set on every oauth2 connect; only absent
-   * for non-oauth2 auths, which have no OAuth client and never reach token refresh.
+   * callback re-resolves its credentials and stamps it on the connection row;
+   * token refresh later resolves the same client credentials by it.
    */
-  clientRef?: string;
+  clientRef: string;
   /** Org / space / actor context — propagated to the callback handler. */
   orgId: string;
   spaceId: string;
@@ -156,18 +139,13 @@ interface InitiateIntegrationOAuthResult {
 
 /**
  * Build the PKCE-protected authorize URL and persist the matching state
- * record. The state record carries every field the callback will need —
- * endpoints, client credentials, resource — so the callback handler
- * never needs to re-fetch the manifest.
+ * record. The state record carries the endpoints, resource and client
+ * reference the callback needs — never the client secret.
  */
 export async function initiateIntegrationOAuth(
   store: OAuthStateStore,
   input: InitiateIntegrationOAuthInput,
 ): Promise<InitiateIntegrationOAuthResult> {
-  // AFPS (CC-10, §7.3): default-when-missing flipped from
-  // `"client_secret_post"` to `"client_secret_basic"` — RFC 8414 §2 /
-  // RFC 7591 §2 default. Manifest-explicit values continue to work.
-  const tokenAuthMethod = input.tokenEndpointAuthMethod ?? "client_secret_basic";
   const scopeSeparator = input.scopeSeparator ?? " ";
   const uniqueScopes = [...new Set(input.scopes ?? [])];
   const scopeString = uniqueScopes.join(scopeSeparator);
@@ -238,10 +216,7 @@ export async function initiateIntegrationOAuth(
       authKey: input.authKey,
       tokenEndpoint: endpoints.tokenEndpoint,
       resource: input.resource,
-      tokenEndpointAuthMethod: tokenAuthMethod,
-      clientId: input.clientId,
-      clientSecret: input.clientSecret,
-      ...(input.clientRef ? { clientRef: input.clientRef } : {}),
+      clientRef: input.clientRef,
       ...(input.connectionId ? { connectionId: input.connectionId } : {}),
     },
   };
@@ -298,7 +273,7 @@ export interface IntegrationOAuthCallbackResult {
    * custom `integration_oauth_clients.id`). Stamped on the connection row so
    * token refresh resolves the same client credentials.
    */
-  clientRef?: string;
+  clientRef: string;
 }
 
 /**
@@ -310,6 +285,7 @@ export interface IntegrationOAuthCallbackResult {
  */
 export async function handleIntegrationOAuthCallback(
   store: OAuthStateStore,
+  resolveClient: OAuthClientResolver,
   code: string,
   state: string,
   /**
@@ -340,14 +316,30 @@ export async function handleIntegrationOAuthCallback(
 
   const integration = stateRow.integration;
   const sentinel = integrationSubjectIdSentinel(integration.packageId, integration.authKey);
+  const client = await resolveClient({
+    clientRef: integration.clientRef,
+    packageId: integration.packageId,
+    authKey: integration.authKey,
+    orgId: stateRow.orgId,
+    spaceId: stateRow.spaceId,
+  });
+  if (!client) {
+    await store.delete(state);
+    throw new OAuthCallbackError(
+      "The OAuth client this connection was started with no longer exists",
+      "revoked",
+      sentinel,
+    );
+  }
 
   const { parsed, raw: tokenData } = await exchangeAuthorizationCode({
     tokenEndpoint: integration.tokenEndpoint,
-    clientId: integration.clientId ?? "",
-    clientSecret: integration.clientSecret ?? "",
+    clientId: client.clientId,
+    clientSecret: client.clientSecret,
     // AFPS (CC-10, §7.3): default-when-missing flipped from
-    // `"client_secret_post"` to `"client_secret_basic"`.
-    tokenEndpointAuthMethod: integration.tokenEndpointAuthMethod ?? "client_secret_basic",
+    // `"client_secret_post"` to `"client_secret_basic"` — the RFC 8414 §2 /
+    // RFC 7591 §2 default.
+    tokenEndpointAuthMethod: client.tokenEndpointAuthMethod ?? "client_secret_basic",
     codeVerifier: stateRow.codeVerifier || undefined,
     redirectUri: stateRow.redirectUri,
     code,
@@ -379,6 +371,6 @@ export async function handleIntegrationOAuthCallback(
     scopesRequested: stateRow.scopesRequested,
     tokenResponse: tokenData,
     ...(integration.connectionId ? { connectionId: integration.connectionId } : {}),
-    ...(integration.clientRef ? { clientRef: integration.clientRef } : {}),
+    clientRef: integration.clientRef,
   };
 }

@@ -105,22 +105,33 @@ export const orgIntegrationsPaths = {
     },
   },
   "/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}": {
-    put: {
+    patch: {
       operationId: "rotateOrgIntegrationOAuthClient",
       tags: ["Integrations"],
-      summary: "Rotate an org-level OAuth client's credentials",
-      description: `Rotates one org-level client in place, by its id (a space client id is a 404 here). ${PERMISSION_NOTE}`,
+      summary:
+        "Update an org-level OAuth client (rotate its secret, change its redirect URI or method)",
+      description: `Updates one org-level client in place, by its id (a space client id is a 404 here). Its \`client_id\` cannot change (409). ${PERMISSION_NOTE}`,
       parameters: [...packageParams, clientIdParam],
       requestBody: jsonBody(oauthClientUpdateBodySchema),
       responses: {
         "200": {
-          description: "Rotated",
+          description: "Updated",
           headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: oauthClientSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`client_id_immutable` — the body names a different `client_id`; register it as a new client instead",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {

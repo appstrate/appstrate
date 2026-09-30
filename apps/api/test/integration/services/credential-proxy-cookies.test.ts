@@ -39,7 +39,6 @@ async function seedConnectedIntegration(
   opts: {
     packageId: string;
     authorizedUris: string[];
-    allowAllUris?: boolean;
     delivery: ReturnType<typeof httpHeaderDelivery>;
     apiKey: string;
   },
@@ -54,7 +53,6 @@ async function seedConnectedIntegration(
         api: {
           type: "api_key",
           authorizedUris: opts.authorizedUris,
-          ...(opts.allowAllUris ? { allowAllUris: true } : {}),
           delivery: opts.delivery,
         },
       },
@@ -122,6 +120,7 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     connectionId?: string,
   ) =>
     proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       ...(connectionId ? { connectionId } : {}),
@@ -136,11 +135,10 @@ describe("proxyCall — session cookie jar (#1613)", () => {
       fetch: fetchImpl,
     });
 
-  const cookieCredential = (packageId: string, allowAllUris = false) =>
+  const cookieCredential = (packageId: string, authorizedUris = ["https://1.1.1.1/**"]) =>
     seedConnectedIntegration(ctx, {
       packageId,
-      authorizedUris: ["https://1.1.1.1/**"],
-      allowAllUris,
+      authorizedUris,
       delivery: SESSION_COOKIE,
       apiKey: "sess-abc",
     });
@@ -253,7 +251,7 @@ describe("proxyCall — session cookie jar (#1613)", () => {
 
   it("files each redirect hop's cookies under that hop's origin", async () => {
     const packageId = "@cpcookieorg/open";
-    await cookieCredential(packageId, true);
+    await cookieCredential(packageId, ["https://1.1.1.1/**", "https://8.8.8.8/**"]);
     const upstream = recordingUpstream((_url, n) =>
       n === 1
         ? new Response(null, { status: 302, headers: { location: "https://8.8.8.8/landing" } })
@@ -342,12 +340,25 @@ describe("proxyCall — session cookie jar (#1613)", () => {
   describe("origin scoping", () => {
     it("does not replay a cookie to another host matched by a glob", async () => {
       const packageId = "@cpcookieorg/glob";
-      await seedConnectedIntegration(ctx, {
-        packageId,
-        authorizedUris: ["https://*/**"],
-        delivery: BEARER,
-        apiKey: "tok",
-      });
+      // An unbounded glob is only open to an auth the proxy injects nothing for.
+      await seedProxyIntegration(
+        ctx,
+        localIntegrationManifest({
+          name: packageId,
+          displayName: "Shop",
+          description: "Shop integration",
+          auths: {
+            api: {
+              type: "custom",
+              authorizedUris: ["https://*/**"],
+              credentialFields: ["token"],
+              requiredCredentialFields: ["token"],
+              delivery: envDelivery({ TOKEN: "token" }),
+            },
+          },
+        }),
+      );
+      await seedProxyConnection(ctx, packageId, "api", { token: "tok" });
       const upstream = scriptedUpstream([["a=1"]]);
 
       await call(packageId, "https://1.1.1.1/x", upstream.fetchImpl);

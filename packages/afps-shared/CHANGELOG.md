@@ -14,6 +14,16 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+### Added
+
+- **`isHostUnboundedUriPattern`** (`./credential-template`): whether an
+  `authorized_uris` entry leaves the host to the caller (a wildcard in either
+  of the host's last two labels, or no `scheme://`). (#1641)
+- **`injectsHttpCredential`** and **`AUTH_TYPE_HTTP_DEFAULTS`**
+  (`./delivery-http`): whether an auth's HTTP delivery names a header the proxy
+  fills with a credential, and the per-auth-type default table it reads (moved
+  from `@appstrate/afps-runtime`). (#1641)
+
 ## [0.9.2] — 2026-09-30
 
 Additive only. Publish before any `@appstrate/core` that imports

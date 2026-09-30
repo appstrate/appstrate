@@ -3,13 +3,14 @@
 
 /** Credential-exfiltration guard of the three `api_call` paths: docs/architecture/SIDECAR.md. */
 
+import { isHostUnboundedUriPattern } from "@appstrate/afps-shared/credential-template";
 import { referencesField } from "./template-vars.ts";
 
 export interface CredentialUrlPolicy {
   substitutesCredential: boolean;
-  /** allow_all_uris after the downgrade (false whenever substitutesCredential). */
+  /** allow_all_uris after the downgrade (false whenever the call carries a credential). */
   allowAllUris: boolean;
-  /** A credential is templated and no authorized_uris is declared. */
+  /** A credential is carried and authorized_uris is empty or leaves the host to the caller. */
   refuse: boolean;
 }
 
@@ -19,6 +20,8 @@ export function credentialUrlPolicy(input: {
   fields: Readonly<Record<string, string>>;
   allowAllUris: boolean;
   authorizedUris: readonly string[];
+  /** The proxy itself adds a credential header to the call. */
+  injectsCredential: boolean;
 }): CredentialUrlPolicy {
   let substitutesCredential = false;
   for (const template of input.templates) {
@@ -27,10 +30,13 @@ export function credentialUrlPolicy(input: {
       break;
     }
   }
+  const carriesCredential = substitutesCredential || input.injectsCredential;
   return {
     substitutesCredential,
-    allowAllUris: input.allowAllUris && !substitutesCredential,
-    refuse: substitutesCredential && input.authorizedUris.length === 0,
+    allowAllUris: input.allowAllUris && !carriesCredential,
+    refuse:
+      carriesCredential &&
+      (input.authorizedUris.length === 0 || input.authorizedUris.some(isHostUnboundedUriPattern)),
   };
 }
 
@@ -43,7 +49,7 @@ export function redactionFields(
 }
 
 export function exfiltrationRefusal(integrationId: string): string {
-  return `Call for integration "${integrationId}" substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`;
+  return `Call for integration "${integrationId}" carries a credential (substituted into an agent-controlled URL, header, or body, or injected by the proxy) but the integration declares no authorized_uris allowlist that names its hosts; refusing to prevent credential exfiltration.`;
 }
 
 /**

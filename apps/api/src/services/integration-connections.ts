@@ -961,10 +961,15 @@ export async function createIntegrationOAuthClient(
 }
 
 /**
- * Rotate an existing custom client's credentials in place, by its id. Scoped to
+ * Update an existing custom client in place, by its id (merge semantics: an
+ * absent field is unchanged, `redirectUri: null` clears it). Scoped to
  * `owner`'s tier and `packageId` (escalation guard) — any other client id is a 404.
  * `is_default` / `auto_provisioned` are not touched here
  * (default selection is `setDefaultIntegrationClient`'s job).
+ *
+ * `clientId` is immutable: the connections this row minted hold refresh
+ * tokens the provider issued to the stored `client_id`, which a new one
+ * cannot refresh. A different value is a 409 — a new client is create + delete.
  *
  * An omitted `clientSecret` PRESERVES the stored pair — except when the caller
  * also declares a secret-based `tokenEndpointAuthMethod`, which is a change
@@ -976,26 +981,22 @@ export async function updateIntegrationOAuthClient(
   packageId: string,
   clientId: string,
   input: {
-    clientId: string;
+    /** Accepted only when equal to the stored value. */
+    clientId?: string;
     /** Omit to PRESERVE the stored secret; `""` declares the client public. */
     clientSecret?: string;
-    redirectUri?: string;
+    /** Omit to keep, `null` to clear. */
+    redirectUri?: string | null;
     /** Explicit `token_endpoint_auth_method` for this client; `"none"` = public. */
     tokenEndpointAuthMethod?: string;
   },
-): Promise<IntegrationOAuthClientWithSecret> {
+): Promise<{
+  previous: IntegrationOAuthClientWithSecret;
+  client: IntegrationOAuthClientWithSecret;
+}> {
   if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
   const byId = clientByIdFilter(owner, packageId, clientId);
-  const [existing] = await db
-    .select({
-      autoProvisioned: integrationOauthClients.autoProvisioned,
-      // Read to decide whether a method-only change has a secret to attach
-      // itself to — see the `methodOnly` block below.
-      clientSecretEncrypted: integrationOauthClients.clientSecretEncrypted,
-    })
-    .from(integrationOauthClients)
-    .where(byId)
-    .limit(1);
+  const [existing] = await db.select().from(integrationOauthClients).where(byId).limit(1);
   if (!existing) {
     throw notFound(`OAuth client '${clientId}' not found`);
   }
@@ -1004,6 +1005,13 @@ export async function updateIntegrationOAuthClient(
   if (existing.autoProvisioned) {
     throw invalidRequest(
       `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot be edited manually; delete it to re-trigger registration.`,
+    );
+  }
+  if (input.clientId !== undefined && input.clientId !== existing.clientId) {
+    throw conflict(
+      "client_id_immutable",
+      `OAuth client '${clientId}' cannot change its client_id: the connections it minted can only refresh their tokens with '${existing.clientId}'. ` +
+        `Register the new client_id as a new OAuth client, make it the default, then delete this one.`,
     );
   }
   // `null` = the secret field was not submitted → keep the stored credential
@@ -1043,7 +1051,6 @@ export async function updateIntegrationOAuthClient(
   const [row] = await db
     .update(integrationOauthClients)
     .set({
-      clientId: input.clientId,
       ...(clientAuth
         ? {
             clientSecretEncrypted: clientAuth.clientSecretEncrypted,
@@ -1052,7 +1059,7 @@ export async function updateIntegrationOAuthClient(
         : methodOnly !== undefined
           ? { tokenEndpointAuthMethod: methodOnly }
           : {}),
-      redirectUri: input.redirectUri ?? null,
+      ...(input.redirectUri !== undefined ? { redirectUri: input.redirectUri } : {}),
       updatedAt: new Date(),
     })
     .where(byId)
@@ -1060,7 +1067,7 @@ export async function updateIntegrationOAuthClient(
   if (!row) {
     throw notFound(`OAuth client '${clientId}' not found`);
   }
-  return projectClientWithSecret(row);
+  return { previous: projectClientWithSecret(existing), client: projectClientWithSecret(row) };
 }
 
 /** Move a space client to its org tier; same id, so pinned connections keep refreshing. */
@@ -1960,7 +1967,11 @@ export async function deleteIntegrationOAuthClient(
   owner: ClientOwner,
   packageId: string,
   clientId: string,
-): Promise<{ deletedConnections: number; disabledScheduleIds: string[] }> {
+): Promise<{
+  client: IntegrationOAuthClient;
+  deletedConnections: number;
+  disabledScheduleIds: string[];
+}> {
   if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
   const connectionSpaces = isSpaceOwner(owner)
     ? eq(integrationConnections.spaceId, owner.spaceId)
@@ -1981,11 +1992,11 @@ export async function deleteIntegrationOAuthClient(
       minted.map((c) => c.id),
       "A connection this OAuth client minted cannot be deleted",
     );
-    const deleted = await tx
+    const [deleted] = await tx
       .delete(integrationOauthClients)
       .where(clientByIdFilter(owner, packageId, clientId))
-      .returning({ id: integrationOauthClients.id });
-    if (deleted.length === 0) {
+      .returning();
+    if (!deleted) {
       throw notFound(`OAuth client '${clientId}' not found`);
     }
     // Cascade: every connection pinned to this client is now dead — the
@@ -2014,7 +2025,11 @@ export async function deleteIntegrationOAuthClient(
     for (const row of deletedConns) {
       disabledScheduleIds.push(...(await forgetDeletedConnection(tx, row)));
     }
-    return { deletedConnections: deletedConns.length, disabledScheduleIds };
+    return {
+      client: toPublicClient(projectClientWithSecret(deleted)),
+      deletedConnections: deletedConns.length,
+      disabledScheduleIds,
+    };
   });
 }
 
@@ -2393,6 +2408,7 @@ export async function persistCredentialBundle(
     // again, so the escalation counter must not carry over. See
     // `recordIntegrationRefreshFailure`.
     refreshFailureCount: 0,
+    refreshFailuresSince: null,
     updatedAt: now,
   };
   if (input.accountId !== undefined) set.accountId = input.accountId;
@@ -2518,33 +2534,51 @@ export async function markIntegrationConnectionNeedsReconnection(
     .where(eq(integrationConnections.id, connectionId));
 }
 
+/** How {@link recordIntegrationRefreshFailure} counts a failure toward `maxFailures`. */
+type RefreshFailureGate =
+  /** A transient OAuth refresh failure: escalates only once the token expired `graceSeconds` ago. */
+  | { graceSeconds: number }
+  /** An upstream rejection of an unrefreshable credential: counts within `windowSeconds` of the first. */
+  | { windowSeconds: number };
+
 /**
  * Record a failure on a connection's credential: a transient OAuth refresh
- * failure (with `graceSeconds`; `invalid_grant` goes through
+ * failure (`invalid_grant` goes through
  * {@link markIntegrationConnectionNeedsReconnection}) or an upstream rejection
- * of an unrefreshable credential (`graceSeconds: null`). Increment and
- * escalation are one statement, so concurrent failures cannot lose a count.
+ * of an unrefreshable credential. Increment and escalation are one statement,
+ * so concurrent failures cannot lose a count; `needsReconnection` is OR'd,
+ * never cleared, and a credential write resets the count.
  *
- * Escalates once the count reaches `maxFailures` AND, with `graceSeconds`,
- * the token expired more than `graceSeconds` ago — so an outage on a valid
- * token never bricks the connection. `needsReconnection` is OR'd, never cleared.
- * Only a credential write resets the count, so for an unrefreshable auth it is
- * cumulative since the last reconnect, not a streak.
+ * A refresh failure escalates at `maxFailures` once the token expired more than
+ * `graceSeconds` ago, so an outage on a valid token never bricks the connection.
+ * A rejection escalates at `maxFailures` rejections within one window: the first
+ * rejection after `windowSeconds` restarts the count, so isolated rejections
+ * spread over time never add up.
  */
 export async function recordIntegrationRefreshFailure(
   connectionId: string,
   maxFailures: number,
-  graceSeconds: number | null,
+  gate: RefreshFailureGate,
 ): Promise<{ failures: number; needsReconnection: boolean }> {
-  const expired =
-    graceSeconds === null
-      ? sql`TRUE`
-      : sql`${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${graceSeconds})`;
+  const { refreshFailureCount: count, refreshFailuresSince: since } = integrationConnections;
+  let failures: SQL;
+  let escalates: SQL;
+  const set: Partial<Record<keyof typeof integrationConnections.$inferInsert, SQL>> = {};
+  if ("windowSeconds" in gate) {
+    const open = sql`(${since} IS NOT NULL AND ${since} > now() - make_interval(secs => ${gate.windowSeconds}))`;
+    failures = sql`CASE WHEN ${open} THEN ${count} + 1 ELSE 1 END`;
+    escalates = sql`${failures} >= ${maxFailures}`;
+    set.refreshFailuresSince = sql`CASE WHEN ${open} THEN ${since} ELSE now() END`;
+  } else {
+    failures = sql`${count} + 1`;
+    escalates = sql`${failures} >= ${maxFailures} AND ${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${gate.graceSeconds})`;
+  }
   const [row] = await db
     .update(integrationConnections)
     .set({
-      refreshFailureCount: sql`${integrationConnections.refreshFailureCount} + 1`,
-      needsReconnection: sql`${integrationConnections.needsReconnection} OR (${integrationConnections.refreshFailureCount} + 1 >= ${maxFailures} AND ${expired})`,
+      ...set,
+      refreshFailureCount: failures,
+      needsReconnection: sql`${integrationConnections.needsReconnection} OR (${escalates})`,
       updatedAt: sql`now()`,
     })
     .where(eq(integrationConnections.id, connectionId))

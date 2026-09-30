@@ -2,7 +2,11 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
-import { isBareAuthSchemePrefix, projectHttpDeliveryConfig } from "../src/delivery-http.ts";
+import {
+  injectsHttpCredential,
+  isBareAuthSchemePrefix,
+  projectHttpDeliveryConfig,
+} from "../src/delivery-http.ts";
 
 describe("projectHttpDeliveryConfig", () => {
   it("returns undefined for an absent block", () => {
@@ -65,5 +69,21 @@ describe("isBareAuthSchemePrefix", () => {
   it("is false outside credentials position — there a bare token is an ordinary literal", () => {
     expect(isBareAuthSchemePrefix("Cookie", "session")).toBe(false);
     expect(isBareAuthSchemePrefix("X-Api-Key", "Token")).toBe(false);
+  });
+});
+
+describe("injectsHttpCredential", () => {
+  it("follows the auth type's default header when no delivery.http names one", () => {
+    for (const type of ["oauth2", "api_key", "basic"]) {
+      expect(injectsHttpCredential(type, undefined)).toBe(true);
+      expect(injectsHttpCredential(type, { prefix: "Token " })).toBe(true);
+    }
+    expect(injectsHttpCredential("custom", undefined)).toBe(false);
+    expect(injectsHttpCredential("mtls", undefined)).toBe(false);
+  });
+
+  it("follows an explicit delivery.http name, an empty one included", () => {
+    expect(injectsHttpCredential("custom", { name: "X-Token" })).toBe(true);
+    expect(injectsHttpCredential("api_key", { name: "" })).toBe(false);
   });
 });

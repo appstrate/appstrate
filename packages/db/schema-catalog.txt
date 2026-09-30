@@ -124,6 +124,7 @@ column integration_connections.integration_package_id text not null
 column integration_connections.label text not null
 column integration_connections.needs_reconnection boolean not null default false
 column integration_connections.refresh_failure_count integer not null default 0
+column integration_connections.refresh_failures_since timestamp with time zone
 column integration_connections.scopes_granted text[] not null default '{}'::text[]
 column integration_connections.shared_with_org boolean not null default false
 column integration_connections.space_id text not null
@@ -737,6 +738,7 @@ constraint notifications notifications_pkey PRIMARY KEY (id)
 constraint notifications notifications_recipient_type_valid CHECK ((recipient_type = ANY (ARRAY['user'::text, 'end_user'::text])))
 constraint notifications notifications_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 constraint notifications notifications_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_completed'::text, 'package_shared'::text])))
 constraint oauth_access_tokens oauth_access_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint oauth_access_tokens oauth_access_tokens_pkey PRIMARY KEY (id)
 constraint oauth_access_tokens oauth_access_tokens_refresh_id_oauth_refresh_tokens_id_fk FOREIGN KEY (refresh_id) REFERENCES oauth_refresh_tokens(id) ON DELETE CASCADE

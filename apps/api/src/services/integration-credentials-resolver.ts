@@ -65,6 +65,9 @@ interface ResolveLiveCredentialsOptions {
   forceRefresh?: boolean;
 }
 
+/** Upstream rejections of an unrefreshable credential count toward reconnection within this window. */
+const UNREFRESHABLE_REJECTION_WINDOW_SECONDS = 60 * 60;
+
 /**
  * NEVER returns an empty payload — the sidecar would read it as "skip the MITM
  * listener" and boot uncredentialed — so every unproducible credential throws.
@@ -82,11 +85,13 @@ interface ResolveLiveCredentialsOptions {
  *     credentials that cannot be decrypted. The sidecar propagates it as a 401 to the integration so the
  *     LLM sees a clean "please re-connect" surface, and stops retrying.
  *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc), or
- *     an unrefreshable auth rejected fewer times than the failure threshold.
+ *     an unrefreshable auth rejected fewer times than the failure threshold
+ *     within one window.
  *     The cached credential may still be valid; the sidecar treats it as
  *     retry-later and the listener's `refreshOnUnauthorized` cooldown
  *     keeps a flapping upstream from hammering this endpoint.
  */
+
 export async function resolveLiveIntegrationCredentials(
   integrationId: string,
   context: {
@@ -204,15 +209,15 @@ export async function resolveLiveIntegrationCredentials(
   };
 
   // A forced refresh nothing can recover (no refresh client, or not oauth2).
-  // One 401 can be a transient upstream fault, so it is counted: 502 until
-  // INTEGRATION_REFRESH_MAX_FAILURES, then terminal. Not a streak — only a
-  // credential write (reconnect) resets the counter, so isolated 401s add up.
+  // One 401 can be a transient upstream fault, or a permission error the agent
+  // provoked, so it is counted: 502 until INTEGRATION_REFRESH_MAX_FAILURES
+  // rejections within one window, then terminal.
   const rejectUnrefreshable = async (reason: string): Promise<never> => {
     const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
     const { failures, needsReconnection } = await recordIntegrationRefreshFailure(
       connection.id,
       maxFailures,
-      null,
+      { windowSeconds: UNREFRESHABLE_REJECTION_WINDOW_SECONDS },
     );
     if (needsReconnection) return flagTerminalAndThrow(reason);
     logger.warn("Integration credential rejected upstream — below the reconnect threshold", {
@@ -226,8 +231,7 @@ export async function resolveLiveIntegrationCredentials(
     });
     throw badGateway(
       `Integration '${integrationId}' auth '${authKey}' was rejected upstream (${reason}); ` +
-        `${failures}/${maxFailures} upstream rejections since the connection was last ` +
-        `(re)connected before it is flagged`,
+        `${failures}/${maxFailures} upstream rejections within an hour before it is flagged`,
     );
   };
 

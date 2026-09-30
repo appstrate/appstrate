@@ -672,7 +672,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     expect(fetchFn).toHaveBeenCalledTimes(11);
   });
 
-  it("strips Authorization + injected credential header on cross-origin redirect", async () => {
+  it("holds an injected credential to authorized_uris on a redirect under allow_all_uris", async () => {
     const authHeadersSeen: { auth: string | null; apiKey: string | null }[] = [];
     const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
       const u = typeof url === "string" ? url : url.toString();
@@ -691,9 +691,8 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     });
     const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
       credentials: { access_token: "secret-token" },
-      // The follower only validates the initial URL — the destination
-      // origin is whatever the attacker-controlled redirect points at.
-      // We rely on cross-origin header stripping for defence in depth.
+      // allow_all_uris is dropped for a call carrying a credential, so the
+      // redirect off authorized_uris is refused before its hop goes out.
       authorizedUris: ["https://api.example.com/**"],
       allowAllUris: true,
       credentialHeaderName: "X-Api-Key",
@@ -704,7 +703,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
       fetchFn: fetchFn as unknown as typeof fetch,
       fetchCredentials,
     });
-    await executeApiCall(
+    const result = await executeApiCall(
       {
         integrationId: "demo",
         connectionId: "conn-1",
@@ -715,12 +714,10 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
       },
       deps,
     );
-    expect(authHeadersSeen.length).toBe(2);
-    // Hop 1 (same origin): both headers present.
+    expect(authHeadersSeen).toHaveLength(1);
     expect(authHeadersSeen[0]!.apiKey).toBe("secret-token");
-    // Hop 2 (cross-origin): Authorization + injected credential stripped.
-    expect(authHeadersSeen[1]!.auth).toBeNull();
-    expect(authHeadersSeen[1]!.apiKey).toBeNull();
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
   });
 
   it("strips an allowed caller override when the platform credential is empty", async () => {
@@ -1045,8 +1042,6 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
         credentials: { access_token: "tok" },
         authorizedUris: null,
         allowAllUris: true,
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer ",
         credentialFieldName: "access_token",
       }));
       const deps = makeDeps({
@@ -1163,23 +1158,8 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     expect(authSeen[1]!.url).toContain("content.dropboxapi.com");
   });
 
-  it("fallback: allowAllUris uses origin-based strip on cross-origin", async () => {
-    // No declared allowlist → no upstream trust boundary → fall back
-    // to WHATWG-style origin strip. Preserves the safety property of
-    // the pre-#475 behaviour for `allowAllUris: true` providers
-    // (webhooks, woocommerce, wordpress, activecampaign).
-    const authSeen: (string | null)[] = [];
-    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
-      const u = typeof url === "string" ? url : url.toString();
-      authSeen.push(new Headers(init?.headers).get("authorization"));
-      if (u.startsWith("https://hook.example.com")) {
-        return new Response(null, {
-          status: 302,
-          headers: { location: "https://second.example.com/landing" },
-        });
-      }
-      return new Response("ok", { status: 200 });
-    });
+  it("refuses an injected credential under allow_all_uris with no allowlist", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
     const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
       credentials: { access_token: "secret" },
       authorizedUris: null,
@@ -1188,10 +1168,6 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
       credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     }));
-    const deps = makeDeps({
-      fetchFn: fetchFn as unknown as typeof fetch,
-      fetchCredentials,
-    });
     const result = await executeApiCall(
       {
         integrationId: "webhooks",
@@ -1201,12 +1177,40 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
         callerHeaders: {},
         body: { kind: "none" },
       },
-      deps,
+      makeDeps({ fetchFn: fetchFn as unknown as typeof fetch, fetchCredentials, declaredUris: [] }),
     );
-    expect(result.ok).toBe(true);
-    expect(authSeen[0]).toBe("Bearer secret");
-    // Cross-origin under allowAllUris → still stripped (fallback path).
-    expect(authSeen[1]).toBeNull();
+    expect(result).toMatchObject({ ok: false, status: 403 });
+    if (!result.ok) expect(result.error).toMatch(/names its hosts/);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("refuses an injected credential whose allowlist leaves the host to the caller", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "secret" },
+      authorizedUris: ["https://api.example.com/**", "https://**"],
+      allowAllUris: false,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer ",
+      credentialFieldName: "access_token",
+    }));
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        fetchCredentials,
+        declaredUris: ["https://api.example.com/**", "https://**"],
+      }),
+    );
+    expect(result).toMatchObject({ ok: false, status: 403 });
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 
   it("strips userinfo from redirect Location before re-issuing the fetch", async () => {
@@ -1892,8 +1896,6 @@ describe("executeApiCall — no credential in an error host", () => {
             credentials: { username: "jdoe", application_password: "xxxx yyyy" },
             authorizedUris: [],
             allowAllUris: true,
-            credentialHeaderName: "Authorization",
-            credentialHeaderPrefix: "Basic ",
             credentialFieldName: "application_password",
           })),
         }),
@@ -1968,8 +1970,6 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     credentials: { access_token: "tok" },
     authorizedUris: null,
     allowAllUris: false,
-    credentialHeaderName: "Authorization",
-    credentialHeaderPrefix: "Bearer ",
     credentialFieldName: "access_token",
   }));
 
@@ -1977,8 +1977,6 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     credentials: { access_token: "tok" },
     authorizedUris: null,
     allowAllUris: true,
-    credentialHeaderName: "Authorization",
-    credentialHeaderPrefix: "Bearer ",
     credentialFieldName: "access_token",
   }));
 
@@ -2109,8 +2107,6 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
             credentials: { access_token: "tok" },
             authorizedUris: [pattern],
             allowAllUris: false,
-            credentialHeaderName: "Authorization",
-            credentialHeaderPrefix: "Bearer ",
             credentialFieldName: "access_token",
           })),
           resolveHost: async () => ["169.254.169.254"],
@@ -2135,8 +2131,6 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
           credentials: { access_token: "tok" },
           authorizedUris: ["https://**"],
           allowAllUris: false,
-          credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer ",
           credentialFieldName: "access_token",
         })),
         resolveHost: async () => ["203.0.113.7"],
@@ -2157,8 +2151,6 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
           credentials: { access_token: "tok" },
           authorizedUris: ["https://**"],
           allowAllUris: false,
-          credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer ",
           credentialFieldName: "access_token",
         })),
         resolveHost,
@@ -2208,8 +2200,6 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     credentials: { access_token: "tok-123" },
     authorizedUris: null,
     allowAllUris: true,
-    credentialHeaderName: "Authorization",
-    credentialHeaderPrefix: "Bearer ",
     credentialFieldName: "access_token",
   }));
 
@@ -2403,8 +2393,6 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
       credentials: { access_token: "tok-123" },
       authorizedUris: ["https://**"],
       allowAllUris: false,
-      credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     }));
     const { cookiesSeen, fetchFn } = recordingFetch("sess=VICTIM-SESSION");
@@ -2443,8 +2431,6 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
       credentials: { access_token: "tok-123", pin: "s3cr3t" },
       authorizedUris: ["https://api.example.com/**"],
       allowAllUris: true,
-      credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     }));
     const { cookiesSeen, fetchFn } = recordingFetch("sess=FROM-OPEN-CALL");
@@ -2590,10 +2576,7 @@ describe("executeApiCall — injected Cookie credential meets the jar (#1613)", 
     expect(sent.slice(1)).toEqual([["PHPSESSID=rotated"], ["PHPSESSID=injected"]]);
   });
 
-  it.each([
-    ["allow_all_uris", sessionCreds(null, true)],
-    ["a glob allowlist", sessionCreds(["https://*.myshop.example/**"])],
-  ])(
+  it.each([["a glob allowlist", sessionCreds(["https://*.myshop.example/**"])]])(
     "a redirect hop's cookie cannot replace the session of the initial origin (%s)",
     async (_label, fetchCredentials) => {
       // victim/go → 302 → attacker/set, which plants its own PHPSESSID.

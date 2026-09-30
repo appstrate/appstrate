@@ -7,12 +7,12 @@ import { spacePackages, integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { db } from "./db.ts";
 import type { TestContext } from "./auth.ts";
-import { seedPackage, seedPackageShare } from "./seed.ts";
+import { seedPackage, seedPackageShare, seedPublishedVersion } from "./seed.ts";
 
 /**
- * Seed a local integration and switch it on in the context's default space.
- * The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
- * the package is placed in, so both writes are needed for it to be active.
+ * Seed a local integration, publish its manifest as `latest` (the version the proxy reads), and
+ * switch it on in the context's default space. The OFFER is the PLACEMENT: a `space_packages` row
+ * only speaks for a space the package is placed in, so both writes are needed for it to be active.
  */
 export async function seedProxyIntegration(
   ctx: TestContext,
@@ -25,6 +25,7 @@ export async function seedProxyIntegration(
     source: "local",
     draftManifest: manifest,
   });
+  await seedPublishedVersion(manifest.name, manifest.version);
   await seedPackageShare(ctx.defaultSpaceId, manifest.name);
   await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: manifest.name });
 }

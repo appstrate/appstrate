@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The `schema_version` and `allow_all_uris` guards of `build:system-packages`.
+ * The `schema_version` guard of `build:system-packages` (the allowlist rule it also runs is
+ * `findUnboundedInjectedCredentials`, tested in `packages/core/test/integration.test.ts`).
  *
  * Driven from synthetic manifests, not the repo's sources: the gate must hold
  * whatever version the tree happens to be at. A guard that stops comparing
@@ -10,10 +11,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
-import {
-  findAllowAllInjectedCredential,
-  findSchemaVersionDrift,
-} from "../build-system-packages.ts";
+import { findSchemaVersionDrift } from "../build-system-packages.ts";
 
 const manifest = (schemaVersion?: unknown) => ({
   name: "@appstrate/zoom",
@@ -57,79 +55,6 @@ describe("findSchemaVersionDrift", () => {
       { dirName: "integration-d-1.0.0", declared: "0.2" },
       { dirName: "integration-e-1.0.0", declared: undefined },
       { dirName: "integration-f-1.0.0", declared: undefined },
-    ]);
-  });
-});
-
-/** An integration whose `primary` auth carries `auth`. */
-const withAuth = (auth: unknown) => ({ name: "@appstrate/zoom", auths: { primary: auth } });
-const HTTP = { http: { in: "header", name: "Authorization", value: "{$credential.token}" } };
-const CUSTOM = { type: "custom" };
-
-describe("findAllowAllInjectedCredential", () => {
-  it("accepts an injected credential bound by authorized_uris, templated or literal", () => {
-    for (const authorized_uris of [["https://api.zoom.us/**"], ["{$credential.site_url}/**"]]) {
-      expect(
-        findAllowAllInjectedCredential([
-          [DIR, withAuth({ ...CUSTOM, authorized_uris, delivery: HTTP })],
-        ]),
-      ).toEqual([]);
-    }
-  });
-
-  it("accepts allow_all_uris when nothing is injected over http", () => {
-    for (const delivery of [undefined, { env: { TOKEN: { value: "{$credential.token}" } } }]) {
-      expect(
-        findAllowAllInjectedCredential([
-          [DIR, withAuth({ ...CUSTOM, allow_all_uris: true, delivery })],
-        ]),
-      ).toEqual([]);
-    }
-  });
-
-  it("rejects an auth-type default header under allow_all_uris, without delivery.http", () => {
-    for (const type of ["oauth2", "api_key", "basic"]) {
-      const env = { env: { TOKEN: { value: "{$credential.token}" } } };
-      expect(
-        findAllowAllInjectedCredential([
-          [DIR, withAuth({ type, allow_all_uris: true, delivery: env })],
-        ]),
-      ).toEqual([{ dirName: DIR, authKey: "primary" }]);
-    }
-  });
-
-  it("rejects delivery.http under allow_all_uris, even next to an authorized_uris list", () => {
-    const auth = {
-      ...CUSTOM,
-      authorized_uris: ["https://*.api-us1.com/**"],
-      allow_all_uris: true,
-      delivery: HTTP,
-    };
-    expect(findAllowAllInjectedCredential([[DIR, withAuth(auth)]])).toEqual([
-      { dirName: DIR, authKey: "primary" },
-    ]);
-  });
-
-  it("reports every offending auth, and skips manifests without auths", () => {
-    expect(
-      findAllowAllInjectedCredential([
-        [
-          "integration-a-1.0.0",
-          {
-            auths: {
-              primary: { ...CUSTOM, allow_all_uris: true, delivery: HTTP },
-              secondary: { ...CUSTOM, allow_all_uris: false, delivery: HTTP },
-              tertiary: { ...CUSTOM, allow_all_uris: true, delivery: HTTP },
-            },
-          },
-        ],
-        ["mcp-server-b-1.0.0", { name: "@appstrate/b" }],
-        ["integration-c-1.0.0", null],
-        ["integration-d-1.0.0", { auths: { primary: null } }],
-      ]),
-    ).toEqual([
-      { dirName: "integration-a-1.0.0", authKey: "primary" },
-      { dirName: "integration-a-1.0.0", authKey: "tertiary" },
     ]);
   });
 });

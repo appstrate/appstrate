@@ -55,6 +55,7 @@ import {
   UNRENDERED_ALLOWLIST_REFUSAL,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
+import { buildInjectedCredentialHeader } from "@appstrate/connect/proxy-primitives";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
 import { filterSensitiveHeaders } from "./redact.ts";
@@ -354,6 +355,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     fields: creds.credentials,
     allowAllUris: creds.allowAllUris,
     authorizedUris,
+    injectsCredential: buildInjectedCredentialHeader(creds) !== undefined,
   });
   // Reassigned when a 401 retry runs with refreshed credentials.
   let redactFields = redactionFields(policy, creds.credentials);

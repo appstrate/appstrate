@@ -13,6 +13,7 @@ import { LocalCookieJarStore } from "../../src/infra/cookie-jar/local-cookie-jar
 import { RedisCookieJarStore } from "../../src/infra/cookie-jar/redis-cookie-jar.ts";
 import type { KeyValueCache, CacheSetOptions } from "../../src/infra/cache/interface.ts";
 import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
+import { decrypt, encrypt } from "@appstrate/connect";
 
 /** Two buckets — their keys are opaque to the store. */
 const JAR: CookieJar = new Map([
@@ -115,11 +116,13 @@ function injectCache(cache: KeyValueCache): { getCache: () => Promise<KeyValueCa
 }
 
 describe("RedisCookieJarStore", () => {
-  it("writes the jar entries as JSON under the cp:cookies: namespace with TTL", async () => {
+  it("writes the jar entries encrypted under the cp:cookies: namespace with TTL", async () => {
     const fake = createFakeCache();
     const jar = new RedisCookieJarStore(injectCache(fake));
     await jar.set("xyz", "conn-a", JAR, 90);
-    expect(fake._store.get("cp:cookies:xyz:conn-a")).toBe(JSON.stringify([...JAR]));
+    const stored = fake._store.get("cp:cookies:xyz:conn-a")!;
+    expect(stored).not.toContain("a=1");
+    expect(decrypt(stored)).toBe(JSON.stringify([...JAR]));
     expect(fake._lastTtl.get("cp:cookies:xyz:conn-a")).toBe(90);
   });
 
@@ -152,8 +155,9 @@ describe("RedisCookieJarStore", () => {
   });
 
   it.each([
-    ["non-array JSON", JSON.stringify({ not: "array" })],
-    ["invalid JSON", "{not json"],
+    ["a plaintext entry", JSON.stringify([...JAR])],
+    ["non-array JSON", encrypt(JSON.stringify({ not: "array" }))],
+    ["invalid JSON", encrypt("{not json")],
   ])("reads %s as an empty jar", async (_label, raw) => {
     const fake = createFakeCache();
     fake._store.set("cp:cookies:s1:conn-a", raw);

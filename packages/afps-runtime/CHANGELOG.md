@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a credential the proxy injects needs a host-bounded allowlist (#1641)
+
+- **BREAKING:** `credentialUrlPolicy` takes a required `injectsCredential`. A
+  call that carries a credential — substituted or injected — drops
+  `allow_all_uris`, and is refused when `authorized_uris` is empty or an entry
+  leaves the host to the caller. `AUTH_TYPE_HTTP_DEFAULTS` moved to
+  `@appstrate/afps-shared/delivery-http`.
+
 ### Changed — `authorized_uris` rendered per connection; only declared hosts pin (#1627)
 
 - `guardedFetch` (and the engine's `preflightUrl`) takes a required `declaredUris`: the manifest's

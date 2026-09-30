@@ -550,13 +550,43 @@ describe("resolveLiveIntegrationCredentials", () => {
         connectionId: connId,
       },
     );
-    // The count restarts from the reconnect — it is cumulative since the last
-    // (re)connect, not a streak — and the 502 says so.
+    // The count restarts from the reconnect, and the 502 says so.
     const afterReconnect = await forced();
     expect(afterReconnect?.status).toBe(502);
-    expect(afterReconnect?.message).toContain(
-      `1/${max} upstream rejections since the connection was last (re)connected`,
-    );
+    expect(afterReconnect?.message).toContain(`1/${max} upstream rejections within an hour`);
+    expect(await needsReconnection(connId)).toBe(false);
+  });
+
+  it("rejections of an unrefreshable auth spread beyond the window never add up", async () => {
+    await db
+      .update(packages)
+      .set({
+        draftManifest: localIntegrationManifest({
+          name: INTEGRATION_ID,
+          serverName: "@official/gmail-server",
+          auths: { primary: { type: "api_key", credentialFields: ["api_key"] } },
+        }) as unknown as Record<string, unknown>,
+      })
+      .where(eq(packages.id, INTEGRATION_ID));
+    const connId = await seedConnection({ userId: ctx.user.id });
+    const forced = () =>
+      resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
+        forceRefresh: true,
+      }).then(
+        () => undefined,
+        (err: { status?: number; message?: string }) => err,
+      );
+    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    for (let i = 1; i < max; i++) expect((await forced())?.status).toBe(502);
+
+    // The window opened by the first rejection has lapsed.
+    await db
+      .update(integrationConnections)
+      .set({ refreshFailuresSince: new Date(Date.now() - 2 * 3_600_000) })
+      .where(eq(integrationConnections.id, connId));
+    const afterWindow = await forced();
+    expect(afterWindow?.status).toBe(502);
+    expect(afterWindow?.message).toContain(`1/${max} upstream rejections within an hour`);
     expect(await needsReconnection(connId)).toBe(false);
   });
 
