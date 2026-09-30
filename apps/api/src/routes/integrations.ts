@@ -112,7 +112,6 @@ import { removeScheduleJobs } from "../services/scheduler.ts";
 import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
-  toSupportedTokenEndpointAuthMethod,
 } from "../services/integration-manifest-helpers.ts";
 import { partitionScopesByAuthCatalog, scopesNotCovered } from "@appstrate/core/integration";
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
@@ -311,11 +310,12 @@ export const oauthClientCreateSchema = oauthClientSchema
 /**
  * Update body, merge semantics: an absent field is left unchanged and `null`
  * clears `redirect_uri`. `client_secret` and `token_endpoint_auth_method` are
- * written as a pair (see `encodeClientAuthForStorage`). `client_id` may only
- * repeat the stored value — a different one is a 409 in the service.
+ * written as a pair (see `encodeClientAuthForStorage`). No `client_id`: the
+ * connections a client minted refresh only with theirs, so a new `client_id`
+ * is a new client.
  */
 export const oauthClientUpdateSchema = oauthClientSchema
-  .partial({ client_id: true })
+  .omit({ client_id: true })
   .extend({ redirect_uri: z.url().nullable().optional() })
   .refine(noSecretWithPublicClient, {
     message: PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
@@ -346,7 +346,6 @@ function toOAuthClientCreateInput(body: z.infer<typeof oauthClientCreateSchema>)
 
 function toOAuthClientUpdateInput(body: z.infer<typeof oauthClientUpdateSchema>) {
   return {
-    ...(body.client_id !== undefined ? { clientId: body.client_id } : {}),
     ...(body.client_secret !== undefined ? { clientSecret: body.client_secret } : {}),
     ...(body.token_endpoint_auth_method !== undefined
       ? { tokenEndpointAuthMethod: body.token_endpoint_auth_method }
@@ -529,23 +528,9 @@ async function assertConnectionBelongsToActor(
   }
 }
 
-/**
- * Guard the caller-supplied `scopes` on both caller-facing kickoffs against the
- * auth's `scope_catalog` (§7.4). `body.scopes` is the ONLY delta the caller
- * contributes to the consent request (defaults and already-granted scopes are
- * computed server-side), so a typo there is otherwise carried all the way to
- * the provider's consent screen, where it fails as an opaque `invalid_scope`.
- * Membership (and the no-catalog carve-out) is `partitionScopesByAuthCatalog`.
- */
-/** The admin pin's set before a write, as the audit `before`. */
-async function adminPinBefore(
-  scope: SpaceScope,
-  integrationPackageId: string,
-  agentPackageId: string,
-): Promise<AuditPayload | null> {
-  const pins = await listIntegrationPins(scope, integrationPackageId);
-  const pin = pins.find((p) => p.agent_package_id === agentPackageId);
-  return pin ? { connectionIds: pin.connection_ids } : null;
+/** The audited view of a pin set or an org default. */
+function pinAudit(connectionIds: string[] | null): AuditPayload | null {
+  return connectionIds ? { connectionIds } : null;
 }
 
 function orgDefaultAudit(
@@ -554,6 +539,14 @@ function orgDefaultAudit(
   return def ? { connectionIds: def.connection_ids, enforce: def.enforce } : null;
 }
 
+/**
+ * Guard the caller-supplied `scopes` on both caller-facing kickoffs against the
+ * auth's `scope_catalog` (§7.4). `body.scopes` is the ONLY delta the caller
+ * contributes to the consent request (defaults and already-granted scopes are
+ * computed server-side), so a typo there is otherwise carried all the way to
+ * the provider's consent screen, where it fails as an opaque `invalid_scope`.
+ * Membership (and the no-catalog carve-out) is `partitionScopesByAuthCatalog`.
+ */
 function assertScopesInAuthCatalog(
   auth: { scope_catalog?: readonly { value: string }[] },
   authKey: string,
@@ -596,20 +589,13 @@ const resolveCallbackClient: OAuthClientResolver = async (ref) => {
     ref.packageId,
     ref.authKey,
   );
-  const client = await resolveIntegrationClientById(
+  return resolveIntegrationClientById(
     ref.clientRef,
     ref.spaceId,
     ref.packageId,
     ref.authKey,
     auth.token_endpoint_auth_method,
   );
-  if (!client) return null;
-  const method = toSupportedTokenEndpointAuthMethod(client.tokenEndpointAuthMethod);
-  return {
-    clientId: client.clientId,
-    clientSecret: client.clientSecret,
-    ...(method ? { tokenEndpointAuthMethod: method } : {}),
-  };
 };
 
 // ─────────────────────────────────────────────
@@ -1343,8 +1329,7 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       const body = await readJsonBody(c, setPinSchema);
       const userId = c.get("user")?.id ?? null;
-      const before = await adminPinBefore(scope, packageId, agentPackageId);
-      const pin = await upsertIntegrationPin(scope, packageId, {
+      const { previous, pin } = await upsertIntegrationPin(scope, packageId, {
         agentPackageId,
         connectionIds: body.connection_ids,
         createdBy: userId,
@@ -1353,8 +1338,8 @@ export function createIntegrationsRouter() {
         action: "integration.pin.upserted",
         resourceType: "integration_pin",
         resourceId: pinAuditResourceId(agentPackageId, packageId),
-        before,
-        after: { connectionIds: pin.connection_ids },
+        before: pinAudit(previous),
+        after: pinAudit(pin.connection_ids),
       });
       return c.json(pin);
     },
@@ -1367,14 +1352,13 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
-      const before = await adminPinBefore(scope, packageId, agentPackageId);
-      const result = await deleteIntegrationPin(scope, packageId, agentPackageId);
-      if (result.deleted) {
+      const { previous } = await deleteIntegrationPin(scope, packageId, agentPackageId);
+      if (previous) {
         await recordAuditFromContext(c, {
           action: "integration.pin.deleted",
           resourceType: "integration_pin",
           resourceId: pinAuditResourceId(agentPackageId, packageId),
-          before,
+          before: pinAudit(previous),
         });
       }
       // Idempotent delete — 204 whether the pin existed or not.
@@ -1409,8 +1393,7 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       const body = await readJsonBody(c, setOrgDefaultSchema);
       const userId = c.get("user")?.id ?? null;
-      const before = orgDefaultAudit(await getOrgDefault(scope, packageId));
-      const def = await upsertOrgDefault(scope, packageId, {
+      const { previous, orgDefault } = await upsertOrgDefault(scope, packageId, {
         connectionIds: body.connection_ids,
         enforce: body.enforce,
         createdBy: userId,
@@ -1419,10 +1402,10 @@ export function createIntegrationsRouter() {
         action: "integration.org_default.upserted",
         resourceType: "integration_org_default",
         resourceId: packageId,
-        before,
-        after: orgDefaultAudit(def),
+        before: orgDefaultAudit(previous),
+        after: orgDefaultAudit(orgDefault),
       });
-      return c.json(def);
+      return c.json(orgDefault);
     },
   );
 
@@ -1432,14 +1415,13 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
-      const before = orgDefaultAudit(await getOrgDefault(scope, packageId));
-      const result = await deleteOrgDefault(scope, packageId);
-      if (result.deleted) {
+      const { previous } = await deleteOrgDefault(scope, packageId);
+      if (previous) {
         await recordAuditFromContext(c, {
           action: "integration.org_default.deleted",
           resourceType: "integration_org_default",
           resourceId: packageId,
-          before,
+          before: orgDefaultAudit(previous),
         });
       }
       // Idempotent delete — 204 whether a default existed or not.

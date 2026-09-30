@@ -11,9 +11,9 @@
  *     (`X-Integration-Id`, `X-Target`, non-UUIDv4 `X-Session-Id`)
  *   - the session-principal rebind guard → 403
  *     (a session bound to principal A, replayed by principal B)
- *   - `ProxyAuthorizationError` (target off the `authorizedUris` allowlist)
+ *   - `unauthorized_target` (target off the `authorizedUris` allowlist)
  *     → 403
- *   - `ProxyCredentialError` (no connection / integration not installed) → 404
+ *   - `credential_not_found` (no connection / integration not installed) → 404
  *   - several own connections and no `X-Connection-Id` → 409 must_choose_connection
  *   - `X-Run-Id` confines the call to the run's bound connections; without it
  *     the space-level rules (org defaults, named, own) pick the connection
@@ -335,7 +335,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
   });
   afterEach(() => restoreFetch());
 
-  it("maps a not-installed integration to 404 (ProxyCredentialError)", async () => {
+  it("maps a not-installed integration to 404 (credential_not_found)", async () => {
     let upstreamCalls = 0;
     mockUpstream(async () => {
       upstreamCalls += 1;
@@ -349,7 +349,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
         "X-Org-Id": ctx.orgId,
         "X-Space-Id": ctx.defaultSpaceId,
         // Integration is never seeded / installed → resolver throws
-        // IntegrationCredentialNotFoundError → ProxyCredentialError → 404.
+        // IntegrationCredentialNotFoundError → credential_not_found → 404.
         "X-Integration-Id": "@cporg/missing",
         "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
         "X-Session-Id": uuidV4(),
@@ -399,7 +399,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
   it("maps an integration not activated in the space to 404 (not 500)", async () => {
     // Package exists in the org but is NOT inserted into spacePackages,
     // so assertIntegrationActive throws an RFC 9457 notFound (an ApiError, not
-    // a ProxyCredentialError). The route's catch must surface its 404 status
+    // a credential_not_found). The route's catch must surface its 404 status
     // rather than masking it as a 500.
     await seedPackage({
       id: INTEGRATION_ID,
@@ -431,7 +431,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
     expect(upstreamCalls).toBe(0);
   });
 
-  it("maps an off-allowlist target to 403 (ProxyAuthorizationError)", async () => {
+  it("maps an off-allowlist target to 403 (unauthorized_target)", async () => {
     await seedIntegrationWithConnection(ctx);
 
     let upstreamCalls = 0;

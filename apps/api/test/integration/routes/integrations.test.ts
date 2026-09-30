@@ -21,6 +21,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { expectRejectedField } from "../../helpers/body-validation.ts";
 import { asc, eq, and } from "drizzle-orm";
 import {
   auditEvents,
@@ -1262,7 +1263,7 @@ describe("OAuth client CRUD", () => {
     expect((await patch({ client_secret: "again" }, "PUT")).status).toBe(404);
   });
 
-  it("refuses a client_id change with 409 and accepts the stored value", async () => {
+  it("refuses any client_id in the update body as an unknown key", async () => {
     const created = await createClient("abc", "shh");
     const patch = (body: Record<string, unknown>) =>
       app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
@@ -1271,18 +1272,16 @@ describe("OAuth client CRUD", () => {
         body: JSON.stringify(body),
       });
 
-    const changed = await patch({ client_id: "abc2", client_secret: "new" });
-    expect(changed.status).toBe(409);
-    const problem = (await changed.json()) as { code?: string; detail?: string };
-    expect(problem.code).toBe("client_id_immutable");
-    expect(problem.detail).toContain("new OAuth client");
+    await expectRejectedField(
+      await patch({ client_id: "abc2", client_secret: "new" }),
+      "client_id",
+    );
+    await expectRejectedField(await patch({ client_id: "abc", client_secret: "new" }), "client_id");
     const [row] = await db
       .select()
       .from(integrationOauthClients)
       .where(eq(integrationOauthClients.id, created.id));
     expect(row!.clientId).toBe("abc");
-
-    expect((await patch({ client_id: "abc", client_secret: "new" })).status).toBe(200);
   });
 
   it("audits create, update and delete with before/after and never the secret", async () => {
@@ -1328,7 +1327,7 @@ describe("OAuth client CRUD", () => {
     const rotate = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
       method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: "abc", client_secret: "" }),
+      body: JSON.stringify({ client_secret: "" }),
     });
     expect(rotate.status).toBe(400);
     const problem = (await rotate.json()) as { detail?: string };

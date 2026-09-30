@@ -31,6 +31,7 @@
 
 import {
   applyInjectedCredentialHeader,
+  credentialCarryingHeader,
   normalizeAuthSchemeTemplates,
   substituteVars,
   findUnresolvedPlaceholders,
@@ -40,15 +41,15 @@ import {
   type SidecarConfig,
 } from "./helpers.ts";
 import {
-  assertAllowlistRendered,
   cookieScope,
   credentialUrlPolicy,
-  exfiltrationRefusal,
+  declaredLiteralHosts,
   fetchApiCall,
   PreflightError,
   redactionFields,
   redactCredentialHost,
   RedirectBlockedError,
+  urlPolicyRefusalMessage,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
 import { buildInjectedCredentialHeader } from "@appstrate/connect/proxy-primitives";
@@ -333,8 +334,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     };
   }
 
-  // 4. Credential-exfiltration guard (docs/architecture/SIDECAR.md). The allowlist + SSRF gate
-  //    itself runs inside `fetchApiCall`, on the target and on every redirect hop.
+  // 4. URL policy (docs/architecture/SIDECAR.md). The allowlist + SSRF gate itself runs inside
+  //    `fetchApiCall`, on the target and on every redirect hop.
   const authorizedUris = creds.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
     templates: [
@@ -344,31 +345,19 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     ],
     fields: creds.credentials,
     allowAllUris: creds.allowAllUris,
+    declaredUris: deps.declaredUris,
     authorizedUris,
     injectsCredential: buildInjectedCredentialHeader(creds) !== undefined,
   });
+  if (policy.refuse) {
+    return { ok: false, status: 403, error: urlPolicyRefusalMessage(policy.refuse, integrationId) };
+  }
   // Reassigned when a 401 retry runs with refreshed credentials.
   let redactFields = redactionFields(policy, creds.credentials);
-  try {
-    assertAllowlistRendered({
-      declaredUris: deps.declaredUris,
-      authorizedUris,
-      allowAllUris: policy.allowAllUris,
-    });
-  } catch (err) {
-    return wrapRequestError(err, integrationId, resolvedUrl, redactFields);
-  }
-  if (policy.refuse) {
-    return { ok: false, status: 403, error: exfiltrationRefusal(integrationId) };
-  }
 
   // 4b. This call's view of the run-wide jar (docs/architecture/SIDECAR.md), keyed by the
   //     connection's credential scope. Siblings are gated per URL, whatever gated the initial target.
-  const cookies = cookieScope(
-    cookieJar,
-    scope,
-    policy.allowAllUris || !authorizedUris.length ? null : deps.declaredUris,
-  );
+  const cookies = cookieScope(cookieJar, scope, policy.allowAllUris ? null : deps.declaredUris);
 
   // 5b. Pre-substitute headers with the *initial* creds so we can
   //     fail fast on unresolved placeholders. Re-substituted on each
@@ -480,11 +469,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     }
     // Server-side credential injection (Authorization, X-Api-Key, …).
     const credentialInjection = applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
-    if (credentialInjection.kind === "inject") {
-      credentialHeaders.push(credentialInjection.header.name);
-    } else if (credentialInjection.kind === "caller_override") {
-      credentialHeaders.push(credentialInjection.headerName);
-    }
+    const carrier = credentialCarryingHeader(credentialInjection);
+    if (carrier) credentialHeaders.push(carrier);
     // ONE Cookie header (injected credential + caller cookies): the jar's base.
     const cookieKeys = Object.keys(resolvedHeaders).filter((k) => k.toLowerCase() === "cookie");
     const baseCookie = cookieKeys.map((k) => resolvedHeaders[k]).join("; ");
@@ -541,7 +527,10 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       // The 4 policy, not the raw flag: a templated credential must not leave the allowlist.
       allowAllUris: policy.allowAllUris,
       credentialHeaders,
-      trustDeclaredHosts: true,
+      trustedHost: declaredLiteralHosts({
+        declaredUris: deps.declaredUris,
+        allowAllUris: policy.allowAllUris,
+      }),
       cookies,
       integrationId,
       ...(fetchFn ? { fetchFn } : {}),
@@ -654,11 +643,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     injectedHeader:
       credentialInjection === "inject" ? (creds.credentialHeaderName?.toLowerCase() ?? null) : null,
     // Which URL-trust policy gated the call.
-    urlPolicy: policy.allowAllUris
-      ? "allow_all"
-      : authorizedUris.length
-        ? "allowlist"
-        : "ssrf_guard",
+    urlPolicy: policy.allowAllUris ? "allow_all" : "allowlist",
     authRefreshed,
     requestHeaderNames,
     // Drops Set-Cookie / WWW-Authenticate / Authorization etc.; keeps

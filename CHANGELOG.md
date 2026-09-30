@@ -17,16 +17,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `SELECT count(*) FROM runs WHERE run_origin = 'remote' AND (model_source IS NOT NULL OR model_id IS NOT NULL OR inference_route IS NOT NULL);`
   (#1641).
 - **Rotating `CONNECTION_ENCRYPTION_KEY` can now finish**:
-  `scripts/migration/0037-rekey-encrypted-columns.ts` re-encrypts, under the
+  `scripts/rekey-encrypted-columns.ts` re-encrypts, under the
   active key, every ciphertext a retired kid wrote in the seven encrypted
   columns; its dry run is the per-kid inventory and exits 0 only when nothing
   is left outside the active kid. Procedure: `docs/ENV.md` § "Rotating
   `CONNECTION_ENCRYPTION_KEY`" (#1641).
 
-- **Two additive migrations apply at boot**: `0078` adds
+- **Three additive migrations apply at boot**: `0078` adds
   `integration_connections.refresh_failures_since`; `0079` adds the
-  `notifications_type_valid` CHECK. Before the deploy, this query must return
-  no row:
+  `notifications_type_valid` CHECK; `0081` adds
+  `model_provider_credentials.refresh_failures_since`. Before the deploy, this
+  query must return no row:
   `SELECT type, count(*) FROM notifications WHERE type NOT IN ('run_completed', 'package_shared') GROUP BY type;`
   (#1641).
 - **Pre-flight the stored integration manifests before the deploy**:
@@ -56,23 +57,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   output schema; a connect run without a 32-byte `CONNECT_RESULT_KEY` fails
   its env validation. The chat module validates `PORT`.
 - **BREAKING (manifests): one template grammar per concept, and nothing
-  unrendered reaches an upstream** (#1641). `delivery.http.value` renders
-  through the same `{$credential.<field>}` renderer as `env` and `files`: a
-  `{{field}}` there is refused at import instead of substituted. Any other
-  `{$…}` (`{$outputs.token}`, …) in delivery or `authorized_uris` is refused at
-  import and throws at render. A connect output is referenced as
-  `{$credential.<name>}`, the jwt extractor's `token` included; login inputs
-  are `{{name}}`, and a `{$…}` in a `connect.login` request is refused.
+  unrendered reaches an upstream** (#1641). Every delivery template (`http`,
+  `env`, `files`) renders `{$credential.<field>}` and nothing else: the
+  api_call `{{…}}` placeholder, `{$outputs.*}` or any other `{$…}` there is
+  refused at import and throws at render, as is any `{$…}` other than
+  `{$credential.<field>}` in `authorized_uris`. A connect output is referenced
+  as `{$credential.<name>}`, the jwt extractor's `token` included; login
+  inputs are `{{name}}`. The login engine applies the import rule before its
+  request: an expression it cannot evaluate fails the login as
+  `invalid_config` and is never sent.
 - **BREAKING (API): an integration OAuth client is updated with `PATCH`, and
   its `client_id` can no longer change** (#1641). `PATCH` replaces the `PUT`
   of `/api/integrations/{packageId}/oauth-clients/{clientId}` and of
-  `/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}`. An absent
-  field is left unchanged (send `null` to clear `redirect_uri`). A different
-  `client_id` answers `409 client_id_immutable`: the connections a client
-  minted refresh only with the `client_id` their tokens were issued to. The
-  audit action `integration.oauth_client.rotated` is now
-  `integration.oauth_client.updated`; create/update/delete rows record the
-  client before and after (never its secret).
+  `/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}`
+  (`updateIntegrationOAuthClient`, `updateOrgIntegrationOAuthClient`). An
+  absent field is left unchanged (send `null` to clear `redirect_uri`). The
+  body has no `client_id`, and sending one is a 400 (unknown field): the
+  connections a client minted refresh only with the `client_id` their tokens
+  were issued to, so a new `client_id` is a new client. The audit action
+  `integration.oauth_client.rotated` is now `integration.oauth_client.updated`;
+  create/update/delete rows record the client before and after (never its
+  secret).
 - **BREAKING (API): OAuth clients name their owning tier** (#1641).
   `GET …/auths/{authKey}/clients` returns `source: "system" | "org" | "space"`
   instead of `"built-in" | "org" | "custom"`, where `custom` meant the space.
@@ -84,9 +89,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **BREAKING (API): one name per role across the pin and connection family**
   (#1641). The agent is `agent_package_id` and the integration
   `integration_package_id` on `IntegrationPin`, `IntegrationConnection`,
-  consuming agents, connection readiness and the run's `connections_used`,
-  whose `label` and `account_id` are always strings and `source` the cascade
-  layer enum.
+  consuming agents, connection readiness, the `connections[]` of
+  `GET /api/me/context` (was `integration_id`) and the run's
+  `connections_used`, whose `label` and `account_id` are always strings and
+  `source` the cascade layer enum.
 - **BREAKING (API): an end-user's member-pin write is a 403, not a 401**
   (#1641). The key is valid; `forbidden` carries no `invalid_token` challenge.
 - **BREAKING (API): the credential proxy's refusals carry stable problem
@@ -115,8 +121,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a `resource` content block with `blob`, whose `uri` is the file's REST
   content URL.
 - **Platform MCP tools return structured output** (#1641). Every JSON result
-  carries `structuredContent` beside its text block (MCP 2025-06-18), and the
-  tools with a stable result shape declare an `outputSchema`.
+  carries `structuredContent` beside its text block (MCP 2025-06-18); an error
+  carries the text only.
 - **Notification kinds are a declared union** (#1641). `GET /api/notifications`
   items are a `oneOf` on `type` (`run_completed`, `package_shared`) with a
   typed payload each, and the database refuses any other kind.
@@ -130,6 +136,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The retired `X-Integration` header is no longer stripped** by the
   credential proxy or the sidecar (#1641); it reaches the upstream like any
   other header.
+- **BREAKING (API): the LLM proxies answer an upstream they cannot reach as
+  502/504, not 500** (#1641): `upstream_unresolvable`, `upstream_unreachable`
+  (502) and `upstream_timeout` (504), with `Proxy-Status error=…`, the
+  credential proxy's codes. A model host with no DNS answer used to be a 400.
+  `/api/llm-proxy/*` documents the 402 a metering module's `beforeUsage` hook
+  can answer.
+- **BREAKING (API): the Stripe webhook receiver answers its refusals as RFC
+  9457 problem documents** (#1641). `POST /api/billing/webhooks` answers
+  `400 invalid_request` for a missing or invalid `stripe-signature` and
+  `500 internal_error` instead of plain text; Stripe reads only the status.
 
 ### Added
 
@@ -147,23 +163,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Every error response in the OpenAPI document declares its body**
   (#1641), and `verify:openapi` §6b enforces it: `application/problem+json`
   (`ProblemDetail`), or the media type a reviewed exemption names (Better
-  Auth's OAuth endpoints, HTML pages, the health report, the Stripe webhook,
-  proxied upstream responses). 100 responses were backfilled.
+  Auth's OAuth endpoints, HTML pages, the health report, proxied upstream
+  responses). 100 responses were backfilled.
 - **A revoked BYOK API key is flagged** (#1641). Upstream 401s through the
   LLM proxy count against the organization's credential; the
   `INTEGRATION_REFRESH_MAX_FAILURES`-th within an hour sets
   `needs_reconnection` and stops inference on it until the key is re-entered.
+  An OAuth subscription credential is never counted: its counter is its
+  refresh streak.
 - **A `connection_overrides` key the agent does not declare is a 400**
   (#1641). It was dropped without a trace, and a schedule froze it onto its
   row, so the run bound a lower cascade layer instead of the account asked
   for. It is refused on the agent run, the inline run and `/inline/validate`,
   and on schedule create and update.
 - **Audit rows record the whole change** (#1641). `schedule.created` records
-  every override; `schedule.updated` records before and after, including the
-  connection-override reset an actor change implies; a placement `PATCH`
-  writes `package.placement.updated` for `modelId`, `proxyId` and
-  `generationConfig`; pin and org-default writes record `before`; admin and
-  member pin rows share one `resourceId`.
+  every override; `schedule.updated` records before and after of only the
+  fields the write changed, including the connection-override reset an actor
+  change implies, and a write that changes nothing records no row; a
+  placement `PATCH` writes `package.placement.updated` for `modelId`,
+  `proxyId` and `generationConfig`; pin and org-default writes record
+  `before`, read in the write's own transaction; admin and member pin rows
+  share one `resourceId`.
 - **`connect.login` reads the regex extractor's `source`** (#1641):
   `$response.body` or `$response.header.<name>`; it was ignored. An
   expression, selector or criterion context the engine cannot evaluate is
@@ -173,9 +193,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (#1641). Rejections of a credential that cannot refresh count toward
   `INTEGRATION_REFRESH_MAX_FAILURES` only within one hour of the first; a
   reconnect still resets the count.
-- **A UUID-shaped system OAuth client, model or provider-key id fails boot**
-  (#1641). Such an id would take precedence over an organization's own row
-  with the same id.
+- **A UUID-shaped system id is refused** (#1641). Such an id would take
+  precedence over an organization's own row with the same id. A system OAuth
+  client with one fails boot; a `SYSTEM_PROVIDER_KEYS` entry whose key or
+  model id is UUID-shaped is skipped and logged, like any other invalid entry.
 - **The root `zod` override no longer pins below the declared floor** (#1641).
   `overrides.zod` moves from 4.5.4 to 4.6.5, the version every workspace
   declares; `verify:overrides` (in `bun run check`) fails when an override
@@ -190,11 +211,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   refused: publish it before calling it through the proxy (`appstrate run`
   without `--report` included).
 - **An auth whose credential the proxy injects must name its hosts** (#1641).
-  Every manifest write and import refuses `allow_all_uris`, or an
-  `authorized_uris` entry that leaves the host to the caller (`https://**`,
-  `https://*.com/**`), on an auth that injects a credential over HTTP; the
-  platform proxy, the sidecar, its MITM egress and `appstrate run` refuse the
-  same calls. BREAKING: such existing custom integrations stop reaching any
+  Every manifest write and import refuses `allow_all_uris`, no
+  `authorized_uris` at all, or an `authorized_uris` entry that leaves the host
+  to the caller (`https://**`, `https://*.com/**`), on an auth that injects a
+  credential over HTTP (without an allowlist every one of its calls was
+  already refused at run time); the platform proxy, the sidecar, its MITM
+  egress and `appstrate run` refuse the same calls. BREAKING: such existing custom integrations stop reaching any
   host — replace `allow_all_uris` with `authorized_uris` naming the hosts.
 - **OAuth client secrets and upstream session cookies no longer sit in
   plaintext in Redis** (#1641). The OAuth connect state stores only the client
@@ -202,6 +224,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   credential-proxy cookie jar is encrypted with the connection-credential
   keyring. A connect started before the deploy fails at its callback and must
   be retried; a cookie jar written before it reads as empty.
+- **An `api_call` whose auth declares no `authorized_uris` and not
+  `allow_all_uris` is refused on every path** (#1641). The sidecar used to
+  relay it anywhere the SSRF gate allowed; the platform proxy answers
+  `403 unauthorized_target`. An empty authorized set authorizes nothing (AFPS
+  §7.9).
 
 ## [1.0.0-beta.64] - 2026-09-30
 

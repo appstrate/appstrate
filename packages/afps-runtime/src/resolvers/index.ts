@@ -54,14 +54,13 @@ export {
 // renderer, and the portable integration resolver.
 export { substituteVars } from "./template-vars.ts";
 
-// Credential-exfiltration guard shared by the three `api_call` paths.
+// The pre-send URL policy shared by the three `api_call` paths.
 export {
-  allowlistUnrendered,
   credentialUrlPolicy,
-  exfiltrationRefusal,
   redactionFields,
-  UNRENDERED_ALLOWLIST_REFUSAL,
+  urlPolicyRefusalMessage,
   type CredentialUrlPolicy,
+  type UrlPolicyRefusal,
 } from "./credential-guard.ts";
 
 // Reusable credential-injecting HTTP-call core — tool factory + helpers.
@@ -98,13 +97,12 @@ export {
 // redirects, cookie capture, deadline.
 export {
   API_CALL_TIMEOUT_MS,
-  assertAllowlistRendered,
+  declaredLiteralHosts,
   fetchApiCall,
   matchesAuthorizedUri,
   stripUserInfoAndFragment,
   redactHost,
   redactCredentialHost,
-  scrubTransportError,
   PreflightError,
   RedirectBlockedError,
   type HostResolver,

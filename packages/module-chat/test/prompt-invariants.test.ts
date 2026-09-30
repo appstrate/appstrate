@@ -253,7 +253,7 @@ describe("caller-context prompt hygiene", () => {
       {
         user: { name: "Ada" },
         org: { role: "member" },
-        connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
+        connections: [{ integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
         agents: [{ packageId: "@appstrate/triage", takes_input: false }],
         agents_truncated: true,
         skills: [{ packageId: "@appstrate/web-research", version: "1.2.0" }],

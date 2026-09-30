@@ -508,7 +508,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     // connections list, not the previous hand-built {id,label,…} stub.
     const body = (await res.json()) as {
       id: string;
-      packageId: string;
+      integration_package_id: string;
       auth_key: string;
       label: string;
       shared_with_org: boolean;
@@ -518,7 +518,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     };
     expect(body.label).toBe("My Gmail");
     expect(body.id).toBe(connId);
-    expect(body.packageId).toBe("@myorg/gmail");
+    expect(body.integration_package_id).toBe("@myorg/gmail");
     expect(body.auth_key).toBe("google");
     expect(body.owner_type).toBe("user");
     expect(typeof body.createdAt).toBe("string");

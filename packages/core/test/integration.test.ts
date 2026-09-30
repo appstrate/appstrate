@@ -34,6 +34,7 @@ import {
   selectedApiCallConfigs,
   findNonSnakeCaseIdentityClaimKeys,
   findUnboundedInjectedCredentials,
+  findUnevaluableExpressions,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
 import { TOOL_NAME_MAX_LEN } from "../src/naming.ts";
@@ -873,6 +874,14 @@ describe("findUnboundedInjectedCredentials — write-path allowlist bound", () =
     }
   });
 
+  it("refuses an injecting auth that declares no authorized_uris, like the run-time guard", () => {
+    for (const authorized_uris of [undefined, []]) {
+      expect(paths({ type: "api_key", authorized_uris })).toEqual([
+        "auths.primary.authorized_uris",
+      ]);
+    }
+  });
+
   it("refuses every authorized_uris entry that leaves the host to the caller", () => {
     const authorized_uris = [
       "https://api.example.com/**",
@@ -1196,15 +1205,29 @@ describe("integrationManifestSchema — unevaluable expressions (§7.6/§7.7)", 
     expect(paths).toContain("auths.session.authorized_uris.0");
   });
 
-  it("rejects the {{field}} form in delivery.http.value", () => {
-    const m = baseManifest();
-    const auths = m.auths as Record<string, Record<string, Record<string, unknown>>>;
-    auths.oauth!.delivery!.http = {
-      in: "header",
-      name: "Authorization",
-      value: "{{access_token}}",
-    };
-    expect(errorPaths(m)).toContain("auths.oauth.delivery.http.value");
+  it("rejects the api_call {{…}} placeholder in every delivery template", () => {
+    const m = customWithConnect(login(), {
+      ...tokenHttp("Bearer {{token}}"),
+      env: { A: { value: "{{token}}" } },
+      files: { "/f": { value: "x{{ token }}" } },
+    });
+    const paths = errorPaths(m);
+    expect(paths).toContain("auths.session.delivery.http.value");
+    expect(paths).toContain("auths.session.delivery.env.A");
+    expect(paths).toContain("auths.session.delivery.files./f");
+  });
+
+  it("is exported as a manifest-level finder that tolerates a non-manifest", () => {
+    const found = findUnevaluableExpressions(
+      customWithConnect(login(), tokenHttp("Bearer {$outputs.token}")),
+    );
+    expect(found.map((v) => [v.authKey, v.path.join(".")])).toEqual([
+      ["session", "auths.session.delivery.http.value"],
+    ]);
+    expect(findUnevaluableExpressions(null)).toEqual([]);
+    expect(
+      findUnevaluableExpressions({ auths: { a: null, b: { connect: { login: {} } } } }),
+    ).toEqual([]);
   });
 
   it("rejects a {$…} expression in the login request", () => {

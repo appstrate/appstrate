@@ -1,25 +1,17 @@
 -- 0036 — give every run's connection snapshot its label and account (#1641).
 --
--- `runs.resolved_connections` is read back through `resolvedConnectionMapSchema`
--- (`@appstrate/core/integration`), which requires a string `label` and
--- `accountId` on every bound connection: the resolver has written both since
--- `integration_connections.label` became NOT NULL (`0077`). A run resolved
--- before that carries `label: null` for a connection that had none, and the
--- parse refuses the row — the run's detail and the runs list would 500 on it.
+-- `resolvedConnectionMapSchema` (`@appstrate/core/integration`) requires a
+-- string `label` and `accountId` on every bound connection of
+-- `runs.resolved_connections`; a run resolved before `0077` may carry
+-- `label: null`, and its detail and the runs list would 500. Each such element
+-- takes the connection's current label (else its own `accountId`) and, when it
+-- lacks one, the connection's `accountId`; one still lacking either raises and
+-- nothing is written.
 --
--- Each such element takes the connection's CURRENT label when the row still
--- exists (after `0077` every connection has one), else its own `accountId` —
--- the extracted identity, the value the platform minted a label from. An
--- `accountId` the snapshot lacks is read off the connection. An element still
--- lacking either after that raises, naming the count: nothing is written.
---
--- Order: after `0032` (whose SHAPE step makes every value an array — refused
--- otherwise) and before the image that parses the snapshot serves traffic.
--- Rows: UNMEASURED — not rehearsed on a production dump yet. Rehearse it with
--- `0032` and record the counts here.
---
--- Idempotent: the WHERE is exactly "an element whose label or accountId is not
--- a string", so a second run matches zero rows. One transaction.
+-- Order: after `0032`, before the image that parses the snapshot serves
+-- traffic. Rows: UNMEASURED — rehearse with `0032` and record the counts here.
+-- Idempotent (the WHERE is exactly "label or accountId not a string"); one
+-- transaction.
 
 BEGIN;
 SET LOCAL lock_timeout = '3s';

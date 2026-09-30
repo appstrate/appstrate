@@ -65,9 +65,6 @@ interface ResolveLiveCredentialsOptions {
   forceRefresh?: boolean;
 }
 
-/** Upstream rejections of an unrefreshable credential count toward reconnection within this window. */
-const UNREFRESHABLE_REJECTION_WINDOW_SECONDS = 60 * 60;
-
 /**
  * NEVER returns an empty payload — the sidecar would read it as "skip the MITM
  * listener" and boot uncredentialed — so every unproducible credential throws.
@@ -217,7 +214,7 @@ export async function resolveLiveIntegrationCredentials(
     const { failures, needsReconnection } = await recordIntegrationRefreshFailure(
       connection.id,
       maxFailures,
-      { windowSeconds: UNREFRESHABLE_REJECTION_WINDOW_SECONDS },
+      "upstream_rejection",
     );
     if (needsReconnection) return flagTerminalAndThrow(reason);
     logger.warn("Integration credential rejected upstream — below the reconnect threshold", {

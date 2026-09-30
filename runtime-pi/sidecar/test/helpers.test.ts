@@ -14,7 +14,7 @@ import {
   INTEGRATION_ID_RE,
   MAX_RESPONSE_SIZE,
   ABSOLUTE_MAX_RESPONSE_SIZE,
-  OUTBOUND_TIMEOUT_MS,
+  API_CALL_TIMEOUT_MS,
   readPositiveByteEnv,
   readPositiveIntEnv,
   readRequestBodyBounded,
@@ -31,8 +31,8 @@ describe("constants", () => {
     expect(ABSOLUTE_MAX_RESPONSE_SIZE).toBe(32 * 1024 * 1024);
   });
 
-  it("OUTBOUND_TIMEOUT_MS is 30_000", () => {
-    expect(OUTBOUND_TIMEOUT_MS).toBe(30_000);
+  it("API_CALL_TIMEOUT_MS is 30_000", () => {
+    expect(API_CALL_TIMEOUT_MS).toBe(30_000);
   });
 
   it("MAX_REQUEST_BODY_SIZE defaults to 10 MB", () => {

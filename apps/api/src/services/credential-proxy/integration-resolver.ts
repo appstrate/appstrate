@@ -298,7 +298,7 @@ async function loadManifest(input: ResolveIntegrationProxyInput): Promise<Integr
       );
     case "invalid_manifest":
       // Both halves carry the issues: the log for the operator, the thrown
-      // message because it travels to the agent as a `ProxyCredentialError`
+      // message because it travels to the agent as a `credential_not_found`
       // (`credential-proxy/core.ts`) — the only channel a run has for finding
       // out why its integration went away. Schema issues name manifest fields,
       // never credentials, so nothing secret rides along.

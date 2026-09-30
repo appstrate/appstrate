@@ -19,6 +19,7 @@
  */
 
 import { eq, sql } from "drizzle-orm";
+import { countUpstreamRejection } from "../upstream-rejection-window.ts";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
@@ -681,31 +682,30 @@ export async function recordModelCredentialRefreshFailure(
   }
 }
 
-/** Same window as an integration's unrefreshable-credential rejections. */
-const UPSTREAM_REJECTION_WINDOW_SECONDS = 60 * 60;
-
 /**
  * Count an upstream 401 on an api-key credential: the
- * `INTEGRATION_REFRESH_MAX_FAILURES`-th within one window flags it
+ * `INTEGRATION_REFRESH_MAX_FAILURES`-th within one rejection window flags it
  * `needsReconnection`, as `recordIntegrationRefreshFailure` does for an
- * unrefreshable integration credential. Rotating the key clears both.
+ * unrefreshable integration credential. Rotating the key clears both. An OAuth
+ * credential is left alone: its counter is its transient-refresh streak.
  */
 export async function recordModelCredentialRejection(orgId: string, id: string): Promise<void> {
-  const { refreshFailureCount: count, refreshFailuresSince: since } = modelProviderCredentials;
-  const open = sql`(${since} IS NOT NULL AND ${since} > now() - make_interval(secs => ${UPSTREAM_REJECTION_WINDOW_SECONDS}))`;
+  const loaded = await loadCredentialRow(id, orgId);
+  if (loaded?.blob?.kind !== "api_key") return;
+  const counted = countUpstreamRejection(
+    modelProviderCredentials.refreshFailureCount,
+    modelProviderCredentials.refreshFailuresSince,
+  );
   const [row] = await db
     .update(modelProviderCredentials)
-    .set({
-      refreshFailureCount: sql`CASE WHEN ${open} THEN ${count} + 1 ELSE 1 END`,
-      refreshFailuresSince: sql`CASE WHEN ${open} THEN ${since} ELSE now() END`,
-    })
+    .set({ refreshFailureCount: counted.failures, refreshFailuresSince: counted.since })
     .where(
       scopedWhere(modelProviderCredentials, {
         orgId,
         extra: [eq(modelProviderCredentials.id, id)],
       }),
     )
-    .returning({ failures: count });
+    .returning({ failures: modelProviderCredentials.refreshFailureCount });
   if (!row || row.failures < getEnv().INTEGRATION_REFRESH_MAX_FAILURES) return;
   logger.warn("model provider: api key rejected upstream, flagging needsReconnection", {
     credentialId: id,

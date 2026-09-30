@@ -89,7 +89,7 @@ const AUTH_CONDITIONAL_HEADERS: ReadonlyArray<{
  * endpoints that is restated as RFC 6749 §5.2 JSON under the standard
  * `Retry-After` (RFC 9110 §10.2.3) — the shape the device/CLI limiters answer.
  */
-export function oauthRateLimitResponse(path: string, res: Response): Response {
+function oauthRateLimitResponse(path: string, res: Response): Response {
   const retryAfter = res.headers.get("X-Retry-After");
   if (res.status !== 429 || retryAfter === null || !path.startsWith("/api/auth/oauth2/")) {
     return res;

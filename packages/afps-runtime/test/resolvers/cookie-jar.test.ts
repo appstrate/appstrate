@@ -184,7 +184,7 @@ describe("fetchApiCall — a caller's cookie scope", () => {
       authorizedUris: policy.authorizedUris ?? [],
       declaredUris: policy.authorizedUris ?? [],
       allowAllUris: policy.allowAllUris ?? false,
-      trustDeclaredHosts: true,
+      trustedHost: () => false,
       resolveHost: async () => ["203.0.113.7"],
     });
   }
@@ -285,7 +285,7 @@ describe("fetchApiCall — the per-call cookie scope", () => {
       declaredUris,
       allowAllUris: false,
       credentialHeaders: [],
-      trustDeclaredHosts: true,
+      trustedHost: () => false,
       integrationId: "i",
       resolveHost: async () => ["203.0.113.7"],
     });

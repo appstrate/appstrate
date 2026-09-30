@@ -696,7 +696,9 @@ target, a header or a substituted body, or one the proxy injects itself
 match `authorized_uris`, and the call is refused when there is none or when an entry
 lets the caller pick the host (`https://**`, `https://*.com/**`). The sidecar, the CLI
 resolver and the platform proxy share this rule (`credentialUrlPolicy`); the sidecar's
-MITM listener refuses the same calls.
+MITM listener refuses the same calls. An auth that declares no `authorized_uris` and
+not `allow_all_uris` has every `api_call` refused, credential or not: an empty
+authorized set authorizes nothing.
 
 An integration whose endpoint is per-connection declares it as a URL-form entry
 instead of `allow_all_uris`: `"{$credential.site_url}/**"`, or
@@ -721,9 +723,9 @@ What the guard covers is narrow. A templated credential cannot leave
 API such as `https://discord.com/api/**` still reaches other tenants' endpoints on that
 path. An auth whose credential the proxy injects over HTTP (`delivery.http`, or its
 type's default header) must name its hosts: the platform refuses a manifest that gives
-it `allow_all_uris: true` or a host-unbounded `authorized_uris` entry when it is
-written (`findUnboundedInjectedCredentials`, `@appstrate/core/integration`), and the
-proxies refuse such a call at run time.
+it `allow_all_uris: true`, no `authorized_uris`, or a host-unbounded `authorized_uris`
+entry when it is written (`findUnboundedInjectedCredentials`,
+`@appstrate/core/integration`), and the proxies refuse such a call at run time.
 
 The runtime layer (sidecar MITM) enforces this on the wire, including across redirect
 hops (per-hop allowlist check, per-hop SSRF gate with the connection pinned to the

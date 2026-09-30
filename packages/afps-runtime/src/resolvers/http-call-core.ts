@@ -33,7 +33,6 @@ import { z } from "zod";
 import { isTextShapedMime, normalizeMime } from "@appstrate/afps-shared/mime";
 import type { JSONSchema, Tool, ToolContext, ToolResult } from "@afps-spec/types";
 import { AuthorizedUrisError, ResolverError } from "../errors.ts";
-import { allowlistUnrendered, UNRENDERED_ALLOWLIST_REFUSAL } from "./credential-guard.ts";
 
 /**
  * Default inline cap for response bodies that come back without an
@@ -1732,30 +1731,12 @@ export async function serializeFetchResponse(
 }
 
 /**
- * Match against `meta.authorizedUris`, or — when the caller substitutes — `rendered`: the
- * substituted target and the list rendered for the connection. Errors name only `target` and
- * the declared entries, never a rendered value (it may be a secret, e.g. an exact webhook URL).
+ * The tool-layer gate on `meta.authorizedUris`. Errors name only `target` and the declared
+ * entries, never a rendered value (it may be a secret, e.g. an exact webhook URL).
  */
-export function enforceAuthorizedUris(
-  meta: ApiCallMeta,
-  target: string,
-  rendered: { target: string; authorizedUris: readonly string[] } = {
-    target,
-    authorizedUris: meta.authorizedUris ?? [],
-  },
-): void {
+function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
   if (meta.allowAllUris) return;
-  const declared = meta.authorizedUris ?? [];
-  const patterns = rendered.authorizedUris;
-  if (
-    allowlistUnrendered({ declaredUris: declared, authorizedUris: patterns, allowAllUris: false })
-  ) {
-    throw new AuthorizedUrisError(
-      "AUTHORIZED_URIS_EMPTY",
-      `Integration ${meta.name}: ${UNRENDERED_ALLOWLIST_REFUSAL}`,
-      { integration: meta.name, target },
-    );
-  }
+  const patterns = meta.authorizedUris ?? [];
   if (patterns.length === 0) {
     throw new AuthorizedUrisError(
       "AUTHORIZED_URIS_EMPTY",
@@ -1765,12 +1746,12 @@ export function enforceAuthorizedUris(
     );
   }
   for (const pattern of patterns) {
-    if (matchesAuthorizedUriSpec(pattern, rendered.target)) return;
+    if (matchesAuthorizedUriSpec(pattern, target)) return;
   }
   throw new AuthorizedUrisError(
     "AUTHORIZED_URIS_MISMATCH",
     `Integration ${meta.name}: target ${target} is not in authorized_uris allowlist`,
-    { integration: meta.name, target, allowlist: declared },
+    { integration: meta.name, target, allowlist: patterns },
   );
 }
 

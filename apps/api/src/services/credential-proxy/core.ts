@@ -32,22 +32,26 @@ import {
   applyInjectedCredentialHeaderToHeaders,
   normalizeAuthSchemeTemplate,
 } from "@appstrate/connect";
-import { buildInjectedCredentialHeader } from "@appstrate/connect/proxy-primitives";
 import {
-  assertAllowlistRendered,
+  buildInjectedCredentialHeader,
+  credentialCarryingHeader,
+} from "@appstrate/connect/proxy-primitives";
+import {
   cookieScope,
   credentialUrlPolicy,
-  exfiltrationRefusal,
   fetchApiCall,
   PreflightError,
   redactCredentialHost,
   redactionFields,
   RedirectBlockedError,
+  urlPolicyRefusalMessage,
   type CookieJar,
   type HostResolver,
+  type UrlPolicyRefusal,
 } from "@appstrate/afps-runtime/resolvers";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
+import type { UpstreamFailureCode } from "../../lib/proxy-upstream-failure.ts";
 import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
@@ -165,9 +169,7 @@ export type ProxyErrorCode =
   | "credential_exfiltration_refused"
   | "credential_not_found"
   | "unresolved_placeholder"
-  | "upstream_unresolvable"
-  | "upstream_unreachable"
-  | "upstream_timeout";
+  | UpstreamFailureCode;
 
 /**
  * A call the proxy answered itself. The route reflects `message` to the caller and logs it, so
@@ -179,38 +181,15 @@ export class ProxyCallError extends Error {
     message: string,
   ) {
     super(message);
-    this.name = new.target.name;
+    this.name = "ProxyCallError";
   }
 }
 
-/** The target, a redirect hop, or the credential policy refused the call (403). */
-export class ProxyAuthorizationError extends ProxyCallError {
-  constructor(
-    redactedMessage: string,
-    code:
-      | "unauthorized_target"
-      | "blocked_target"
-      | "credential_exfiltration_refused" = "unauthorized_target",
-  ) {
-    super(code, redactedMessage);
-  }
-}
-
-class ProxyCredentialError extends ProxyCallError {
-  constructor(message: string) {
-    super("credential_not_found", message);
-  }
-}
-
-/** A caller template names a credential field the connection lacks (400, a misconfigured agent). */
-export class ProxySubstitutionError extends ProxyCallError {
-  constructor(message: string) {
-    super("unresolved_placeholder", message);
-  }
-}
-
-/** The upstream could not be reached, resolved, or did not answer in time (502 / 504). */
-class ProxyUpstreamError extends ProxyCallError {}
+const REFUSAL_CODE: Record<UrlPolicyRefusal, ProxyErrorCode> = {
+  unrendered: "unauthorized_target",
+  unauthorized: "unauthorized_target",
+  exfiltration: "credential_exfiltration_refused",
+};
 
 /**
  * Execute one authenticated proxy call. Credentials never leak into the
@@ -239,7 +218,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     refreshSelection = { ...selection, connectionId };
   } catch (err) {
     if (err instanceof IntegrationCredentialNotFoundError) {
-      throw new ProxyCredentialError(err.message);
+      throw new ProxyCallError("credential_not_found", err.message);
     }
     throw err;
   }
@@ -251,7 +230,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const target = substituteVars(input.target, fields);
   const unresolvedInTarget = findUnresolvedPlaceholders(target);
   if (unresolvedInTarget.length > 0) {
-    throw new ProxySubstitutionError(
+    throw new ProxyCallError(
+      "unresolved_placeholder",
       `Unresolved placeholders in target: {{${unresolvedInTarget.join(",")}}}`,
     );
   }
@@ -270,23 +250,19 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     ],
     fields,
     allowAllUris: resolved.allowAllUris,
+    declaredUris,
     authorizedUris,
     injectsCredential: buildInjectedCredentialHeader(resolved) !== undefined,
   });
+  if (policy.refuse) {
+    throw new ProxyCallError(
+      REFUSAL_CODE[policy.refuse],
+      urlPolicyRefusalMessage(policy.refuse, input.integrationId),
+    );
+  }
   // `target` carries decrypted values and goes on the wire only; messages name `redactedHost`.
   const redactFields = redactionFields(policy, fields);
   const redactedHost = redactCredentialHost(target, redactFields);
-  try {
-    assertAllowlistRendered({ declaredUris, authorizedUris, allowAllUris: policy.allowAllUris });
-  } catch (err) {
-    throw toProxyCallError(err, input.integrationId, redactedHost);
-  }
-  if (policy.refuse) {
-    throw new ProxyAuthorizationError(
-      exfiltrationRefusal(input.integrationId),
-      "credential_exfiltration_refused",
-    );
-  }
 
   // Resolve caller headers, then let the shared injector add the pinned
   // credential header server-side (mirror of the sidecar — single source
@@ -301,7 +277,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     const substituted = substituteVars(template, fields);
     const unresolved = findUnresolvedPlaceholders(substituted);
     if (unresolved.length > 0) {
-      throw new ProxySubstitutionError(
+      throw new ProxyCallError(
+        "unresolved_placeholder",
         `Unresolved placeholders in header "${k}": {{${unresolved.join(",")}}}`,
       );
     }
@@ -309,11 +286,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     headers.set(k, substituted);
   }
   let credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, resolved);
-  if (credentialInjection.kind === "inject") {
-    sensitiveHeaderNames.add(credentialInjection.header.name);
-  } else if (credentialInjection.kind === "caller_override") {
-    sensitiveHeaderNames.add(credentialInjection.headerName);
-  }
+  const carrier = credentialCarryingHeader(credentialInjection);
+  if (carrier) sensitiveHeaderNames.add(carrier);
 
   // Body substitution (opt-in; body may be bytes). Bun's global fetch
   // accepts string / Uint8Array / ReadableStream directly.
@@ -327,7 +301,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       const substituted = substituteVars(bodyTemplate, fields);
       const unresolved = findUnresolvedPlaceholders(substituted);
       if (unresolved.length > 0) {
-        throw new ProxySubstitutionError(
+        throw new ProxyCallError(
+          "unresolved_placeholder",
           `Unresolved placeholders in body: {{${unresolved.join(",")}}}`,
         );
       }
@@ -378,7 +353,6 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         credentialHeaders: [...sensitiveHeaderNames],
         // The platform's network is not the manifest author's to declare: only the operator's
         // `EGRESS_ALLOW_INTERNAL_HOSTS` skips the SSRF gate here.
-        trustDeclaredHosts: false,
         trustedHost: isAllowedInternalIdpHost,
         ...(cookies ? { cookies } : {}),
         integrationId: input.integrationId,
@@ -505,23 +479,23 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
 function toProxyCallError(err: unknown, integrationId: string, redactedHost: string): unknown {
   if (err instanceof PreflightError) {
     if (err.reason === "unresolvable") {
-      return new ProxyUpstreamError("upstream_unresolvable", err.message);
+      return new ProxyCallError("upstream_unresolvable", err.message);
     }
-    return new ProxyAuthorizationError(
-      `Integration ${integrationId}: ${err.message} (host ${redactedHost})`,
+    return new ProxyCallError(
       err.reason === "ssrf" ? "blocked_target" : "unauthorized_target",
+      `Integration ${integrationId}: ${err.message} (host ${redactedHost})`,
     );
   }
   if (err instanceof RedirectBlockedError) {
-    return new ProxyAuthorizationError(
-      `Integration ${integrationId}: ${err.message}`,
+    return new ProxyCallError(
       err.reason === "ssrf" ? "blocked_target" : "unauthorized_target",
+      `Integration ${integrationId}: ${err.message}`,
     );
   }
   if (err instanceof Error) {
     return err.name === "TimeoutError"
-      ? new ProxyUpstreamError("upstream_timeout", `${redactedHost} did not answer in time`)
-      : new ProxyUpstreamError("upstream_unreachable", `${redactedHost} could not be reached`);
+      ? new ProxyCallError("upstream_timeout", `${redactedHost} did not answer in time`)
+      : new ProxyCallError("upstream_unreachable", `${redactedHost} could not be reached`);
   }
   return err;
 }

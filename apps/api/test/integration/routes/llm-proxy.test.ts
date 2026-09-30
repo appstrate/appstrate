@@ -463,6 +463,54 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(res.headers.get("proxy-status")).toBe("appstrate; error=proxy_internal_response");
   });
 
+  it.each([
+    [
+      "unreachable",
+      new Error("Unable to connect"),
+      502,
+      "upstream_unreachable",
+      "destination_unavailable",
+    ],
+    [
+      "silent",
+      new DOMException("deadline exceeded", "TimeoutError"),
+      504,
+      "upstream_timeout",
+      "http_response_timeout",
+    ],
+  ] as const)(
+    "answers an %s upstream as its own failure, never a 500",
+    async (_, thrown, status, code, proxyError) => {
+      const h = await buildHarness();
+      mockUpstream(async () => {
+        throw thrown;
+      });
+      const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+        method: "POST",
+        headers: authHeaders(h),
+        body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+      });
+      expect(res.status).toBe(status);
+      expect(((await res.json()) as { code: string }).code).toBe(code);
+      expect(res.headers.get("proxy-status")).toBe(`appstrate; error=${proxyError}`);
+    },
+  );
+
+  it("answers an upstream whose host does not resolve with 502 upstream_unresolvable", async () => {
+    const h = await buildHarness({ baseUrl: "https://llm.nonexistent.invalid/v1" });
+    mockUpstream(async () => new Response("should not be called", { status: 599 }));
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+    });
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("upstream_unresolvable");
+    expect(body.detail).not.toContain("nonexistent");
+    expect(res.headers.get("proxy-status")).toBe("appstrate; error=dns_error");
+  });
+
   it("rejects cookie sessions with 403 (bearer-only)", async () => {
     const h = await buildHarness();
     mockUpstream(async () => new Response("should not be called", { status: 599 }));

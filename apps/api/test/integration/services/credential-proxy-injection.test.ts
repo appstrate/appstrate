@@ -22,7 +22,7 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { proxyCall, ProxySubstitutionError } from "../../../src/services/credential-proxy/core.ts";
+import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -340,7 +340,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     expect(connection?.needsReconnection).toBe(false);
   });
 
-  it("throws ProxySubstitutionError (fail-closed) when the target references an unresolved {{field}}", async () => {
+  it("refuses with unresolved_placeholder (fail-closed) when the target references an unresolved {{field}}", async () => {
     const packageId = "@cpinjectorg/failclosed";
     await seedProxyIntegration(
       ctx,
@@ -380,7 +380,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
         headers: {},
         fetch: fakeFetch,
       }),
-    ).rejects.toBeInstanceOf(ProxySubstitutionError);
+    ).rejects.toMatchObject({ code: "unresolved_placeholder" });
 
     // Fail-closed: the upstream fetch must never be issued.
     expect(upstreamHit).toBe(false);

@@ -54,7 +54,11 @@ describe("resolveHttpDelivery — explicit overrides", () => {
     const plan = resolveHttpDelivery(
       "oauth2",
       { access_token: "tok" },
-      { headerName: "X-Token", headerPrefix: "Token ", valueFrom: "access_token" },
+      {
+        headerName: "X-Token",
+        headerPrefix: "Token ",
+        valueFrom: { template: "{$credential.access_token}" },
+      },
     );
     expect(plan).toEqual({
       headerName: "X-Token",

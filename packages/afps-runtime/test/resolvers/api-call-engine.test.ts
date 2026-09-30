@@ -10,11 +10,10 @@
 import { describe, it, expect, mock, afterEach } from "bun:test";
 import {
   API_CALL_TIMEOUT_MS,
+  declaredLiteralHosts,
   fetchApiCall,
   PreflightError,
   RedirectBlockedError,
-  redactCredentialValues,
-  scrubTransportError,
   type FetchApiCallOptions,
 } from "../../src/resolvers/api-call-engine.ts";
 import { hostLiterallyAllowlisted } from "../../src/resolvers/http-call-core.ts";
@@ -28,15 +27,17 @@ async function gate(
   opts: Partial<FetchApiCallOptions> & { declaredUris?: readonly string[] },
 ): Promise<PreflightError | null> {
   const fetchFn = mock(async () => new Response("ok")) as unknown as typeof fetch;
+  const declaredUris = opts.declaredUris ?? [];
+  const allowAllUris = opts.allowAllUris ?? false;
   try {
     await fetchApiCall({
       url,
       init: { method: "GET" },
       authorizedUris: [],
-      declaredUris: [],
-      allowAllUris: false,
+      declaredUris,
+      allowAllUris,
       credentialHeaders: [],
-      trustDeclaredHosts: true,
+      trustedHost: declaredLiteralHosts({ declaredUris, allowAllUris }),
       integrationId: "i",
       fetchFn,
       ...opts,
@@ -48,31 +49,52 @@ async function gate(
   }
 }
 
-describe("redactCredentialValues", () => {
-  it("replaces the longest value first, so a value containing another is not half-leaked", () => {
-    const out = redactCredentialValues("x=abcdefgh", { a: "abc", b: "abcdefgh" });
-    expect(out).toBe("x={{b}}");
-    expect(out).not.toContain("defgh");
-  });
-});
-
-describe("scrubTransportError", () => {
-  const bunError = () =>
-    Object.assign(new Error("Unable to connect. Is the computer able to access the url?"), {
+describe("fetchApiCall — a transport error", () => {
+  const bunError = (message = "Unable to connect. Is the computer able to access the url?") =>
+    Object.assign(new Error(message), {
       name: "ConnectionRefused",
       path: "https://api.example.com/v1?key=SeCrEt-path-7",
     });
 
-  it("rebuilds a templated call's error without the URL Bun keeps on `.path`", () => {
-    const out = scrubTransportError(bunError(), { api_key: "SeCrEt-path-7" }) as Error;
+  /** The error `fetchApiCall` rejects with when the transport throws `thrown`. */
+  const sendFailing = (thrown: Error, credentialFields?: Record<string, string>) =>
+    fetchApiCall({
+      url: "https://api.example.com/v1",
+      init: { method: "GET" },
+      authorizedUris: [],
+      declaredUris: [],
+      allowAllUris: true,
+      credentialHeaders: [],
+      trustedHost: () => false,
+      integrationId: "i",
+      fetchFn: (async () => {
+        throw thrown;
+      }) as unknown as typeof fetch,
+      resolveHost: publicResolver,
+      ...(credentialFields ? { credentialFields } : {}),
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+  it("is rebuilt without the URL Bun keeps on `.path` on a templated call", async () => {
+    const out = (await sendFailing(bunError(), { api_key: "SeCrEt-path-7" })) as Error;
     expect(out.name).toBe("ConnectionRefused");
     expect(out.message).toContain("Unable to connect");
     expect(JSON.stringify({ ...out })).not.toContain("SeCrEt-path-7");
   });
 
-  it("returns an untemplated call's error untouched", () => {
+  it("is rethrown untouched on an untemplated call", async () => {
     const err = bunError();
-    expect(scrubTransportError(err, {})).toBe(err);
+    expect(await sendFailing(err)).toBe(err);
+  });
+
+  it("scrubs the longest value first, so a value containing another is not half-leaked", async () => {
+    const out = (await sendFailing(bunError("failed at https://x.example/?k=abcdefgh abcdefgh"), {
+      a: "abc",
+      b: "abcdefgh",
+    })) as Error;
+    expect(out.message).toBe("failed at x.example {{b}}");
   });
 });
 
@@ -89,7 +111,7 @@ describe("redirect loop error", () => {
       declaredUris: ["https://api.acme.com/**"],
       allowAllUris: false,
       credentialHeaders: [],
-      trustDeclaredHosts: true,
+      trustedHost: () => false,
       integrationId: "i",
       resolveHost: publicResolver,
       credentialFields: { api_key: secret },
@@ -175,9 +197,11 @@ describe("fetchApiCall — initial-target gate per branch", () => {
     expect(err!.message).not.toContain("token");
   });
 
-  it("no allowlist: same gate applies", async () => {
-    const err = await gate("https://rebind.example/x", { resolveHost: internalResolver });
-    expect(err?.reason).toBe("ssrf");
+  it("no allowlist and no allow_all: every target is refused before any DNS work", async () => {
+    const resolveHost = mock(publicResolver);
+    const err = await gate("https://ok.example/x", { resolveHost });
+    expect(err?.reason).toBe("not_authorized");
+    expect(resolveHost).not.toHaveBeenCalled();
   });
 
   it("glob-matched allowlist host stays behind the SSRF gate", async () => {
@@ -204,7 +228,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
     const err = await gate("https://intranet.corp/api", {
       authorizedUris: ["https://intranet.corp/**"],
       declaredUris: ["https://intranet.corp/**"],
-      trustDeclaredHosts: false,
+      trustedHost: () => false,
       resolveHost: internalResolver,
     });
     expect(err?.reason).toBe("ssrf");
@@ -260,8 +284,16 @@ describe("fetchApiCall — initial-target gate per branch", () => {
       resolveHost,
     });
     expect(err?.reason).toBe("not_authorized");
-    expect(err!.message).toContain("does not render");
     expect(resolveHost).not.toHaveBeenCalled();
+  });
+
+  it("a declared literal host is not trusted under allow_all_uris", async () => {
+    const err = await gate("https://intranet.corp/api", {
+      allowAllUris: true,
+      declaredUris: ["https://intranet.corp/**"],
+      resolveHost: internalResolver,
+    });
+    expect(err?.reason).toBe("ssrf");
   });
 
   it("an off-allowlist refusal names the declared entries, never a rendered one", async () => {
@@ -288,7 +320,6 @@ describe("fetchApiCall — initial-target gate per branch", () => {
   it("public-resolving target proceeds on every gated branch", async () => {
     const branches: Array<{ allowAllUris?: boolean; authorizedUris?: string[] }> = [
       { allowAllUris: true },
-      {},
       { authorizedUris: ["https://**"] },
     ];
     for (const opts of branches) {
@@ -325,7 +356,7 @@ describe("fetchApiCall — credentials across a redirect", () => {
       ...policy,
       declaredUris: policy.authorizedUris,
       credentialHeaders: ["Authorization", "X-Api-Key"],
-      trustDeclaredHosts: true,
+      trustedHost: () => false,
       integrationId: "i",
       fetchFn,
       resolveHost: publicResolver,
@@ -373,7 +404,7 @@ describe("fetchApiCall — credentials across a redirect", () => {
       declaredUris: ["https://api.example.com/**", "https://x.example/**"],
       allowAllUris: false,
       credentialHeaders: [],
-      trustDeclaredHosts: true,
+      trustedHost: () => false,
       integrationId: "i",
       fetchFn,
       resolveHost: publicResolver,
@@ -403,7 +434,7 @@ describe("fetchApiCall — transport", () => {
       declaredUris: ["https://api.example.com/**"],
       allowAllUris: false,
       credentialHeaders: [],
-      trustDeclaredHosts: false,
+      trustedHost: () => false,
       integrationId: "i",
       resolveHost: publicResolver,
     });
@@ -426,7 +457,7 @@ describe("fetchApiCall — transport", () => {
       declaredUris: [],
       allowAllUris: true,
       credentialHeaders: [],
-      trustDeclaredHosts: false,
+      trustedHost: () => false,
       integrationId: "i",
       fetchFn,
       resolveHost: publicResolver,

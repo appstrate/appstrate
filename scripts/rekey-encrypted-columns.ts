@@ -2,28 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * 0037 — re-encrypt every keyring ciphertext under the active key, so a retired
- * `CONNECTION_ENCRYPTION_KEYS` entry can be dropped (#1641). With the platform's env (it decrypts;
- * Bun loads `./.env`):
+ * Re-encrypt every keyring ciphertext under the active key, so a retired
+ * `CONNECTION_ENCRYPTION_KEYS` entry can be dropped — step 3 of the rotation in `docs/ENV.md`
+ * § "Rotating `CONNECTION_ENCRYPTION_KEY`". Run with the platform's env (it decrypts):
  *
- *   bun scripts/migration/0037-rekey-encrypted-columns.ts [--apply] [--batch 500]
+ *   bun scripts/rekey-encrypted-columns.ts [--apply] [--batch 500]
  *
- * The dry run prints, per column, how many ciphertexts each kid holds: `active`, `retired`
- * (in `CONNECTION_ENCRYPTION_KEYS`), `UNKNOWN` (no key for it: nothing can read it) or
- * `NOT AN ENVELOPE`. `--apply` decrypts every ciphertext under a retired kid and writes it back
- * under the active one, a batch at a time; each write is guarded by the value it read, so a row the
- * platform rewrote meanwhile (already under the active kid) is left alone. Safe against a running
- * platform, idempotent, `updated_at` untouched: the plaintext does not change.
- *
- * Exit 0 only when every ciphertext is under the active kid — the condition for dropping a retired
- * key. Procedure: `docs/ENV.md` § "Rotating `CONNECTION_ENCRYPTION_KEY`". Out of reach: the
- * credential-proxy cookie jars in Redis, which expire with their session.
+ * Dry run: the per-kid inventory. `--apply`: rewrite, batch by batch, each write guarded by the
+ * value it read. Exit 0 only when every ciphertext is under the active kid.
  */
 
 import { parseArgs } from "node:util";
 import { SQL } from "bun";
 import { decrypt, encrypt } from "@appstrate/connect";
-import { getEnv } from "../../packages/env/src/index.ts";
+import { getEnv } from "../packages/env/src/index.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 interface EncryptedColumn {
@@ -198,7 +190,7 @@ if (import.meta.main) {
     const query: Query = (text, params) => db.unsafe(text, params ?? []);
     await query("SET statement_timeout = '120s'");
     const [target] = await query("SELECT current_database() AS name");
-    out(`0037 — ${values.apply ? "APPLY" : "DRY RUN"} on database ${target!.name}`);
+    out(`rekey — ${values.apply ? "APPLY" : "DRY RUN"} on database ${target!.name}`);
     out(
       `active kid ${keyring.activeKid}; retired kids: ${keyring.retiredKids.join(", ") || "none"}`,
     );
@@ -212,14 +204,14 @@ if (import.meta.main) {
     const clean = reportCounts(await countByKid(query), keyring, out);
     out(
       clean
-        ? "0037: every ciphertext is under the active kid — the retired keys can be dropped."
+        ? "rekey: every ciphertext is under the active kid — the retired keys can be dropped."
         : values.apply
-          ? "0037: ciphertexts remain outside the active kid — see the lines above."
-          : "0037: DRY RUN — nothing written. Re-run with --apply to re-encrypt the retired kids.",
+          ? "rekey: ciphertexts remain outside the active kid — see the lines above."
+          : "rekey: DRY RUN — nothing written. Re-run with --apply to re-encrypt the retired kids.",
     );
     code = clean ? 0 : 1;
   } catch (error) {
-    out(`0037: FAILED — ${getErrorMessage(error)}`);
+    out(`rekey: FAILED — ${getErrorMessage(error)}`);
   } finally {
     await sql?.close();
   }

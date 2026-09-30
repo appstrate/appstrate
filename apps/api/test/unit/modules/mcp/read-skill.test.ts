@@ -8,7 +8,6 @@
 
 import { describe, expect, it } from "bun:test";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
@@ -141,9 +140,8 @@ describe("read_skill", () => {
     expect(oversized.content).toHaveLength(1);
   });
 
-  it("carries every success as structuredContent matching its outputSchema, errors as text only", async () => {
-    const { call, descriptor } = tool(async () => snapshot(files));
-    const validate = new AjvJsonSchemaValidator().getValidator(descriptor.outputSchema!);
+  it("carries every success as structuredContent, errors as text only", async () => {
+    const { call } = tool(async () => snapshot(files));
     for (const args of [
       { id: "@acme/tone" },
       { id: "@acme/tone", path: "scripts/run.sh" },
@@ -151,7 +149,6 @@ describe("read_skill", () => {
     ]) {
       const result = await call(args);
       expect(result.structuredContent).toEqual(payload(result));
-      expect(validate(result.structuredContent).valid).toBe(true);
     }
     expect(
       (await call({ id: "@acme/tone", path: "missing.md" })).structuredContent,

@@ -29,7 +29,6 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { ApiError, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { ORG_ROLES_WITH_FULL_ACCESS, type OrgRole } from "@appstrate/core/permissions";
-import type { AuditPayload } from "@appstrate/core/module";
 import { parseListPagination } from "../lib/list-query.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
@@ -60,7 +59,7 @@ import {
 } from "../lib/package-access.ts";
 import { listScheduleRuns } from "../services/state/runs.ts";
 import { requireRunsRead, runVisibilityFilter } from "../lib/run-visibility.ts";
-import { recordAuditFromContext } from "../services/audit.ts";
+import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
@@ -796,41 +795,30 @@ export function createSchedulesRouter() {
       getActor(c),
       runVisibilityFilter(c),
     );
-    // Each field this write moves, before and after — `connectionOverrides`
-    // included when an actor change reset it without the patch naming it.
-    const auditBefore: AuditPayload = {};
-    const auditAfter: AuditPayload = {};
-    const moved = (key: string, before: unknown, after: unknown) => {
-      if (after === undefined) return;
-      auditBefore[key] = before;
-      auditAfter[key] = after;
-    };
-    moved("name", existing.name, data.name);
-    moved("cronExpression", existing.cron_expression, data.cron_expression);
-    moved("timezone", existing.timezone, data.timezone);
-    moved("input", existing.input, data.input);
-    moved("enabled", existing.enabled, data.enabled);
-    moved("modelIdOverride", existing.model_id_override, data.model_id_override);
-    moved(
-      "generationConfigOverride",
-      existing.generation_config_override,
-      generationConfigOverride,
-    );
-    moved("proxyIdOverride", existing.proxy_id_override, data.proxy_id_override);
-    moved("versionOverride", existing.version_override, data.version_override);
-    moved("connectionOverrides", existing.connection_overrides, connectionOverrides);
-    moved("dependencyOverrides", existing.dependency_overrides, data.dependency_overrides);
-    if (actor) {
-      moved("actorType", existingActor.type, actor.type);
-      moved("actorId", existingActor.id, actor.id);
-    }
-    await recordAuditFromContext(c, {
-      action: "schedule.updated",
-      resourceType: "schedule",
-      resourceId: id,
-      before: auditBefore,
-      after: auditAfter,
+    // `connectionOverrides` is recorded when an actor change reset it without the patch naming it.
+    const diff = auditDiff({
+      name: [existing.name, data.name],
+      cronExpression: [existing.cron_expression, data.cron_expression],
+      timezone: [existing.timezone, data.timezone],
+      input: [existing.input, data.input],
+      enabled: [existing.enabled, data.enabled],
+      modelIdOverride: [existing.model_id_override, data.model_id_override],
+      generationConfigOverride: [existing.generation_config_override, generationConfigOverride],
+      proxyIdOverride: [existing.proxy_id_override, data.proxy_id_override],
+      versionOverride: [existing.version_override, data.version_override],
+      connectionOverrides: [existing.connection_overrides, connectionOverrides],
+      dependencyOverrides: [existing.dependency_overrides, data.dependency_overrides],
+      actorType: [existingActor.type, actor?.type],
+      actorId: [existingActor.id, actor?.id],
     });
+    if (diff) {
+      await recordAuditFromContext(c, {
+        action: "schedule.updated",
+        resourceType: "schedule",
+        resourceId: id,
+        ...diff,
+      });
+    }
     return c.json(schedule);
   });
 

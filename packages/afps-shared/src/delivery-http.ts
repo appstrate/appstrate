@@ -18,8 +18,7 @@
  * `{$credential.<field>}` syntax. This module is a pure shape projection: it
  * maps the AFPS snake_case block onto the resolver `HttpDeliveryConfig` shape,
  * carrying the template verbatim (`./credential-template` renders it). The per-auth-type
- * default table, the `basic → base64(user:pass)` fallback, and the base64
- * encoding branch all live in the resolver engine
+ * default table is below; the rendering and the base64 encoding live in the resolver engine
  * (`@appstrate/afps-runtime/resolvers:resolveHttpDelivery`) — they are NOT
  * re-implemented here.
  */
@@ -32,8 +31,8 @@
 export interface HttpDeliveryConfig {
   headerName?: string;
   headerPrefix?: string;
-  /** A credential field name, or a `{$credential.<field>}` template. */
-  valueFrom?: string | { template: string; encoding?: "base64" };
+  /** A `{$credential.<field>}` template, base64-encoded after rendering when asked. */
+  valueFrom?: { template: string; encoding?: "base64" };
   allowServerOverride?: boolean;
 }
 
@@ -82,17 +81,32 @@ export function projectHttpDeliveryConfig(
 }
 
 /**
- * Auth-type defaults for `delivery.http` (AFPS §4.1.4). `valueFrom` names the
- * credential field to inject, by its canonical snake_case storage key.
- * `resolveHttpDelivery` (`@appstrate/afps-runtime/resolvers`) applies them.
+ * Auth-type defaults for `delivery.http` (AFPS §4.1.4), written as the manifest
+ * would write them. `resolveHttpDelivery` (`@appstrate/afps-runtime/resolvers`)
+ * applies them.
  */
 export const AUTH_TYPE_HTTP_DEFAULTS: Readonly<
-  Record<string, { headerName: string; headerPrefix: string; valueFrom: string }>
+  Record<
+    string,
+    Required<Pick<HttpDeliveryConfig, "headerName" | "headerPrefix">> & HttpDeliveryConfig
+  >
 > = {
-  oauth2: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "access_token" },
-  api_key: { headerName: "X-Api-Key", headerPrefix: "", valueFrom: "api_key" },
-  basic: { headerName: "Authorization", headerPrefix: "Basic ", valueFrom: "" },
-  custom: { headerName: "", headerPrefix: "", valueFrom: "" },
+  oauth2: {
+    headerName: "Authorization",
+    headerPrefix: "Bearer ",
+    valueFrom: { template: "{$credential.access_token}" },
+  },
+  api_key: {
+    headerName: "X-Api-Key",
+    headerPrefix: "",
+    valueFrom: { template: "{$credential.api_key}" },
+  },
+  basic: {
+    headerName: "Authorization",
+    headerPrefix: "Basic ",
+    valueFrom: { template: "{$credential.username}:{$credential.password}", encoding: "base64" },
+  },
+  custom: { headerName: "", headerPrefix: "" },
 };
 
 /**

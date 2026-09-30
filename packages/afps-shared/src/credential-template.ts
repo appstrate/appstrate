@@ -12,11 +12,6 @@
  * `@appstrate/afps-runtime`'s `substituteVars` — there is exactly ONE
  * implementation per syntax, and this module owns `{$credential.<field>}`.
  *
- * It renders every manifest value template: `delivery.http.value` as well as
- * `delivery.env` / `delivery.files`. Any other `{$…}` expression throws
- * {@link UnsupportedTemplateExpressionError}, so an unrendered expression never
- * reaches an upstream.
- *
  * A missing field renders empty (a missing credential field means "no value to
  * inject"). The empty-value behaviour is parametrised:
  *   - `emptyAs: "string"` (default) → returns `""` for an all-empty render
@@ -117,10 +112,8 @@ export function parseUrlFormPattern(pattern: string): { field: string; suffix: s
 const PATTERN_AUTHORITY = /^(?:[A-Za-z][A-Za-z0-9+.-]*|\*{1,2}):\/\/([^/?#]*)/;
 
 /**
- * Whether an `authorized_uris` entry lets the caller pick the host: a wildcard in either of the
- * host's last two labels (`https://**`, `*://*`, `https://*.com/**`, `https://example.*`), or a
- * glob with no `scheme://` at all. A `{$credential.<field>}` host is bounded: the connection, not
- * the call, supplies it.
+ * Whether an `authorized_uris` entry lets the caller pick the host: a wildcard in either of its
+ * last two labels (`https://**`, `https://*.com/**`), or no `scheme://`.
  */
 export function isHostUnboundedUriPattern(pattern: string): boolean {
   if (parseUrlFormPattern(pattern)) return false;

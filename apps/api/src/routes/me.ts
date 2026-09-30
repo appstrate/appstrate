@@ -291,19 +291,6 @@ router.get(
   },
 );
 
-/** The caller's current member pin set on (agent, integration), for the audit `before`. */
-async function memberPinBefore(
-  scope: SpaceScope,
-  agentPackageId: string,
-  integrationPackageId: string,
-  userId: string,
-): Promise<string[] | null> {
-  const pins = await listMemberPinsForAgent(scope, agentPackageId, userId);
-  return (
-    pins.find((p) => p.integration_package_id === integrationPackageId)?.connection_ids ?? null
-  );
-}
-
 router.put(
   MEMBER_PIN_ROUTE,
   requireCeiling("integrations", "connect"),
@@ -314,8 +301,7 @@ router.put(
     const integrationPackageId = c.req.param("integrationPackageId")!;
     const scope = getSpaceScope(c);
     const input = await readJsonBody(c, upsertMemberPinSchema, { allowEmpty: true });
-    const before = await memberPinBefore(scope, agentPackageId, integrationPackageId, userId);
-    const result = await upsertMemberPin(scope, {
+    const { previous, pin } = await upsertMemberPin(scope, {
       agentPackageId,
       integrationId: integrationPackageId,
       connectionIds: input.connection_ids,
@@ -325,10 +311,10 @@ router.put(
       action: "integration.member_pin.upserted",
       resourceType: "integration_pin",
       resourceId: pinAuditResourceId(agentPackageId, integrationPackageId),
-      before: before ? { connectionIds: before } : null,
-      after: { connectionIds: result.connection_ids },
+      before: previous ? { connectionIds: previous } : null,
+      after: { connectionIds: pin.connection_ids },
     });
-    return c.json(result);
+    return c.json(pin);
   },
 );
 
@@ -341,14 +327,13 @@ router.delete(
     const agentPackageId = c.req.param("agentPackageId")!;
     const integrationPackageId = c.req.param("integrationPackageId")!;
     const scope = getSpaceScope(c);
-    const before = await memberPinBefore(scope, agentPackageId, integrationPackageId, userId);
-    const result = await deleteMemberPin(scope, agentPackageId, integrationPackageId, userId);
-    if (result.deleted) {
+    const { previous } = await deleteMemberPin(scope, agentPackageId, integrationPackageId, userId);
+    if (previous) {
       await recordAuditFromContext(c, {
         action: "integration.member_pin.deleted",
         resourceType: "integration_pin",
         resourceId: pinAuditResourceId(agentPackageId, integrationPackageId),
-        before: before ? { connectionIds: before } : null,
+        before: { connectionIds: previous },
       });
     }
     return c.body(null, 204);

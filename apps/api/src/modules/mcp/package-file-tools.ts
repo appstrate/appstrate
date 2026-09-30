@@ -125,47 +125,6 @@ function buildValidatePackageFileTool(ctx: PackageFileToolContext): AppstrateToo
     description:
       "Validate a file-backed .afps/.zip/.afps-bundle using the exact import preflight. " +
       "Performs no mutation. Returns package identities, root, integrity and conflicts.",
-    outputSchema: {
-      type: "object",
-      required: ["valid", "importable", "file", "root", "integrity", "packages", "conflicts"],
-      properties: {
-        valid: { type: "boolean" },
-        importable: { type: "boolean" },
-        file: {
-          type: "object",
-          required: ["id", "uri", "name", "mime", "size"],
-          properties: {
-            id: { type: "string" },
-            uri: { type: "string" },
-            name: { type: "string" },
-            mime: { type: "string" },
-            size: { type: "integer" },
-          },
-        },
-        root: { type: "string" },
-        integrity: { type: "string" },
-        packages: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["identity", "type", "integrity"],
-            properties: {
-              identity: { type: "string" },
-              type: { type: ["string", "null"] },
-              integrity: { type: "string" },
-            },
-          },
-        },
-        conflicts: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["identity", "reason"],
-            properties: { identity: { type: "string" }, reason: { type: "string" } },
-          },
-        },
-      },
-    },
     annotations: {
       title: "Validate package file",
       readOnlyHint: true,
@@ -302,44 +261,6 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
     description:
       "Return the executable MCP-server runtimes this Appstrate build supports and an exact " +
       "minimal manifest template for each. Call this before authoring a local MCP package.",
-    outputSchema: {
-      type: "object",
-      required: [
-        "archive_required",
-        "package_archive_max_bytes",
-        "schema_version",
-        "entry_point_must_exist",
-        "required_archive_files",
-        "runtimes",
-      ],
-      properties: {
-        archive_required: { type: "boolean" },
-        package_archive_max_bytes: { type: "integer" },
-        schema_version: { type: "string" },
-        entry_point_must_exist: { type: "boolean" },
-        required_archive_files: { type: "array", items: { type: "string" } },
-        runtimes: {
-          type: "array",
-          items: {
-            type: "object",
-            required: [
-              "runtime",
-              "manifest_version",
-              "server_type",
-              "entry_point",
-              "manifest_template",
-            ],
-            properties: {
-              runtime: { type: "string" },
-              manifest_version: { type: "string" },
-              server_type: { type: "string" },
-              entry_point: { type: "string" },
-              manifest_template: { type: "object" },
-            },
-          },
-        },
-      },
-    },
     annotations: {
       title: "Get MCP runtime capabilities",
       readOnlyHint: true,

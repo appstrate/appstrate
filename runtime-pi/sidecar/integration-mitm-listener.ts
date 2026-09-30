@@ -73,7 +73,7 @@ import {
   peerAdmitted,
   readRequestBodyBounded,
   resolveAndCheckHost,
-  OUTBOUND_TIMEOUT_MS,
+  API_CALL_TIMEOUT_MS,
   type AuthorityPolicy,
   type HostResolver,
   type PeerCheck,
@@ -898,8 +898,8 @@ export async function handleInnerRequest(
   };
 
   const action = buildAction();
-  // The api_call rule (`credentialUrlPolicy`) at run time: an injected credential needs an
-  // allowlist naming its hosts, whatever manifest version predates the write-path check.
+  // The api_call rule (`credentialUrlPolicy`): an injected credential goes only to hosts its
+  // auth's allowlist names, never to one an entry leaves to the caller.
   if (action.injectedHeader && action.matchedAuth?.authorizedUris.some(isHostUnboundedUriPattern)) {
     emit({ kind: "request-refused", url: targetUrl, reason: "credential not host-bounded" });
     return new Response("MITM listener: credential allowlist leaves the host open", {
@@ -929,7 +929,7 @@ export async function handleInnerRequest(
       headers: outboundHeaders,
       ...(body.byteLength > 0 ? { body } : {}),
       redirect: "manual",
-      signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
+      signal: AbortSignal.timeout(API_CALL_TIMEOUT_MS),
     });
   } catch (err) {
     emit({ kind: "upstream-error", url: targetUrl, error: (err as Error).message });
@@ -987,7 +987,7 @@ export async function handleInnerRequest(
         headers: outbound,
         ...(body.byteLength > 0 ? { body } : {}),
         redirect: "manual",
-        signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
+        signal: AbortSignal.timeout(API_CALL_TIMEOUT_MS),
       });
     } catch (err) {
       emit({ kind: "upstream-error", url: targetUrl, error: `retry: ${(err as Error).message}` });

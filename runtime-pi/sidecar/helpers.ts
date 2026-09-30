@@ -51,8 +51,8 @@ export const MAX_RESPONSE_SIZE = 256 * 1024; // 256 KB
 // something like MAX_INLINE_RESPONSE_BYTES would end the ambiguity, but it
 // lives in packages/afps-runtime.
 export const ABSOLUTE_MAX_RESPONSE_SIZE = 32 * 1024 * 1024; // 32 MB — covers PDFs/images/archives, aligned with MAX_MCP_ENVELOPE_SIZE × 2
-/** Every other sidecar outbound call (forward proxy, MITM, platform tools) shares the api_call deadline. */
-export const OUTBOUND_TIMEOUT_MS = API_CALL_TIMEOUT_MS;
+/** Every sidecar outbound call (forward proxy, MITM, platform tools) shares the api_call deadline. */
+export { API_CALL_TIMEOUT_MS };
 const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_000 — was killing legitimate long-running agentic runs at exactly 5 min)
 
 /**
@@ -360,6 +360,7 @@ export {
   findUnresolvedPlaceholders,
   HOP_BY_HOP_HEADERS,
   applyInjectedCredentialHeader,
+  credentialCarryingHeader,
   normalizeAuthSchemeTemplates,
   withIdleBound,
   STREAM_IDLE,

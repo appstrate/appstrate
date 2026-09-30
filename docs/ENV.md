@@ -147,7 +147,7 @@ retired key stays in `CONNECTION_ENCRYPTION_KEYS` until something re-encrypts wh
 2. Set `CONNECTION_ENCRYPTION_KEY` to the new key, `CONNECTION_ENCRYPTION_KEY_ID` to its kid, and add
    the old pair to `CONNECTION_ENCRYPTION_KEYS` (`{"k1":"<old key>"}`). Deploy, and wait until no
    process runs the old env: from then on every write uses the new kid and the old one only decrypts.
-3. With that env, run `bun scripts/migration/0037-rekey-encrypted-columns.ts --apply`: it
+3. With that env, run `bun scripts/rekey-encrypted-columns.ts --apply`: it
    re-encrypts, under the active kid, every ciphertext the retired kids wrote.
 4. Run it again without `--apply`: its per-kid inventory must show nothing under the old kid, and it
    exits 0.

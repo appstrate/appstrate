@@ -38,9 +38,7 @@ import {
 import {
   credentialTemplateRefs,
   isHostUnboundedUriPattern,
-  parseCredentialRef,
   parseUrlFormPattern,
-  templateExpressions,
   unsupportedTemplateExpressions,
 } from "@appstrate/afps-shared/credential-template";
 import {
@@ -50,10 +48,7 @@ import {
 } from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
-import {
-  isResponseTextExpression,
-  parseResponseExpression,
-} from "@appstrate/afps-shared/runtime-expression";
+import { loginBlockIssues, type LoginBlockView } from "@appstrate/afps-shared/runtime-expression";
 import { z } from "zod";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
 
@@ -203,11 +198,8 @@ export interface UnboundedInjectedCredentialViolation {
 }
 
 /**
- * List the auths that inject a credential over HTTP (`delivery.http`, or the auth type's default
- * header) while declaring `allow_all_uris: true` or an `authorized_uris` entry whose host the
- * caller picks (`isHostUnboundedUriPattern`). A WRITE-path policy, like
- * {@link findNonSnakeCaseIdentityClaimKeys}; the credential proxies refuse the same calls at run
- * time (`credentialUrlPolicy`, `@appstrate/afps-runtime/resolvers`).
+ * List the auths that inject a credential over HTTP without an `authorized_uris` allowlist that
+ * names their hosts — the write-path twin of the run-time `credentialUrlPolicy`.
  */
 export function findUnboundedInjectedCredentials(
   manifest: unknown,
@@ -226,15 +218,21 @@ export function findUnboundedInjectedCredentials(
     if (!injectsHttpCredential(typeof a.type === "string" ? a.type : "", a.delivery?.http)) {
       continue;
     }
+    const uris: unknown[] = Array.isArray(a.authorized_uris) ? a.authorized_uris : [];
     if (a.allow_all_uris === true) {
       found.push({
         authKey,
         path: ["auths", authKey, "allow_all_uris"],
         message: `auth '${authKey}' injects a credential, so it cannot set allow_all_uris; list its hosts in authorized_uris`,
       });
+    } else if (uris.length === 0) {
+      found.push({
+        authKey,
+        path: ["auths", authKey, "authorized_uris"],
+        message: `auth '${authKey}' injects a credential, so it must list its hosts in authorized_uris`,
+      });
     }
-    if (!Array.isArray(a.authorized_uris)) continue;
-    a.authorized_uris.forEach((pattern, index) => {
+    uris.forEach((pattern, index) => {
       if (typeof pattern !== "string" || !isHostUnboundedUriPattern(pattern)) return;
       found.push({
         authKey,
@@ -249,6 +247,11 @@ export function findUnboundedInjectedCredentials(
 export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefine((m, ctx) => {
   const manifest = m as unknown as IntegrationManifest;
   const auths = manifest.auths ?? {};
+
+  // §7.6 + §7.7 install gate: no template or runtime expression reaches an upstream as literal text.
+  for (const { message, path } of findUnevaluableExpressions(manifest)) {
+    ctx.addIssue({ code: "custom", message, path });
+  }
 
   for (const [authKey, auth] of Object.entries(auths)) {
     // (1) authorized_uris non-empty unless allow_all_uris.
@@ -369,16 +372,6 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
         ]);
       }
     });
-
-    // (1f') §7.6 + §7.7 install gate — every template and runtime expression is one the platform
-    // evaluates, so none reaches an upstream as literal text.
-    for (const issue of findUnevaluableExpressions(auth)) {
-      ctx.addIssue({
-        code: "custom",
-        message: `${issue.message}${UNEVALUABLE_HINT}`,
-        path: ["auths", authKey, ...issue.at],
-      });
-    }
 
     // (1g) Templated authorized_uris entries (#1458) reference declared, required fields, in the
     // authority of a `scheme://` entry or as a leading whole URL (#1627). Forbidden with `connect`
@@ -677,122 +670,76 @@ interface DeliveryView {
   files?: Record<string, { value?: string }>;
 }
 
-/** Appended to every {@link findUnevaluableExpressions} issue (`scripts/migration/0035` keys on it). */
-const UNEVALUABLE_HINT = " — the platform does not evaluate it (AFPS §7.6/§7.7)";
-
-type IntegrationAuth = NonNullable<IntegrationManifest["auths"]>[string];
 type IssuePath = (string | number)[];
 
+/** A manifest expression the platform does not evaluate, located in the manifest. */
+export interface UnevaluableExpression {
+  authKey: string;
+  path: (string | number)[];
+  message: string;
+}
+
+/** The `{{…}}` placeholder of the agent-facing api_call grammar. */
+const API_CALL_PLACEHOLDER = /\{\{[^{}]*\}\}/g;
+
 /**
- * The templates and runtime expressions of one auth the platform cannot evaluate: a `{$…}`
- * other than `{$credential.<field>}` in delivery or `authorized_uris`, the `{{field}}` form in
- * `delivery.http.value`, any `{$…}` in the login request (its placeholders are `{{input}}`),
- * and a `connect.login` response expression outside `@appstrate/afps-shared/runtime-expression`.
+ * List the templates and runtime expressions the platform cannot evaluate: in a delivery template
+ * (http, env, files) anything but `{$credential.<field>}`, `{$…}` other than that in
+ * `authorized_uris`, and a `connect.login` expression outside {@link loginBlockIssues}.
  */
-function findUnevaluableExpressions(auth: IntegrationAuth): { message: string; at: IssuePath }[] {
-  const issues: { message: string; at: IssuePath }[] = [];
-  const delivery = auth.delivery as DeliveryView | undefined;
-  const templates: [string | undefined, IssuePath][] = [
-    [delivery?.http?.value, ["delivery", "http", "value"]],
-    ...Object.entries(delivery?.env ?? {}).map(([k, e]): [string | undefined, IssuePath] => [
-      e.value,
-      ["delivery", "env", k],
-    ]),
-    ...Object.entries(delivery?.files ?? {}).map(([k, e]): [string | undefined, IssuePath] => [
-      e.value,
-      ["delivery", "files", k],
-    ]),
-    ...(auth.authorized_uris ?? []).map((u, i): [string, IssuePath] => [u, ["authorized_uris", i]]),
-  ];
-  for (const [template, at] of templates) {
-    for (const expr of unsupportedTemplateExpressions(template ?? "")) {
-      issues.push({ message: `'${expr}' is not a {$credential.<field>} reference`, at });
-    }
-  }
-  if (/\{\{[^}]*\}\}/.test(delivery?.http?.value ?? "")) {
-    issues.push({
-      message:
-        "delivery.http.value references credential fields as {$credential.<field>}, not {{field}}",
-      at: ["delivery", "http", "value"],
-    });
-  }
-
-  const login = auth.connect?.login;
-  if (!login) return issues;
-  const request = login.request;
-  const requestTemplates: [string | undefined, IssuePath][] = [
-    [request.url, ["url"]],
-    [request.body, ["body"]],
-    ...Object.entries(request.headers ?? {}).map(([k, v]): [string, IssuePath] => [
-      v,
-      ["headers", k],
-    ]),
-  ];
-  for (const [template, at] of requestTemplates) {
-    for (const expr of templateExpressions(template ?? "")) {
-      issues.push({
-        message: `'${expr}' is not evaluated in a login request; login inputs are {{name}}`,
-        at: ["connect", "login", "request", ...at],
+export function findUnevaluableExpressions(manifest: unknown): UnevaluableExpression[] {
+  const auths = (manifest as { auths?: unknown } | null)?.auths;
+  if (typeof auths !== "object" || auths === null) return [];
+  const found: UnevaluableExpression[] = [];
+  for (const [authKey, raw] of Object.entries(auths)) {
+    const auth = (raw ?? {}) as {
+      delivery?: DeliveryView;
+      authorized_uris?: unknown;
+      connect?: { login?: LoginBlockView };
+    };
+    const push = (message: string, at: IssuePath) =>
+      found.push({
+        authKey,
+        path: ["auths", authKey, ...at],
+        message: `${message} — the platform does not evaluate it (AFPS §7.6/§7.7)`,
       });
+    const delivery = auth.delivery;
+    const deliveryTemplates: [string | undefined, IssuePath][] = [
+      [delivery?.http?.value, ["delivery", "http", "value"]],
+      ...(["env", "files"] as const).flatMap((kind) =>
+        Object.entries(delivery?.[kind] ?? {}).map(([k, e]): [string | undefined, IssuePath] => [
+          e?.value,
+          ["delivery", kind, k],
+        ]),
+      ),
+    ];
+    const uris = Array.isArray(auth.authorized_uris) ? auth.authorized_uris : [];
+    const templates: [string | undefined, IssuePath][] = [
+      ...deliveryTemplates,
+      ...uris.map((u, i): [string | undefined, IssuePath] => [
+        typeof u === "string" ? u : undefined,
+        ["authorized_uris", i],
+      ]),
+    ];
+    for (const [template, at] of templates) {
+      for (const expr of unsupportedTemplateExpressions(template ?? "")) {
+        push(`'${expr}' is not a {$credential.<field>} reference`, at);
+      }
+    }
+    for (const [template, at] of deliveryTemplates) {
+      for (const placeholder of new Set((template ?? "").match(API_CALL_PLACEHOLDER))) {
+        push(
+          `'${placeholder}' is not a delivery template expression; delivery templates reference credential fields as {$credential.<field>}`,
+          at,
+        );
+      }
+    }
+    const login = auth.connect?.login;
+    for (const issue of login ? loginBlockIssues(login) : []) {
+      push(issue.message, ["connect", "login", ...issue.path]);
     }
   }
-
-  const outputs = (login.outputs ?? {}) as Record<string, unknown>;
-  const isJwt = (o: unknown) => (o as { from?: unknown } | null)?.from === "jwt";
-  for (const [name, raw] of Object.entries(outputs)) {
-    const at = ["connect", "login", "outputs", name];
-    const out = raw as { from?: string; context?: string; token?: string; source?: string };
-    if (typeof raw === "string") {
-      if (!parseResponseExpression(raw)) {
-        issues.push({ message: `unsupported runtime expression '${raw}'`, at });
-      }
-    } else if (out.from === undefined) {
-      if (out.context !== "$response.body") {
-        issues.push({
-          message: `selector context '${out.context}' is not supported (only $response.body)`,
-          at: [...at, "context"],
-        });
-      }
-    } else if (out.from === "jwt") {
-      const ref = parseCredentialRef(out.token ?? "");
-      if (
-        ref === null ||
-        !Object.prototype.hasOwnProperty.call(outputs, ref) ||
-        isJwt(outputs[ref])
-      ) {
-        issues.push({
-          message: `jwt token '${out.token}' must be {$credential.<output>} naming a non-jwt output`,
-          at: [...at, "token"],
-        });
-      }
-    } else if (out.from === "regex" && !isResponseTextExpression(out.source ?? "")) {
-      issues.push({
-        message: `regex source '${out.source}' must be $response.body or $response.header.<name>`,
-        at: [...at, "source"],
-      });
-    }
-  }
-
-  (login.success_criteria ?? []).forEach((criterion, index) => {
-    const at = ["connect", "login", "success_criteria", index];
-    const context = criterion.context ?? "$response.body";
-    if (criterion.type === "jsonpath" && context !== "$response.body") {
-      issues.push({ message: `jsonpath context '${context}' is not supported`, at });
-    } else if (criterion.type === "regex" && !isResponseTextExpression(context)) {
-      issues.push({ message: `regex context '${context}' is not supported`, at });
-    } else if ((criterion.type ?? "simple") === "simple") {
-      // The engine compares the two sides of the first `==`.
-      const eq = criterion.condition.indexOf("==");
-      const operands =
-        eq === -1 ? [] : [criterion.condition.slice(0, eq), criterion.condition.slice(eq + 2)];
-      for (const operand of operands.map((o) => o.trim()).filter((o) => o.startsWith("$"))) {
-        if (!parseResponseExpression(operand)) {
-          issues.push({ message: `unsupported runtime expression '${operand}'`, at });
-        }
-      }
-    }
-  });
-  return issues;
+  return found;
 }
 
 /**

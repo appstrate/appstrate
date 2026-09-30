@@ -18,6 +18,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
+import { expectRejectedField } from "../../helpers/body-validation.ts";
 import { auditEvents, integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { __resetSystemIntegrationsForTest } from "../../../src/services/integration-client-registry.ts";
@@ -185,7 +186,7 @@ describe("/api/org-integrations — org-level OAuth clients", () => {
       headers: json,
       body: JSON.stringify({ client_id: "org-a-2" }),
     });
-    expect(renamed.status).toBe(409);
+    await expectRejectedField(renamed, "client_id");
 
     const deleted = await app.request(`${ORG_BASE}/oauth-clients/${a}`, {
       method: "DELETE",

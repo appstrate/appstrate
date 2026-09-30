@@ -376,6 +376,8 @@ const config: KnipConfig = {
         "scripts/conformance/grab-token.ts",
         // Operator data scripts, run by hand (`bun scripts/migration/…`); nothing imports them.
         "scripts/migration/*.ts",
+        // Key-rotation tool, run by hand (`docs/ENV.md` § "Rotating `CONNECTION_ENCRYPTION_KEY`").
+        "scripts/rekey-encrypted-columns.ts",
         // System-package sources: `build:system-packages` reads them off disk
         // and bundles them, so nothing imports them.
         "scripts/system-packages/**/server/index.ts",

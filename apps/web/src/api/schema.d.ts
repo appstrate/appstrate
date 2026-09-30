@@ -1741,9 +1741,9 @@ export interface paths {
         head?: never;
         /**
          * Update a custom OAuth client (rotate its secret, change its redirect URI or method)
-         * @description Updates one of this space's custom clients in place, by its id (an org-level client id is a 404 here). Its `client_id` cannot change (409). Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.
+         * @description Updates one of this space's custom clients in place, by its id (an org-level client id is a 404 here). Its `client_id` cannot change. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.
          */
-        patch: operations["rotateIntegrationOAuthClient"];
+        patch: operations["updateIntegrationOAuthClient"];
         trace?: never;
     };
     "/api/integrations/{packageId}/oauth-clients/{clientId}/promote": {
@@ -2779,9 +2779,9 @@ export interface paths {
         head?: never;
         /**
          * Update an org-level OAuth client (rotate its secret, change its redirect URI or method)
-         * @description Updates one org-level client in place, by its id (a space client id is a 404 here). Its `client_id` cannot change (409). Requires `org-integrations:configure`, which is never granted to an API key.
+         * @description Updates one org-level client in place, by its id (a space client id is a 404 here). Its `client_id` cannot change. Requires `org-integrations:configure`, which is never granted to an API key.
          */
-        patch: operations["rotateOrgIntegrationOAuthClient"];
+        patch: operations["updateOrgIntegrationOAuthClient"];
         trace?: never;
     };
     "/api/orgs": {
@@ -10155,7 +10155,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/plain": string;
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description Webhook processing error */
@@ -10164,7 +10164,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/plain": string;
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
         };
@@ -13267,7 +13267,7 @@ export interface operations {
             };
         };
     };
-    rotateIntegrationOAuthClient: {
+    updateIntegrationOAuthClient: {
         parameters: {
             query?: never;
             header?: {
@@ -13287,8 +13287,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Immutable. Accepted only when equal to the stored value; a different one is refused with 409 `client_id_immutable` — the connections this client minted can only refresh with the `client_id` their tokens were issued to. A new `client_id` is a new client: register it, make it the default, then delete this one. */
-                    client_id?: string;
                     /** @description OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. */
                     client_secret?: string;
                     /**
@@ -13341,17 +13339,6 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `client_id_immutable` — the body names a different `client_id`; register it as a new client instead */
-            409: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
         };
     };
     promoteIntegrationOAuthClient: {
@@ -13807,7 +13794,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
             400: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -13831,7 +13818,18 @@ export interface operations {
                     "application/json": Record<string, never>;
                 };
             };
-            /** @description Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only). */
+            /** @description A metering module's `beforeUsage` hook refused the call for payment (e.g. credits exhausted); `code` is the module's. RFC 9457 problem+json. */
+            402: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -13865,8 +13863,29 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
             default: {
                 headers: {
@@ -13920,7 +13939,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
             400: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -13944,7 +13963,18 @@ export interface operations {
                     "application/json": Record<string, never>;
                 };
             };
-            /** @description Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only). */
+            /** @description A metering module's `beforeUsage` hook refused the call for payment (e.g. credits exhausted); `code` is the module's. RFC 9457 problem+json. */
+            402: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -13978,8 +14008,29 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
             default: {
                 headers: {
@@ -14033,7 +14084,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
             400: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -14057,7 +14108,18 @@ export interface operations {
                     "application/json": Record<string, never>;
                 };
             };
-            /** @description Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only). */
+            /** @description A metering module's `beforeUsage` hook refused the call for payment (e.g. credits exhausted); `code` is the module's. RFC 9457 problem+json. */
+            402: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -14091,8 +14153,29 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
             default: {
                 headers: {
@@ -14146,7 +14229,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
             400: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -14170,7 +14253,18 @@ export interface operations {
                     "application/json": Record<string, never>;
                 };
             };
-            /** @description Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only). */
+            /** @description A metering module's `beforeUsage` hook refused the call for payment (e.g. credits exhausted); `code` is the module's. RFC 9457 problem+json. */
+            402: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -14204,8 +14298,29 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
             default: {
                 headers: {
@@ -14491,12 +14606,12 @@ export interface operations {
                      *       },
                      *       "connections": [
                      *         {
-                     *           "integration_id": "@appstrate/gmail",
+                     *           "integration_package_id": "@appstrate/gmail",
                      *           "name": "Gmail",
                      *           "source": "own"
                      *         },
                      *         {
-                     *           "integration_id": "@appstrate/clickup",
+                     *           "integration_package_id": "@appstrate/clickup",
                      *           "name": "ClickUp",
                      *           "source": "shared"
                      *         }
@@ -14565,7 +14680,7 @@ export interface operations {
                         }[];
                         /** @description Integrations the caller could attach to an agent. */
                         connections: {
-                            integration_id: string;
+                            integration_package_id: string;
                             name: string;
                             /** @enum {string} */
                             source: "own" | "shared" | "both";
@@ -16846,7 +16961,7 @@ export interface operations {
             };
         };
     };
-    rotateOrgIntegrationOAuthClient: {
+    updateOrgIntegrationOAuthClient: {
         parameters: {
             query?: never;
             header?: {
@@ -16866,8 +16981,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Immutable. Accepted only when equal to the stored value; a different one is refused with 409 `client_id_immutable` — the connections this client minted can only refresh with the `client_id` their tokens were issued to. A new `client_id` is a new client: register it, make it the default, then delete this one. */
-                    client_id?: string;
                     /** @description OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. */
                     client_secret?: string;
                     /**
@@ -16920,17 +17033,6 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `client_id_immutable` — the body names a different `client_id`; register it as a new client instead */
-            409: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
         };
     };
     listOrganizations: {
@@ -24964,8 +25066,29 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
             default: {
                 headers: {
@@ -25070,8 +25193,29 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
             default: {
                 headers: {
@@ -25176,8 +25320,29 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
             default: {
                 headers: {
@@ -25282,8 +25447,29 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
             default: {
                 headers: {

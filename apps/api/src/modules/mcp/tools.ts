@@ -326,45 +326,6 @@ function describePayload(
   };
 }
 
-const STRING_LIST = { type: "array", items: { type: "string" } };
-
-/** `describePayload`'s shape — `describe_operation`'s result and `best_match`. */
-const OPERATION_DEFINITION_SCHEMA: NonNullable<Tool["outputSchema"]> = {
-  type: "object",
-  required: ["operation_id", "method", "path", "path_params", "granted", "parameters", "responses"],
-  properties: {
-    operation_id: { type: "string" },
-    method: { type: "string" },
-    path: { type: "string" },
-    path_params: STRING_LIST,
-    summary: { type: "string" },
-    description: { type: "string" },
-    required_permissions: STRING_LIST,
-    target_space_permissions: STRING_LIST,
-    ceiling_permissions: STRING_LIST,
-    granted: { type: "boolean" },
-    parameters: { type: "array" },
-    request_body: { type: ["object", "null"] },
-    responses: { type: "object" },
-    referenced_schemas: { type: "object" },
-  },
-};
-
-/** `readResponse`'s envelope around a dispatched REST answer. */
-const DISPATCHED_RESPONSE_SCHEMA: NonNullable<Tool["outputSchema"]> = {
-  type: "object",
-  required: ["status"],
-  properties: {
-    status: { type: "integer", description: "The HTTP status the REST operation answered." },
-    etag: { type: "string", description: "Send back as `if_match` on the next write." },
-    truncated: { type: "boolean" },
-    body: { description: "The response body — parsed JSON, else text." },
-    note: { type: "string" },
-    content_type: { type: "string" },
-    bytes: { type: ["integer", "null"] },
-  },
-};
-
 /** A denial's ceiling half: named only when a delegated credential's scopes miss one. */
 function deniedCeiling(
   op: CatalogOperation,
@@ -391,41 +352,6 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
       "permissions they need in YOUR space: report that to the user instead of trying them. " +
       "`total` counts the matches you may invoke, `denied_total` the rest; both lists are " +
       "capped at `limit`.",
-    outputSchema: {
-      type: "object",
-      required: ["total", "operations", "denied_total", "denied"],
-      properties: {
-        total: { type: "integer" },
-        operations: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["operation_id", "method", "path"],
-            properties: {
-              operation_id: { type: "string" },
-              method: { type: "string" },
-              path: { type: "string" },
-              summary: { type: "string" },
-              tags: STRING_LIST,
-            },
-          },
-        },
-        denied_total: { type: "integer" },
-        denied: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["operation_id", "required_permissions"],
-            properties: {
-              operation_id: { type: "string" },
-              required_permissions: STRING_LIST,
-              ceiling_permissions: STRING_LIST,
-            },
-          },
-        },
-        best_match: OPERATION_DEFINITION_SCHEMA,
-      },
-    },
     annotations: {
       title: "Search API operations",
       readOnlyHint: true,
@@ -527,7 +453,6 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
       "OAuth token): its scopes must include each, so they make an operation unavailable when " +
       "your credential's scopes omit one, whatever your role holds. A granted " +
       "operation can still be refused on the record it acts on; that refusal names its reason.",
-    outputSchema: OPERATION_DEFINITION_SCHEMA,
     annotations: {
       title: "Describe API operation",
       readOnlyHint: true,
@@ -737,7 +662,6 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       "pass it back as `if_match` on the next write to that resource. A write refused with " +
       "412 means it changed since you read it: re-read, reapply your change, retry; 428 means " +
       "the write requires `if_match` (package draft updates do — read the package first).",
-    outputSchema: DISPATCHED_RESPONSE_SCHEMA,
     annotations: {
       title: "Invoke API operation",
       // Dispatches any of ~222 operations, including POST/PUT/DELETE — declare
@@ -1140,8 +1064,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
             "retry the SAME call with their `id`s here. Those fields are what tells the candidates " +
             "apart, so read them rather than listing connections separately. Each key is the " +
             "integration id itself (`@scope/integration`) — NOT the " +
-            "`integrations.<id>` field path the error reports it under, which matches no " +
-            "integration and is ignored. TOP-LEVEL argument, " +
+            "`integrations.<id>` field path the error reports it under. A key naming an " +
+            "integration the agent does not declare is refused (400). TOP-LEVEL argument, " +
             (inline ? "alongside `manifest`/`input`" : "alongside `input`") +
             " — pass the object itself; JSON-encoding it is " +
             "refused before the launch.",
@@ -1323,32 +1247,6 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
       "`runId`, `chat_session_id`, or `purpose`. Each row carries an `appfile://` URI you can " +
       "pass verbatim into a run_and_wait input file field (to feed a file to another agent) " +
       "or read with read_file. Returns `{ files: [...], hasMore }`.",
-    outputSchema: {
-      type: "object",
-      required: ["files", "hasMore"],
-      properties: {
-        files: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["id", "uri", "name", "mime", "size", "downloadable"],
-            properties: {
-              id: { type: "string" },
-              uri: { type: "string" },
-              name: { type: "string" },
-              mime: { type: "string" },
-              size: { type: "number" },
-              runId: { type: ["string", "null"] },
-              packageId: { type: ["string", "null"] },
-              createdAt: { type: ["string", "null"] },
-              downloadable: { type: "boolean" },
-              capabilities: { type: ["object", "null"] },
-            },
-          },
-        },
-        hasMore: { type: "boolean" },
-      },
-    },
     annotations: {
       title: "List files",
       readOnlyHint: true,
@@ -1584,7 +1482,6 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
       "(their own or org-shared). Call this first to ground who you are acting for, what the " +
       "caller's role allows (operations beyond it fail at invoke time), and which integrations " +
       "to prefer when building or configuring an agent.",
-    outputSchema: DISPATCHED_RESPONSE_SCHEMA,
     annotations: {
       title: "Get caller context",
       readOnlyHint: true,

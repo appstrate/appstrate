@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `scripts/migration/0037-rekey-encrypted-columns.ts` on a private PGlite replayed to the current
+ * `scripts/rekey-encrypted-columns.ts` on a private PGlite replayed to the current
  * schema, with a real two-key keyring: every live ciphertext under the retired kid ends under the
  * active one with the same plaintext, a rerun is a no-op, and what the keyring cannot read is
  * counted and left alone.
@@ -19,14 +19,14 @@ import {
   rekeyRetiredKids,
   reportCounts,
   type Query,
-} from "../../../../scripts/migration/0037-rekey-encrypted-columns.ts";
+} from "../../../../scripts/rekey-encrypted-columns.ts";
 import { replayJournal } from "../helpers/journal.ts";
 
 const ORG = "e0000000-0000-4000-8000-00000000d037";
 const SPACE = "spc_d0370000-0000-4000-8000-000000000001";
-const USER = "usr_0037_alice";
-const GMAIL = "@acme0037/gmail";
-const AGENT = "@acme0037/agent";
+const USER = "usr_rekey_alice";
+const GMAIL = "@acmerekey/gmail";
+const AGENT = "@acmerekey/agent";
 const OLD_KEY = randomBytes(32).toString("base64");
 const NEW_KEY = randomBytes(32).toString("base64");
 const KEYRING = { activeKid: "k2", retiredKids: ["k1"] };
@@ -70,7 +70,7 @@ beforeAll(async () => {
     INSERT INTO organizations (id, name, slug) VALUES ('${ORG}', 'Zero37', 'zero-37');
     INSERT INTO spaces (id, org_id, name, is_default) VALUES ('${SPACE}', '${ORG}', 'Default', true);
     INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-      VALUES ('${USER}', 'Alice', 'a-0037@example.com', true, now(), now());
+      VALUES ('${USER}', 'Alice', 'a-rekey@example.com', true, now(), now());
     INSERT INTO packages (id, type) VALUES ('${GMAIL}', 'integration'), ('${AGENT}', 'agent');
   `);
   const inserts: [string, unknown[]][] = [
@@ -99,8 +99,8 @@ beforeAll(async () => {
     [
       `INSERT INTO runs (id, package_id, user_id, space_id, org_id, status, started_at,
                          sink_secret_encrypted, sink_expires_at, sink_closed_at)
-       VALUES ('run_0037_open', $1, $2, $3, $4, 'running', now(), $5, now() + interval '1 hour', NULL),
-              ('run_0037_closed', $1, $2, $3, $4, 'success', now(), $6, now() + interval '1 hour', now())`,
+       VALUES ('run_rekey_open', $1, $2, $3, $4, 'running', now(), $5, now() + interval '1 hour', NULL),
+              ('run_rekey_closed', $1, $2, $3, $4, 'success', now(), $6, now() + interval '1 hour', now())`,
       [AGENT, USER, SPACE, ORG, OLD.run, OLD.closed],
     ],
     [
@@ -132,7 +132,7 @@ afterAll(async () => {
   _resetKeyringForTesting();
 });
 
-describe("0037 — rekey encrypted columns", () => {
+describe("rekey-encrypted-columns", () => {
   it("names every *_encrypted column of the schema", async () => {
     const { rows } = await pg.query<{ c: string }>(
       `SELECT table_name || '.' || column_name AS c FROM information_schema.columns
@@ -174,7 +174,7 @@ describe("0037 — rekey encrypted columns", () => {
       await column("integration_oauth_clients", "client_secret_encrypted", "auth_key = 'other'"),
     ).toBe("");
     // A closed sink is never verified again: left as it was.
-    expect(await column("runs", "sink_secret_encrypted", "id = 'run_0037_closed'")).toBe(
+    expect(await column("runs", "sink_secret_encrypted", "id = 'run_rekey_closed'")).toBe(
       OLD.closed!,
     );
 

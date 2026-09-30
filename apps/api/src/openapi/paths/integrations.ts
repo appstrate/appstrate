@@ -293,14 +293,8 @@ export const oauthClientCreateBodySchema = {
 export const oauthClientUpdateBodySchema = {
   type: "object",
   description:
-    "Merge semantics (RFC 7396): an absent field is left unchanged. `client_secret` and `token_endpoint_auth_method` are written together: sending neither keeps both.",
+    "Merge semantics (RFC 7396): an absent field is left unchanged. `client_secret` and `token_endpoint_auth_method` are written together: sending neither keeps both. There is no `client_id`: the connections a client minted refresh only with the `client_id` their tokens were issued to, so a new `client_id` is a new client — register it, make it the default, then delete this one.",
   properties: {
-    client_id: {
-      type: "string",
-      minLength: 1,
-      description:
-        "Immutable. Accepted only when equal to the stored value; a different one is refused with 409 `client_id_immutable` — the connections this client minted can only refresh with the `client_id` their tokens were issued to. A new `client_id` is a new client: register it, make it the default, then delete this one.",
-    },
     client_secret: {
       type: "string",
       description:
@@ -686,13 +680,13 @@ export const integrationsPaths = {
   },
   "/api/integrations/{packageId}/oauth-clients/{clientId}": {
     patch: {
-      operationId: "rotateIntegrationOAuthClient",
+      operationId: "updateIntegrationOAuthClient",
       tags: ["Integrations"],
       summary:
         "Update a custom OAuth client (rotate its secret, change its redirect URI or method)",
       description:
         "Updates one of this space's custom clients in place, by its id (an " +
-        "org-level client id is a 404 here). Its `client_id` cannot change (409). Auto-provisioned " +
+        "org-level client id is a 404 here). Its `client_id` cannot change. Auto-provisioned " +
         "(DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -717,16 +711,6 @@ export const integrationsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description:
-            "`client_id_immutable` — the body names a different `client_id`; register it as a new client instead",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
       },
     },
     delete: {

@@ -671,12 +671,8 @@ describe("Schedules API", () => {
       const [updated] = await scheduleAudits(schedule.id);
       expect(updated).toEqual({
         action: "schedule.updated",
-        before: {
-          connectionOverrides: { [integration]: ids },
-          actorType: "user",
-          actorId: ctx.user.id,
-        },
-        after: { connectionOverrides: null, actorType: "user", actorId: other.id },
+        before: { connectionOverrides: { [integration]: ids }, actorId: ctx.user.id },
+        after: { connectionOverrides: null, actorId: other.id },
       });
     });
   });

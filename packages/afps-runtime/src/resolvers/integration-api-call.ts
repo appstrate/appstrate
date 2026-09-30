@@ -38,7 +38,6 @@
 import type { Tool } from "@afps-spec/types";
 import type { Bundle } from "../bundle/types.ts";
 import {
-  enforceAuthorizedUris,
   makeApiCallTool,
   resolveBodyForFetch,
   serializeFetchResponse,
@@ -57,7 +56,7 @@ import {
   normaliseMcpToolNamespace,
 } from "@appstrate/afps-shared/mcp-naming";
 import {
-  assertAllowlistRendered,
+  declaredLiteralHosts,
   fetchApiCall,
   PreflightError,
   RedirectBlockedError,
@@ -76,7 +75,12 @@ import {
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
 import { substituteVars } from "./template-vars.ts";
-import { credentialUrlPolicy, exfiltrationRefusal, redactionFields } from "./credential-guard.ts";
+import {
+  credentialUrlPolicy,
+  redactionFields,
+  urlPolicyRefusalMessage,
+  type UrlPolicyRefusal,
+} from "./credential-guard.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
 
 // ─────────────────────────────────────────────
@@ -448,7 +452,6 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       const templates = [req.target];
       if (typeof req.body === "string") templates.push(req.body);
       const target = substituteVars(req.target, fields);
-      enforceAuthorizedUris(meta, req.target, { target, authorizedUris });
 
       const deliveryPlan = resolveLocalDeliveryPlan(meta, entry);
       const allowsAuthorizationOverride =
@@ -484,29 +487,11 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         templates,
         fields,
         allowAllUris: meta.allowAllUris,
+        declaredUris: meta.authorizedUris,
         authorizedUris,
         injectsCredential: injectedCredentialHeader !== null,
       });
-      try {
-        assertAllowlistRendered({
-          declaredUris: meta.authorizedUris,
-          authorizedUris,
-          allowAllUris: policy.allowAllUris,
-        });
-      } catch (err) {
-        throw new AuthorizedUrisError(
-          "AUTHORIZED_URIS_MISMATCH",
-          `Integration ${meta.name}: ${(err as Error).message}`,
-          { integration: meta.name, target: req.target },
-        );
-      }
-      if (policy.refuse) {
-        throw new ResolverError(
-          "RESOLVER_CREDENTIAL_EXFIL_BLOCKED",
-          exfiltrationRefusal(meta.name),
-          { integration: meta.name },
-        );
-      }
+      if (policy.refuse) throw refusalError(policy.refuse, meta.name, req.target);
       const redactFields = redactionFields(policy, fields);
 
       const resolvedBody = await resolveBodyForFetch(req.body, {
@@ -538,7 +523,10 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
           credentialHeaders: injectedCredentialHeader
             ? [...credentialHeaders, injectedCredentialHeader]
             : credentialHeaders,
-          trustDeclaredHosts: true,
+          trustedHost: declaredLiteralHosts({
+            declaredUris: meta.authorizedUris,
+            allowAllUris: policy.allowAllUris,
+          }),
           integrationId: meta.name,
           ...(this.fetchImpl ? { fetchFn: this.fetchImpl } : {}),
           ...(this.resolveHost ? { resolveHost: this.resolveHost } : {}),
@@ -552,7 +540,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
             throw new AuthorizedUrisError(
               "AUTHORIZED_URIS_MISMATCH",
               `Integration ${meta.name}: ${err.message}`,
-              { integration: meta.name, target: req.target },
+              { integration: meta.name, target: req.target, allowlist: meta.authorizedUris },
             );
           }
           throw new ResolverError(
@@ -578,6 +566,14 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       });
     };
   }
+}
+
+/** A {@link credentialUrlPolicy} refusal as the resolver's typed error. */
+function refusalError(refusal: UrlPolicyRefusal, integration: string, target: string): Error {
+  const message = urlPolicyRefusalMessage(refusal, integration);
+  return refusal === "exfiltration"
+    ? new ResolverError("RESOLVER_CREDENTIAL_EXFIL_BLOCKED", message, { integration })
+    : new AuthorizedUrisError("AUTHORIZED_URIS_EMPTY", message, { integration, target });
 }
 
 /**

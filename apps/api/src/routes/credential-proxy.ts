@@ -82,6 +82,7 @@ import { runBoundSelection } from "../services/credential-proxy/integration-reso
 import type { AppEnv } from "../types/index.ts";
 
 import { assertBearerOnly } from "../lib/bearer-only.ts";
+import { UPSTREAM_FAILURES } from "../lib/proxy-upstream-failure.ts";
 import { getCookieJarStore } from "../infra/index.ts";
 import { getCredentialProxyLimits } from "../services/proxy-limits.ts";
 
@@ -432,13 +433,7 @@ const PROXY_ERRORS: Record<
     title: "Unresolved Placeholder",
     proxyError: "proxy_internal_response",
   },
-  upstream_unresolvable: { status: 502, title: "Upstream Unresolvable", proxyError: "dns_error" },
-  upstream_unreachable: {
-    status: 502,
-    title: "Upstream Unreachable",
-    proxyError: "destination_unavailable",
-  },
-  upstream_timeout: { status: 504, title: "Upstream Timeout", proxyError: "http_response_timeout" },
+  ...UPSTREAM_FAILURES,
 };
 
 /** Boolean control headers: `1` / `0`, absent = `0`, anything else a 400. */

@@ -32,6 +32,7 @@ import {
   sql,
   type SQL,
 } from "drizzle-orm";
+import { countUpstreamRejection } from "./upstream-rejection-window.ts";
 import { db } from "@appstrate/db/client";
 import {
   spacePackages,
@@ -89,7 +90,7 @@ import { integrationCallbackUrl } from "../lib/integration-callback-url.ts";
 import { CONNECTION_LABEL_MAX, toMintedLabel } from "../lib/connection-label.ts";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
-import type { Actor } from "@appstrate/connect";
+import type { Actor, ResolvedOAuthClient } from "@appstrate/connect";
 import {
   resolveIntegrationToolCatalog,
   readDefaultTools,
@@ -967,10 +968,6 @@ export async function createIntegrationOAuthClient(
  * `is_default` / `auto_provisioned` are not touched here
  * (default selection is `setDefaultIntegrationClient`'s job).
  *
- * `clientId` is immutable: the connections this row minted hold refresh
- * tokens the provider issued to the stored `client_id`, which a new one
- * cannot refresh. A different value is a 409 — a new client is create + delete.
- *
  * An omitted `clientSecret` PRESERVES the stored pair — except when the caller
  * also declares a secret-based `tokenEndpointAuthMethod`, which is a change
  * request rather than a preserve: it is applied against the stored secret, or
@@ -981,8 +978,6 @@ export async function updateIntegrationOAuthClient(
   packageId: string,
   clientId: string,
   input: {
-    /** Accepted only when equal to the stored value. */
-    clientId?: string;
     /** Omit to PRESERVE the stored secret; `""` declares the client public. */
     clientSecret?: string;
     /** Omit to keep, `null` to clear. */
@@ -1005,13 +1000,6 @@ export async function updateIntegrationOAuthClient(
   if (existing.autoProvisioned) {
     throw invalidRequest(
       `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot be edited manually; delete it to re-trigger registration.`,
-    );
-  }
-  if (input.clientId !== undefined && input.clientId !== existing.clientId) {
-    throw conflict(
-      "client_id_immutable",
-      `OAuth client '${clientId}' cannot change its client_id: the connections it minted can only refresh their tokens with '${existing.clientId}'. ` +
-        `Register the new client_id as a new OAuth client, make it the default, then delete this one.`,
     );
   }
   // `null` = the secret field was not submitted → keep the stored credential
@@ -1282,7 +1270,9 @@ export function resolveConnectClient(
  * Precedence: the client row's own `token_endpoint_auth_method` (the admin's
  * explicit declaration) wins over `manifestAuthMethod`, which is the
  * manifest's `auths.{key}.token_endpoint_auth_method` and stands in when the
- * row does not declare one.
+ * row does not declare one. The method comes back narrowed to what the token
+ * client speaks (`toSupportedTokenEndpointAuthMethod`), so the OAuth callback
+ * and the refresh post the same client authentication.
  *
  * `null` is reserved for "no such client here" (since-removed, remapped,
  * cross-scope) and for a ciphertext that will not open — the caller skips the
@@ -1294,11 +1284,15 @@ export async function resolveIntegrationClientById(
   integrationId: string,
   authKey: string,
   manifestAuthMethod: string | undefined,
-): Promise<{
-  clientId: string;
-  clientSecret: string;
-  tokenEndpointAuthMethod: string | undefined;
-} | null> {
+): Promise<ResolvedOAuthClient | null> {
+  const resolved = (clientId: string, clientSecret: string, method: string | undefined) => {
+    const tokenEndpointAuthMethod = toSupportedTokenEndpointAuthMethod(method);
+    return {
+      clientId,
+      clientSecret,
+      ...(tokenEndpointAuthMethod ? { tokenEndpointAuthMethod } : {}),
+    };
+  };
   // 1) System client (env), validated against this (integrationId, authKey).
   const sys = resolveSystemClientForAuth(clientRef, integrationId, authKey);
   if (sys) {
@@ -1308,11 +1302,7 @@ export async function resolveIntegrationClientById(
     // that omits its secret without declaring `"none"`, so emptiness here is
     // always a declaration, never a gap.
     const method = sys.tokenEndpointAuthMethod ?? manifestAuthMethod;
-    return {
-      clientId: sys.clientId,
-      clientSecret: method === "none" ? "" : (sys.clientSecret ?? ""),
-      tokenEndpointAuthMethod: method,
-    };
+    return resolved(sys.clientId, method === "none" ? "" : (sys.clientSecret ?? ""), method);
   }
 
   // A custom client id is the row's UUID PK. Anything else — a since-removed
@@ -1354,7 +1344,7 @@ export async function resolveIntegrationClientById(
   // with any other declared method unrepresentable, so emptiness here always
   // arrives as `"none"`.
   if (method === "none") {
-    return { clientId: row.clientId, clientSecret: "", tokenEndpointAuthMethod: "none" };
+    return resolved(row.clientId, "", "none");
   }
 
   let clientSecret: string;
@@ -1376,7 +1366,7 @@ export async function resolveIntegrationClientById(
   // method to `client_secret_basic` before calling `assertClientAuthCoherent`,
   // so a secret-based (or unstated) method with no secret throws
   // `ClientAuthInvariantError` before anything reaches the wire.
-  return { clientId: row.clientId, clientSecret, tokenEndpointAuthMethod: method };
+  return resolved(row.clientId, clientSecret, method);
 }
 
 /**
@@ -2538,8 +2528,8 @@ export async function markIntegrationConnectionNeedsReconnection(
 type RefreshFailureGate =
   /** A transient OAuth refresh failure: escalates only once the token expired `graceSeconds` ago. */
   | { graceSeconds: number }
-  /** An upstream rejection of an unrefreshable credential: counts within `windowSeconds` of the first. */
-  | { windowSeconds: number };
+  /** An upstream rejection of an unrefreshable credential: counts within one rejection window. */
+  | "upstream_rejection";
 
 /**
  * Record a failure on a connection's credential: a transient OAuth refresh
@@ -2551,9 +2541,8 @@ type RefreshFailureGate =
  *
  * A refresh failure escalates at `maxFailures` once the token expired more than
  * `graceSeconds` ago, so an outage on a valid token never bricks the connection.
- * A rejection escalates at `maxFailures` rejections within one window: the first
- * rejection after `windowSeconds` restarts the count, so isolated rejections
- * spread over time never add up.
+ * A rejection escalates at `maxFailures` rejections within one window
+ * ({@link countUpstreamRejection}).
  */
 export async function recordIntegrationRefreshFailure(
   connectionId: string,
@@ -2564,11 +2553,11 @@ export async function recordIntegrationRefreshFailure(
   let failures: SQL;
   let escalates: SQL;
   const set: Partial<Record<keyof typeof integrationConnections.$inferInsert, SQL>> = {};
-  if ("windowSeconds" in gate) {
-    const open = sql`(${since} IS NOT NULL AND ${since} > now() - make_interval(secs => ${gate.windowSeconds}))`;
-    failures = sql`CASE WHEN ${open} THEN ${count} + 1 ELSE 1 END`;
+  if (gate === "upstream_rejection") {
+    const counted = countUpstreamRejection(count, since);
+    failures = counted.failures;
     escalates = sql`${failures} >= ${maxFailures}`;
-    set.refreshFailuresSince = sql`CASE WHEN ${open} THEN ${since} ELSE now() END`;
+    set.refreshFailuresSince = counted.since;
   } else {
     failures = sql`${count} + 1`;
     escalates = sql`${failures} >= ${maxFailures} AND ${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${gate.graceSeconds})`;
@@ -2691,7 +2680,7 @@ export async function listIntegrationConnections(
 
 /** One integration the actor could attach to an agent (own and/or org-shared). */
 interface UsableIntegration {
-  integration_id: string;
+  integration_package_id: string;
   name: string;
   source: "own" | "shared" | "both";
   /**
@@ -2787,7 +2776,7 @@ export async function listUsableIntegrationsForActor(
     const { own, shared } = acc.get(integrationId)!;
     const source: UsableIntegration["source"] = own && shared ? "both" : own ? "own" : "shared";
     return {
-      integration_id: integrationId,
+      integration_package_id: integrationId,
       name: nameMap.get(integrationId) ?? integrationId,
       source,
       version: versionMap.get(integrationId),

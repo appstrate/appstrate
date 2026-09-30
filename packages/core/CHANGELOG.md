@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `allow_all_uris` or an `authorized_uris` entry that leaves the host to the
   caller. Needs `@appstrate/afps-shared` `isHostUnboundedUriPattern` /
   `injectsHttpCredential`. (#1641)
+- **`findUnevaluableExpressions`** and **`UnevaluableExpression`**
+  (`@appstrate/core/integration`): the manifest-level finder behind the
+  `integrationManifestSchema` rule below, each issue located per auth
+  (`authKey`, `path`, `message`). (#1641)
 
 - **The connection-resolution vocabulary is exported as runtime values**
   (`@appstrate/core/integration`): `CONNECTION_RESOLUTION_SOURCES` and
@@ -26,12 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`integrationManifestSchema` refuses expressions the platform does not
-  evaluate** (`findUnevaluableExpressions`): a `{$…}` other than
-  `{$credential.<field>}` in delivery or `authorized_uris`, `{{field}}` in
-  `delivery.http.value`, `{$…}` in a `connect.login` request, and
-  `connect.login` output/criterion expressions, jwt `token`s or regex
-  `source`s the login engine cannot read. Needs `@appstrate/afps-shared`
+  evaluate** (`findUnevaluableExpressions`): in a delivery template (`http`,
+  `env`, `files`) anything but `{$credential.<field>}`, the api_call `{{…}}`
+  placeholder included; a `{$…}` other than `{$credential.<field>}` in
+  `authorized_uris`; and every `connect.login` expression
+  `loginBlockIssues` refuses. Needs `@appstrate/afps-shared`
   `./runtime-expression` and the new `./credential-template` exports. (#1641)
+- **`findUnboundedInjectedCredentials` also lists an injecting auth that
+  declares no `authorized_uris`.** (#1641)
 
 ## [13.0.0] — 2026-09-30
 

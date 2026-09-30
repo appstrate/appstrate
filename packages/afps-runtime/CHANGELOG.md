@@ -9,11 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed — a credential the proxy injects needs a host-bounded allowlist (#1641)
 
-- **BREAKING:** `credentialUrlPolicy` takes a required `injectsCredential`. A
-  call that carries a credential — substituted or injected — drops
-  `allow_all_uris`, and is refused when `authorized_uris` is empty or an entry
-  leaves the host to the caller. `AUTH_TYPE_HTTP_DEFAULTS` moved to
-  `@appstrate/afps-shared/delivery-http`.
+- **BREAKING:** a call that carries a credential — substituted or injected by
+  the proxy — drops `allow_all_uris`, and is refused when `authorized_uris` is
+  empty or an entry leaves the host to the caller (`credentialUrlPolicy`,
+  below). `AUTH_TYPE_HTTP_DEFAULTS` moved to
+  `@appstrate/afps-shared/delivery-http`, and `resolveHttpDelivery` reads
+  `valueFrom` as a template only.
 
 ### Changed — one outbound engine for every api_call path (#1641)
 
@@ -21,10 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `preflightUrl` and `MAX_REDIRECTS` are replaced by `fetchApiCall`: the
   pinned transport by default, `API_CALL_TIMEOUT_MS` combined with the
   caller's signal, the allowlist as the credential rule across redirects,
-  `trustDeclaredHosts` / `trustedHost`, and `PreflightError` reason
-  `unresolvable`. `RedirectBlockedError(reason, redactedHost)`;
-  `assertAllowlistRendered`, `PreflightError`, `API_CALL_TIMEOUT_MS` and
-  `HostResolver` are exported from the resolvers barrel.
+  `trustedHost` (one predicate; `declaredLiteralHosts` for the sidecar and the
+  CLI), and `PreflightError` reason `unresolvable`.
+  `RedirectBlockedError(reason, redactedHost)`; `declaredLiteralHosts`,
+  `PreflightError`, `API_CALL_TIMEOUT_MS` and `HostResolver` are exported from
+  the resolvers barrel.
+- **BREAKING:** `fetchApiCall` refuses every target when there is no
+  allowlist and no `allow_all_uris`.
 - **BREAKING:** HTTP delivery renders manifest templates with
   `renderCredentialTemplate` (`{$credential.<field>}` only); a
   `{{field}}` in a delivery value is sent as the literal it is, and any
@@ -32,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed — `authorized_uris` rendered per connection; only declared hosts pin (#1627)
 
-- `guardedFetch` (and the engine's `preflightUrl`) takes a required `declaredUris`: the manifest's
+- `fetchApiCall` takes a required `declaredUris`: the manifest's
   declared, unrendered `authorized_uris`. `authorizedUris` (the list rendered for the
   connection) decides what matches; only a host written literally in `declaredUris`
   exempts a target from the SSRF net, and only those hosts share cookies across
@@ -45,13 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   publishes it (`anyOf` a `uri` or that pattern), and the new `apiCallTargetJsonSchema`
   export is its `target` property for tool schemas composed by hand.
 - A declared allowlist that renders to nothing for the connection (its URL field unset
-  or not an absolute http(s) URL) refuses every target instead of falling back to the
-  no-allowlist SSRF branch: `allowlistUnrendered` + `UNRENDERED_ALLOWLIST_REFUSAL`, applied
-  by `preflightUrl` / `guardedFetch`, the local resolver and the sidecar.
-- Off-allowlist refusals (`preflightUrl`, `enforceAuthorizedUris`) name the DECLARED
-  entries, never a rendered one — an exact-URL entry such as `{$credential.webhook_url}`
-  renders to a secret. `enforceAuthorizedUris(meta, target, rendered?)` takes the
-  substituted target and the rendered list as one optional `rendered` argument.
+  or not an absolute http(s) URL) refuses every target: `credentialUrlPolicy`'s
+  `"unrendered"` refusal, on the local resolver, the sidecar and the platform proxy.
+- Off-allowlist refusals (`fetchApiCall` and the `api_call` tool's allowlist check) name
+  the DECLARED entries, never a rendered one — an exact-URL entry such as
+  `{$credential.webhook_url}` renders to a secret.
 
 ### Changed — `X-Run-Id` is a reserved transport header
 
@@ -73,51 +75,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@appstrate/runner-pi` uses it to expose `api_call` only for the tools the
   agent selected.
 
-### Added — credential-exfiltration guard
+### Added — the pre-send URL policy of the three `api_call` paths
 
-Exported from `@appstrate/afps-runtime/resolvers` and shared by all three
-`api_call` paths (the sidecar, the local resolver, the platform credential
-proxy):
+Exported from `@appstrate/afps-runtime/resolvers` and shared by the sidecar,
+the local resolver and the platform credential proxy:
 
-- `credentialUrlPolicy({ templates, fields, allowAllUris, authorizedUris })`
-  and its result type `CredentialUrlPolicy` (`substitutesCredential`,
-  `allowAllUris`, `refuse`). A call whose `templates` reference a credential
-  field loses `allow_all_uris`; `refuse` is set when `authorizedUris` is empty.
-  `templates` must be exactly the strings substituted — the sidecar now passes
-  a JSON body's string leaves, not `JSON.stringify(body)`, whose escaping hid
-  `{{\tapi_key}}`.
+- `credentialUrlPolicy(input)` — `templates`, `fields`, `allowAllUris`,
+  `declaredUris`, `authorizedUris`, `injectsCredential` — returns a
+  `CredentialUrlPolicy` (`substitutesCredential`, `allowAllUris`, `refuse`).
+  A call whose
+  `templates` reference a credential field, or whose credential the proxy
+  injects, loses `allow_all_uris`. `refuse` (`UrlPolicyRefusal`) is
+  `"unrendered"` when the declared allowlist renders to nothing for the
+  connection, `"exfiltration"` when a credential-carrying call has no
+  allowlist or an entry that leaves the host to the caller, `"unauthorized"`
+  when there is no allowlist and no `allow_all_uris` (an empty authorized set
+  authorizes nothing), otherwise `null`. `templates` must be exactly the
+  strings substituted — the sidecar passes a JSON body's string leaves, not
+  `JSON.stringify(body)`, whose escaping hid `{{\tapi_key}}`.
+- `urlPolicyRefusalMessage(refusal, integrationId)`: the one message per
+  refusal; it names no credential value.
 - `redactionFields(policy, fields)`: the credential values to scrub from an
   echoed host — `fields` when the call templates a credential, `{}` otherwise.
-- `exfiltrationRefusal(integrationId)`: the one refusal message for
-  `policy.refuse`.
 - `redactCredentialHost(url, fields)`: the URL's host with credential values
   (compared lowercased) replaced by their `{{field}}` placeholder.
-- `scrubTransportError(err, fields)`: `err` unchanged when `fields` is empty
-  (untemplated call); otherwise a same-`name` `Error` carrying only the message,
-  every URL cut to its redacted host (Bun keeps the full URL on `.path`).
-- `guardedFetch` and `fetchFollowingRedirectsCapturingCookies` take an optional
-  `credentialFields`, scrubbed from every host their refusals and logs name.
-  The "Too many redirects" error names the start URL's host instead of the
-  full URL.
+- `fetchApiCall` takes an optional `credentialFields`, scrubbed from every
+  host its refusals and logs name; a transport error on a templated call
+  keeps only its message, every URL cut to its redacted host (Bun keeps the
+  full URL on `.path`). The "Too many redirects" error names the start URL's
+  host instead of the full URL.
 
 ### Changed — local resolver
 
-- Runs the shared guard; its `RESOLVER_CREDENTIAL_EXFIL_BLOCKED` message is
-  `exfiltrationRefusal`'s.
+- Runs the shared policy: an `"exfiltration"` refusal is
+  `RESOLVER_CREDENTIAL_EXFIL_BLOCKED`, an `"unrendered"` or `"unauthorized"`
+  one `AUTHORIZED_URIS_EMPTY`, both with `urlPolicyRefusalMessage`'s message.
 - A refused target's error `details.target` carries the template
   (`https://{{api_key}}.x.com/`), never the substituted URL, and the host in
   the message has credential values scrubbed.
-- A transport error is rethrown through `scrubTransportError`.
 
 ### Fixed — own-property placeholders
 
 - `substituteVars` and the guard's placeholder lookup match own properties
   only: `{{constructor}}` no longer resolves to `Object.prototype`'s.
 
-### Changed — redirect follower takes a `CookieScope` (BREAKING)
+### Changed — the redirect follower takes a `CookieScope` (BREAKING)
 
-- `fetchFollowingRedirectsCapturingCookies` takes `cookies: CookieScope` in
-  place of the `cookieJar` map. Each hop's `Set-Cookie` lands in the bucket of
+- `fetchApiCall` takes `cookies: CookieScope` (omitted: a jar living for the
+  call's redirect chain only) where the follower it replaces took a
+  `cookieJar` map. Each hop's `Set-Cookie` lands in the bucket of
   THAT hop's origin (host-only), no longer in the initial target's, and every
   hop's `Cookie` (the first included) is composed from `init`'s uncomposed
   `Cookie`. Once a cross-origin credential strip fires, that `Cookie` is

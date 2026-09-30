@@ -85,7 +85,7 @@ import {
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
-  OUTBOUND_TIMEOUT_MS,
+  API_CALL_TIMEOUT_MS,
   concatAndRelease,
   readRequestBodyBounded,
   substituteVars,
@@ -619,7 +619,7 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
  */
 function upstreamFetchErrorText(tool: string, err: unknown): string {
   if (err instanceof Error && err.name === "TimeoutError") {
-    return `${tool}: upstream fetch timed out after ${OUTBOUND_TIMEOUT_MS}ms`;
+    return `${tool}: upstream fetch timed out after ${API_CALL_TIMEOUT_MS}ms`;
   }
   if (err instanceof Error && err.name === "AbortError") {
     return `${tool}: upstream fetch aborted`;
@@ -1150,7 +1150,7 @@ function buildSidecarTools(options: MountMcpOptions): {
    *
    * Cancellation and deadline are composed: `callerSignal` is the MCP
    * request's own abort (client gone, transport closed) and must keep working,
-   * `OUTBOUND_TIMEOUT_MS` is the same bound every other outbound call in the
+   * `API_CALL_TIMEOUT_MS` is the same bound every other outbound call in the
    * sidecar already carries. `/mcp` has no server-side deadline of its own, so
    * without it a platform that accepts the connection and never answers hangs
    * this tool call — and with it the agent — for the rest of the run.
@@ -1180,7 +1180,7 @@ function buildSidecarTools(options: MountMcpOptions): {
     try {
       const res = await fetchFn(url, {
         headers: { Authorization: `Bearer ${config.runToken}` },
-        signal: AbortSignal.any([callerSignal, AbortSignal.timeout(OUTBOUND_TIMEOUT_MS)]),
+        signal: AbortSignal.any([callerSignal, AbortSignal.timeout(API_CALL_TIMEOUT_MS)]),
       });
       return await responseToToolResult(res, {
         source: tool,

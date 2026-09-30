@@ -29,7 +29,10 @@ consumer's publish rather than the first user's `npm install`.
   **`UnsupportedTemplateExpressionError`** (`./credential-template`). (#1641)
 - **`./runtime-expression`**: `parseResponseExpression`,
   `isResponseTextExpression` — the Arazzo response expressions a
-  `connect.login` block may use. (#1641)
+  `connect.login` block may use — and `simpleCriterionOperands` and
+  `loginBlockIssues` (with `LoginBlockView`, `LoginBlockIssue`): the one rule
+  of which `connect.login` expressions are evaluable, shared by the login
+  engine and import validation. (#1641)
 - **`guardedFetchChain`** (`./guarded-fetch`): `guardedFetch` that also
   returns the terminal logical URL and the number of redirects followed.
   `GuardedFetchOptions` gains `forwardCredentials` (a cross-origin hop it
@@ -45,6 +48,9 @@ consumer's publish rather than the first user's `npm install`.
 - **BREAKING: `projectHttpDeliveryConfig` carries `value` verbatim** as
   `valueFrom: { template, encoding? }` in the `{$credential.<field>}`
   grammar; no bare-field lowering, no `{{field}}` rewrite. (#1641)
+- **BREAKING: `HttpDeliveryConfig.valueFrom` is `{ template, encoding? }`
+  only**, and `AUTH_TYPE_HTTP_DEFAULTS` is written as templates (`basic`:
+  `{$credential.username}:{$credential.password}`, base64). (#1641)
 - The guarded-fetch transport receives the URL as a string. (#1641)
 
 ## [0.9.2] — 2026-09-30

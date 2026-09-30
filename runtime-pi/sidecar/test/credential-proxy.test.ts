@@ -1963,7 +1963,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
       deps,
     );
 
-  const ssrfGuardCreds = mock(async (): Promise<CredentialsResponse> => ({
+  const noAllowlistCreds = mock(async (): Promise<CredentialsResponse> => ({
     credentials: { access_token: "tok" },
     authorizedUris: null,
     allowAllUris: false,
@@ -1977,58 +1977,71 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     credentialFieldName: "access_token",
   }));
 
-  for (const [label, fetchCredentials] of [
-    ["ssrf_guard (no allowlist)", ssrfGuardCreds],
-    ["allow_all", allowAllCreds],
-  ] as const) {
-    it(`refuses a hostname resolving into a blocked range — ${label}`, async () => {
-      const fetchFn = mock(async () => new Response("leaked", { status: 200 }));
-      const result = await call(
-        makeDeps({
-          fetchFn: fetchFn as unknown as typeof fetch,
-          fetchCredentials,
-          declaredUris: [],
-          resolveHost: async () => ["169.254.169.254"],
-        }),
-      );
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.status).toBe(403);
-        expect(result.error).toMatch(/blocked network range/);
-      }
-      // The request never went out — fail happened pre-fetch.
-      expect(fetchFn).not.toHaveBeenCalled();
-    });
+  it("refuses every target when there is no allowlist and no allow_all_uris", async () => {
+    const resolveHost = mock(async () => ["203.0.113.7"]);
+    const fetchFn = mock(async () => new Response("leaked", { status: 200 }));
+    const result = await call(
+      makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        fetchCredentials: noAllowlistCreds,
+        declaredUris: [],
+        resolveHost,
+      }),
+      "https://public.example.com/x",
+    );
+    expect(result).toMatchObject({ ok: false, status: 403 });
+    if (!result.ok) expect(result.error).toContain("declares no authorized_uris");
+    expect(resolveHost).not.toHaveBeenCalled();
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
 
-    it(`fails closed on DNS resolution failure — ${label}`, async () => {
-      const fetchFn = mock(async () => new Response("leaked", { status: 200 }));
-      const result = await call(
-        makeDeps({
-          fetchFn: fetchFn as unknown as typeof fetch,
-          fetchCredentials,
-          declaredUris: [],
-          resolveHost: async () => {
-            throw new Error("ENOTFOUND");
-          },
-        }),
-      );
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.status).toBe(502);
-        expect(result.error).toMatch(/could not be resolved/);
-        // Host only — never the full URL (may encode capabilities).
-        expect(result.error).toContain("rebind.example.com");
-        expect(result.error).not.toContain("/x");
-      }
-      expect(fetchFn).not.toHaveBeenCalled();
-    });
-  }
+  it(`refuses a hostname resolving into a blocked range — allow_all`, async () => {
+    const fetchFn = mock(async () => new Response("leaked", { status: 200 }));
+    const result = await call(
+      makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        fetchCredentials: allowAllCreds,
+        declaredUris: [],
+        resolveHost: async () => ["169.254.169.254"],
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toMatch(/blocked network range/);
+    }
+    // The request never went out — fail happened pre-fetch.
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it(`fails closed on DNS resolution failure — allow_all`, async () => {
+    const fetchFn = mock(async () => new Response("leaked", { status: 200 }));
+    const result = await call(
+      makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        fetchCredentials: allowAllCreds,
+        declaredUris: [],
+        resolveHost: async () => {
+          throw new Error("ENOTFOUND");
+        },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(502);
+      expect(result.error).toMatch(/could not be resolved/);
+      // Host only — never the full URL (may encode capabilities).
+      expect(result.error).toContain("rebind.example.com");
+      expect(result.error).not.toContain("/x");
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
 
   it("refuses when ANY resolved record is blocked (multi-record rebind)", async () => {
     const fetchFn = mock(async () => new Response("leaked", { status: 200 }));
     const result = await call(
       makeDeps({
-        fetchCredentials: ssrfGuardCreds,
+        fetchCredentials: allowAllCreds,
         declaredUris: [],
         fetchFn: fetchFn as unknown as typeof fetch,
         resolveHost: async () => ["203.0.113.7", "10.0.0.5"],
@@ -2043,7 +2056,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     const fetchFn = mock(async () => new Response("ok", { status: 200 }));
     const result = await call(
       makeDeps({
-        fetchCredentials: ssrfGuardCreds,
+        fetchCredentials: allowAllCreds,
         declaredUris: [],
         fetchFn: fetchFn as unknown as typeof fetch,
         resolveHost: async () => ["203.0.113.7"],
@@ -2162,7 +2175,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
   it("IP-literal targets skip resolution but stay literal-blocked", async () => {
     const resolveHost = mock(async () => ["203.0.113.7"]);
     const result = await call(
-      makeDeps({ fetchCredentials: ssrfGuardCreds, declaredUris: [], resolveHost }),
+      makeDeps({ fetchCredentials: allowAllCreds, declaredUris: [], resolveHost }),
       "https://169.254.169.254/latest/meta-data",
     );
     expect(result.ok).toBe(false);

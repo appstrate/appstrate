@@ -621,9 +621,9 @@ export const mePaths = {
                     description: "Integrations the caller could attach to an agent.",
                     items: {
                       type: "object",
-                      required: ["integration_id", "name", "source"],
+                      required: ["integration_package_id", "name", "source"],
                       properties: {
-                        integration_id: { type: "string" },
+                        integration_package_id: { type: "string" },
                         name: { type: "string" },
                         source: { type: "string", enum: ["own", "shared", "both"] },
                         version: {
@@ -765,8 +765,12 @@ export const mePaths = {
                 user: { id: "user_abc", name: "Ada Lovelace", email: "ada@acme.com" },
                 org: { id: "org_abc123", role: "member", name: "Acme", slug: "acme" },
                 connections: [
-                  { integration_id: "@appstrate/gmail", name: "Gmail", source: "own" },
-                  { integration_id: "@appstrate/clickup", name: "ClickUp", source: "shared" },
+                  { integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" },
+                  {
+                    integration_package_id: "@appstrate/clickup",
+                    name: "ClickUp",
+                    source: "shared",
+                  },
                 ],
                 recent_runs: [
                   {

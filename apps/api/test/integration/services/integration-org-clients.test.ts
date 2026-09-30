@@ -471,9 +471,6 @@ describe("org-level integration OAuth clients", () => {
         redirect_uri: "https://example.com/cb",
         spaceId: null,
       });
-      await expect(
-        updateIntegrationOAuthClient(org, INTEGRATION, orgRow, { clientId: "other" }),
-      ).rejects.toMatchObject({ status: 409, code: "client_id_immutable" });
     });
 
     it("delete matches the tier and the integration (404 otherwise)", async () => {

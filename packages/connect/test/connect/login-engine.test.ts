@@ -277,7 +277,7 @@ describe("runLogin — security limits", () => {
         fetchImpl: impl,
         resolveHost: TEST_RESOLVE,
       }),
-    ).rejects.toMatchObject({ reason: "unresolved_placeholder" });
+    ).rejects.toMatchObject({ reason: "invalid_config" });
     expect(calls).toHaveLength(0);
   });
 
@@ -392,11 +392,30 @@ describe("runLogin — security limits", () => {
     expect((err as LoginError).cause).toBeInstanceOf(SyntaxError);
   });
 
-  it("extract_failed: a `jwt` extractor whose token ref is absent from scope", async () => {
-    // The `jwt` extractor names `token: {$credential.missing}`, but no other
-    // extractor produced a `missing` value — `scope[field]` is undefined → fail
-    // closed.
-    const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ access_token: "TOK" }) }]);
+  it("extract_failed: a `jwt` extractor whose token output extracted nothing", async () => {
+    const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ other: "x" }) }]);
+    const config: LoginConfig = {
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
+        outputs: {
+          access_token: "$response.body#/access_token",
+          person_id: { from: "jwt", token: "{$credential.access_token}", path: "/sub" },
+        },
+      },
+    };
+    const err = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LoginError);
+    expect((err as LoginError).reason).toBe("extract_failed");
+  });
+
+  it("invalid_config before any fetch: a `jwt` token naming no declared output", async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: "{}" }]);
     const config: LoginConfig = {
       login: {
         request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
@@ -413,8 +432,9 @@ describe("runLogin — security limits", () => {
       fetchImpl: impl,
       resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(LoginError);
-    expect((err as LoginError).reason).toBe("extract_failed");
+    expect(err).toMatchObject({ reason: "invalid_config" });
+    expect((err as LoginError).message).toContain("connect.login.outputs.person_id.token");
+    expect(calls).toHaveLength(0);
   });
 
   it("extract_failed: a `jwt` extractor fed a garbage (undecodable) token", async () => {

@@ -470,12 +470,7 @@ export async function readIntegrationManifestForProxy(
   orgId: string,
   frozen: ResolvedIntegrationVersion | null,
 ): Promise<IntegrationManifestLoadResult | { ok: false; failure: { kind: "not_published" } }> {
-  if (frozen) {
-    return readIntegrationManifestAt(
-      packageId,
-      resolvedIntegrationVersionToDescriptor(packageId, frozen),
-    );
-  }
+  if (frozen) return readIntegrationManifestForRun(packageId, frozen);
   const res = await resolvePublishedManifest(packageId, "integration", orgId);
   if (res.ok) return parseIntegrationManifest(res.rawManifest);
   if (res.reason === "not_found") return { ok: false, failure: { kind: "not_found" } };

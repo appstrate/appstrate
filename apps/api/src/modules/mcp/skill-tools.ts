@@ -85,28 +85,6 @@ export function buildReadSkillTool(ctx: SkillToolContext): AppstrateToolDefiniti
       "served. With `path`: one of those files (scripts, references) at that version. A skill " +
       "a chat turn injected is readable at the definition injected; any other needs " +
       "`skills:read`.",
-    outputSchema: {
-      type: "object",
-      required: ["id", "version", "definition"],
-      properties: {
-        id: { type: "string" },
-        version: { type: ["string", "null"], description: "`null` for the stored tree." },
-        definition: { type: "string", enum: ["draft", "published"] },
-        content: { type: ["string", "null"], description: "Text content, inlined when small." },
-        note: { type: "string" },
-        files: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["path", "size"],
-            properties: { path: { type: "string" }, size: { type: "integer" } },
-          },
-        },
-        path: { type: "string" },
-        size: { type: "integer" },
-        media_kind: { type: "string" },
-      },
-    },
     annotations: {
       title: "Read skill",
       readOnlyHint: true,

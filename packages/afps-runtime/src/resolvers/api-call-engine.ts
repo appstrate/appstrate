@@ -35,7 +35,6 @@ import {
   stripUserInfoAndFragment,
 } from "./http-call-core.ts";
 import { cookieScope, type CookieScope } from "./cookie-jar.ts";
-import { allowlistUnrendered, UNRENDERED_ALLOWLIST_REFUSAL } from "./credential-guard.ts";
 
 export { stripUserInfoAndFragment };
 
@@ -81,20 +80,6 @@ export class PreflightError extends Error {
   }
 }
 
-/**
- * A declared allowlist this connection does not render refuses every target. Each path runs it
- * before its credential policy so the refusal names the fix (the connection's URL).
- */
-export function assertAllowlistRendered(input: {
-  declaredUris: readonly string[];
-  authorizedUris: readonly string[];
-  allowAllUris: boolean;
-}): void {
-  if (allowlistUnrendered(input)) {
-    throw new PreflightError("not_authorized", UNRENDERED_ALLOWLIST_REFUSAL);
-  }
-}
-
 /** Extract hostname for audit logs, never throwing. */
 export function redactHost(url: string): string {
   try {
@@ -105,10 +90,7 @@ export function redactHost(url: string): string {
 }
 
 /** Each credential value, raw or percent-encoded, → `{{field}}`; longest first (overlaps). */
-export function redactCredentialValues(
-  value: string,
-  fields: Readonly<Record<string, string>>,
-): string {
+function redactCredentialValues(value: string, fields: Readonly<Record<string, string>>): string {
   const needles: Array<[string, string]> = [];
   for (const [name, fieldValue] of Object.entries(fields)) {
     if (fieldValue.length === 0) continue;
@@ -148,14 +130,23 @@ function redactCredentialMessage(
  * `err` as-is when `fields` is empty (untemplated call); otherwise a same-`name` Error with the
  * message scrubbed and nothing else — Bun keeps the full URL on `.path` even when the message has none.
  */
-export function scrubTransportError(
-  err: unknown,
-  fields: Readonly<Record<string, string>>,
-): unknown {
+function scrubTransportError(err: unknown, fields: Readonly<Record<string, string>>): unknown {
   if (!(err instanceof Error) || Object.keys(fields).length === 0) return err;
   const clean = new Error(redactCredentialMessage(err.message, fields));
   clean.name = err.name;
   return clean;
+}
+
+/**
+ * The sidecar's and the CLI's SSRF exemption: a host the manifest names literally is the
+ * operator's topology. None under allow_all_uris, where the caller picks the host.
+ */
+export function declaredLiteralHosts(policy: {
+  declaredUris: readonly string[];
+  allowAllUris: boolean;
+}): (hostname: string) => boolean {
+  return (hostname) =>
+    !policy.allowAllUris && hostLiterallyAllowlisted(`http://${hostname}/`, policy.declaredUris);
 }
 
 interface ApiCallLogger {
@@ -175,10 +166,8 @@ export interface FetchApiCallOptions {
   allowAllUris: boolean;
   /** Names of the headers that carry a credential (injected or substituted). */
   credentialHeaders: readonly string[];
-  /** A declared literal host is the operator's topology: exempt from the SSRF gate. */
-  trustDeclaredHosts: boolean;
-  /** Hosts the operator trusts outright (`EGRESS_ALLOW_INTERNAL_HOSTS`). */
-  trustedHost?: (hostname: string) => boolean;
+  /** Hosts exempt from the SSRF gate: {@link declaredLiteralHosts} or the operator's own list. */
+  trustedHost: (hostname: string) => boolean;
   /** The caller's cookie view; omitted = a jar living for this call's redirect chain only. */
   cookies?: CookieScope;
   integrationId: string;
@@ -199,9 +188,9 @@ export interface FetchApiCallOptions {
 export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFetchResult> {
   const fields = opts.credentialFields ?? {};
   const { authorizedUris, declaredUris, allowAllUris } = opts;
-  assertAllowlistRendered({ declaredUris, authorizedUris, allowAllUris });
   if (!URL.canParse(opts.url)) throw new PreflightError("ssrf", "Invalid target URL");
-  const gated = !allowAllUris && authorizedUris.length > 0;
+  // An empty list matches nothing: without allow_all_uris, every target is refused.
+  const gated = !allowAllUris;
   const inAllowlist = (url: URL) => matchesAuthorizedUri(url.href, authorizedUris);
   const warn = (message: string, hop: number, host: string) =>
     opts.logger?.warn(message, { integrationId: opts.integrationId, hop, host });
@@ -235,11 +224,7 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
               forwardCredentials: inAllowlist,
             }
           : {}),
-        allowHost: (hostname) =>
-          opts.trustedHost?.(hostname) === true ||
-          (opts.trustDeclaredHosts &&
-            gated &&
-            hostLiterallyAllowlisted(`http://${hostname}/`, declaredUris)),
+        allowHost: opts.trustedHost,
         sensitiveHeaders: opts.credentialHeaders,
         cookies:
           opts.cookies ?? cookieScope(new Map(), opts.integrationId, gated ? declaredUris : null),

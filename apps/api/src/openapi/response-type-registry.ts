@@ -140,7 +140,7 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     sharedTypeName: "IntegrationPin",
     description: "IntegrationPin",
   },
-  // Inline oauth-client response (create 201 / rotate 200) — both return the
+  // Inline oauth-client response (create 201 / update 200) — both return the
   // secret-stripped public client via `toPublicClient`. Registered so the
   // shared-type's `id` (+ the rest) can't drift back out of the spec.
   {

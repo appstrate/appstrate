@@ -451,6 +451,35 @@ describe("model-provider-credentials service — upstream rejections of an api k
       .where(eq(modelProviderCredentials.id, id));
     expect(row!.count).toBe(1);
   });
+
+  it("leaves an OAuth credential's transient-refresh streak and flag untouched", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-reject-oauth" });
+    const id = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      label: "Subscription",
+      providerId: "test-oauth",
+      accessToken: "access-1",
+      refreshToken: "refresh-1",
+      expiresAt: Date.now() + 3_600_000,
+    });
+    await db
+      .update(modelProviderCredentials)
+      .set({ refreshFailureCount: 2 })
+      .where(eq(modelProviderCredentials.id, id));
+
+    for (let i = 0; i < 6; i++) await recordModelCredentialRejection(ctx.orgId, id);
+
+    const [row] = await db
+      .select({
+        count: modelProviderCredentials.refreshFailureCount,
+        since: modelProviderCredentials.refreshFailuresSince,
+      })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, id));
+    expect(row).toEqual({ count: 2, since: null });
+    expect(await flagged(ctx.orgId, id)).toBe(false);
+  });
 });
 
 /**

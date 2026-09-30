@@ -105,16 +105,26 @@ const baseResponses = {
       "provider instead), or request body exceeds " +
       "the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model " +
       "whose upstream resolves into a blocked range carries `Proxy-Status` error " +
-      "`destination_ip_prohibited`.",
+      "`destination_ip_prohibited`. `usage_context_required` — a platform-provided model " +
+      "called without a valid `X-Run-Id` or the first-party chat loopback while a metering " +
+      "module is loaded.",
     headers: PROXY_STATUS_HEADER,
     content: problem,
   },
   "401": unauthorized,
+  "402": {
+    description:
+      "A metering module's `beforeUsage` hook refused the call for payment (e.g. credits " +
+      "exhausted); `code` is the module's. RFC 9457 problem+json.",
+    headers: PROXY_STATUS_HEADER,
+    content: problem,
+  },
   "403": {
     description:
-      "Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth " +
+      "Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth " +
       "method was used (cookie sessions and any unknown/unrecognized auth " +
-      "strategy are rejected; bearer only).",
+      "strategy are rejected; bearer only), or a metering module's `beforeUsage` hook " +
+      "refused the call on another ground (`code` is the module's).",
     headers: PROXY_STATUS_HEADER,
     content: problem,
   },
@@ -133,11 +143,22 @@ const baseResponses = {
     content: problem,
   },
   "429": { $ref: "#/components/responses/RateLimited" },
-  "500": {
-    $ref: "#/components/responses/InternalServerError",
+  "500": { $ref: "#/components/responses/InternalServerError" },
+  "502": {
     description:
-      "`internal_error` — the proxy's own failure, an upstream that could not be reached or " +
-      "did not answer in time included.",
+      "`upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` " +
+      "error `dns_error`); `upstream_unreachable` — the connection to it failed " +
+      "(`destination_unavailable`). Names neither the host nor the cause. No usage recorded.",
+    headers: PROXY_STATUS_HEADER,
+    content: problem,
+  },
+  "504": {
+    description:
+      "`upstream_timeout` — the upstream sent no response headers in time: " +
+      "`LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min " +
+      "otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded.",
+    headers: PROXY_STATUS_HEADER,
+    content: problem,
   },
   default: {
     description:
@@ -427,6 +448,8 @@ export const runLlmProxyPaths = Object.fromEntries(
           },
           "429": { $ref: "#/components/responses/RateLimited" },
           "500": baseResponses["500"],
+          "502": baseResponses["502"],
+          "504": baseResponses["504"],
           default: baseResponses.default,
         },
       },

@@ -231,7 +231,7 @@ export async function upsertIntegrationPin(
   scope: SpaceScope,
   integrationId: string,
   input: SetPinInput,
-): Promise<PinSummary> {
+): Promise<PinWrite> {
   return upsertPin({
     scope,
     agentPackageId: input.agentPackageId,
@@ -243,9 +243,31 @@ export async function upsertIntegrationPin(
   });
 }
 
+/** A pin write: the set it replaced (`null` when there was none) and the stored pin. */
+interface PinWrite {
+  previous: string[] | null;
+  pin: PinSummary;
+}
+
+/** The one pin row of (space, agent, integration, owner) — `userId: null` is the admin pin. */
+function pinKey(
+  scope: SpaceScope,
+  agentPackageId: string,
+  integrationId: string,
+  userId: string | null,
+) {
+  return and(
+    eq(integrationPins.spaceId, scope.spaceId),
+    eq(integrationPins.packageId, agentPackageId),
+    eq(integrationPins.integrationId, integrationId),
+    userId === null ? isNull(integrationPins.userId) : eq(integrationPins.userId, userId),
+  );
+}
+
 /**
- * Raw SQL: `onConflictDoUpdate` cannot target the index's `coalesce`. One
- * statement writes and returns, mapped by drizzle's column mappers (drivers differ).
+ * Raw SQL: `onConflictDoUpdate` cannot target the index's `coalesce`. The
+ * replaced set is read under a row lock in the same transaction, mapped by
+ * drizzle's column mappers (drivers differ).
  */
 async function upsertPin(args: {
   scope: SpaceScope;
@@ -255,7 +277,7 @@ async function upsertPin(args: {
   userIdValue: string | null;
   validateOpts: { allowOwnedBy?: string };
   createdBy: string | null;
-}): Promise<PinSummary> {
+}): Promise<PinWrite> {
   const { scope, agentPackageId, integrationId, connectionIds, userIdValue, createdBy } = args;
   await assertAgentActiveHere(scope, agentPackageId);
 
@@ -264,55 +286,68 @@ async function upsertPin(args: {
     sql`, `,
   )}]::uuid[]`;
   await validatePinTargets(scope, integrationId, connectionIds, args.validateOpts);
-  const [row] = toRows<{
-    connection_ids: string | unknown[];
-    created_at: string | Date;
-    updated_at: string | Date;
-  }>(
-    await db.execute(sql`
-    INSERT INTO ${integrationPins}
-      (space_id, package_id, integration_package_id, user_id, connection_ids, created_by)
-    VALUES (${scope.spaceId}, ${agentPackageId}, ${integrationId}, ${userIdValue}, ${ids}, ${createdBy})
-    ON CONFLICT (space_id, package_id, integration_package_id, (coalesce(user_id, '')))
-    DO UPDATE SET
-      connection_ids = EXCLUDED.connection_ids,
-      created_by = EXCLUDED.created_by,
-      updated_at = now()
-    RETURNING connection_ids, created_at, updated_at
-  `),
-  );
-  return {
-    agent_package_id: agentPackageId,
-    integration_package_id: integrationId,
-    connection_ids: integrationPins.connectionIds.mapFromDriverValue(
-      row!.connection_ids,
-    ) as string[],
-    createdAt: (
-      integrationPins.createdAt.mapFromDriverValue(row!.created_at) as Date
-    ).toISOString(),
-    updatedAt: (
-      integrationPins.updatedAt.mapFromDriverValue(row!.updated_at) as Date
-    ).toISOString(),
-  };
+  return db.transaction(async (tx) => {
+    const [previous] = await tx
+      .select({ connectionIds: integrationPins.connectionIds })
+      .from(integrationPins)
+      .where(pinKey(scope, agentPackageId, integrationId, userIdValue))
+      .for("update");
+    const [row] = toRows<{
+      connection_ids: string | unknown[];
+      created_at: string | Date;
+      updated_at: string | Date;
+    }>(
+      await tx.execute(sql`
+      INSERT INTO ${integrationPins}
+        (space_id, package_id, integration_package_id, user_id, connection_ids, created_by)
+      VALUES (${scope.spaceId}, ${agentPackageId}, ${integrationId}, ${userIdValue}, ${ids}, ${createdBy})
+      ON CONFLICT (space_id, package_id, integration_package_id, (coalesce(user_id, '')))
+      DO UPDATE SET
+        connection_ids = EXCLUDED.connection_ids,
+        created_by = EXCLUDED.created_by,
+        updated_at = now()
+      RETURNING connection_ids, created_at, updated_at
+    `),
+    );
+    return {
+      previous: previous?.connectionIds ?? null,
+      pin: {
+        agent_package_id: agentPackageId,
+        integration_package_id: integrationId,
+        connection_ids: integrationPins.connectionIds.mapFromDriverValue(
+          row!.connection_ids,
+        ) as string[],
+        createdAt: (
+          integrationPins.createdAt.mapFromDriverValue(row!.created_at) as Date
+        ).toISOString(),
+        updatedAt: (
+          integrationPins.updatedAt.mapFromDriverValue(row!.updated_at) as Date
+        ).toISOString(),
+      },
+    };
+  });
 }
 
-export async function deleteIntegrationPin(
+/** Delete one pin row; `previous` is the set it held, `null` when there was none. */
+async function deletePin(
+  scope: SpaceScope,
+  agentPackageId: string,
+  integrationId: string,
+  userId: string | null,
+): Promise<{ previous: string[] | null }> {
+  const [row] = await db
+    .delete(integrationPins)
+    .where(pinKey(scope, agentPackageId, integrationId, userId))
+    .returning({ connectionIds: integrationPins.connectionIds });
+  return { previous: row?.connectionIds ?? null };
+}
+
+export function deleteIntegrationPin(
   scope: SpaceScope,
   integrationId: string,
   agentPackageId: string,
-): Promise<{ deleted: boolean }> {
-  const result = await db
-    .delete(integrationPins)
-    .where(
-      and(
-        eq(integrationPins.spaceId, scope.spaceId),
-        eq(integrationPins.integrationId, integrationId),
-        eq(integrationPins.packageId, agentPackageId),
-        isNull(integrationPins.userId),
-      ),
-    )
-    .returning({ id: integrationPins.id });
-  return { deleted: result.length > 0 };
+): Promise<{ previous: string[] | null }> {
+  return deletePin(scope, agentPackageId, integrationId, null);
 }
 
 /**
@@ -384,7 +419,7 @@ interface UpsertMemberPinInput {
 export async function upsertMemberPin(
   scope: SpaceScope,
   input: UpsertMemberPinInput,
-): Promise<PinSummary> {
+): Promise<PinWrite> {
   return upsertPin({
     scope,
     agentPackageId: input.agentPackageId,
@@ -396,24 +431,13 @@ export async function upsertMemberPin(
   });
 }
 
-export async function deleteMemberPin(
+export function deleteMemberPin(
   scope: SpaceScope,
   agentPackageId: string,
   integrationId: string,
   userId: string,
-): Promise<{ deleted: boolean }> {
-  const result = await db
-    .delete(integrationPins)
-    .where(
-      and(
-        eq(integrationPins.spaceId, scope.spaceId),
-        eq(integrationPins.packageId, agentPackageId),
-        eq(integrationPins.integrationId, integrationId),
-        eq(integrationPins.userId, userId),
-      ),
-    )
-    .returning({ id: integrationPins.id });
-  return { deleted: result.length > 0 };
+): Promise<{ previous: string[] | null }> {
+  return deletePin(scope, agentPackageId, integrationId, userId);
 }
 
 /**

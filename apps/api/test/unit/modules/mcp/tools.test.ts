@@ -8,7 +8,6 @@
 
 import { describe, it, expect } from "bun:test";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import type { Actor } from "@appstrate/connect";
@@ -1170,13 +1169,8 @@ describe("undeclared tool arguments", () => {
   });
 });
 
-/**
- * MCP 2025-06-18 structured output: a client that listed a tool's
- * `outputSchema` REJECTS a success without `structuredContent`, or one that
- * does not validate — the SDK validator below is the one those clients run.
- */
+/** MCP 2025-06-18 structured output: the JSON answer, mirrored as text. */
 describe("structured tool output", () => {
-  const validator = new AjvJsonSchemaValidator();
   const fileList = () =>
     new Response(
       JSON.stringify({
@@ -1186,7 +1180,7 @@ describe("structured tool output", () => {
       { status: 200, headers: { "content-type": "application/json" } },
     );
 
-  it("answers each declared schema with conforming structuredContent, mirrored as text", async () => {
+  it("answers each JSON tool with structuredContent, mirrored as text", async () => {
     const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
     const cases: Array<[string, Record<string, unknown>, () => Response]> = [
       ["search_operations", { query: "agent" }, fileList],
@@ -1198,15 +1192,9 @@ describe("structured tool output", () => {
     ];
     for (const [name, args, respond] of cases) {
       const { byName } = makeTools(FULL_SURFACE, false, undefined, respond);
-      const tool = byName.get(name)!;
-      expect(tool.descriptor.outputSchema).toBeDefined();
-      const result = await tool.handler(args, noExtra);
-      expect(result.isError).toBe(false);
+      const result = await byName.get(name)!.handler(args, noExtra);
+      expect({ name, isError: result.isError }).toEqual({ name, isError: false });
       expect(result.structuredContent).toEqual(parseResult(result));
-      const verdict = validator.getValidator(tool.descriptor.outputSchema!)(
-        result.structuredContent,
-      );
-      expect({ name, ...verdict }).toMatchObject({ name, valid: true });
     }
   });
 

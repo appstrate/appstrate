@@ -29,7 +29,6 @@ import type {
   RefreshExchangeResult,
 } from "@appstrate/connect";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
-import { toSupportedTokenEndpointAuthMethod } from "./integration-manifest-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import { dedupedRefresh } from "../lib/deduped-refresh.ts";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
@@ -462,12 +461,5 @@ export async function buildIntegrationOAuthRefreshContext(
   // The resolver returns the method already paired with the secret it hands
   // back — a public client comes back as `"none"` with no secret — so refresh
   // posts what it was given rather than re-deriving from the manifest.
-  const { clientId, clientSecret, tokenEndpointAuthMethod } = client;
-  const supportedAuthMethod = toSupportedTokenEndpointAuthMethod(tokenEndpointAuthMethod);
-  return {
-    tokenEndpoint,
-    clientId,
-    clientSecret,
-    ...(supportedAuthMethod ? { tokenEndpointAuthMethod: supportedAuthMethod } : {}),
-  };
+  return { tokenEndpoint, ...client };
 }

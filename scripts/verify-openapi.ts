@@ -2274,8 +2274,6 @@ const NON_PROBLEM_ERROR_BODIES: ErrorBodyExemptions = {
   "GET /api/integrations/connect/start": "text/html",
   // The health report: the 503 is the 200's document with `status: unhealthy`.
   "GET /health 503": "application/json",
-  // Stripe's webhook receiver (module-ee) answers plain text; Stripe reads the status only.
-  "POST /api/billing/webhooks": "text/plain",
   // An upstream response the proxies relay verbatim, at the upstream's status, with
   // the upstream's body and media type. The proxies' own refusals stay ProblemDetail.
   ...Object.fromEntries(

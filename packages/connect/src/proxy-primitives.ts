@@ -68,7 +68,7 @@ export { matchesAuthorizedUriSpec } from "@appstrate/afps-runtime/resolvers";
 export interface ProxyCredentialsPayload {
   /** Credential fields keyed by name (e.g. `access_token`, `api_key`, `subdomain`, ...). */
   credentials: Record<string, string>;
-  /** URL allowlist per AFPS §7.5 — `null` means no whitelist, SSRF safety net applies. */
+  /** URL allowlist per AFPS §7.9 — `null` or empty authorizes nothing unless `allowAllUris`. */
   authorizedUris: string[] | null;
   /** When true, skip allowlist enforcement (still block private/internal ranges). */
   allowAllUris: boolean;
@@ -183,6 +183,18 @@ export function applyInjectedCredentialHeaderToHeaders(
   if (decision.kind !== "inject") return decision;
   headers.set(decision.header.name, decision.header.value);
   return decision;
+}
+
+/**
+ * The header carrying the credential after an injection decision — the injected one or the
+ * caller's allowed override — so a redirect leaving the allowlist strips it.
+ */
+export function credentialCarryingHeader(
+  decision: HttpDeliveryInjectionDecision,
+): string | undefined {
+  if (decision.kind === "inject") return decision.header.name;
+  if (decision.kind === "caller_override") return decision.headerName;
+  return undefined;
 }
 
 /**

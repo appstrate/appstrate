@@ -17,6 +17,7 @@ import {
   buildInjectedCredentialHeader,
   applyInjectedCredentialHeader,
   applyInjectedCredentialHeaderToHeaders,
+  credentialCarryingHeader,
   normalizeAuthSchemeTemplate,
   normalizeAuthSchemeTemplates,
 } from "../src/proxy-primitives.ts";
@@ -281,6 +282,25 @@ describe("applyInjectedCredentialHeader (record)", () => {
     });
     expect(headers).toEqual({ "x-api-key": "caller" });
     expect(decision).toEqual({ kind: "caller_override", headerName: "X-Api-Key" });
+  });
+});
+
+describe("credentialCarryingHeader", () => {
+  const creds = {
+    credentials: { access_token: "server" },
+    credentialHeaderName: "X-Token",
+    credentialFieldName: "access_token",
+  };
+
+  it("names the injected header, or the caller's allowed override, never a no-op", () => {
+    expect(credentialCarryingHeader(applyInjectedCredentialHeader({}, creds))).toBe("X-Token");
+    const override = applyInjectedCredentialHeader(
+      { "x-token": "caller" },
+      { ...creds, credentialAllowServerOverride: true },
+    );
+    expect(credentialCarryingHeader(override)).toBe("X-Token");
+    const none = applyInjectedCredentialHeader({}, { ...creds, credentialHeaderName: undefined });
+    expect(credentialCarryingHeader(none)).toBeUndefined();
   });
 });
 
