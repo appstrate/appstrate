@@ -95,6 +95,18 @@ const CORPUS: Case[] = [
     vendorRetryable: false,
   },
   {
+    name: "Anthropic OAuth refresh token rejected (pi-ai stored-credential refresh)",
+    message:
+      "OAuth refresh failed for anthropic: Anthropic token refresh request failed. " +
+      "url=https://platform.claude.com/v1/oauth/token; details=Error: HTTP request failed. " +
+      'status=400; url=https://platform.claude.com/v1/oauth/token; body={"error": ' +
+      '"invalid_grant", "error_description": "Refresh token not found or invalid"}',
+    // Not `invalid_request`, although the text carries a 400: that status is the
+    // token endpoint's, and the remedy is to reconnect the subscription.
+    category: "credential_unavailable",
+    vendorRetryable: false,
+  },
+  {
     name: "bare transport failure (undici)",
     message: "fetch failed",
     category: "unknown",
