@@ -59,8 +59,15 @@ function oauthModel(overrides: Partial<SubscriptionChatModel> = {}): Subscriptio
 }
 
 describe("Pi chat model binding", () => {
+  it("never reads the host's Pi CLI credential store", () => {
+    // A stored credential outranks the key the turn registers: Pi's default
+    // `~/.pi/agent/auth.json` would let a CLI login answer for the org's own.
+    expect(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS.authPath).not.toContain(".pi/agent");
+  });
+
   it("skips the redundant full-catalog refresh for an already resolved chat model", () => {
     expect(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS).toEqual({
+      authPath: "/tmp/pi-chat/auth.json",
       modelsPath: null,
       allowModelNetwork: false,
       refreshOnCreate: false,

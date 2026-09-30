@@ -18,6 +18,7 @@ import type {
 import { llmProxyBaseUrl, type Api, type ExtensionFactory, type Model } from "@appstrate/runner-pi";
 import { buildPiModel } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../llm.ts";
+import { PI_CHAT_AGENT_DIR } from "./resource-loader.ts";
 
 interface PiChatModelBindingBase {
   /** Fully resolved Pi model. No provider secret is ever stored on this object. */
@@ -54,8 +55,14 @@ export type ResolvedPiChatModelBinding = PiProxyModelBinding | PiOAuthModelBindi
  * Chat already resolves one concrete model before entering Pi. The targeted
  * credential setup refreshes that provider afterwards, so a full catalog and
  * availability refresh during every runtime construction is redundant.
+ *
+ * `authPath` keeps Pi off its default store, `~/.pi/agent/auth.json`: a stored
+ * credential outranks the key the turn registers, so a Pi CLI login on the
+ * host (an old Anthropic OAuth entry, say) would answer for the org's own
+ * credential. Runs pin theirs the same way (`pi-runner.ts`).
  */
 export const PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS = {
+  authPath: `${PI_CHAT_AGENT_DIR}/auth.json`,
   modelsPath: null,
   allowModelNetwork: false,
   refreshOnCreate: false,
