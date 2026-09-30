@@ -84,6 +84,8 @@
     "audit:deps": "bun scripts/audit-dependencies.ts",
     "audit:empty-integrations": "bun scripts/audit-empty-integration-selections.ts",
     "audit:storage-orphans": "bun scripts/storage-orphans.ts",
+    "bench:chat": "bun scripts/bench/chat/run.ts",
+    "bench:chat:compare": "bun scripts/bench/chat/compare.ts",
     "docker:build:runtime": "bun scripts/docker-build-runtime.ts",
     "docker:build:runner:node": "docker build -t appstrate-mcp-runner-node:latest -f ./runtime-pi/runners/node/Dockerfile ./runtime-pi/runners/node/",
     "docker:build:runner:python": "docker build -t appstrate-mcp-runner-python:latest -f ./runtime-pi/runners/python/Dockerfile ./runtime-pi/runners/python/",
