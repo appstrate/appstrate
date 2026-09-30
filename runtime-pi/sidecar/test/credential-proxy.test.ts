@@ -174,6 +174,7 @@ describe("executeApiCall — connection-rendered allowlists (#1627)", () => {
           credentials: { webhook_url: hook },
           authorizedUris: [hook],
           allowAllUris: false,
+          credentialFieldName: "webhook_url",
         })),
       }),
     );
