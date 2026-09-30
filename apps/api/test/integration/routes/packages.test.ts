@@ -19,6 +19,7 @@ import {
   seedSpace,
   seedSpaceMember,
   seedSpacePackage,
+  loseVersionArchive,
 } from "../../helpers/seed.ts";
 import {
   initSystemIntegrations,
@@ -35,7 +36,6 @@ import {
   buildMinimalZip,
   uploadPackageZip,
   downloadVersionZip,
-  deleteVersionZip,
 } from "../../../src/services/package-storage.ts";
 import { unzipPackageArchive } from "../../../src/services/package-archive.ts";
 import {
@@ -3286,7 +3286,7 @@ describe("Packages API", () => {
         body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
       });
       expect(create.status).toBe(201);
-      await deleteVersionZip(id, "0.1.0");
+      await loseVersionArchive(id, "0.1.0");
 
       // Move the draft away from 0.1.0 so an applied restore would show.
       const edited = await app.request(`/api/packages/agents/${id}`, {
@@ -3335,7 +3335,7 @@ describe("Packages API", () => {
         body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
       });
       expect(create.status).toBe(201);
-      await deleteVersionZip(id, "0.1.0");
+      await loseVersionArchive(id, "0.1.0");
 
       // Previously 200 with `content: null`, indistinguishable from an empty version.
       const res = await app.request(`/api/packages/agents/${id}/versions/0.1.0`, {
@@ -3447,7 +3447,7 @@ describe("Packages API", () => {
         body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
       });
       expect(create.status).toBe(201);
-      await deleteVersionZip(id, "0.1.0");
+      await loseVersionArchive(id, "0.1.0");
 
       // Previously a 404 ("Artifact missing…" / "Artifact not found in storage"),
       // which read as "no such version" rather than a broken published artifact.
@@ -4201,7 +4201,7 @@ describe("Packages API", () => {
       await db
         .insert(packageDistTags)
         .values({ packageId: sourceId, tag: "latest", versionId: row.id });
-      await deleteVersionZip(sourceId, "0.1.0");
+      await loseVersionArchive(sourceId, "0.1.0");
 
       const res = await app.request(`/api/packages/${sourceId}/fork`, {
         method: "POST",

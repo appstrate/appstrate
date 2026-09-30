@@ -16,7 +16,7 @@ import { downloadPackageFiles, uploadPackageFiles } from "./package-items/storag
 import { downloadVersionZip } from "./package-storage.ts";
 import { unzipPackageArchive } from "./package-archive.ts";
 import { getVersionForDownload, versionArtifactUnavailable } from "./package-versions.ts";
-import { withPackageDraftLock } from "./package-draft-lock.ts";
+import { withPackageDraftLock } from "./package-locks.ts";
 import {
   CONFIG_BY_TYPE,
   SYSTEM_STORAGE_NAMESPACE,

@@ -53,6 +53,9 @@ import { isSystemPackage } from "./system-packages.ts";
 import { assertArchiveContentConforms } from "./package-items/config.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import { postInstallPackage } from "./post-install-package.ts";
+import { lockPackageVersions } from "./package-locks.ts";
+import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
+import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
 import { activatePackage } from "./space-packages.ts";
 import { downloadVersionZip } from "./package-storage.ts";
@@ -422,8 +425,8 @@ export async function importBundle(
     // pass the preflight, but only one insert wins; the loser previously
     // fell through and grafted its version + bytes onto the WINNER's row.
     //
-    // Serialization per packageId uses the same advisory lock key as
-    // `createPackageVersion` (`pg_advisory_xact_lock(hashtext(id))`), so
+    // Serialization per packageId uses the same advisory lock as
+    // `createPackageVersion` (`lockPackageVersions`), so
     // concurrent importers of one id are fully ordered through this claim
     // section; the `FOR UPDATE` re-read additionally guards against a
     // concurrent DELETE (the delete path does not take the advisory lock).
@@ -434,7 +437,7 @@ export async function importBundle(
     // (vs. reused a same-org survivor) so a post-install failure only rolls
     // back the orphan we created — never a pre-existing row.
     const insertedThisRow = await db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${packageId}))`);
+      await lockPackageVersions(tx, packageId);
       const insertedRows = await tx
         .insert(packages)
         .values({
@@ -496,20 +499,34 @@ export async function importBundle(
       // leave an un-runnable package with no version. A single self-guarding
       // DELETE (`NOT EXISTS` any package_versions) is atomic — it can't race a
       // concurrent import that commits a version in the window, which a
-      // separate SELECT-then-DELETE would cascade-delete. Then rethrow.
+      // separate SELECT-then-DELETE would cascade-delete. The draft archive
+      // post-install may already have written goes through the outbox like any
+      // other package delete. Then rethrow.
       if (insertedThisRow) {
-        await db.delete(packages).where(
-          and(
-            eq(packages.id, packageId),
-            eq(packages.orgId, scope.orgId),
-            notExists(
-              db
-                .select({ one: sql`1` })
-                .from(packageVersions)
-                .where(eq(packageVersions.packageId, packageId)),
-            ),
-          ),
-        );
+        await db.transaction(async (tx) => {
+          const jobs = await packageStorageDeletionJobs(
+            tx,
+            scope.orgId,
+            packageId,
+            "import_rolled_back",
+          );
+          const deleted = await tx
+            .delete(packages)
+            .where(
+              and(
+                eq(packages.id, packageId),
+                eq(packages.orgId, scope.orgId),
+                notExists(
+                  tx
+                    .select({ one: sql`1` })
+                    .from(packageVersions)
+                    .where(eq(packageVersions.packageId, packageId)),
+                ),
+              ),
+            )
+            .returning({ id: packages.id });
+          if (deleted.length > 0) await enqueueStorageDeletion(tx, jobs);
+        });
       }
       throw err;
     }
