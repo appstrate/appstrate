@@ -56,11 +56,12 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 export interface ProxyRunSelection extends RunBoundSelection {
   /** The version the run froze at kickoff for this integration; `null` when it froze none. */
   frozenVersion: () => Promise<ResolvedIntegrationVersion | null>;
-  /** The same run, read again: one selection reads it once, so each resolution takes its own. */
-  reread: () => ProxyRunSelection;
 }
 
-/** The `X-Run-Id` run, bound to the ACTOR: a caller borrows only the snapshot of its own run. */
+/**
+ * The `X-Run-Id` run, bound to the ACTOR: a caller borrows only the snapshot of its own run.
+ * Each read checks the run anew, so a run that finished since the call started stops lending.
+ */
 export function runBoundSelection(input: {
   orgId: string;
   spaceId: string;
@@ -69,15 +70,12 @@ export function runBoundSelection(input: {
   actor: Actor;
 }): ProxyRunSelection {
   const { orgId, spaceId, runId, integrationId, actor } = input;
-  let read: ReturnType<typeof requireAttributableRun> | undefined;
-  const attributableRun = () =>
-    (read ??= requireAttributableRun({ orgId, runId, spaceId, owner: actor }));
+  const attributableRun = () => requireAttributableRun({ orgId, runId, spaceId, owner: actor });
   return {
     id: runId,
     boundSet: async () => (await attributableRun()).resolvedConnections?.[integrationId] ?? [],
     frozenVersion: async () =>
       (await attributableRun()).resolvedIntegrationVersions?.[integrationId] ?? null,
-    reread: () => runBoundSelection(input),
   };
 }
 

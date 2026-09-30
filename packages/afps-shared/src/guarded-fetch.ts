@@ -26,8 +26,7 @@
  * - Strips credential headers on any cross-origin hop: the builtin
  *   `authorization`/`cookie`/`proxy-authorization` set UNIONED with the
  *   caller's `sensitiveHeaders` (vendor-specific names like `X-Api-Key` that
- *   the primitive cannot know about) — unless the caller's `forwardCredentials`
- *   authorizes that hop (an `authorized_uris` allowlist spanning several hosts).
+ *   the primitive cannot know about), unless `forwardCredentials` authorizes that hop.
  * - Rejects non-http(s) schemes and strips userinfo/fragment from redirect
  *   targets (defeats `https://user:pass@…` credential-leak + fragment tricks).
  * - CONNECTS TO THE VALIDATED ADDRESS: under Bun with the global `fetch`, each
@@ -156,17 +155,13 @@ export interface GuardedFetchOptions {
   /**
    * Per-hop cookie state (afps-runtime's `CookieScope` fits): `capture` gets each hop's
    * Set-Cookie; `header` composes each hop's Cookie over `base` (the caller's Cookie header,
-   * null once a cross-origin hop stripped credentials). Both receive the logical URL, never the
-   * pinned one.
+   * null once a cross-origin hop stripped it). Both receive the logical URL, never the pinned one.
    */
   cookies?: {
     header(url: string, base: string | null): string | undefined;
     capture(url: string, setCookieHeaders: string[]): void;
   };
-  /**
-   * True keeps credential headers, Cookie and body across this cross-origin hop (the caller's
-   * allowlist authorized it). Default: every origin change strips them.
-   */
+  /** True keeps credential headers, Cookie and body across this origin change (default: strip). */
   forwardCredentials?: (url: URL) => boolean;
   /** `false` returns the first response even when it is a redirect (a single-use body). Default true. */
   followRedirects?: boolean;
@@ -260,10 +255,7 @@ export async function guardedFetch(
   return (await guardedFetchChain(input, init, opts)).response;
 }
 
-/**
- * {@link guardedFetch} that also reports where the chain ended: `finalUrl` is the LOGICAL URL of
- * the terminal hop (never the pinned address), `hops` the redirects followed.
- */
+/** {@link guardedFetch}, also returning the terminal hop's logical URL and the hops followed. */
 export async function guardedFetchChain(
   input: string | URL,
   init?: RequestInit,
@@ -456,8 +448,7 @@ export async function guardedFetchChain(
       // A `ReadableStream` body is single-use: hop 0 consumed it, so any hop
       // that PRESERVES the body is about to re-send a locked stream. The
       // runtime answers that with an opaque `TypeError: body already used`
-      // from inside `fetch`, naming neither the redirect nor the stream (a
-      // caller that streams passes `followRedirects: false`).
+      // from inside `fetch`, naming neither the redirect nor the stream.
       //
       // Fail loudly instead of dropping the body: a bodyless PUT the caller
       // never made, sent silently, is the worse outcome — that is the exact

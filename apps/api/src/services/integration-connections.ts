@@ -962,8 +962,7 @@ export async function createIntegrationOAuthClient(
 }
 
 /**
- * Update an existing custom client in place, by its id (merge semantics: an
- * absent field is unchanged, `redirectUri: null` clears it). Scoped to
+ * Update an existing custom client in place, by its id; an absent field is unchanged. Scoped to
  * `owner`'s tier and `packageId` (escalation guard) — any other client id is a 404.
  * `is_default` / `auto_provisioned` are not touched here
  * (default selection is `setDefaultIntegrationClient`'s job).
@@ -1005,8 +1004,7 @@ export async function updateIntegrationOAuthClient(
   // `null` = the secret field was not submitted → keep the stored credential
   // and its declared method exactly as they are. Rotating only the redirect URI
   // must not silently clear the secret (nor flip a confidential client public).
-  // A new secret with no method rotates the credential, not its transport: the
-  // stored secret-based method stays (a public client's `"none"` cannot).
+  // A new secret alone keeps the stored secret-based method (not a public client's `"none"`).
   const keptMethod =
     input.clientSecret && existing.tokenEndpointAuthMethod !== "none"
       ? (existing.tokenEndpointAuthMethod ?? undefined)
@@ -1255,9 +1253,7 @@ export function resolveConnectClient(
  * Precedence: the client row's own `token_endpoint_auth_method` (the admin's
  * explicit declaration) wins over `manifestAuthMethod`, which is the
  * manifest's `auths.{key}.token_endpoint_auth_method` and stands in when the
- * row does not declare one. The method comes back narrowed to what the token
- * client speaks (`toSupportedTokenEndpointAuthMethod`), so the OAuth callback
- * and the refresh post the same client authentication.
+ * row does not declare one; `toSupportedTokenEndpointAuthMethod` narrows it as on the callback.
  *
  * `null` is reserved for "no such client here" (since-removed, remapped,
  * cross-scope) and for a ciphertext that will not open — the caller skips the
@@ -2917,8 +2913,7 @@ export function scheduleOverridesName(connectionId: string): SQL {
 
 /**
  * Remove `connectionId` from `actor`'s OWN schedule overrides; emptying a set disables an enabled
- * schedule (a fallback would silently change its account) — a disabled one keeps its reason.
- * Returns the ids it disabled.
+ * schedule (a fallback would silently change its account). Returns the ids it disabled.
  */
 async function dropConnectionFromOwnSchedules(
   tx: Tx,

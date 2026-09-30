@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { problemContent } from "../responses.ts";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
-
-const problem = {
-  "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-} as const;
 
 /**
  * Better Auth answers `sign-up/email` and `sign-in/email` itself: its errors are
@@ -228,25 +225,25 @@ export const authPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { description: "Invalid bootstrap token", content: problem },
+        "401": { description: "Invalid bootstrap token", content: problemContent },
         "403": {
           description:
             "Email rejected by AUTH_ALLOWED_SIGNUP_DOMAINS — the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP only; an active domain allowlist still applies.",
-          content: problem,
+          content: problemContent,
         },
         "409": {
           description:
             "Either an account with that email already exists, OR another bootstrap redemption is in progress on this instance (cluster-wide advisory lock + in-process CAS).",
-          content: problem,
+          content: problemContent,
         },
         "410": {
           description:
             "No bootstrap token is currently redeemable (none configured, already redeemed, or instance bootstrapped via AUTH_BOOTSTRAP_OWNER_EMAIL)",
-          content: problem,
+          content: problemContent,
         },
         "422": {
           description: "Signup rejected (weak password, duplicate email)",
-          content: problem,
+          content: problemContent,
         },
         "429": {
           $ref: "#/components/responses/RateLimited",

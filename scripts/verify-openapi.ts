@@ -44,6 +44,7 @@ import { dirname, join, normalize, relative } from "node:path";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
 import type { OpenApiSchemaEntry } from "@appstrate/core/module";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
+import { resolveRef } from "./lib/openapi-pointer.ts";
 import {
   buildZodSchemaRegistry,
   EXEMPT_REQUEST_BODIES,
@@ -276,22 +277,6 @@ try {
 console.log(`\n  4. Zod <> OpenAPI Request Body Comparison`);
 console.log(`  -------------------------------------------`);
 
-/**
- * Resolve a `$ref` pointer (e.g. "#/components/schemas/Foo") against the spec.
- * Returns the referenced object, or undefined if the path is invalid.
- */
-function resolveRef(ref: string): Record<string, unknown> | undefined {
-  if (!ref.startsWith("#/")) return undefined;
-  const parts = ref.slice(2).split("/");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let current: any = openApiSpec;
-  for (const part of parts) {
-    if (current == null || typeof current !== "object") return undefined;
-    current = current[part];
-  }
-  return current as Record<string, unknown> | undefined;
-}
-
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Deref (`$ref`) and merge (`allOf`) a spec schema node into a normalized view
@@ -311,7 +296,7 @@ function normalizeSpecSchema(
   if (!schema || typeof schema !== "object" || depth > 12) return null;
   let s = schema;
   if (typeof s.$ref === "string") {
-    const r = resolveRef(s.$ref);
+    const r = resolveRef(openApiSpec, s.$ref);
     if (!r) return null;
     s = r;
   }
@@ -617,7 +602,7 @@ function unionBranches(
   if (!Array.isArray(branches)) return undefined;
   return branches.map((branch) => {
     const obj = asSchemaObject(branch);
-    if (obj && typeof obj.$ref === "string") return resolveRef(obj.$ref) ?? obj;
+    if (obj && typeof obj.$ref === "string") return resolveRef(openApiSpec, obj.$ref) ?? obj;
     return obj ?? {};
   });
 }
@@ -746,7 +731,7 @@ function objectProperties(
 function derefSchema(value: unknown): Record<string, unknown> | undefined {
   const obj = asSchemaObject(value);
   if (!obj) return undefined;
-  if (typeof obj.$ref === "string") return resolveRef(obj.$ref) ?? undefined;
+  if (typeof obj.$ref === "string") return resolveRef(openApiSpec, obj.$ref) ?? undefined;
   return obj;
 }
 
@@ -820,7 +805,7 @@ function getOpenApiRequestBodySchema(
 
   // Resolve top-level $ref
   if (schema && typeof schema.$ref === "string") {
-    schema = resolveRef(schema.$ref);
+    schema = resolveRef(openApiSpec, schema.$ref);
   }
 
   return schema;
@@ -835,7 +820,7 @@ function normalizeType(schema: Record<string, unknown>): {
   nullable: boolean;
 } {
   if (typeof schema.$ref === "string") {
-    const resolved = resolveRef(schema.$ref);
+    const resolved = resolveRef(openApiSpec, schema.$ref);
     return resolved ? normalizeType(resolved) : { baseTypes: [], nullable: false };
   }
 
@@ -2177,7 +2162,7 @@ for (const [specPath, pathItem] of Object.entries(
 
       let resp = rawResp as Record<string, unknown>;
       if (typeof resp.$ref === "string") {
-        resp = resolveRef(resp.$ref) ?? {};
+        resp = resolveRef(openApiSpec, resp.$ref) ?? {};
       }
       const content = resp.content as Record<string, Record<string, unknown>> | undefined;
       if (!content || Object.keys(content).length === 0) {
@@ -2357,11 +2342,11 @@ for (const entry of responseTypeRegistry) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const op = pathObj?.[entry.method.toLowerCase()] as any;
     let resp = op?.responses?.[entry.status] as Record<string, unknown> | undefined;
-    if (resp && typeof resp.$ref === "string") resp = resolveRef(resp.$ref);
+    if (resp && typeof resp.$ref === "string") resp = resolveRef(openApiSpec, resp.$ref);
     let schema = (resp?.content as Record<string, Record<string, unknown>> | undefined)?.[
       "application/json"
     ]?.schema as Record<string, unknown> | undefined;
-    if (schema && typeof schema.$ref === "string") schema = resolveRef(schema.$ref);
+    if (schema && typeof schema.$ref === "string") schema = resolveRef(openApiSpec, schema.$ref);
     specSchema = schema;
   } else {
     responseDrifts.push({

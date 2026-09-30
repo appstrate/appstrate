@@ -9,16 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`findUnboundedInjectedCredentials`** and
-  **`UnboundedInjectedCredentialViolation`** (`@appstrate/core/integration`):
-  the write-path rule listing each auth that injects a credential under
-  `allow_all_uris`, with no `authorized_uris`, or with an entry that leaves
-  the host to the caller. Needs `@appstrate/afps-shared`
-  `isHostUnboundedUriPattern` / `injectsHttpCredential`. (#1641)
-- **`findUnevaluableExpressions`** and **`UnevaluableExpression`**
-  (`@appstrate/core/integration`): the manifest-level finder behind the
-  `integrationManifestSchema` rule below, each issue located per auth
-  (`authKey`, `path`, `message`). (#1641)
+- **`findUnboundedInjectedCredentials`**, **`findUnevaluableExpressions`**
+  and **`AuthManifestIssue`** (`@appstrate/core/integration`): two
+  manifest-level finders returning `AuthManifestIssue[]`, each issue located
+  per auth (`authKey`, `path`, `message`). The first is the write-path rule
+  listing each auth that injects a credential under `allow_all_uris`, with no
+  `authorized_uris`, or with an entry that leaves the host to the caller
+  (malformed included); it needs `@appstrate/afps-shared`
+  `isHostUnboundedUriPattern` / `injectsHttpCredential`. The second backs the
+  `integrationManifestSchema` rule below. (#1641)
 - **The connection-resolution vocabulary is exported as runtime values**
   (`@appstrate/core/integration`): `CONNECTION_RESOLUTION_SOURCES` and
   `CONNECTION_RESOLUTION_ERROR_CODES`, from which the

@@ -101,7 +101,12 @@ describe("credentialUrlPolicy — a credential the proxy injects", () => {
   });
 
   it("refuses an allowlist entry that leaves the host to the caller, templated or injected", () => {
-    for (const unbounded of ["https://**", "https://*.com/**"]) {
+    for (const unbounded of [
+      "https://**",
+      "https://*.com/**",
+      "https://@x:y@**/**",
+      "https://%2A%2A\\**",
+    ]) {
       const authorizedUris = ["https://api.example.com/**", unbounded];
       expect(credentialUrlPolicy({ ...injected, authorizedUris }).refuse).toBe("exfiltration");
       expect(

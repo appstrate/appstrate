@@ -578,7 +578,7 @@ async function updateBlob(
       .returning({ id: modelProviderCredentials.id });
 
     if (updated.length > 0) {
-      // Chokepoint for every OAuth blob write (token refresh + needsReconnection):
+      // Chokepoint for every blob write (token refresh + needsReconnection):
       // bust the resolved-model cache so a rotated token or a freshly-dead credential
       // stops being served immediately, not after the TTL.
       clearResolvedModelCache();
@@ -685,57 +685,45 @@ export async function recordModelCredentialRefreshFailure(
 }
 
 /**
- * Count an upstream 401 against the api key the request sent: once the row holds another key
- * (a rotation raced the call), the rejection counts for nothing. The
- * `INTEGRATION_REFRESH_MAX_FAILURES`-th within one rejection window flags the key
- * `needsReconnection` in the same UPDATE, conditioned on the ciphertext that holds it. OAuth
- * credentials are left alone (their counter is the transient-refresh streak).
+ * Count an upstream 401 against the api key the request sent (none once the row holds another
+ * key); the `INTEGRATION_REFRESH_MAX_FAILURES`-th within one window flags it. OAuth rows are skipped.
  */
 export async function recordModelCredentialRejection(
   orgId: string,
   id: string,
   rejectedApiKey: string,
 ): Promise<void> {
-  const counted = countUpstreamRejection(
-    modelProviderCredentials.refreshFailureCount,
-    modelProviderCredentials.refreshFailuresSince,
-  );
-  const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
   const byId = scopedWhere(modelProviderCredentials, {
     orgId,
     extra: [eq(modelProviderCredentials.id, id)],
   });
-  for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
-    const [row] = await db
-      .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
-      .from(modelProviderCredentials)
-      .where(byId)
-      .limit(1);
-    if (!row) return;
-    const blob = decryptBlob(row.credentialsEncrypted);
-    if (blob?.kind !== "api_key" || blob.apiKey !== rejectedApiKey || blob.needsReconnection) {
-      return;
-    }
-    const flagged = encryptCredentials({ ...blob, needsReconnection: true });
-    const [updated] = await db
-      .update(modelProviderCredentials)
-      .set({
-        refreshFailureCount: counted.failures,
-        refreshFailuresSince: counted.since,
-        credentialsEncrypted: sql`CASE WHEN ${counted.failures} >= ${maxFailures} THEN ${flagged} ELSE ${modelProviderCredentials.credentialsEncrypted} END`,
-      })
-      .where(and(byId, eq(modelProviderCredentials.credentialsEncrypted, row.credentialsEncrypted)))
-      .returning({ failures: modelProviderCredentials.refreshFailureCount });
-    if (!updated) continue;
-    if (updated.failures >= maxFailures) {
-      logger.warn("model provider: api key rejected upstream, flagging needsReconnection", {
-        credentialId: id,
-        failures: updated.failures,
-      });
-      clearResolvedModelCache();
-    }
-    return;
-  }
+  const [row] = await db
+    .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
+    .from(modelProviderCredentials)
+    .where(byId)
+    .limit(1);
+  if (!row) return;
+  const blob = decryptBlob(row.credentialsEncrypted);
+  if (blob?.kind !== "api_key" || blob.apiKey !== rejectedApiKey || blob.needsReconnection) return;
+
+  const counted = countUpstreamRejection(
+    modelProviderCredentials.refreshFailureCount,
+    modelProviderCredentials.refreshFailuresSince,
+  );
+  const [updated] = await db
+    .update(modelProviderCredentials)
+    .set({ refreshFailureCount: counted.failures, refreshFailuresSince: counted.since })
+    .where(and(byId, eq(modelProviderCredentials.credentialsEncrypted, row.credentialsEncrypted)))
+    .returning({ failures: modelProviderCredentials.refreshFailureCount });
+  if (!updated || updated.failures < getEnv().INTEGRATION_REFRESH_MAX_FAILURES) return;
+
+  logger.warn("model provider: api key rejected upstream, flagging needsReconnection", {
+    credentialId: id,
+    failures: updated.failures,
+  });
+  await updateBlob(orgId, id, (b) =>
+    b.kind === "api_key" && b.apiKey === rejectedApiKey ? { ...b, needsReconnection: true } : null,
+  );
 }
 
 // ─── Delete ────────────────────────────────────────────────────────────────

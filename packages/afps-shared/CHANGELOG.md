@@ -16,24 +16,40 @@ consumer's publish rather than the first user's `npm install`.
 
 ### Added
 
+- **`parseAuthorizedUriPattern`**, **`AuthorizedUriPattern`** and
+  **`canonicalUrl`** (`./credential-template`): the one reading of an
+  `authorized_uris` entry, shared by the host-bound rule and the afps-runtime
+  matcher, egress policy and literal-host pin. An entry is `path` (no
+  `scheme://`), `any` (`scheme://**`), `url` (`scheme`, `authority` up to the
+  first `/`, `host`, `rest`) or `malformed`: an authority that is empty, is
+  not spelled as WHATWG serialises it (only case and a default port may
+  differ), or holds `%`, `\`, `@`, `?`, `#`, whitespace, a control or
+  non-ASCII character. The host is a bracketed IPv6 literal, else what
+  precedes the first `:`. `canonicalUrl` re-serialises a URL through WHATWG
+  without userinfo or fragment (`undefined` when it does not parse). (#1641)
 - **`isHostUnboundedUriPattern`** (`./credential-template`): whether an
-  `authorized_uris` entry leaves the host to the caller — no literal
-  `scheme://` (`**://api.example.com/**`), an empty host (`https:///**`), or
-  a wildcard in either of the host's last two labels (`https://**`,
-  `https://*.com./**`). A public suffix (`https://*.co.uk/**`) is not
-  detected. (#1641)
+  `authorized_uris` entry leaves the host to the caller, on its
+  `parseAuthorizedUriPattern` reading — malformed, no literal `scheme://`
+  (`**://api.example.com/**`), an empty host, or a wildcard in either of the
+  host's last two labels (`https://**`, `https://*.com./**`). A public suffix
+  (`https://*.co.uk/**`) is not detected. (#1641)
+- **`API_CALL_PLACEHOLDER`** (`./credential-template`): the global regex of
+  the api_call `{{…}}` placeholder, which a credential template never renders.
+  (#1641)
 - **`parseCredentialRef`**, **`templateExpressions`** and
   **`unsupportedTemplateExpressions`** (`./credential-template`): the field a
   lone `{$credential.<field>}` names, and a template's (unsupported) `{$…}`
   expressions. (#1641)
 - **`injectsHttpCredential`** and **`AUTH_TYPE_HTTP_DEFAULTS`**
   (`./delivery-http`): whether an auth's HTTP delivery names a header the proxy
-  fills with a credential, and the per-auth-type default table it reads.
-  (#1641)
-- **`./runtime-expression`**: `parseResponseExpression`,
-  `isResponseTextExpression` — the Arazzo response expressions a
-  `connect.login` block may use — and `simpleCriterionOperands` and
-  `loginBlockIssues` (with `LoginBlockView`, `LoginBlockIssue`): the one rule
+  fills with a credential, and the per-auth-type default table it reads, in
+  the template grammar. It has `oauth2` (`Authorization`, `Bearer ` +
+  `{$credential.access_token}`), `api_key` (`X-Api-Key`,
+  `{$credential.api_key}`) and `basic` (`Authorization`, `Basic ` + base64 of
+  `{$credential.username}:{$credential.password}`) only. (#1641)
+- **`./runtime-expression`**: `parseResponseExpression` — the Arazzo response
+  expressions a `connect.login` block may use — and `simpleCriterionOperands`
+  and `loginBlockIssues` (with `LoginBlockView`, `LoginBlockIssue`): the one rule
   of which `connect.login` expressions are evaluable, shared by the login
   engine and import validation. (#1641)
 - **`guardedFetchChain`** and **`GuardedFetchResult`** (`./guarded-fetch`):
@@ -53,8 +69,7 @@ consumer's publish rather than the first user's `npm install`.
   `valueFrom: { template, encoding? }` in the `{$credential.<field>}`
   grammar; no bare-field lowering, no `{{field}}` rewrite. (#1641)
 - **BREAKING: `HttpDeliveryConfig.valueFrom` is `{ template, encoding? }`
-  only**, and `AUTH_TYPE_HTTP_DEFAULTS` is written as templates (`basic`:
-  `{$credential.username}:{$credential.password}`, base64). (#1641)
+  only**. (#1641)
 - The guarded-fetch transport receives the URL as a string. (#1641)
 
 ## [0.9.2] — 2026-09-30

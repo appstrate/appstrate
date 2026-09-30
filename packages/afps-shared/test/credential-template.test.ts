@@ -5,6 +5,7 @@ import { describe, it, expect } from "bun:test";
 import {
   credentialTemplateRefs,
   isHostUnboundedUriPattern,
+  parseAuthorizedUriPattern,
   parseCredentialRef,
   parseUrlFormPattern,
   renderAuthorizedUris,
@@ -332,8 +333,73 @@ describe("isHostUnboundedUriPattern", () => {
       "https://user@/**",
       "https://*.com./**",
       "https://*.com../**",
+      "https://[::**/**",
+      "https://[2001:db8::*]/**",
     ]) {
       expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, true]);
+    }
+  });
+
+  it("is true for a malformed entry, whose authority WHATWG would rewrite", () => {
+    for (const pattern of [
+      "https://%2A%2A\\**",
+      "https://@x:y@**/**",
+      "https://u@x:1@**/**",
+      "https://api.example.com@evil.test/**",
+      "https://api%2Eexample.com/**",
+      "https://api.example.com\\@evil.test/**",
+      "https://api.exa mple.com/**",
+      "https://api.example.com\t/**",
+      "https://ａpi.example.com/**",
+      "https://api.example.com?x/**",
+      "https:///api.example.com/x",
+      "https://127.1/**",
+    ]) {
+      expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, true]);
+    }
+  });
+});
+
+describe("parseAuthorizedUriPattern", () => {
+  it("canonicalises scheme, host case and a default port, keeping the wildcards", () => {
+    expect(parseAuthorizedUriPattern("HTTPS://*.Example.COM:443/v1/**")).toEqual({
+      kind: "url",
+      scheme: "https://",
+      authority: "*.example.com",
+      host: "*.example.com",
+      rest: "/v1/**",
+    });
+  });
+
+  it("keeps the raw authority of a pattern WHATWG cannot parse", () => {
+    expect(parseAuthorizedUriPattern("https://h.example.com:*/**")).toEqual({
+      kind: "url",
+      scheme: "https://",
+      authority: "h.example.com:*",
+      host: "h.example.com",
+      rest: "/**",
+    });
+    expect(parseAuthorizedUriPattern("http://[::1]:8080/x").kind).toBe("url");
+  });
+
+  it("tells a catch-all and a scheme-less pattern apart", () => {
+    expect(parseAuthorizedUriPattern("*://**")).toEqual({ kind: "any", scheme: "*://" });
+    expect(parseAuthorizedUriPattern("api.example.com/**")).toEqual({
+      kind: "path",
+      pattern: "api.example.com/**",
+    });
+  });
+
+  it("refuses an authority that is empty, not canonical, or holds userinfo or escapes", () => {
+    for (const pattern of [
+      "https:///**",
+      "https://%2A%2A\\**",
+      "https://@x:y@**/**",
+      "https://a.com%2f.evil.test/**",
+      "https://a.com#.b.com/**",
+      "https://0x7f.1/**",
+    ]) {
+      expect([pattern, parseAuthorizedUriPattern(pattern).kind]).toEqual([pattern, "malformed"]);
     }
   });
 });

@@ -6,6 +6,7 @@ import { errorHandler } from "../../src/middleware/error-handler.ts";
 import {
   proxyProblem,
   proxyStatusMarker,
+  upstreamFailureDetail,
   type ProxyProblemCode,
 } from "../../src/lib/proxy-status.ts";
 import type { AppEnv } from "../../src/types/index.ts";
@@ -34,5 +35,19 @@ describe("proxyProblem", () => {
     expect(res.status).toBe(status);
     expect(res.headers.get("proxy-status")).toBe(member);
     expect(((await res.json()) as { code: string }).code).toBe(code);
+  });
+});
+
+describe("upstreamFailureDetail", () => {
+  it("completes the subject with the failure's phrase", () => {
+    expect(upstreamFailureDetail("api.example.com", "upstream_unresolvable")).toBe(
+      "api.example.com could not be resolved",
+    );
+    expect(upstreamFailureDetail("api.example.com", "upstream_unreachable")).toBe(
+      "api.example.com could not be reached",
+    );
+    expect(upstreamFailureDetail("api.example.com", "upstream_timeout")).toBe(
+      "api.example.com did not answer in time",
+    );
   });
 });

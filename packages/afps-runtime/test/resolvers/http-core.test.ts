@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { isHostUnboundedUriPattern } from "@appstrate/afps-shared/credential-template";
 import {
   makeApiCallTool,
   matchesAuthorizedUriSpec,
@@ -367,10 +368,10 @@ describe("matchesAuthorizedUriSpec", () => {
     it("normalisation never moves a wildcard into an empty authority", () => {
       expect(matchesAuthorizedUriSpec("https:///**", "https://evil.com/")).toBe(false);
       expect(matchesAuthorizedUriSpec("https:///*", "https://evil.com/")).toBe(false);
-      // A literal `https:///host` still names its host, as `new URL` reads it.
+      // An empty authority is malformed, even when WHATWG would read a host after it.
       expect(
         matchesAuthorizedUriSpec("https:///api.example.com/x", "https://api.example.com/x"),
-      ).toBe(true);
+      ).toBe(false);
     });
 
     it("a pattern that already contains the wildcard placeholder still compiles", () => {
@@ -415,5 +416,47 @@ describe("matchesAuthorizedUriSpec", () => {
     expect(matchesAuthorizedUriSpec(pat, "https://attacker.example/services/data/v59.0")).toBe(
       false,
     );
+  });
+  it("a malformed authority matches nothing, however WHATWG would rewrite it", () => {
+    for (const pattern of [
+      "https://%2A%2A\\**",
+      "https://@x:y@**/**",
+      "https://*.example.com@**/**",
+      "https://%2A.example.com/**",
+      "https://*.example.com\\.evil.test/**",
+      "https://ａpi.example.com/**",
+    ]) {
+      expect([pattern, matchesAuthorizedUriSpec(pattern, "https://attacker.test/steal")]).toEqual([
+        pattern,
+        false,
+      ]);
+    }
+  });
+
+  it("agrees with isHostUnboundedUriPattern: a host-bound entry never reaches another host", () => {
+    const targets = [
+      "https://attacker.test/steal",
+      "https://a.attacker.test/steal",
+      "https://[::ffff:5db8:d822]/steal",
+    ];
+    for (const pattern of [
+      "https://*.example.com/**",
+      "https://api.example.com:*/**",
+      "https://*.example.com./**",
+      "HTTPS://*.EXAMPLE.com:443/**",
+      "https://%2A%2A\\**",
+      "https://@x:y@**/**",
+      "https://[::**/**",
+      "https://*:x.example.com/**",
+      "https:///**",
+      "**://api.example.com/**",
+      "https://**/**",
+    ]) {
+      const reaches = targets.some((t) => matchesAuthorizedUriSpec(pattern, t));
+      expect([pattern, reaches && !isHostUnboundedUriPattern(pattern)]).toEqual([pattern, false]);
+    }
+    // Control: the table does reach other hosts, through entries the rule calls unbounded.
+    expect(matchesAuthorizedUriSpec("https://**/**", targets[0]!)).toBe(true);
+    expect(matchesAuthorizedUriSpec("https://[::**/**", targets[2]!)).toBe(true);
   });
 });

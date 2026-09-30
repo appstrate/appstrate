@@ -3,7 +3,6 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  isResponseTextExpression,
   loginBlockIssues,
   parseResponseExpression,
   simpleCriterionOperands,
@@ -37,15 +36,6 @@ describe("parseResponseExpression", () => {
   }
 });
 
-describe("isResponseTextExpression", () => {
-  it("is the whole body or one header", () => {
-    expect(isResponseTextExpression("$response.body")).toBe(true);
-    expect(isResponseTextExpression("$response.header.Set-Cookie")).toBe(true);
-    expect(isResponseTextExpression("$response.body#/token")).toBe(false);
-    expect(isResponseTextExpression("$statusCode")).toBe(false);
-  });
-});
-
 describe("simpleCriterionOperands", () => {
   it("splits on the first == and trims", () => {
     expect(simpleCriterionOperands("$statusCode == 200")).toEqual(["$statusCode", "200"]);
@@ -77,6 +67,14 @@ describe("loginBlockIssues", () => {
         ],
       }),
     ).toEqual([]);
+  });
+
+  it("runs a regex output only on the whole body or one header", () => {
+    const regex = (source: string) => ({ outputs: { t: { from: "regex", source } } });
+    expect(paths(regex("$response.body"))).toEqual([]);
+    expect(paths(regex("$response.header.Set-Cookie"))).toEqual([]);
+    expect(paths(regex("$response.body#/token"))).toEqual(["outputs.t.source"]);
+    expect(paths(regex("$statusCode"))).toEqual(["outputs.t.source"]);
   });
 
   it("locates each expression the engine cannot evaluate", () => {

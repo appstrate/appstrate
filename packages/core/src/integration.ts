@@ -36,6 +36,7 @@ import {
   assertUniqueApiToolAuthTokens,
 } from "@appstrate/afps-shared/api-tool-naming";
 import {
+  API_CALL_PLACEHOLDER,
   credentialTemplateRefs,
   isHostUnboundedUriPattern,
   parseUrlFormPattern,
@@ -190,10 +191,12 @@ export function findNonSnakeCaseIdentityClaimKeys(manifest: unknown): IdentityCl
   return found;
 }
 
-/** One auth whose proxy-injected credential is not held to a bounded set of hosts. */
-export interface UnboundedInjectedCredentialViolation {
+type IssuePath = (string | number)[];
+
+/** One write-path refusal of an auth, located in the manifest. */
+export interface AuthManifestIssue {
   authKey: string;
-  path: (string | number)[];
+  path: IssuePath;
   message: string;
 }
 
@@ -201,13 +204,11 @@ export interface UnboundedInjectedCredentialViolation {
  * List the auths that inject a credential over HTTP without an `authorized_uris` allowlist that
  * names their hosts — the write-path twin of the run-time `credentialUrlPolicy`.
  */
-export function findUnboundedInjectedCredentials(
-  manifest: unknown,
-): UnboundedInjectedCredentialViolation[] {
+export function findUnboundedInjectedCredentials(manifest: unknown): AuthManifestIssue[] {
   if (typeof manifest !== "object" || manifest === null) return [];
   const auths = (manifest as { auths?: unknown }).auths;
   if (typeof auths !== "object" || auths === null) return [];
-  const found: UnboundedInjectedCredentialViolation[] = [];
+  const found: AuthManifestIssue[] = [];
   for (const [authKey, auth] of Object.entries(auths)) {
     const a = (auth ?? {}) as {
       type?: unknown;
@@ -670,27 +671,15 @@ interface DeliveryView {
   files?: Record<string, { value?: string }>;
 }
 
-type IssuePath = (string | number)[];
-
-/** A manifest expression the platform does not evaluate, located in the manifest. */
-export interface UnevaluableExpression {
-  authKey: string;
-  path: (string | number)[];
-  message: string;
-}
-
-/** The `{{…}}` placeholder of the agent-facing api_call grammar. */
-const API_CALL_PLACEHOLDER = /\{\{[^{}]*\}\}/g;
-
 /**
  * List the templates and runtime expressions the platform cannot evaluate: in a delivery template
  * (http, env, files) anything but `{$credential.<field>}`, `{$…}` other than that in
  * `authorized_uris`, and a `connect.login` expression outside {@link loginBlockIssues}.
  */
-export function findUnevaluableExpressions(manifest: unknown): UnevaluableExpression[] {
+export function findUnevaluableExpressions(manifest: unknown): AuthManifestIssue[] {
   const auths = (manifest as { auths?: unknown } | null)?.auths;
   if (typeof auths !== "object" || auths === null) return [];
-  const found: UnevaluableExpression[] = [];
+  const found: AuthManifestIssue[] = [];
   for (const [authKey, raw] of Object.entries(auths)) {
     const auth = (raw ?? {}) as {
       delivery?: DeliveryView;

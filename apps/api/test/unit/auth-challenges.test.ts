@@ -8,11 +8,7 @@
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { Hono } from "hono";
 import type { AppEnv } from "../../src/types/index.ts";
-import {
-  proxyErrorStatus,
-  proxyStatusMarker,
-  relayedProxyStatus,
-} from "../../src/lib/proxy-status.ts";
+import { proxyStatusMarker, relayedProxyStatus } from "../../src/lib/proxy-status.ts";
 import {
   registerAuthChallenge,
   resolveAuthChallenge,
@@ -175,7 +171,7 @@ describe("auth-challenge responder", () => {
       headers: { Authorization: "Bearer apst_invalid" },
     });
     expect(res.headers.get("WWW-Authenticate")).toBe('Bearer error="invalid_token"');
-    expect(res.headers.get("Proxy-Status")).toBe(proxyErrorStatus("proxy_internal_response"));
+    expect(res.headers.get("Proxy-Status")).toBe("appstrate; error=proxy_internal_response");
   });
 
   it("does not apply the generic fallback to a 403 on an unmatched path", async () => {

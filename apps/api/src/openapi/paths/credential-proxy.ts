@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { problemContent } from "../responses.ts";
+
 /**
  * Credential proxy endpoint (BYOI for external runners).
  *
@@ -46,10 +48,6 @@ export const PROXY_STATUS_HEADER = {
       "Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
     schema: { type: "string", example: "appstrate; received-status=401" },
   },
-} as const;
-
-const problem = {
-  "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
 } as const;
 
 const proxyParameters = [
@@ -211,7 +209,7 @@ const proxyResponses = {
       "integration's enforced org default — or `unresolved_placeholder` — the target, a " +
       "header or the substituted body names a `{{field}}` the connection does not hold.",
     headers: PROXY_STATUS_HEADER,
-    content: problem,
+    content: problemContent,
   },
   "401": {
     description:
@@ -245,7 +243,7 @@ const proxyResponses = {
       "`credential-proxy:call`, session bound to a different principal, cookie session " +
       "used, or `X-Run-Id` names another actor's run.",
     headers: PROXY_STATUS_HEADER,
-    content: problem,
+    content: problemContent,
   },
   "404": {
     description:
@@ -254,7 +252,7 @@ const proxyResponses = {
       "run bound none, or when the integration has no published version; `not_found` when " +
       "`X-Run-Id` names no run of this space.",
     headers: PROXY_STATUS_HEADER,
-    content: problem,
+    content: problemContent,
   },
   "409": {
     description:
@@ -269,12 +267,12 @@ const proxyResponses = {
       "`needs_reconnection` — the connection that would be bound (the run's bound one included), " +
       "or a member of the org default, needs its owner to reconnect it.",
     headers: PROXY_STATUS_HEADER,
-    content: problem,
+    content: problemContent,
   },
   "413": {
     description: "Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB).",
     headers: PROXY_STATUS_HEADER,
-    content: problem,
+    content: problemContent,
   },
   "429": { $ref: "#/components/responses/RateLimited" },
   "500": { $ref: "#/components/responses/InternalServerError" },
@@ -284,14 +282,14 @@ const proxyResponses = {
       "`dns_error`); `upstream_unreachable` — the connection to it failed " +
       "(`destination_unavailable`).",
     headers: PROXY_STATUS_HEADER,
-    content: problem,
+    content: problemContent,
   },
   "504": {
     description:
       "`upstream_timeout` — the upstream did not answer within the 30 s deadline " +
       "(`Proxy-Status` error `http_response_timeout`).",
     headers: PROXY_STATUS_HEADER,
-    content: problem,
+    content: problemContent,
   },
   default: {
     description:

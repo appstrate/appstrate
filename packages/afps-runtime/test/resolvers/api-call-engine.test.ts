@@ -40,6 +40,7 @@ async function gate(
       integrationId: "i",
       fetchFn,
       ...opts,
+      credentialFields: opts.credentialFields ?? {},
     });
     return null;
   } catch (err) {
@@ -56,7 +57,7 @@ describe("fetchApiCall — a transport error", () => {
     });
 
   /** The error `fetchApiCall` rejects with when the transport throws `thrown`. */
-  const sendFailing = (thrown: Error, credentialFields?: Record<string, string>) =>
+  const sendFailing = (thrown: Error, credentialFields: Record<string, string> = {}) =>
     fetchApiCall({
       url: "https://api.example.com/v1",
       init: { method: "GET" },
@@ -70,7 +71,7 @@ describe("fetchApiCall — a transport error", () => {
         throw thrown;
       }) as unknown as typeof fetch,
       resolveHost: publicResolver,
-      ...(credentialFields ? { credentialFields } : {}),
+      credentialFields,
     }).then(
       () => null,
       (e: unknown) => e,
@@ -150,12 +151,16 @@ describe("hostLiterallyAllowlisted", () => {
     ).toBe(true);
   });
 
-  it("strips literal ports and userinfo from the spec authority", () => {
+  it("strips a literal port from the spec authority", () => {
     expect(
-      hostLiterallyAllowlisted("https://api.example.com/x", [
-        "https://user@api.example.com:8443/**",
-      ]),
+      hostLiterallyAllowlisted("https://api.example.com/x", ["https://api.example.com:8443/**"]),
     ).toBe(true);
+  });
+
+  it("never pins through a malformed entry, which the matcher refuses too", () => {
+    for (const spec of ["https://user@api.example.com/**", "https://api%2Eexample.com/**"]) {
+      expect(hostLiterallyAllowlisted("https://api.example.com/x", [spec])).toBe(false);
+    }
   });
 
   it("compares hosts case-insensitively", () => {
@@ -274,6 +279,22 @@ describe("fetchApiCall — initial-target gate per branch", () => {
     }
   });
 
+  it("a malformed entry authorizes nothing: the injected credential is never sent", async () => {
+    const fetchFn = mock(async () => new Response("ok")) as unknown as typeof fetch;
+    for (const pattern of ["https://@x:y@**/**", "https://%2A%2A\\**"]) {
+      const err = await gate("https://attacker.test/steal", {
+        init: { method: "GET", headers: { "X-Api-Key": "SECRET" } },
+        credentialHeaders: ["X-Api-Key"],
+        authorizedUris: [pattern],
+        declaredUris: [pattern],
+        fetchFn,
+        resolveHost: publicResolver,
+      });
+      expect(err?.reason).toBe("not_authorized");
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
   it("off-allowlist target is refused before any DNS work", async () => {
     const resolveHost = mock(publicResolver);
     const err = await gate("https://evil.example/x", {
@@ -366,6 +387,7 @@ describe("fetchApiCall — credentials across a redirect", () => {
       credentialHeaders: ["Authorization", "X-Api-Key"],
       trustedHost: () => false,
       integrationId: "i",
+      credentialFields: {},
       fetchFn,
       resolveHost: publicResolver,
     });
@@ -401,6 +423,30 @@ describe("fetchApiCall — credentials across a redirect", () => {
     expect((err as RedirectBlockedError).reason).toBe("unauthorized");
   });
 
+  it("classifies a hop to a host with no DNS answer as unresolvable, not as SSRF", async () => {
+    const fetchFn = mock(
+      async () => new Response(null, { status: 302, headers: { location: "https://gone.test/" } }),
+    ) as unknown as typeof fetch;
+    const err = await fetchApiCall({
+      url: "https://api.example.com/x",
+      init: { method: "GET" },
+      authorizedUris: ["https://api.example.com/**", "https://gone.test/**"],
+      declaredUris: ["https://api.example.com/**", "https://gone.test/**"],
+      allowAllUris: false,
+      credentialHeaders: [],
+      trustedHost: () => false,
+      integrationId: "i",
+      credentialFields: {},
+      fetchFn,
+      resolveHost: async (host) => {
+        if (host === "gone.test") throw new Error("ENOTFOUND");
+        return ["203.0.113.7"];
+      },
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RedirectBlockedError);
+    expect(classifyApiCallFailure(err)).toMatchObject({ kind: "unresolvable", redirect: true });
+  });
+
   it("returns a streaming body's redirect unfollowed", async () => {
     const fetchFn = mock(
       async () => new Response(null, { status: 307, headers: { location: "https://x.example/" } }),
@@ -414,6 +460,7 @@ describe("fetchApiCall — credentials across a redirect", () => {
       credentialHeaders: [],
       trustedHost: () => false,
       integrationId: "i",
+      credentialFields: {},
       fetchFn,
       resolveHost: publicResolver,
     });
@@ -444,6 +491,7 @@ describe("fetchApiCall — transport", () => {
       credentialHeaders: [],
       trustedHost: () => false,
       integrationId: "i",
+      credentialFields: {},
       resolveHost: publicResolver,
     });
     expect(seen!.url).toContain("203.0.113.7");
@@ -467,6 +515,7 @@ describe("fetchApiCall — transport", () => {
       credentialHeaders: [],
       trustedHost: () => false,
       integrationId: "i",
+      credentialFields: {},
       fetchFn,
       resolveHost: publicResolver,
     });
@@ -490,6 +539,9 @@ describe("classifyApiCallFailure", () => {
       redirect: true,
     });
     expect(classifyApiCallFailure(new RedirectBlockedError("ssrf", "h")).kind).toBe("ssrf");
+    expect(classifyApiCallFailure(new RedirectBlockedError("unresolvable", "h")).kind).toBe(
+      "unresolvable",
+    );
     expect(classifyApiCallFailure(new DOMException("late", "TimeoutError")).kind).toBe("timeout");
     expect(
       classifyApiCallFailure(Object.assign(new Error("refused"), { code: "ECONNREFUSED" })),

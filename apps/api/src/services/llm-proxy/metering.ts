@@ -515,10 +515,8 @@ interface MeteredForwardOptions {
    */
   swap?: ModelSwap | null;
   /**
-   * Response-cache write for a non-streaming 2xx reply. When set, the forwarded
-   * (already alias-swapped) body is persisted and {@link CACHE_STATUS_MISS} is
-   * appended to `Cache-Status` (RFC 9211: after any upstream cache's member). `null` → no caching (the sole caller always
-   * passes the field; it is `null` whenever no cache key was resolved).
+   * Response-cache write for a non-streaming 2xx reply: the forwarded (alias-swapped) body is
+   * stored and {@link CACHE_STATUS_MISS} appended to `Cache-Status` (RFC 9211). `null` → no caching.
    */
   cache?: { cacheKey: string; ttlSeconds: number } | null;
   /**

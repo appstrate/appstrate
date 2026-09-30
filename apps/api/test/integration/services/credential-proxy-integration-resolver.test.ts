@@ -680,17 +680,10 @@ describe("credential-proxy integration-resolver", () => {
       const withoutRun = await resolveIntegrationProxyCredentials(input());
       expect(withoutRun.declaredUris).toEqual(["https://later.example.com/**"]);
 
-      // One read of the run per selection: both halves answer from the same snapshot.
-      const run2 = runBoundSelection({
-        orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
-        runId: run.id,
-        integrationId: INTEGRATION_ID,
-        actor,
-      });
-      expect(await run2.boundSet()).toHaveLength(1);
+      // Each read checks the run anew: once it has finished, it lends nothing.
+      expect(await run1.boundSet()).toHaveLength(1);
       await db.update(runs).set({ status: "success" }).where(eq(runs.id, run.id));
-      expect(await run2.frozenVersion()).toEqual({ version: "1.0.0", source: "version" });
+      await expect(run1.frozenVersion()).rejects.toThrow("no longer active");
     });
   });
 });

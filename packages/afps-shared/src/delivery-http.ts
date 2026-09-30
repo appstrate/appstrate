@@ -102,7 +102,6 @@ export const AUTH_TYPE_HTTP_DEFAULTS: Readonly<
     headerPrefix: "Basic ",
     valueFrom: { template: "{$credential.username}:{$credential.password}", encoding: "base64" },
   },
-  custom: { headerName: "", headerPrefix: "" },
 };
 
 /**

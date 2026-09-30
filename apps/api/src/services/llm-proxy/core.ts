@@ -24,6 +24,7 @@ import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import {
   proxyProblem,
   relayedProxyStatus,
+  upstreamFailureDetail,
   type UpstreamFailureCode,
 } from "../../lib/proxy-status.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
@@ -379,17 +380,11 @@ function blockedUpstream(presetId: string): ApiError {
   );
 }
 
-const UPSTREAM_FAILURE_DETAIL: Record<UpstreamFailureCode, string> = {
-  upstream_unresolvable: "could not be resolved",
-  upstream_unreachable: "could not be reached",
-  upstream_timeout: "did not answer in time",
-};
-
 /** The model's upstream failed at transport level (502 / 504); names neither host nor cause. */
 function unreachableUpstream(presetId: string, code: UpstreamFailureCode): ApiError {
   return proxyProblem(
     code,
-    `The upstream of model "${presetId}" ${UPSTREAM_FAILURE_DETAIL[code]}.`,
+    `${upstreamFailureDetail(`The upstream of model "${presetId}"`, code)}.`,
   );
 }
 

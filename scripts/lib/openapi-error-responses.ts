@@ -7,9 +7,10 @@
  * exempted response declares its exemption's media type instead.
  */
 
+import { OPERATION_VERBS, resolveRef } from "./openapi-pointer.ts";
+
 const PROBLEM_MEDIA_TYPE = "application/problem+json";
 const PROBLEM_DETAIL_REF = "#/components/schemas/ProblemDetail";
-const OPERATION_VERBS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
 const ERROR_STATUS = /^([45](\d\d|XX)|default)$/;
 
 type Node = Record<string, unknown>;
@@ -28,16 +29,6 @@ export interface ErrorBodyReport {
   gaps: string[];
   /** Exemption keys that excused no response, sorted. */
   stale: string[];
-}
-
-function resolveLocalRef(spec: Node, ref: string): Node | undefined {
-  if (!ref.startsWith("#/")) return undefined;
-  let current: unknown = spec;
-  for (const part of ref.slice(2).split("/")) {
-    if (current === null || typeof current !== "object") return undefined;
-    current = (current as Node)[part.replace(/~1/g, "/").replace(/~0/g, "~")];
-  }
-  return current !== null && typeof current === "object" ? (current as Node) : undefined;
 }
 
 function isProblemDetail(schema: unknown): boolean {
@@ -65,7 +56,7 @@ export function checkErrorResponseBodies(
         if (!ERROR_STATUS.test(status)) continue;
         checked++;
         const key = `${operationKey} ${status}`;
-        const response = typeof raw?.$ref === "string" ? resolveLocalRef(root, raw.$ref) : raw;
+        const response = typeof raw?.$ref === "string" ? resolveRef(root, raw.$ref) : raw;
         if (!response) {
           gaps.push(`${key} — unresolvable $ref ${String(raw?.$ref)}`);
           continue;

@@ -894,9 +894,11 @@ describe("findUnboundedInjectedCredentials — write-path allowlist bound", () =
       "**://api.example.com/**",
       "https:///**",
       "https://*.com./**",
+      "https://@x:y@**/**",
+      "https://%2A%2A\\**",
     ];
     expect(paths({ type: "api_key", authorized_uris })).toEqual(
-      [1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => `auths.primary.authorized_uris.${i}`),
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => `auths.primary.authorized_uris.${i}`),
     );
   });
 

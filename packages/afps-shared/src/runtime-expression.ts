@@ -29,7 +29,7 @@ export function parseResponseExpression(expression: string): ResponseExpression 
 }
 
 /** Whether `expression` names response text a regex runs on: the whole body or one header. */
-export function isResponseTextExpression(expression: string): boolean {
+function isResponseTextExpression(expression: string): boolean {
   const parsed = parseResponseExpression(expression);
   return parsed?.kind === "header" || (parsed?.kind === "body" && parsed.pointer === undefined);
 }

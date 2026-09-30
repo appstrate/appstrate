@@ -10,8 +10,7 @@
  * sourcing — the platform layer (`apps/api/src/services/integration-connections.ts`)
  * loads the manifest, resolves the registered OAuth client, and feeds
  * us. The state never holds a client secret: the callback re-resolves the
- * client by `clientRef` through an injected {@link OAuthClientResolver}. Exposes an initiate (authorization URL) and a callback (token
- * exchange) function for the integration OAuth flow.
+ * client by `clientRef` through an injected {@link OAuthClientResolver}.
  *
  * Notable AFPS inputs:
  *   - `resource` (RFC 8707) is sent on both the authorize URL and the token

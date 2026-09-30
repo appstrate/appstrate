@@ -18,19 +18,16 @@ import type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
 import { hostLiterallyAllowlisted, matchesAuthorizedUriSpec } from "./http-call-core.ts";
 import { cookieScope, type CookieScope } from "./cookie-jar.ts";
 
-export type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
-
 /** Deadline of one upstream `api_call` exchange, body included, on every path. */
 export const API_CALL_TIMEOUT_MS = 30_000;
 
 /**
- * A redirect hop refused by the allowlist or the SSRF gate. The message names the hop's host
- * with credential values scrubbed — never the URL, which may carry capabilities (`?token=…`).
- * Callers map it to a policy refusal (403), distinct from a network fault.
+ * A redirect hop refused: off the allowlist, blocked by the SSRF gate, or with no DNS answer. The
+ * message names its host, credential values scrubbed, never the URL (`?token=…`).
  */
 export class RedirectBlockedError extends Error {
   constructor(
-    public readonly reason: "ssrf" | "unauthorized",
+    public readonly reason: "ssrf" | "unauthorized" | "unresolvable",
     redactedHost: string,
   ) {
     super(`Redirect blocked (${reason}): host=${redactedHost}`);
@@ -56,7 +53,6 @@ export interface ApiCallFailureClass {
   redirect: boolean;
   /** The refusal's message (hosts redacted); a transport error's own message. */
   message: string;
-  /** The transport error's `code` (`ECONNREFUSED`, …), when it has one. */
   code?: string;
 }
 
@@ -66,7 +62,7 @@ export function classifyApiCallFailure(err: unknown): ApiCallFailureClass {
     return { kind: err.reason, redirect: false, message: err.message };
   }
   if (err instanceof RedirectBlockedError) {
-    const kind = err.reason === "ssrf" ? "ssrf" : "not_authorized";
+    const kind = err.reason === "unauthorized" ? "not_authorized" : err.reason;
     return { kind, redirect: true, message: err.message };
   }
   const error = err instanceof Error ? err : new Error(String(err));
@@ -82,7 +78,7 @@ export function classifyApiCallFailure(err: unknown): ApiCallFailureClass {
 }
 
 /** Extract hostname for audit logs, never throwing. */
-export function redactHost(url: string): string {
+function redactHost(url: string): string {
   try {
     return new URL(url).hostname;
   } catch {
@@ -166,7 +162,7 @@ export interface FetchApiCallOptions {
   fetchFn?: typeof fetch;
   resolveHost?: HostResolver;
   /** Credential values scrubbed from the hosts a refusal or a log line names. */
-  credentialFields?: Readonly<Record<string, string>>;
+  credentialFields: Readonly<Record<string, string>>;
   logger?: ApiCallLogger;
 }
 
@@ -176,10 +172,9 @@ export interface FetchApiCallOptions {
  * `ReadableStream` body cannot be replayed, so its redirect is returned unfollowed.
  */
 export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFetchResult> {
-  const fields = opts.credentialFields ?? {};
+  const fields = opts.credentialFields;
   const { authorizedUris, declaredUris, allowAllUris } = opts;
   if (!URL.canParse(opts.url)) throw new PreflightError("ssrf", "Invalid target URL");
-  // An empty list matches nothing: without allow_all_uris, every target is refused.
   const gated = !allowAllUris;
   const inAllowlist = (url: URL) =>
     authorizedUris.some((p) => matchesAuthorizedUriSpec(p, url.href));
@@ -240,12 +235,13 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
         `Too many redirects (>${DEFAULT_MAX_REDIRECTS}) starting at ${redactCredentialHost(opts.url, fields)}`,
       );
     }
+    if (err.reason === "resolution-failed") {
+      if (err.hop > 0) throw new RedirectBlockedError("unresolvable", host);
+      throw new PreflightError("unresolvable", `Target host could not be resolved (${host})`);
+    }
     if (err.hop > 0) {
       warn("Redirect refused (SSRF)", err.hop, host);
       throw new RedirectBlockedError("ssrf", host);
-    }
-    if (err.reason === "resolution-failed") {
-      throw new PreflightError("unresolvable", `Target host could not be resolved (${host})`);
     }
     throw new PreflightError("ssrf", "URL targets a blocked network range");
   }

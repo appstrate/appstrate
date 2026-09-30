@@ -48,8 +48,6 @@ export const ENCRYPTED_COLUMNS: readonly EncryptedColumn[] = [
   },
 ];
 
-const KID = /^[A-Za-z0-9_-]{1,32}$/;
-
 export type Query = (text: string, params?: unknown[]) => Promise<Record<string, unknown>[]>;
 
 interface KidCount {
@@ -100,23 +98,24 @@ export async function rekeyRetiredKids(
   options: { retiredKids: readonly string[]; batchSize: number },
 ): Promise<RekeyResult> {
   const result: RekeyResult = { rekeyed: 0, skipped: 0, failed: [] };
-  const bad = options.retiredKids.find((kid) => !KID.test(kid));
-  if (bad !== undefined) throw new Error(`retired kid '${bad}' does not match ${KID.source}`);
-  if (options.retiredKids.length === 0) return result;
-  const kids = options.retiredKids.map((kid) => `'${kid}'`).join(", ");
+  const kids = options.retiredKids;
+  if (kids.length === 0) return result;
+  const kidParams = kids.map((_, i) => `$${i + 1}`).join(", ");
 
   for (const spec of ENCRYPTED_COLUMNS) {
     const keys = spec.key.map((k) => `"${k}"`).join(", ");
     let after: string[] | null = null;
     for (;;) {
-      const bound = after ? `AND (${keys}) > (${after.map((_, i) => `$${i + 1}`).join(", ")})` : "";
+      const bound = after
+        ? `AND (${keys}) > (${after.map((_, i) => `$${kids.length + i + 1}`).join(", ")})`
+        : "";
       const rows = await query(
         `SELECT ${spec.key.map((k) => `"${k}"::text AS "${k}"`).join(", ")}, "${spec.column}" AS blob
            FROM "${spec.table}"
           WHERE ${scope(spec)} AND "${spec.column}" LIKE 'v1:%'
-            AND split_part("${spec.column}", ':', 2) IN (${kids}) ${bound}
+            AND split_part("${spec.column}", ':', 2) IN (${kidParams}) ${bound}
           ORDER BY ${keys} LIMIT ${options.batchSize}`,
-        after ?? [],
+        [...kids, ...(after ?? [])],
       );
       for (const row of rows) {
         const id = spec.key.map((k) => String(row[k]));

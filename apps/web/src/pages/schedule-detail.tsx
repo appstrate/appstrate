@@ -79,7 +79,7 @@ export function ScheduleDetailPage() {
           ]}
           actions={
             <>
-              <LiveScheduleStatusBadge schedule={schedule} />
+              <ScheduleStatusBadge schedule={schedule} />
               {can("schedules:write") && !mayWrite && (
                 <DisabledReasonTooltip reason={t("schedule.memberGoverned")}>
                   <Button
@@ -167,16 +167,6 @@ export function ScheduleDetailPage() {
       />
     </div>
   );
-}
-
-// ─── Live Status Badge (reactive) ────────────────────────
-
-function LiveScheduleStatusBadge({
-  schedule,
-}: {
-  schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
-}) {
-  return <ScheduleStatusBadge schedule={schedule} />;
 }
 
 // ─── Params Tab ──────────────────────────────────────────

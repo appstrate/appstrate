@@ -6,11 +6,7 @@
 import { isHostUnboundedUriPattern } from "@appstrate/afps-shared/credential-template";
 import { referencesField } from "./template-vars.ts";
 
-/**
- * Why a call is refused before anything is sent: the declared allowlist does not render for this
- * connection, the call carries a credential the allowlist does not bound, or there is no
- * allowlist and no `allow_all_uris` (an empty authorized set authorizes nothing, AFPS §7.9).
- */
+/** Why a call is refused before anything is sent; {@link urlPolicyRefusalMessage} says it. */
 export type UrlPolicyRefusal = "unrendered" | "exfiltration" | "unauthorized";
 
 export interface CredentialUrlPolicy {
@@ -44,7 +40,6 @@ export function credentialUrlPolicy(input: {
   const allowAllUris = input.allowAllUris && !carriesCredential;
   const noAllowlist = input.authorizedUris.length === 0;
   let refuse: UrlPolicyRefusal | null = null;
-  // A declared list that renders to nothing here: its URL field is unset or not an absolute http(s) URL.
   if (!allowAllUris && noAllowlist && input.declaredUris.length > 0) refuse = "unrendered";
   else if (
     carriesCredential &&

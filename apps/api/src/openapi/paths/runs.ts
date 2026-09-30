@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { problemContent } from "../responses.ts";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
@@ -39,23 +40,19 @@ const runFileManifestEntry = {
   },
 } as const;
 
-const problem = {
-  "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-} as const;
-
 /** Refusals of the run-sink HMAC guard (`middleware/verify-run-signature.ts`), one per route behind it. */
 const runSinkUnauthorized = {
   description:
     "`missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance`",
-  content: problem,
+  content: problemContent,
 } as const;
 const runSinkNotFound = {
   description: "`not_found` — no run with this id.",
-  content: problem,
+  content: problemContent,
 } as const;
 const runSinkGone = {
   description: "`run_sink_closed` | `run_sink_expired`",
-  content: problem,
+  content: problemContent,
 } as const;
 
 const canonicalRunsPaths = {
@@ -1613,7 +1610,7 @@ const canonicalRunsPaths = {
         "401": runSinkUnauthorized,
         "404": {
           description: "`not_found` — no run with this id, or no workspace was provisioned for it.",
-          content: problem,
+          content: problemContent,
         },
         "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },
@@ -1654,12 +1651,12 @@ const canonicalRunsPaths = {
         },
         "400": {
           description: "`duplicate_file_name` — the stored manifest has colliding workspace names",
-          content: problem,
+          content: problemContent,
         },
         "401": runSinkUnauthorized,
         "404": {
           description: "`not_found` — no run with this id, or it carries no input files.",
-          content: problem,
+          content: problemContent,
         },
         "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },
@@ -1744,13 +1741,13 @@ const canonicalRunsPaths = {
         "400": {
           description:
             "X-File-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body",
-          content: problem,
+          content: problemContent,
         },
         "401": runSinkUnauthorized,
         "403": {
           description:
             "`storage_limit_exceeded` — the write would overrun the organization's storage limit.",
-          content: problem,
+          content: problemContent,
         },
         "404": runSinkNotFound,
         "409": {
@@ -1762,7 +1759,7 @@ const canonicalRunsPaths = {
             "the (run, sha256, name) dedup), each spending the org quota and the run's file " +
             "budget. The id is therefore single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`. " +
             "The runtime signs a fresh `webhook-id` on every attempt, so retries are unaffected.",
-          content: problem,
+          content: problemContent,
         },
         "410": runSinkGone,
         "413": {
@@ -1772,7 +1769,7 @@ const canonicalRunsPaths = {
             "mid-flight and any partial object deleted. Or `file_count_exceeded` — the run " +
             "already holds `RUN_MAX_FILES` files. Distinct codes so a client can tell " +
             '"one file too big" from "too many files".',
-          content: problem,
+          content: problemContent,
         },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
@@ -1805,7 +1802,7 @@ const canonicalRunsPaths = {
         "401": runSinkUnauthorized,
         "404": {
           description: "`not_found` — no run with this id, or no input file of that name.",
-          content: problem,
+          content: problemContent,
         },
         "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },

@@ -42,12 +42,12 @@ import {
   redactionFields,
   urlPolicyRefusalMessage,
   type CookieJar,
-  type HostResolver,
   type UrlPolicyRefusal,
 } from "@appstrate/afps-runtime/resolvers";
+import type { HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
-import type { ProxyProblemCode } from "../../lib/proxy-status.ts";
+import { upstreamFailureDetail, type ProxyProblemCode } from "../../lib/proxy-status.ts";
 import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
@@ -201,12 +201,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     resolved = result.payload;
     declaredUris = result.declaredUris;
     connectionId = result.connectionId;
-    // The refresh re-checks the run: one that finished since this read must not refresh.
-    refreshSelection = {
-      ...selection,
-      connectionId,
-      ...(input.run ? { run: input.run.reread() } : {}),
-    };
+    refreshSelection = { ...selection, connectionId };
   } catch (err) {
     if (err instanceof IntegrationCredentialNotFoundError) {
       throw new ProxyCallError("credential_not_found", err.message);
@@ -479,9 +474,15 @@ function toProxyCallError(err: unknown, integrationId: string, redactedHost: str
     case "unresolvable":
       return new ProxyCallError("upstream_unresolvable", failure.message);
     case "timeout":
-      return new ProxyCallError("upstream_timeout", `${redactedHost} did not answer in time`);
+      return new ProxyCallError(
+        "upstream_timeout",
+        upstreamFailureDetail(redactedHost, "upstream_timeout"),
+      );
     case "transport":
-      return new ProxyCallError("upstream_unreachable", `${redactedHost} could not be reached`);
+      return new ProxyCallError(
+        "upstream_unreachable",
+        upstreamFailureDetail(redactedHost, "upstream_unreachable"),
+      );
   }
 }
 

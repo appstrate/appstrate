@@ -53,7 +53,8 @@ import {
   allocateMcpToolNamespace,
   normaliseMcpToolNamespace,
 } from "@appstrate/afps-shared/mcp-naming";
-import { classifyApiCallFailure, fetchApiCall, type HostResolver } from "./api-call-engine.ts";
+import type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
+import { classifyApiCallFailure, fetchApiCall } from "./api-call-engine.ts";
 import { AuthorizedUrisError, ResolverError } from "../errors.ts";
 import {
   planHttpDeliveryInjection,

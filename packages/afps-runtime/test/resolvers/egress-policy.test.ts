@@ -115,6 +115,14 @@ describe("compileEgressPolicy — allowsAuthority", () => {
     }
   });
 
+  it("grants nothing through a malformed entry, at TCP or URL level", () => {
+    for (const pattern of ["https://@x:y@**/**", "https://%2A%2A\\**", "https://a.com@evil.test"]) {
+      const p = policy(pattern);
+      expect(p.allowsAuthority("evil.test", 443)).toBe(false);
+      expect(p.allowsUrl("https://evil.test/steal")).toBe(false);
+    }
+  });
+
   it("denies everything for an empty list", () => {
     expect(policy().allowsAuthority("api.github.com", 443)).toBe(false);
   });

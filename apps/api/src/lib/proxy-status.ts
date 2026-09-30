@@ -14,7 +14,7 @@ import { ApiError } from "./errors.ts";
 const PROXY_NAME = "appstrate";
 
 /** RFC 9209 §2.3 proxy error types the platform emits. */
-export type ProxyErrorType =
+type ProxyErrorType =
   | "http_request_denied"
   | "destination_ip_prohibited"
   | "dns_error"
@@ -27,13 +27,14 @@ export function relayedProxyStatus(receivedStatus: number): string {
   return `${PROXY_NAME}; received-status=${receivedStatus}`;
 }
 
-export function proxyErrorStatus(type: ProxyErrorType): string {
+function proxyErrorStatus(type: ProxyErrorType): string {
   return `${PROXY_NAME}; error=${type}`;
 }
 
 /**
- * Each problem a platform proxy answers itself: status, title, and the RFC 9209 §2.3 error type
- * when it is more precise than the one {@link proxyStatusMarker} appends for the status.
+ * Each problem a platform proxy answers itself: status, title, the RFC 9209 §2.3 error type
+ * when it is more precise than the one {@link proxyStatusMarker} appends for the status, and
+ * for an upstream failure the phrase that completes its detail.
  */
 const PROXY_PROBLEMS = {
   unauthorized_target: {
@@ -49,19 +50,38 @@ const PROXY_PROBLEMS = {
   },
   credential_not_found: { status: 404, title: "Credential Not Found" },
   unresolved_placeholder: { status: 400, title: "Unresolved Placeholder" },
-  upstream_unresolvable: { status: 502, title: "Upstream Unresolvable", proxyError: "dns_error" },
+  upstream_unresolvable: {
+    status: 502,
+    title: "Upstream Unresolvable",
+    proxyError: "dns_error",
+    failure: "could not be resolved",
+  },
   upstream_unreachable: {
     status: 502,
     title: "Upstream Unreachable",
     proxyError: "destination_unavailable",
+    failure: "could not be reached",
   },
-  upstream_timeout: { status: 504, title: "Upstream Timeout", proxyError: "http_response_timeout" },
-} as const satisfies Record<string, { status: number; title: string; proxyError?: ProxyErrorType }>;
+  upstream_timeout: {
+    status: 504,
+    title: "Upstream Timeout",
+    proxyError: "http_response_timeout",
+    failure: "did not answer in time",
+  },
+} as const satisfies Record<
+  string,
+  { status: number; title: string; proxyError?: ProxyErrorType; failure?: string }
+>;
 
 export type ProxyProblemCode = keyof typeof PROXY_PROBLEMS;
 
 /** A proxy's upstream that could not be resolved, reached, or did not answer in time. */
 export type UpstreamFailureCode = Extract<ProxyProblemCode, `upstream_${string}`>;
+
+/** `"<subject> could not be reached"` and the like: the detail of an upstream failure. */
+export function upstreamFailureDetail(subject: string, code: UpstreamFailureCode): string {
+  return `${subject} ${PROXY_PROBLEMS[code].failure}`;
+}
 
 /** The problem a proxy answers for `code`; `detail` never names a secret. */
 export function proxyProblem(code: ProxyProblemCode, detail: string): ApiError {

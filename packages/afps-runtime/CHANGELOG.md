@@ -10,21 +10,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed — one outbound engine for every api_call path (#1641)
 
 - **BREAKING:** `guardedFetch`, `fetchFollowingRedirectsCapturingCookies`,
-  `MAX_REDIRECTS`, `matchesAuthorizedUri`, `stripUserInfoAndFragment` and
-  `scrubTransportError` are no longer exported; `fetchApiCall` replaces the
-  first two. By default it pins every hop to its DNS-validated address. It
-  bounds the call with `API_CALL_TIMEOUT_MS` combined with the caller's
-  signal, keeps the credential across a redirect only to an origin the
-  allowlist names (never https→http), and refuses every target when there is
-  no allowlist and no `allow_all_uris`. `trustedHost` is optional: omitted,
-  the hosts the declared allowlist names literally skip the SSRF gate (none
-  under `allow_all_uris`).
-- New exports: `fetchApiCall`, `API_CALL_TIMEOUT_MS`, `PreflightError`
-  (reason `ssrf`, `not_authorized` or `unresolvable`), `HostResolver`, and
-  `classifyApiCallFailure` with `ApiCallFailureClass`: what `fetchApiCall`
-  threw, as `not_authorized`, `ssrf`, `unresolvable`, `timeout` or
-  `transport`, flagged when a redirect hop was refused.
-  `RedirectBlockedError` takes `(reason, redactedHost)`.
+  `MAX_REDIRECTS`, `matchesAuthorizedUri`, `stripUserInfoAndFragment`,
+  `scrubTransportError`, `redactHost` and `RedirectBlockedError` are no longer
+  exported; `fetchApiCall` replaces the first two. By default it pins every
+  hop to its DNS-validated address. It bounds the call with
+  `API_CALL_TIMEOUT_MS` combined with the caller's signal, keeps the
+  credential across a redirect only to an origin the allowlist names (never
+  https→http), and refuses every target when there is no allowlist and no
+  `allow_all_uris`. `trustedHost` is optional: omitted, the hosts the declared
+  allowlist names literally skip the SSRF gate (none under `allow_all_uris`).
+- New exports: `fetchApiCall` (`credentialFields` required: `{}` scrubs
+  nothing), `API_CALL_TIMEOUT_MS`, and `classifyApiCallFailure`: what
+  `fetchApiCall` threw, as `not_authorized`, `ssrf`, `unresolvable`,
+  `timeout` or `transport`, flagged when a redirect hop was refused. A target
+  or a redirect hop with no DNS answer is `unresolvable` (a 502 on both
+  proxies).
+  `PreflightError`, `ApiCallFailureClass` and `HostResolver` (import it from
+  `@appstrate/afps-shared/ssrf-dns`) are not exported.
+- **BREAKING:** `matchesAuthorizedUriSpec`, `compileEgressPolicy` and
+  `hostLiterallyAllowlisted` read each entry through
+  `parseAuthorizedUriPattern` (`@appstrate/afps-shared/credential-template`),
+  the parser the host-bound rule judges. A malformed entry (an authority that
+  is empty, not spelled as WHATWG serialises it, or holding `%`, `\`, `@`,
+  `?`, `#`, whitespace, a control or non-ASCII character) matches no URL,
+  grants no authority and pins no host.
 - **BREAKING:** a call that carries a credential — substituted or injected by
   the proxy — drops `allow_all_uris`, and `credentialUrlPolicy` refuses it
   when `authorized_uris` is empty or an entry leaves the host to the caller
@@ -102,11 +111,11 @@ the local resolver and the platform credential proxy:
   echoed host — `fields` when the call templates a credential, `{}` otherwise.
 - `redactCredentialHost(url, fields)`: the URL's host with credential values
   (compared lowercased) replaced by their `{{field}}` placeholder.
-- `fetchApiCall` takes an optional `credentialFields`, scrubbed from every
-  host its refusals and logs name; a transport error on a templated call
-  keeps only its message, every URL cut to its redacted host (Bun keeps the
-  full URL on `.path`). The "Too many redirects" error names the start URL's
-  host instead of the full URL.
+- `fetchApiCall` scrubs its `credentialFields` from every host its refusals
+  and logs name; a transport error on a templated call keeps only its
+  message, every URL cut to its redacted host (Bun keeps the full URL on
+  `.path`). The "Too many redirects" error names the start URL's host
+  instead of the full URL.
 
 ### Changed — local resolver
 

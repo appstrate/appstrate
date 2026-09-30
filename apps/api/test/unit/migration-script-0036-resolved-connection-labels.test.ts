@@ -4,8 +4,8 @@
  * `scripts/migration/0036-resolved-connection-labels.sql` on a private PGlite
  * replayed to the current schema: every legacy snapshot element ends with a
  * string `label` and `accountId` — the one shape `resolvedConnectionMapSchema`
- * reads back — a rerun is a no-op, and an element with nothing to take refuses
- * the whole batch.
+ * reads back — a rerun is a no-op, an element whose connection is gone and that
+ * names no account is still filled, and one without a `connectionId` refuses the batch.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -119,14 +119,28 @@ describe("0036 — resolved connection labels", () => {
     expect(await snapshot("run_0036_legacy")).toEqual(before);
   });
 
-  it("refuses the batch when an element has nothing to take", async () => {
+  it("names an element with a deleted connection and no account by its connectionId", async () => {
     await insertRun("run_0036_orphan", {
       [GMAIL]: [{ connectionId: GONE, source: "fallback_auto", label: null }],
     });
-    await expect(pg.exec(script)).rejects.toThrow(/0036: 1 snapshot element/);
-    await pg.exec("ROLLBACK");
+    await pg.exec(script);
     expect(await snapshot("run_0036_orphan")).toEqual({
-      [GMAIL]: [{ connectionId: GONE, source: "fallback_auto", label: null }],
+      [GMAIL]: [{ connectionId: GONE, source: "fallback_auto", label: GONE, accountId: "" }],
+    });
+    resolvedConnectionMapSchema.parse(await snapshot("run_0036_orphan"));
+  });
+
+  it("refuses the batch when an element carries no connectionId", async () => {
+    const corrupt = { [GMAIL]: [{ source: "fallback_auto", label: null }] };
+    await insertRun("run_0036_no_id", corrupt);
+    await insertRun("run_0036_pending", {
+      [GMAIL]: [{ connectionId: LIVE, source: "member_pin", label: null }],
+    });
+    await expect(pg.exec(script)).rejects.toThrow(/0036: 1 snapshot element\(s\) carry no string/);
+    await pg.exec("ROLLBACK");
+    expect(await snapshot("run_0036_no_id")).toEqual(corrupt);
+    expect(await snapshot("run_0036_pending")).toEqual({
+      [GMAIL]: [{ connectionId: LIVE, source: "member_pin", label: null }],
     });
   });
 });

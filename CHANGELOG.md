@@ -41,7 +41,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   remains (#1641).
 - **Run `scripts/migration/0036-resolved-connection-labels.sql` after `0032`,
   before the new image serves traffic**: run snapshots written before #1611
-  can hold `label: null`, and the snapshot is now parsed on read (#1641).
+  can hold `label: null`, and the snapshot is now parsed on read (#1641). A
+  missing label or account takes its connection's; when that connection is
+  deleted, the label falls back to the element's `accountId`, else its
+  `connectionId`, and the account to `''`. It writes nothing while an element
+  lacks a string `connectionId` or names no cascade layer in `source`.
 
 ### Changed
 
@@ -51,8 +55,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (403), `credential_not_found` (404), `unresolved_placeholder` (400). LLM
   proxy: a model whose upstream resolves into a blocked range is
   `403 blocked_target` (was `400 invalid_request`). Both: an upstream that
-  cannot be resolved or reached is a 502 (`upstream_unresolvable`,
-  `upstream_unreachable`), a timeout a 504 (`upstream_timeout`); was a 500.
+  cannot be resolved or reached (on the credential proxy, the target or a
+  redirect hop) is a 502 (`upstream_unresolvable`, `upstream_unreachable`), a
+  timeout a 504 (`upstream_timeout`); was a 500.
 - **The credential and LLM proxies mark every response with RFC 9209
   `Proxy-Status`** (#1641): `appstrate; received-status=<n>` on a relayed
   upstream response, `appstrate; error=<type>` on the proxy's own. A relayed
@@ -71,7 +76,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   redirects under one rule: an origin the `authorized_uris` allowlist names
   keeps the credential (Dropbox `api.` to `content.`), any other origin change
   strips it, and an https→http hop never carries it. Every hop is SSRF-checked
-  and connected to its DNS-validated address; one 30 s deadline bounds every
+  and connected to its DNS-validated address, except a trusted host: on the
+  sidecar and `appstrate run`, one the manifest's `authorized_uris` names
+  literally (by design); on the platform proxy, one
+  `EGRESS_ALLOW_INTERNAL_HOSTS` lists. One 30 s deadline bounds every
   call (`appstrate run` had none), and the sidecar answers a timeout 504 like
   the platform proxy (was 502). A streaming upload's redirect is returned
   unfollowed.
@@ -210,10 +218,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   hosts** (#1641). Manifest writes and imports refuse, on such an auth,
   `allow_all_uris`, no `authorized_uris`, or an entry that leaves the host to
   the caller; the platform proxy, the sidecar, its MITM egress and
-  `appstrate run` refuse the same calls. An entry names its host only with a
-  literal scheme, a non-empty host and no wildcard in its last two labels
-  (not `https://**`, `https://*.com./**`, `https:///**`, `**://…`); a public
-  suffix (`https://*.co.uk/**`) is not detected. List the hosts instead.
+  `appstrate run` refuse the same calls. One parser
+  (`parseAuthorizedUriPattern`) reads an entry for this rule, the URL matcher,
+  the runner egress policy and the literal-host pin that skips the SSRF gate.
+  An entry is malformed when its authority (after `scheme://`, up to the
+  first `/`) is empty, is not spelled as WHATWG serialises it (only case and
+  a default port may differ), or holds `%`, `\`, `@`, `?`, `#`, whitespace, a
+  control or non-ASCII character (`https://%2A%2A\**`, `https://@x:y@**/**`):
+  it matches, grants and pins nothing, and counts as leaving the host to the
+  caller. Otherwise an entry names its host only with a literal scheme, a
+  non-empty host and no wildcard in its last two labels (not `https://**`,
+  `https://*.com./**`, `https://[::**/**`, `**://…`); a public suffix
+  (`https://*.co.uk/**`) is not detected. List the hosts instead.
 - **An `authorized_uris` scheme glob matches scheme characters only**
   (#1641): `**://api.example.com/**` no longer matches a URL on another host
   whose query holds `://api.example.com/`.

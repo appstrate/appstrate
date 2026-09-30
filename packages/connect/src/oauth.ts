@@ -24,7 +24,7 @@ import { type TokenErrorKind } from "./token-utils.ts";
  *   longer resolves (deleted, out of reach, undecryptable), so no exchange was
  *   attempted. Retrying cannot help until an admin restores or re-registers it.
  */
-export type OAuthCallbackErrorKind = TokenErrorKind | "client_unavailable";
+type OAuthCallbackErrorKind = TokenErrorKind | "client_unavailable";
 
 export class OAuthCallbackError extends Error {
   constructor(

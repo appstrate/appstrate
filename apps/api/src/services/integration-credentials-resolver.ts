@@ -79,8 +79,9 @@ interface ResolveLiveCredentialsOptions {
  *   - 410: the credential is dead and the connection has been flagged
  *     `needsReconnection` — refresh token revoked upstream, an unrefreshable
  *     auth whose forced refreshes reached the failure threshold, or stored
- *     credentials that cannot be decrypted. The sidecar propagates it as a 401 to the integration so the
- *     LLM sees a clean "please re-connect" surface, and stops retrying.
+ *     credentials that cannot be decrypted. The sidecar propagates it as a
+ *     401 to the integration so the LLM sees a clean "please re-connect"
+ *     surface, and stops retrying.
  *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc), or
  *     an unrefreshable auth rejected fewer times than the failure threshold
  *     within one window.
@@ -88,7 +89,6 @@ interface ResolveLiveCredentialsOptions {
  *     retry-later and the listener's `refreshOnUnauthorized` cooldown
  *     keeps a flapping upstream from hammering this endpoint.
  */
-
 export async function resolveLiveIntegrationCredentials(
   integrationId: string,
   context: {

@@ -99,12 +99,7 @@ export {
   API_CALL_TIMEOUT_MS,
   classifyApiCallFailure,
   fetchApiCall,
-  redactHost,
   redactCredentialHost,
-  PreflightError,
-  RedirectBlockedError,
-  type ApiCallFailureClass,
-  type HostResolver,
 } from "./api-call-engine.ts";
 
 // Sticky-cookie jar shared by both credential proxies and the redirect follower.

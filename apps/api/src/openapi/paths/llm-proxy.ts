@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { problemContent } from "../responses.ts";
 import {
   LLM_PROXY_MOUNT,
   RUN_LLM_PROXY_MOUNT,
@@ -50,10 +51,6 @@ const baseParameters = [
   // separate, content-addressed response cache these routes *do* have.
 ] as const;
 
-const problem = {
-  "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-} as const;
-
 /** A 401 is the caller's credential refused, or the provider's refusal relayed. */
 const unauthorized = {
   description:
@@ -64,7 +61,7 @@ const unauthorized = {
     ...PROXY_STATUS_HEADER,
     "WWW-Authenticate": { $ref: "#/components/headers/WWWAuthenticate" },
   },
-  content: { ...problem, "application/json": { schema: { type: "object" } } },
+  content: { ...problemContent, "application/json": { schema: { type: "object" } } },
 } as const;
 
 const baseResponses = {
@@ -108,7 +105,7 @@ const baseResponses = {
       "called without a valid `X-Run-Id` or the first-party chat loopback while a metering " +
       "module is loaded.",
     headers: PROXY_STATUS_HEADER,
-    content: problem,
+    content: problemContent,
   },
   "401": unauthorized,
   "402": {
@@ -116,7 +113,7 @@ const baseResponses = {
       "A metering module's `beforeUsage` hook refused the call for payment (e.g. credits " +
       "exhausted); `code` is the module's. RFC 9457 problem+json.",
     headers: PROXY_STATUS_HEADER,
-    content: problem,
+    content: problemContent,
   },
   "403": {
     description:
@@ -127,21 +124,21 @@ const baseResponses = {
       "model's upstream resolves into a blocked network range (`Proxy-Status` error " +
       "`destination_ip_prohibited`).",
     headers: PROXY_STATUS_HEADER,
-    content: problem,
+    content: problemContent,
   },
   "409": {
     description:
       "`org_deleting` — the organization's deletion is reserved, so no new " +
       "metered usage is admitted. RFC 9457 problem+json.",
     headers: PROXY_STATUS_HEADER,
-    content: problem,
+    content: problemContent,
   },
   "413": {
     description:
       "Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced " +
       "by the body-limit middleware).",
     headers: PROXY_STATUS_HEADER,
-    content: problem,
+    content: problemContent,
   },
   "429": { $ref: "#/components/responses/RateLimited" },
   "500": { $ref: "#/components/responses/InternalServerError" },
@@ -151,7 +148,7 @@ const baseResponses = {
       "error `dns_error`); `upstream_unreachable` — the connection to it failed " +
       "(`destination_unavailable`). Names neither the host nor the cause. No usage recorded.",
     headers: PROXY_STATUS_HEADER,
-    content: problem,
+    content: problemContent,
   },
   "504": {
     description:
@@ -159,7 +156,7 @@ const baseResponses = {
       "`LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min " +
       "otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded.",
     headers: PROXY_STATUS_HEADER,
-    content: problem,
+    content: problemContent,
   },
   default: {
     description:
@@ -430,7 +427,7 @@ export const runLlmProxyPaths = Object.fromEntries(
               "Validation error — malformed or empty body, a field the proxy cannot " +
               "meter, or the run's model is not served by this endpoint.",
             headers: PROXY_STATUS_HEADER,
-            content: problem,
+            content: problemContent,
           },
           "401": unauthorized,
           "403": {
@@ -438,14 +435,14 @@ export const runLlmProxyPaths = Object.fromEntries(
               "The run is not running, is remote-origin, or its model is not a " +
               "platform-provided model pinned at launch.",
             headers: PROXY_STATUS_HEADER,
-            content: problem,
+            content: problemContent,
           },
           "404": { $ref: "#/components/responses/NotFound" },
           "409": baseResponses["409"],
           "413": {
             description: "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`.",
             headers: PROXY_STATUS_HEADER,
-            content: problem,
+            content: problemContent,
           },
           "429": { $ref: "#/components/responses/RateLimited" },
           "500": baseResponses["500"],

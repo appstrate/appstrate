@@ -210,6 +210,15 @@ describe("rekey-encrypted-columns", () => {
     expect(await column("org_proxies", "url_encrypted", "true")).toBe(current);
   });
 
+  it("binds the retired kids: one carrying SQL matches nothing", async () => {
+    const retiredKids = ["x') OR true --"];
+    expect(await rekeyRetiredKids(query, { retiredKids, batchSize: 10 })).toEqual({
+      rekeyed: 0,
+      skipped: 0,
+      failed: [],
+    });
+  });
+
   it("reports a ciphertext the retired key cannot open, and moves on", async () => {
     await pg.query("UPDATE org_proxies SET url_encrypted = $1", [
       `v1:k1:${randomBytes(40).toString("base64")}`,
