@@ -1,17 +1,11 @@
 -- 0036 — give every run's connection snapshot its label and account (#1641).
 --
--- `resolvedConnectionMapSchema` (`@appstrate/core/integration`) requires a
--- string `label` and `accountId` on every bound connection of
--- `runs.resolved_connections`; a run resolved before `0077` may carry
--- `label: null`, and its detail and the runs list would 500. Each such element
--- takes the connection's current label (else its own `accountId`) and, when it
--- lacks one, the connection's `accountId`; one still lacking either raises and
--- nothing is written.
---
--- Order: after `0032`, before the image that parses the snapshot serves
--- traffic. Rows: UNMEASURED — rehearse with `0032` and record the counts here.
--- Idempotent (the WHERE is exactly "label or accountId not a string"); one
--- transaction.
+-- `resolvedConnectionMapSchema` requires a string `label` and `accountId` on every
+-- element of `runs.resolved_connections`; a pre-`0077` run may carry `label: null`, and
+-- its reads 500. A missing label takes the connection's current one (else the element's
+-- `accountId`), a missing `accountId` the connection's; an element still lacking either
+-- raises and nothing is written. Order: `scripts/migration/README.md`.
+-- Rows: UNMEASURED — record the rehearsal counts here. Idempotent; one transaction.
 
 BEGIN;
 SET LOCAL lock_timeout = '3s';

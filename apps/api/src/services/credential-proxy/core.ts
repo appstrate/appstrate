@@ -14,11 +14,8 @@
  * machinery behind the sidecar's `/internal/integration-credentials/*`
  * surface) via {@link resolveIntegrationProxyCredentials}.
  *
- * The in-container sidecar (`runtime-pi/sidecar/credential-proxy.ts`) and the
- * CLI's local resolver source their credentials elsewhere; all three send the
- * call through `fetchApiCall` (`@appstrate/afps-runtime`), so the allowlist +
- * SSRF gate, the credential rule across redirects, the pinned transport and
- * the deadline are one implementation.
+ * The sidecar and the CLI resolver source their credentials elsewhere; all three
+ * send the call through `fetchApiCall` (`@appstrate/afps-runtime`).
  *
  * The module deliberately does NOT implement rate-limiting, authz, or
  * audit logging — those are the caller's responsibility. This function
@@ -141,7 +138,6 @@ interface ProxyCallInput {
 
   /** Transport override (tests): keeps every per-hop guard, disables the address pin. */
   fetch?: typeof fetch;
-  /** DNS resolver of the SSRF gate (tests). */
   resolveHost?: HostResolver;
 }
 
@@ -268,9 +264,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // credential header server-side (mirror of the sidecar — single source
   // of truth in `@appstrate/connect/proxy-primitives`).
   //
-  // Every header whose value carries a decrypted credential, collected AT INJECTION TIME: the
-  // injected header can be any vendor name and a caller template can put a `{{field}}` in any
-  // header. A redirect leaving the allowlist strips them like `Authorization`.
+  // Every header carrying a decrypted credential (any vendor name, or a caller `{{field}}`),
+  // collected at injection time: a redirect leaving the allowlist strips them.
   const sensitiveHeaderNames = new Set<string>();
   const headers = new Headers();
   for (const [k, template] of headerTemplates) {

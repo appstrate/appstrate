@@ -15,14 +15,12 @@
  *
  * The reusable HTTP core lives in {@link makeApiCallTool} / {@link ApiCallFn}
  * (body streaming, `authorized_uris` matching, response serialisation), and
- * the outbound half is `fetchApiCall` (`./api-call-engine.ts`), shared with
- * the platform credential proxy and the sidecar. This module is
+ * the outbound half is `fetchApiCall` (`./api-call-engine.ts`). This module is
  * credential-source-specific:
  *
  *   - {@link LocalIntegrationResolver} reads a JSON creds file keyed by
- *     integration id, injects the credential header itself, then sends the
- *     call through `fetchApiCall` (offline / air-gapped dev — no refresh, no
- *     rotation).
+ *     integration id and injects the credential header itself (offline /
+ *     air-gapped dev — no refresh, no rotation).
  *   - {@link RemoteAppstrateIntegrationResolver} forwards every call through
  *     a pinned Appstrate instance's `/api/credential-proxy/proxy` route, with
  *     the integration id as the `X-Integration-Id` scope marker. Credentials never

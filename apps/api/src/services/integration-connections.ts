@@ -2538,11 +2538,6 @@ type RefreshFailureGate =
  * of an unrefreshable credential. Increment and escalation are one statement,
  * so concurrent failures cannot lose a count; `needsReconnection` is OR'd,
  * never cleared, and a credential write resets the count.
- *
- * A refresh failure escalates at `maxFailures` once the token expired more than
- * `graceSeconds` ago, so an outage on a valid token never bricks the connection.
- * A rejection escalates at `maxFailures` rejections within one window
- * ({@link countUpstreamRejection}).
  */
 export async function recordIntegrationRefreshFailure(
   connectionId: string,

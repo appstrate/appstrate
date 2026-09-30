@@ -3,9 +3,8 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 /**
- * A tool's JSON answer: `structuredContent`, plus the same JSON as a text block
- * for clients that ignore structured output (MCP 2025-06-18). An error carries
- * the text only.
+ * A tool's JSON answer: `structuredContent` plus the same JSON as text (MCP 2025-06-18);
+ * an error carries the text only.
  */
 export function jsonResult(payload: Record<string, unknown>, isError = false): CallToolResult {
   const content = [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }];

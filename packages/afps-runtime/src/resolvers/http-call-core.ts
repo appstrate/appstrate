@@ -18,10 +18,7 @@
  * ({@link makeApiCallTool} calls `enforceAuthorizedUris` before dispatch),
  * and response serialisation ({@link serializeFetchResponse}).
  *
- * The OUTBOUND half of an api_call (allowlist + SSRF gate per hop, pinned
- * transport, credential rule across redirects, cookie capture, deadline) is
- * `fetchApiCall` in the sibling `./api-call-engine.ts`, shared by the platform
- * credential proxy, the sidecar and `integration-api-call.ts`'s local resolver.
+ * The OUTBOUND half of an api_call is `fetchApiCall` (`./api-call-engine.ts`).
  *
  * Specification: `afps-spec/spec.md` §8.2, §8.4 — file-reference IO.
  */

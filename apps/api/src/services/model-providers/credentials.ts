@@ -683,11 +683,9 @@ export async function recordModelCredentialRefreshFailure(
 }
 
 /**
- * Count an upstream 401 on an api-key credential: the
- * `INTEGRATION_REFRESH_MAX_FAILURES`-th within one rejection window flags it
- * `needsReconnection`, as `recordIntegrationRefreshFailure` does for an
- * unrefreshable integration credential. Rotating the key clears both. An OAuth
- * credential is left alone: its counter is its transient-refresh streak.
+ * Count an upstream 401 on an api-key credential: the `INTEGRATION_REFRESH_MAX_FAILURES`-th
+ * within one rejection window flags it `needsReconnection`. OAuth credentials are left alone
+ * (their counter is the transient-refresh streak).
  */
 export async function recordModelCredentialRejection(orgId: string, id: string): Promise<void> {
   const loaded = await loadCredentialRow(id, orgId);
@@ -808,9 +806,7 @@ export async function listOrgModelProviderCredentials(
         authMode: cfg?.authMode ?? "api_key",
         providerId: r.providerId,
         oauth_email: isOauth ? (blob.email ?? null) : null,
-        // Dead for inference: a blob flagged (a revoked OAuth grant, an API key
-        // rejected upstream) or one that no longer decrypts. The model list
-        // badges its rows on the same cases and points the user at THIS tab.
+        // Flagged or undecryptable: the model list badges the same cases and points here.
         needs_reconnection: blob === null || !!blob.needsReconnection,
         created_by: r.createdBy,
         createdAt: toISORequired(r.createdAt),

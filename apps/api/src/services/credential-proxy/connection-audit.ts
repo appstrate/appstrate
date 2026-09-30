@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Audit of the credential proxy's use of a connection. One row per X-Session-Id and connection,
- * and only for a connection the caller does not own (a colleague's shared connection, an org
- * default): the owner driving their own credential is not an access to be traced, and a session
- * (one CLI run, one CI job) is the unit its owner reviews — a row per call would bury it.
+ * Audit of the credential proxy's use of a connection the caller does not own: one row per
+ * X-Session-Id and connection (a session is the unit its owner reviews, not a call).
  */
 
 import type { Context } from "hono";

@@ -249,10 +249,7 @@ export const upsertMemberPinSchema = z
   })
   .strict();
 
-/**
- * Path-addressed like the admin pins: two package ids, each `@scope/name`, with a
- * static segment between them — the trie router cannot split two adjacent ones.
- */
+/** Two `@scope/name` ids need a static segment between them: the trie router cannot split them. */
 const MEMBER_PIN_ROUTE =
   "/integration-pins/:agentPackageId{@[^/]+/[^/]+}/integrations/:integrationPackageId{@[^/]+/[^/]+}";
 
@@ -280,10 +277,7 @@ router.get(
       return c.json(listResponse([]));
     }
     const agentPackageId = c.req.query("agent_package_id");
-    // An omitted parameter is an empty list, not a 400 — the picker renders
-    // before it has an agent to ask about, exactly as it does for an end-user
-    // above. The spec is what was wrong here: it marked the parameter
-    // `required` and documented a 400 this route has never raised.
+    // Omitted = an empty list, not a 400: the picker renders before it has an agent.
     if (!agentPackageId) return c.json(listResponse([]));
     const scope = getSpaceScope(c);
     const pins = await listMemberPinsForAgent(scope, agentPackageId, user.id);

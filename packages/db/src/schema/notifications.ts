@@ -86,8 +86,7 @@ export const notifications = pgTable(
     // cleanup is explicit at the deletion sites.
     recipientType: text("recipient_type").notNull().$type<"user" | "end_user">(),
     recipientId: text("recipient_id").notNull(),
-    // Notification kind: text + CHECK, not a pgEnum, so a kind is added
-    // without an ALTER TYPE (same posture as `recipientType`).
+    // text + CHECK, not a pgEnum: a kind is added without an ALTER TYPE.
     type: text("type").notNull().$type<NotificationType>(),
     // Originating entity (the run, for "run_completed"). Null for types
     // that have no run. `runs.id` is a text (`run_`-prefixed) id, so this

@@ -3,16 +3,10 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
-/**
- * Upstream rejections of a credential nothing can refresh (an integration's unrefreshable auth,
- * an org's model API key) count toward reconnection within this window of the first one.
- */
+/** Rejections of an unrefreshable credential count toward reconnection within this window. */
 const UPSTREAM_REJECTION_WINDOW_SECONDS = 60 * 60;
 
-/**
- * The SET expressions counting one rejection: inside the window the count grows, after it the
- * rejection restarts the count and the window, so isolated rejections never add up.
- */
+/** SET expressions counting one rejection; one past the window restarts count and window. */
 export function countUpstreamRejection(
   count: AnyPgColumn,
   since: AnyPgColumn,

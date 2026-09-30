@@ -1500,9 +1500,8 @@ export interface ResolvedConnection {
 export type ResolvedConnectionMap = Record<string, ResolvedConnection[]>;
 
 /**
- * The persisted snapshot's one shape, parsed wherever `runs.resolved_connections`
- * is read back: a jsonb column is typed by assertion only, so a row that drifted
- * from {@link ResolvedConnectionMap} fails here, loudly, not in a caller.
+ * Parsed wherever `runs.resolved_connections` is read back: a jsonb `$type` is only
+ * an assertion, so a drifted row fails here, loudly, not in a caller.
  */
 export const resolvedConnectionMapSchema: z.ZodType<ResolvedConnectionMap> = z.record(
   z.string(),

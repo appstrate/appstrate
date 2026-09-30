@@ -67,12 +67,8 @@ export const llmUsageSourceValues = ["proxy", "runner"] as const;
 export const llmUsageSourceEnum = pgEnum("llm_usage_source", llmUsageSourceValues);
 
 /**
- * Which credential set reaches the upstream provider — `system` for
- * platform-provided model credentials, `org` for the organization's own key
- * or subscription. Types `llm_usage.credential_source` (nullable: historical
- * rows may predate it; every new row is stamped) and `runs.model_source`.
- * Attribution only: the OSS platform records who paid the provider, never how
- * that maps to any downstream accounting.
+ * Whose credential reaches the upstream provider — `system` (platform-provided)
+ * or `org` (the organization's own key or subscription). Attribution only.
  */
 export const credentialSourceValues = ["system", "org"] as const;
 export const credentialSourceEnum = pgEnum("credential_source", credentialSourceValues);
@@ -97,11 +93,8 @@ export const inferenceRouteEnum = pgEnum("inference_route", inferenceRouteValues
 export type InferenceRoute = (typeof inferenceRouteValues)[number];
 
 /**
- * Why a `package_schedules` row is disabled — NULL exactly while it is enabled
- * (`package_schedules_disabled_reason_matches`). `user` is a person's pause;
- * every other value names the system act that switched it off: the fire-time
- * actor check failed, the actor left the organization, or a connection its
- * `connection_overrides` named was deleted.
+ * Why a `package_schedules` row is disabled — NULL exactly while it is enabled.
+ * `user` is a person's pause; every other value names the system act.
  */
 export const scheduleDisabledReasonValues = [
   "user",

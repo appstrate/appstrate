@@ -2235,24 +2235,15 @@ if (schemaGaps.length === 0 && staleResponseSchema.length === 0) {
 // ═══════════════════════════════════════════════════
 // 6b. Error Response Bodies
 // ═══════════════════════════════════════════════════
-//
-// Every 4xx/5xx/`default` response declares `application/problem+json` →
-// `ProblemDetail` (inline, or through a shared `#/components/responses/*`): the
-// body every `ApiError` produces. Without this a refusal documented by a bare
-// `description` passed every other step. The rule lives in
-// scripts/lib/openapi-error-responses.ts.
+// Rule: scripts/lib/openapi-error-responses.ts.
 
 console.log(`\n  6b. Error Response Bodies`);
 console.log(`  --------------------------`);
 
-// Error responses the platform's `ApiError` does not author, keyed "VERB /path"
-// (every error status of the operation) or "VERB /path STATUS", valued with the
-// media type they declare instead.
+// Error responses the platform's `ApiError` does not author (key format: `ErrorBodyExemptions`).
 const NON_PROBLEM_ERROR_BODIES: ErrorBodyExemptions = {
-  // Better Auth's handler (`/api/auth/*`, lib/auth-pipeline.ts) answers these: the
-  // OAuth 2.1 / OIDC / RFC 8628 device endpoints and the CLI plugin return the
-  // RFC 6749 §5.2 `{ error, error_description }` JSON their clients parse — the
-  // 429 `oauthRateLimitResponse` restates in that shape included.
+  // Better Auth's OAuth / OIDC / device / CLI endpoints: RFC 6749 §5.2
+  // `{ error, error_description }`, `oauthRateLimitResponse`'s 429 included.
   "GET /api/auth/oauth2/authorize": "application/json",
   "POST /api/auth/oauth2/token": "application/json",
   "GET /api/auth/oauth2/userinfo": "application/json",
@@ -2274,8 +2265,7 @@ const NON_PROBLEM_ERROR_BODIES: ErrorBodyExemptions = {
   "GET /api/integrations/connect/start": "text/html",
   // The health report: the 503 is the 200's document with `status: unhealthy`.
   "GET /health 503": "application/json",
-  // An upstream response the proxies relay verbatim, at the upstream's status, with
-  // the upstream's body and media type. The proxies' own refusals stay ProblemDetail.
+  // Upstream responses the proxies relay verbatim; their own refusals stay ProblemDetail.
   ...Object.fromEntries(
     ["GET", "POST", "PUT", "PATCH", "DELETE"].map((verb) => [
       `${verb} /api/credential-proxy/proxy default`,

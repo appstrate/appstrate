@@ -25,12 +25,9 @@
  *   - Session binding keyed on a namespaced principal id (`apikey:<id>`
  *     or `user:<id>`) — cookie jars can never be shared between a bearer
  *     JWT and an API key, nor between two API keys of the same org.
- *   - Log line on every call (requestId, authMethod, apiKeyId, userId,
- *     endUserId, integrationId, connectionId, target, status); an audit row
- *     on the first use per session of a connection the caller does not own
- *     (`services/credential-proxy/connection-audit.ts`)
- *   - RFC 9209 `Proxy-Status` on every response: `received-status` on a
- *     relayed upstream response, `error` on the proxy's own
+ *   - Log line on every call; an audit row on the first use per session of a
+ *     connection the caller does not own (`credential-proxy/connection-audit.ts`)
+ *   - RFC 9209 `Proxy-Status` on every response (`lib/proxy-status.ts`)
  *   - URL allowlist enforced via the integration manifest
  *     (`authorized_uris`; `allow_all_uris` unless a credential is templated)
  *   - Upstream `Set-Cookie` never relayed to the caller

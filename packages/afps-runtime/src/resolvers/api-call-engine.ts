@@ -2,24 +2,10 @@
 // Copyright 2026 Appstrate
 
 /**
- * The outbound half of every `api_call` path — the platform credential proxy
- * (`apps/api/src/services/credential-proxy/core.ts`), the sidecar
- * (`runtime-pi/sidecar/credential-proxy.ts`) and the standalone CLI's
- * `LocalIntegrationResolver` (`./integration-api-call.ts`). {@link fetchApiCall}
- * is the one implementation of:
- *
- *   - the `authorized_uris` gate, on the initial target AND every redirect hop;
- *   - the SSRF gate (literal blocklist + DNS rebind), per hop, with the
- *     connection pinned to the validated address (`guardedFetchChain`);
- *   - the credential rule across a redirect: an origin the allowlist names
- *     keeps the credential (Dropbox `api.` ⇄ `content.`), any other origin
- *     change strips it (headers, Cookie, body);
- *   - per-hop cookie capture into the caller's scope (#473);
- *   - the {@link API_CALL_TIMEOUT_MS} deadline, combined with the caller's signal.
- *
- * What stays per path: where the credential comes from (DB, platform fetch,
- * creds file), substitution + injection, the 401 retry, and how the response
- * is served.
+ * The outbound half of every `api_call` path (platform proxy, sidecar, CLI):
+ * allowlist + SSRF gate on every hop with the connection pinned, credentials
+ * kept only across allowlisted origins, per-hop cookie capture, one deadline.
+ * Credential sourcing, injection, the 401 retry and serving stay per path.
  */
 
 import {
@@ -154,7 +140,6 @@ interface ApiCallLogger {
 }
 
 export interface FetchApiCallOptions {
-  /** The substituted target. */
   url: string;
   /** Method, headers (credential already injected), body, and optionally the caller's signal. */
   init: RequestInit;
@@ -173,7 +158,6 @@ export interface FetchApiCallOptions {
   integrationId: string;
   /** Transport override (tests): disables the address pin. Omitted = pinned global `fetch`. */
   fetchFn?: typeof fetch;
-  /** DNS resolver for the SSRF gate (tests). */
   resolveHost?: HostResolver;
   /** Credential values scrubbed from the hosts a refusal or a log line names. */
   credentialFields?: Readonly<Record<string, string>>;

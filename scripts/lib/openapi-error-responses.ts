@@ -1,16 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared helper: the error-body rule of `scripts/verify-openapi.ts` (§6b).
- *
- * Lives here rather than inline in the gate so a failing document is reachable
- * from a test (`scripts/test/openapi-error-responses.test.ts`), like §2's helper.
- *
- * Every 4xx/5xx/`default` response must declare `application/problem+json`
- * whose schema is `ProblemDetail` — directly, or as an `allOf` member when the
- * refusal adds fields — once any `$ref` to a shared response is resolved. A
- * response may declare further media types beside it (a proxy's relayed body).
- * An exempted response must instead declare the media type its exemption names.
+ * The error-body rule of `scripts/verify-openapi.ts` §6b (here so a test reaches it):
+ * every 4xx/5xx/`default` response declares `application/problem+json` → `ProblemDetail`
+ * (directly or as an `allOf` member, `$ref`s resolved), further media types allowed; an
+ * exempted response declares its exemption's media type instead.
  */
 
 const PROBLEM_MEDIA_TYPE = "application/problem+json";

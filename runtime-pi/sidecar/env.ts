@@ -3,9 +3,7 @@
 /**
  * Validated env contract for the sidecar: the base block every orchestrator
  * writes through `buildBaseSidecarEnv`, plus the run values `sidecar-env.ts`
- * serialises. A missing or malformed value is a launcher bug, so it fails at
- * boot rather than on the first platform call — or, for a JSON value, instead
- * of silently dropping the tools or the schema it carries.
+ * serialises. A missing or malformed value is a launcher bug: it fails at boot.
  */
 
 import { normalizeHttpUrl } from "@appstrate/core/url";

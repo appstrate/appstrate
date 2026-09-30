@@ -110,10 +110,8 @@ export function assertDependencyOverrideKeysDeclared(
 }
 
 /**
- * The same refusal for a `connection_overrides` KEY: the resolver reads only
- * the integrations the manifest declares, so an undeclared key was dropped and
- * the run bound a lower cascade layer instead of the account it was asked for.
- * Judged against the EFFECTIVE manifest, for the reason stated above.
+ * The same refusal for a `connection_overrides` KEY the EFFECTIVE manifest does not
+ * declare: the resolver would drop it and bind a lower cascade layer instead.
  */
 export function assertConnectionOverrideKeysDeclared(
   manifest: Record<string, unknown>,

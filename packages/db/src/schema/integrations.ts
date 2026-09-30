@@ -102,10 +102,7 @@ export const integrationConnections = pgTable(
     // `refresh_failures_since`. Reset to 0 on any successful credential write
     // (`persistCredentialBundle`).
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
-    // Start of the window in which upstream rejections of an unrefreshable
-    // credential count toward the reconnect threshold; read by the escalation
-    // predicate of `recordIntegrationRefreshFailure`, which restarts it once it
-    // has lapsed. NULL when no rejection window is open.
+    // Start of the open rejection window of an unrefreshable credential; NULL when none.
     refreshFailuresSince: timestamp("refresh_failures_since", { withTimezone: true }),
     // NOTE — there is deliberately no `last_refresh_failure_at` here, and the
     // same note sits on the `model_provider_credentials` twin. There was one,

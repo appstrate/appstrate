@@ -100,12 +100,7 @@ interface InitiateIntegrationOAuthInput {
   authorizationParams?: Record<string, string>;
   /** Platform redirect URI — same callback for all integration flows. */
   redirectUri: string;
-  /**
-   * Which registered client this flow uses — a flat client id (system env id or
-   * custom `integration_oauth_clients.id`). Carried into the state so the
-   * callback re-resolves its credentials and stamps it on the connection row;
-   * token refresh later resolves the same client credentials by it.
-   */
+  /** The registered client this flow uses; the callback re-resolves its credentials by it. */
   clientRef: string;
   /** Org / space / actor context — propagated to the callback handler. */
   orgId: string;

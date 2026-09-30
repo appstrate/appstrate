@@ -4,11 +4,9 @@ import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
 
 /**
- * The provenance badge shared by every system+DB table: models, model-provider
- * credentials and proxies say `built-in` / `custom` (the org's own row);
- * integration OAuth clients name their owning tier, `system` / `org` / `space`.
- * `auto-provisioned` marks a DCR/CIMD machine client, read-only. One component
- * so the wording + variant never drift.
+ * The provenance badge of every system+DB table: `built-in` / `custom`, or an OAuth
+ * client's owning tier (`system` / `org` / `space`); `auto-provisioned` = a read-only
+ * DCR/CIMD client.
  */
 export function SourceBadge({
   source,

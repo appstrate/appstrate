@@ -2,14 +2,10 @@
 /// <reference types="bun" />
 
 /**
- * Verify that every root `overrides` entry satisfies every range a workspace
- * declares for that package. An override replaces the version for the WHOLE
- * tree, so one left behind when Dependabot raises a workspace floor silently
- * runs every workspace below the floor it declares — the root pinned zod at
- * 4.5.4 while 13 workspaces declared `^4.6.5` (#1641).
- *
- * The override's floor is compared: `4.6.5`, `^4.6.5` and `~4.6.5` all floor at
- * `4.6.5`, and that version must satisfy each declared range.
+ * Verify that every root `overrides` entry satisfies every range a workspace declares
+ * for that package: an override replaces the version for the WHOLE tree, so a stale one
+ * silently runs workspaces below their declared floor. The override's floor (`4.6.5` for
+ * `^4.6.5` / `~4.6.5`) must satisfy each range.
  */
 
 import { readFileSync } from "node:fs";

@@ -161,9 +161,7 @@ export const runs = pgTable(
     versionRef: text("version_ref").default("draft").notNull(),
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
-    // Whose credential the run's inference spends, stamped at launch. NULL on a
-    // remote-origin run (`runs_remote_has_no_platform_model`) and on a run
-    // refused before launch (`createFailedRun`), which resolved no model.
+    // Whose credential the run's inference spends; NULL when no model was resolved.
     modelSource: credentialSourceEnum("model_source"),
     // The model the run launched with — a system model id or an `org_models.id`,
     // the same pointer as `packages.model_id`. The platform LLM proxy serves a
@@ -425,8 +423,7 @@ export const runs = pgTable(
     ),
     // The proxy serves the run's pinned model, never one the request names.
     check("runs_proxy_route_has_model", sql`inference_route <> 'proxy' OR model_id IS NOT NULL`),
-    // A remote runner brings its own model and credentials: no platform model,
-    // source or inference route is ever recorded for it.
+    // A remote runner brings its own model and credentials.
     check(
       "runs_remote_has_no_platform_model",
       sql`run_origin = 'platform' OR (model_source IS NULL AND model_id IS NULL AND inference_route IS NULL)`,

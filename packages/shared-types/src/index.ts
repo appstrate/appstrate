@@ -943,11 +943,8 @@ export interface OrgModelInfo extends ModelMetadata {
   is_default: boolean;
   /**
    * True when the model's stored credential can no longer be used for
-   * inference — a credential flagged `needsReconnection` (an OAuth grant whose
-   * refresh token was revoked, or a BYOK API key rejected upstream
-   * `INTEGRATION_REFRESH_MAX_FAILURES` times within an hour), or, for either
-   * auth mode, a stored blob that no longer decrypts (e.g. a key rotation that
-   * retired a kid still in use). The model
+   * inference — flagged `needsReconnection` (revoked OAuth grant, BYOK key
+   * rejected upstream repeatedly) or a stored blob that no longer decrypts. The model
    * is listed (so it can be inspected/detached/deleted) but must never be
    * selectable for inference. Always false for built-in/system models, which
    * read their key from the environment and have no stored blob.

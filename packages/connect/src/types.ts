@@ -50,11 +50,8 @@ export interface OAuthStateRecord {
     /** Optional RFC 8707 `resource` parameter (`auths.{key}.resource`) for the token exchange. */
     resource?: string;
     /**
-     * Which registered client minted this connection — a flat client id (system
-     * env id or custom `integration_oauth_clients.id`). The state carries this
-     * reference, never the client's credentials: the callback re-resolves them
-     * through {@link OAuthClientResolver}, stamps the ref on the connection row,
-     * and token refresh later resolves the same credentials by it.
+     * The registered client that minted this connection. The state carries this
+     * reference, never the client's credentials ({@link OAuthClientResolver}).
      */
     clientRef: string;
     /**
@@ -76,11 +73,7 @@ export interface ResolvedOAuthClient {
   tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
 }
 
-/**
- * Resolve a state's `clientRef` to its current credentials at callback time,
- * within the state's space (and its org). `null` = the client no longer exists
- * there.
- */
+/** A `clientRef` → its current credentials within the state's space; `null` = gone. */
 export type OAuthClientResolver = (ref: {
   clientRef: string;
   packageId: string;

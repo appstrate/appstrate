@@ -308,11 +308,9 @@ export const oauthClientCreateSchema = oauthClientSchema
   });
 
 /**
- * Update body, merge semantics: an absent field is left unchanged and `null`
- * clears `redirect_uri`. `client_secret` and `token_endpoint_auth_method` are
- * written as a pair (see `encodeClientAuthForStorage`). No `client_id`: the
- * connections a client minted refresh only with theirs, so a new `client_id`
- * is a new client.
+ * Update body, merge semantics: absent = unchanged, `null` clears `redirect_uri`.
+ * `client_secret` and `token_endpoint_auth_method` are written as a pair. No
+ * `client_id`: a new `client_id` is a new client.
  */
 export const oauthClientUpdateSchema = oauthClientSchema
   .omit({ client_id: true })

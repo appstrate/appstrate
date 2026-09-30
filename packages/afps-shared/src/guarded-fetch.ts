@@ -81,9 +81,7 @@ import { resolveAndCheckHost, type HostResolver } from "./ssrf-dns.ts";
  *
  *   on this default, and all of them multi-step credential exchanges — the
  *   exact population #473 is about
- *     - `@appstrate/afps-runtime`'s `fetchApiCall` — every `api_call` path
- *       (platform credential proxy, sidecar, local resolver); it re-runs the
- *       `authorized_uris` assertion (`validateHop`) on every hop.
+ *     - `@appstrate/afps-runtime`'s `fetchApiCall` — every `api_call` path.
  *     - `packages/connect/src/oauth-egress.ts` — OAuth discovery, token
  *       exchange and userinfo.
  *     - `apps/api/src/services/integration-connections.ts` — OAuth
@@ -166,9 +164,8 @@ export interface GuardedFetchOptions {
     capture(url: string, setCookieHeaders: string[]): void;
   };
   /**
-   * A cross-origin hop for which this returns true keeps the credential headers, the caller's
-   * Cookie and the body: the caller's own allowlist authorized that origin (multi-host APIs such
-   * as Dropbox `api.` ⇄ `content.`). Default: every origin change strips them.
+   * True keeps credential headers, Cookie and body across this cross-origin hop (the caller's
+   * allowlist authorized it). Default: every origin change strips them.
    */
   forwardCredentials?: (url: URL) => boolean;
   /** `false` returns the first response even when it is a redirect (a single-use body). Default true. */

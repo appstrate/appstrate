@@ -11,9 +11,7 @@
  *   2. Substitute `{{vars}}` into URL / headers / body.
  *   3. Refuse a credential the allowlist does not bound (`credentialUrlPolicy`).
  *   4. Inject the credential header server-side.
- *   5. Send it through `fetchApiCall` (`@appstrate/afps-runtime`), the outbound
- *      half shared with the platform proxy and the CLI: allowlist + SSRF gate
- *      per hop, pinned transport, credential rule across redirects, deadline.
+ *   5. Send it through `fetchApiCall`, the outbound engine shared with the platform and CLI.
  *   6. Retry once on 401 with a refreshed token.
  *   7. Log persistent auth failures locally (once per connection per run).
  *
@@ -172,10 +170,7 @@ export interface ApiCallBaseDeps {
   config: SidecarConfig;
   /** Run-wide sticky-cookie store, read and written through `cookieScope`. */
   cookieJar: CookieJar;
-  /**
-   * Transport override (tests). Omitted = the global `fetch` — for `api_call` upstreams, pinned
-   * to the DNS-validated address; an override disables the pin.
-   */
+  /** Transport override (tests); disables the address pin of `api_call` upstreams. */
   fetchFn?: typeof fetch;
   /**
    * Set tracking which credential scopes already had a persistent auth
@@ -334,8 +329,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     };
   }
 
-  // 4. URL policy (docs/architecture/SIDECAR.md). The allowlist + SSRF gate itself runs inside
-  //    `fetchApiCall`, on the target and on every redirect hop.
+  // 4. URL policy (docs/architecture/SIDECAR.md); the per-hop gate runs inside `fetchApiCall`.
   const authorizedUris = creds.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
     templates: [
@@ -504,20 +498,9 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       body: buildBody(activeCreds.credentials),
       proxy: args.proxyUrl || undefined,
     };
-    // A streaming body cannot be replayed, so `fetchApiCall` returns its 30x unfollowed:
-    // the credential stays on the initial, allowlist-checked origin.
-    //
-    // KNOWN LIMITATION, stated rather than papered over: the agent CANNOT
-    // follow that 30x. `location` is on `UPSTREAM_HEADER_ALLOWLIST`
-    // (`packages/mcp-transport/src/upstream-meta.ts`) so it reaches the
-    // runtime on `_meta` — and stops there. `callToolResultToPi` forwards
-    // only `content` blocks to the model, and the response shaper
-    // (`runtime-pi/mcp/api-call-response-resolver.ts`) renders `_meta` down
-    // to `[api_call status=<n>]`, dropping every header. A caller that must
-    // follow one re-issues with a BUFFERED body, which walks the chain
-    // server-side under the per-hop URL policy. Rendering `location` is
-    // deliberately NOT done: a redirect URL is routinely credential-bearing
-    // (`?code=`, `?X-Amz-Signature=`).
+    // A streaming body's 30x comes back unfollowed (not replayable), and the model never sees
+    // `location` (a redirect URL routinely carries credentials): a caller that must follow one
+    // re-issues with a buffered body, which walks the chain under the per-hop policy.
     if (init.body instanceof ReadableStream) init.duplex = "half";
     const sent = await fetchApiCall({
       url: resolvedUrl,

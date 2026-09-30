@@ -80,11 +80,7 @@ export function projectHttpDeliveryConfig(
   return cfg;
 }
 
-/**
- * Auth-type defaults for `delivery.http` (AFPS §4.1.4), written as the manifest
- * would write them. `resolveHttpDelivery` (`@appstrate/afps-runtime/resolvers`)
- * applies them.
- */
+/** Auth-type defaults for `delivery.http` (AFPS §4.1.4), in manifest form. */
 export const AUTH_TYPE_HTTP_DEFAULTS: Readonly<
   Record<
     string,
@@ -110,9 +106,8 @@ export const AUTH_TYPE_HTTP_DEFAULTS: Readonly<
 };
 
 /**
- * Whether an auth's HTTP delivery names a header the proxy fills with a
- * credential itself: an explicit `delivery.http.name`, else its type's default.
- * The manifest-level form of `resolveHttpDelivery` returning a plan.
+ * Whether an auth's HTTP delivery names a header the proxy fills with a credential
+ * itself: an explicit `delivery.http.name`, else its type's default.
  */
 export function injectsHttpCredential(
   authType: string,

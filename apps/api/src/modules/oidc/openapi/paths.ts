@@ -5,10 +5,8 @@ import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 /**
  * 429 for the `/api/auth/oauth2/*` endpoints, which Better Auth's own limiter
  * guards (the budgets are the `rateLimit` block of `oauthProvider()` in
- * `auth/plugins.ts`). Its refusal is restated at the mount
- * (`oauthRateLimitResponse`, `lib/auth-pipeline.ts`) in the RFC 6749 §5.2
- * error shape rather than `#/components/responses/RateLimited`'s ProblemDetail:
- * OAuth clients parse `{ error }`.
+ * `auth/plugins.ts`); the mount restates its refusal (`oauthRateLimitResponse`)
+ * in the RFC 6749 §5.2 shape, not ProblemDetail: OAuth clients parse `{ error }`.
  */
 const providerRateLimited = {
   description:
@@ -33,10 +31,7 @@ const providerRateLimited = {
   },
 };
 
-/**
- * RFC 6749 §5.2 error body. Every `/api/auth/*` endpoint below is served by Better Auth,
- * whose errors carry this shape as `application/json` — not the platform's ProblemDetail.
- */
+/** RFC 6749 §5.2 error body: Better Auth's (`/api/auth/*`) errors, not ProblemDetail. */
 const oauthError = {
   "application/json": {
     schema: {

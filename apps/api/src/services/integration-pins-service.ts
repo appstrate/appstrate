@@ -133,10 +133,7 @@ export async function setBlockUserConnections(
 
 // ─────────────────────────── Pin CRUD ─────────────────────────────────────────
 
-/**
- * The audit `resourceId` of a pin — ONE format for the admin and the member
- * rows of the same (agent, integration); the `action` tells the scopes apart.
- */
+/** A pin's audit `resourceId`: one format for admin and member rows; `action` tells them apart. */
 export function pinAuditResourceId(agentPackageId: string, integrationPackageId: string): string {
   return `${integrationPackageId}#${agentPackageId}`;
 }

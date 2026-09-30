@@ -84,10 +84,8 @@ const AUTH_CONDITIONAL_HEADERS: ReadonlyArray<{
 ];
 
 /**
- * Better Auth's limiter answers from `onRequest`, before any plugin hook, with
- * `{ message }` under `X-Retry-After` and no `Content-Type`. On the OAuth
- * endpoints that is restated as RFC 6749 §5.2 JSON under the standard
- * `Retry-After` (RFC 9110 §10.2.3) — the shape the device/CLI limiters answer.
+ * Better Auth's limiter answers `{ message }` under `X-Retry-After`, untyped; on the OAuth
+ * endpoints it is restated as RFC 6749 §5.2 JSON under `Retry-After`, like the CLI limiters.
  */
 function oauthRateLimitResponse(path: string, res: Response): Response {
   const retryAfter = res.headers.get("X-Retry-After");
