@@ -46,6 +46,13 @@ const MCP_URL = `${ORIGIN}/api/mcp/o/org_teardown`;
 const TURN_TIMEOUT_MS = 20_000;
 
 /**
+ * The bound itself, shortened: every case here that holds a wind-down which
+ * never settles would otherwise wait out the engine's production grace. What
+ * is under test is that the turn gives up at all, not how long it waits.
+ */
+const WIND_DOWN_GRACE_MS = 100;
+
+/**
  * One in-process transport playing the platform MCP endpoint.
  *
  * The SDK's Streamable-HTTP transport hands every POST the signal of its own
@@ -199,6 +206,7 @@ async function runStubbedTurn(abortSettles: boolean) {
     onError: (error) => String(error),
     recordUsage: () => {},
     createSession,
+    windDownGraceMs: WIND_DOWN_GRACE_MS,
   });
 
   // Press stop only once the session exists and its prompt is in flight —

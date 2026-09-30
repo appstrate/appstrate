@@ -623,11 +623,13 @@ describe("runPiChat against a stub provider", () => {
         onError: (error) => String(error),
         recordUsage: () => {},
         buildMcpTools,
+        // The bound is under test, not its production length.
+        windDownGraceMs: 100,
       });
       const text = await res.text();
 
-      // The body closed and the slot went with it, within the grace (5 s) plus
-      // the turn's own construction — far below the 20 s this test allows.
+      // The body closed and the slot went with it, within the grace plus the
+      // turn's own construction — far below the 20 s this test allows.
       expect(released).toBe(1);
       expect(Date.now() - startedAt).toBeLessThan(15_000);
       // Said so, in the same shape as the session-abort case.
