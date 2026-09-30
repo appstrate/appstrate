@@ -35,7 +35,10 @@ import {
   apiUploadToolNameFor as deriveApiUploadToolName,
   assertUniqueApiToolAuthTokens,
 } from "@appstrate/afps-shared/api-tool-naming";
-import { credentialTemplateRefs } from "@appstrate/afps-shared/credential-template";
+import {
+  credentialTemplateRefs,
+  parseUrlFormPattern,
+} from "@appstrate/afps-shared/credential-template";
 import { isBareAuthSchemePrefix } from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
@@ -182,7 +185,6 @@ export function findNonSnakeCaseIdentityClaimKeys(manifest: unknown): IdentityCl
 export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefine((m, ctx) => {
   const manifest = m as unknown as IntegrationManifest;
   const auths = manifest.auths ?? {};
-  const apiCallAuthKeys = new Set(Object.keys(readApiMetaAuths(manifest) ?? {}));
 
   for (const [authKey, auth] of Object.entries(auths)) {
     // (1) authorized_uris non-empty unless allow_all_uris.
@@ -304,9 +306,10 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       }
     });
 
-    // (1g) Templated authorized_uris entries (#1458) reference declared, required
-    // fields, in the authority only. Forbidden with `connect` and api_call (their hosts are pinned past
-    // the SSRF gate) and on oauth2 (a refresh keeps only tokens in the bundle).
+    // (1g) Templated authorized_uris entries (#1458) reference declared, required fields, in the
+    // authority of a `scheme://` entry or as a leading whole URL (#1627). Forbidden with `connect`
+    // (its hosts are pinned past the SSRF gate) and on oauth2 (a refresh keeps only tokens in the
+    // bundle). Allowed on api_call: its consumers pin only the declared literal entries.
     const credentialFields = credentialsSchema as
       { properties?: Record<string, unknown>; required?: unknown } | undefined;
     const declaredFields = new Set(Object.keys(credentialFields?.properties ?? {}));
@@ -315,16 +318,19 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       const refs = credentialTemplateRefs(pattern);
       if (refs.length === 0) return;
       const path = ["auths", authKey, "authorized_uris", index];
-      // Placeholders live in the authority only: a rendered `..` in a path would widen it.
+      // Outside the URL form, placeholders live in the authority only: a rendered `..` in a path
+      // would widen it.
       const scheme = TEMPLATE_SCHEME_PREFIX.exec(pattern);
       const afterScheme = scheme ? pattern.slice(scheme[0].length) : "";
       const authorityEnd = afterScheme.search(/[/?#]/);
       if (!scheme) {
-        ctx.addIssue({
-          code: "custom",
-          message: `authorized_uris entry "${pattern}" is templated without a scheme:// prefix; placeholders are only allowed in the host and port`,
-          path,
-        });
+        if (!parseUrlFormPattern(pattern)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `authorized_uris entry "${pattern}" is templated without a scheme:// prefix; without one, the entry must be a single leading placeholder followed by nothing or a "/" path without placeholders`,
+            path,
+          });
+        }
       } else if (
         authorityEnd !== -1 &&
         credentialTemplateRefs(afterScheme.slice(authorityEnd)).length > 0
@@ -346,13 +352,6 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
         ctx.addIssue({
           code: "custom",
           message: `authorized_uris entry "${pattern}" is templated, which is forbidden on an oauth2 auth`,
-          path,
-        });
-      }
-      if (apiCallAuthKeys.has(authKey)) {
-        ctx.addIssue({
-          code: "custom",
-          message: `authorized_uris entry "${pattern}" is templated, which is forbidden on an auth exposing api_call (_meta["${API_META_KEY}"])`,
           path,
         });
       }

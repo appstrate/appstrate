@@ -22,6 +22,15 @@ consumer's publish rather than the first user's `npm install`.
   `Cookie` header until a cross-origin hop strips it, then `null`. Both get the
   logical URL, never the pinned one. A session an upstream rotates on a
   redirect response now reaches the next hop. Without the option nothing changes.
+- **URL-form `authorized_uris` in `renderAuthorizedUris`** (`./credential-template`,
+  issue #1627) — a pattern that is exactly one `{$credential.<field>}` at index 0,
+  followed by nothing or a placeholder-free `/` suffix (`{$credential.site_url}/**`),
+  renders the field as a whole URL: it must parse as an absolute `http:`/`https:`
+  URL with a host, no userinfo, query or fragment and no `*`; it renders as
+  origin + path (a bare entry keeps the exact path; before a suffix one
+  trailing `/` is dropped), then the suffix. Any other value drops
+  the entry. New export `parseUrlFormPattern(pattern)` splits such a pattern into
+  `{ field, suffix }` (`null` otherwise). Authority-form patterns are unchanged.
 
 ## [0.9.1] — unreleased
 
