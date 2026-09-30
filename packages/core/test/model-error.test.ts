@@ -30,6 +30,16 @@ describe("classifyModelError", () => {
     });
   });
 
+  it("reads a failed OAuth refresh as a dead credential, not the token endpoint's 400", () => {
+    expect(
+      classifyModelError({
+        message:
+          "OAuth refresh failed for anthropic: Anthropic token refresh request failed. " +
+          'details=Error: HTTP request failed. status=400; body={"error": "invalid_grant"}',
+      }),
+    ).toEqual({ category: "credential_unavailable", retryable: false });
+  });
+
   it("classifies throttling as retryable", () => {
     expect(classifyModelError({ message: "429 rate limit from hidden-backend" })).toEqual({
       category: "rate_limited",
