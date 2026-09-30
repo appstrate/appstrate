@@ -39,7 +39,7 @@ import { toISO } from "../lib/date-helpers.ts";
 import type { DbOrTx } from "../lib/db-helpers.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
-import { withPackageDraftLock } from "./package-draft-lock.ts";
+import { lockPackageVersions, withPackageDraftLock } from "./package-locks.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 
 // ─────────────────────────────────────────────
@@ -98,7 +98,7 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
   }
 
   return await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${packageId}))`);
+    await lockPackageVersions(tx, packageId);
 
     // Forward-only enforcement (include yanked — duplicates must be rejected even if yanked)
     const allExisting = await tx
@@ -536,7 +536,7 @@ export async function getVersionCount(packageId: string): Promise<number> {
 /** Permanently delete a version. Reassigns dist-tags, then removes the DB row and storage artifact. */
 export async function deletePackageVersion(packageId: string, version: string): Promise<boolean> {
   const deleted = await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${packageId}))`);
+    await lockPackageVersions(tx, packageId);
 
     // Find the version row
     const [row] = await tx
@@ -1137,21 +1137,10 @@ export async function createVersionAndUpload(params: {
   } catch (err) {
     // The transaction rolled back. If the upload itself went through (or
     // partially) before a later step failed, the bytes sit at a path no
-    // version row references. Best-effort cleanup — but ONLY when no row
-    // exists for this version: if one does, the artifact at that path is the
-    // published one from an earlier publish and must not be deleted.
-    try {
-      const [existingRow] = await db
-        .select({ id: packageVersions.id })
-        .from(packageVersions)
-        .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
-        .limit(1);
-      if (!existingRow) {
-        await deleteVersionZip(packageId, version);
-      }
-    } catch {
-      logger.warn("Failed to clean up ZIP after version create error", { packageId, version });
-    }
+    // version row references. Best-effort cleanup, which keeps the artifact
+    // when a row does exist for this version: it is then the published one,
+    // from an earlier or a concurrent publish, and must not be deleted.
+    await deleteVersionZip(packageId, version);
     throw err;
   }
 }

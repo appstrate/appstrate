@@ -24,13 +24,14 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion, seedSpaceMember } from "../../helpers/seed.ts";
-import { activatePackage, updateSpacePackage } from "../../../src/services/space-packages.ts";
 import {
-  buildMinimalZip,
-  deleteVersionZip,
-  uploadPackageZip,
-} from "../../../src/services/package-storage.ts";
+  loseVersionArchive,
+  seedPackage,
+  seedPackageVersion,
+  seedSpaceMember,
+} from "../../helpers/seed.ts";
+import { activatePackage, updateSpacePackage } from "../../../src/services/space-packages.ts";
+import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import {
   runs,
   packages,
@@ -627,7 +628,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     it("refuses a version whose ZIP is gone with 422, never running the draft", async () => {
       await seedPublishedAgent(ctx, "1.2.3");
-      await deleteVersionZip("@acme/briefing", "1.2.3");
+      await loseVersionArchive("@acme/briefing", "1.2.3");
       // The seeded draft is runnable (non-empty prompt): the 422 and zero run
       // rows prove it was not substituted for the missing version.
       await expectProblem(await launch(), 422, { code: "version_artifact_unavailable" });
@@ -684,7 +685,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       // 422 below is precedence, not an integration the fixture failed to declare.
       await expectProblem(await launch(), 409, { code: "missing_integration_connection" });
 
-      await deleteVersionZip("@acme/briefing", "1.2.3");
+      await loseVersionArchive("@acme/briefing", "1.2.3");
       await expectProblem(await launch(), 422, { code: "version_artifact_unavailable" });
       expect(await db.select().from(runs).where(eq(runs.packageId, "@acme/briefing"))).toHaveLength(
         0,
