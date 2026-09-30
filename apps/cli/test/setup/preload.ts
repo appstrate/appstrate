@@ -13,6 +13,12 @@
  *    `lib/ui.ts` throw immediately instead of blocking on clack.
  */
 
+import { setDefaultTimeout } from "bun:test";
+
+// 10 s per test. Set here, not in bunfig: `[test] timeout` is not a key Bun
+// reads, and the one bunfig carried was silently ignored (Bun's default is 5 s).
+setDefaultTimeout(10_000);
+
 process.env.APPSTRATE_CLI_NO_OPEN = "1";
 process.env.NO_COLOR = "1";
 Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
