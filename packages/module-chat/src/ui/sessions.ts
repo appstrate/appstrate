@@ -151,6 +151,22 @@ export async function stopSession(
   if (!res.ok) throw new Error(`Failed to stop session (HTTP ${res.status})`);
 }
 
+/** Answer a writing tool call the session's live turn is holding. */
+export async function respondToToolApproval(
+  getHeaders: GetHeaders | null | undefined,
+  id: string,
+  approvalId: string,
+  decision: { approved: boolean; reason?: string },
+): Promise<void> {
+  const res = await fetch(`/api/chat/sessions/${id}/approvals/${approvalId}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { ...headers(getHeaders), "Content-Type": "application/json" },
+    body: JSON.stringify(decision),
+  });
+  if (!res.ok) throw new Error(`Failed to answer the approval (HTTP ${res.status})`);
+}
+
 /** A stored message node as returned by `GET /sessions/:id`. */
 interface StoredMessage {
   id: string;

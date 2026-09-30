@@ -405,6 +405,11 @@ export const chatPaths = {
                   description:
                     "Lets the assistant author agents (create, edit, compose inline) this turn; absent = on. Narrows the caller's own grants, never widens them.",
                 },
+                tool_approval: {
+                  type: "boolean",
+                  description:
+                    "Holds every writing tool call this turn for the user's answer (see `respondToChatToolApproval`); absent = on. Off, writes run straight away, still within the caller's own grants.",
+                },
                 skill_mode: {
                   type: "string",
                   enum: [...chatSkillModeValues],
@@ -477,6 +482,47 @@ export const chatPaths = {
       ],
       responses: {
         "204": { description: "Stop signal accepted" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "429": {
+          $ref: "#/components/responses/RateLimited",
+          description: "Rate limited (60/min per caller)",
+        },
+      },
+    },
+  },
+  "/api/chat/sessions/{id}/approvals/{approvalId}": {
+    post: {
+      operationId: "respondToChatToolApproval",
+      tags: ["Chat"],
+      summary: "Answer a chat tool approval",
+      description:
+        "Allows or refuses a writing tool call the session's in-flight turn is holding (the `approvalId` of its `tool-approval-request` stream part). A refusal blocks the call and its reason is handed to the model. Signed-in sessions only: API keys and other bearer tokens are refused, so a model cannot approve its own call. The turn refuses on its own if no answer arrives before it ends.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+        { name: "approvalId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["approved"],
+              properties: {
+                approved: { type: "boolean" },
+                reason: { type: "string", maxLength: 2000 },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "204": { description: "Answer recorded; the turn resumes" },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "429": {

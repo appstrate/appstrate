@@ -177,3 +177,18 @@ describe("httpStatusOf", () => {
     expect(httpStatusOf({ body: {} })).toBeUndefined();
   });
 });
+
+describe("deriveToolPhase — approval gate", () => {
+  it("is neither running nor an error while held, or once refused", () => {
+    const running = { type: "running" };
+    expect(deriveToolPhase({ status: running, approval: {} })).toBe("pending");
+    expect(
+      deriveToolPhase({
+        isError: true,
+        result: { error: "denied" },
+        approval: { approved: false },
+      }),
+    ).toBe("pending");
+    expect(deriveToolPhase({ status: running, approval: { approved: true } })).toBe("running");
+  });
+});

@@ -179,5 +179,20 @@
   "skills.enforcedError": "The skills required by the space could not be loaded.",
   "skills.emptyBesidesEnforced": "No other skill is available in this space.",
   "skills.enforcedTitle": "Skills required by the space",
-  "skills.enforcedIndicator": "Skills required by the space: {{names}}"
+  "skills.enforcedIndicator": "Skills required by the space: {{names}}",
+  "approval.allow": "Allow",
+  "approval.deny": "Deny",
+  "approval.failed": "The answer could not be sent. The turn may have ended.",
+  "approval.action": "{{action}} of {{target}}",
+  "approval.denied": "Denied",
+  "approval.deniedWithReason": "Denied: {{reason}}",
+  "approval.request": "Allow this action? {{action}}",
+  "approval.allowed": "Allowed",
+  "approvalMode.label": "Action approval",
+  "approvalMode.ask.short": "Ask",
+  "approvalMode.ask.title": "Ask before acting",
+  "approvalMode.ask.hint": "The assistant waits for your approval before any action that changes something.",
+  "approvalMode.auto.short": "Direct",
+  "approvalMode.auto.title": "Act without asking",
+  "approvalMode.auto.hint": "The assistant runs its actions straight away, with your permissions."
 }

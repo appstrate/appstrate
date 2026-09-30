@@ -68,6 +68,7 @@ import {
   spaceIdFromHeaders,
   SESSIONS_QUERY_KEY,
   stopSession,
+  respondToToolApproval,
   type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
@@ -85,6 +86,8 @@ import {
 import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
+import { ToolApprovalModeSelect } from "./tool-approval-mode.tsx";
+import { getToolApprovalEnabled } from "./tool-approval-store.ts";
 import { SkillsPicker } from "./skills-picker.tsx";
 import { EnforcedSkillsIndicator } from "./enforced-skills.tsx";
 import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
@@ -301,6 +304,7 @@ export function ChatPage({
     () => (
       <div className="flex items-center gap-2">
         {authorsAgents ? <AgentAuthoringToggle /> : null}
+        <ToolApprovalModeSelect />
         <ModelSelect
           models={models}
           selectedId={selectedModel}
@@ -594,6 +598,7 @@ function ConversationInner({
               generation: getCompatibleGenerationSettings(),
               // Read at request time, like the model above, for the same reason.
               agent_authoring: getAgentAuthoringEnabled(),
+              tool_approval: getToolApprovalEnabled(),
               ...(skills && {
                 skill_mode: skills.skillMode,
                 pinned_skills: skills.pinnedSkills,
@@ -761,7 +766,30 @@ function ConversationInner({
   }, [chat, getHeaders, id]);
   const chatWithServerStop = useMemo(() => ({ ...chat, stop }), [chat, stop]);
 
-  const runtime = useAISDKRuntime(chatWithServerStop, { adapters: { attachments } });
+  // Approvals are held by the server-side turn, so the answer goes to it, not
+  // into the `useChat` messages: the turn writes the resolution back into the
+  // stream it is still producing.
+  const onRespondToToolApproval = useCallback(
+    ({
+      approvalId,
+      approved,
+      reason,
+    }: {
+      approvalId: string;
+      approved: boolean;
+      reason?: string;
+    }) =>
+      respondToToolApproval(getHeaders, id, approvalId, {
+        approved,
+        ...(reason ? { reason } : {}),
+      }),
+    [getHeaders, id],
+  );
+
+  const runtime = useAISDKRuntime(chatWithServerStop, {
+    adapters: { attachments },
+    onRespondToToolApproval,
+  });
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
