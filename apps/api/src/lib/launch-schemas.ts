@@ -38,7 +38,10 @@
  */
 
 import { z } from "zod";
-import { collectOverridableDependencyIds } from "@appstrate/core/dependencies";
+import {
+  collectOverridableDependencyIds,
+  parseManifestIntegrations,
+} from "@appstrate/core/dependencies";
 import { ApiError } from "./errors.ts";
 import { connectionIdSetSchema } from "./connection-set.ts";
 import { isValidDependencyOverride } from "../services/input-parser.ts";
@@ -98,14 +101,46 @@ export function assertDependencyOverrideKeysDeclared(
   manifest: Record<string, unknown>,
   overrides: Readonly<Record<string, string>> | null | undefined,
 ): void {
+  assertKeysDeclared(
+    "dependency_overrides",
+    collectOverridableDependencyIds(manifest),
+    overrides,
+    "skill or integration dependency",
+  );
+}
+
+/**
+ * The same refusal for a `connection_overrides` KEY: the resolver reads only
+ * the integrations the manifest declares, so an undeclared key was dropped and
+ * the run bound a lower cascade layer instead of the account it was asked for.
+ * Judged against the EFFECTIVE manifest, for the reason stated above.
+ */
+export function assertConnectionOverrideKeysDeclared(
+  manifest: Record<string, unknown>,
+  overrides: Readonly<Record<string, unknown>> | null | undefined,
+): void {
+  assertKeysDeclared(
+    "connection_overrides",
+    new Set(parseManifestIntegrations(manifest).map((entry) => entry.id)),
+    overrides,
+    "integration dependency",
+  );
+}
+
+function assertKeysDeclared(
+  field: "dependency_overrides" | "connection_overrides",
+  declared: ReadonlySet<string>,
+  overrides: Readonly<Record<string, unknown>> | null | undefined,
+  noun: string,
+): void {
   if (!overrides) return;
-  const declared = collectOverridableDependencyIds(manifest);
   const unknownKey = Object.keys(overrides).find((key) => !declared.has(key));
   if (unknownKey === undefined) return;
   throw new ApiError({
     status: 400,
     code: "invalid_request",
     title: "Bad Request",
-    detail: `\`dependency_overrides["${unknownKey}"]\` is not a declared skill or integration dependency of this agent`,
+    detail: `\`${field}["${unknownKey}"]\` is not a declared ${noun} of this agent`,
+    param: field,
   });
 }

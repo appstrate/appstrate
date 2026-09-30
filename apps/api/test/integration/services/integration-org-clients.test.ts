@@ -279,7 +279,7 @@ describe("org-level integration OAuth clients", () => {
       const orgRow = await seedClient({ spaceId: null, clientId: "org-client" });
       await seedClient({ spaceId: spaceA.spaceId, clientId: "space-a", isDefault: true });
       expect(rows(await listIntegrationClients(org, INTEGRATION, AUTH_KEY))).toEqual([
-        [SYSTEM_ID, "built-in", true],
+        [SYSTEM_ID, "system", true],
         [orgRow, "org", false],
       ]);
     });
@@ -295,7 +295,7 @@ describe("org-level integration OAuth clients", () => {
       });
       expect(rows(await listIntegrationClients(spaceA, INTEGRATION, AUTH_KEY))).toEqual([
         [orgDefault, "org", false],
-        [own, "custom", true],
+        [own, "space", true],
       ]);
       expect(rows(await listIntegrationClients(spaceB, INTEGRATION, AUTH_KEY))).toEqual([
         [orgDefault, "org", true],
@@ -306,7 +306,7 @@ describe("org-level integration OAuth clients", () => {
       const own = await seedClient({ spaceId: spaceA.spaceId, clientId: "space-a" });
       await seedClient({ spaceId: null, clientId: "org-o" });
       expect(rows(await listIntegrationClients(spaceA, INTEGRATION, AUTH_KEY))).toEqual([
-        [own, "custom", true],
+        [own, "space", true],
       ]);
     });
   });

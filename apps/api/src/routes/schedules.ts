@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
 import {
+  assertConnectionOverrideKeysDeclared,
   assertDependencyOverrideKeysDeclared,
   connectionOverridesSchema,
   dependencyOverridesSchema,
@@ -452,6 +453,10 @@ export function createSchedulesRouter() {
       // key the effective manifest does not declare is refused here as a
       // malformed request, rather than freezing onto the row and 400-ing at
       // every tick.
+      assertConnectionOverrideKeysDeclared(
+        effectiveAgent.manifest as unknown as Record<string, unknown>,
+        data.connection_overrides,
+      );
       await assertDependencyDraftOverridesAllowed(
         c,
         data.dependency_overrides,
@@ -518,8 +523,16 @@ export function createSchedulesRouter() {
         resourceId: schedule.id,
         after: {
           packageId: agent.id,
-          cronExpression: data.cron_expression,
-          timezone: data.timezone,
+          name: schedule.name,
+          cronExpression: schedule.cron_expression,
+          timezone: schedule.timezone,
+          input: schedule.input,
+          modelIdOverride: schedule.model_id_override,
+          generationConfigOverride: schedule.generation_config_override,
+          proxyIdOverride: schedule.proxy_id_override,
+          versionOverride: schedule.version_override,
+          connectionOverrides: schedule.connection_overrides,
+          dependencyOverrides: schedule.dependency_overrides,
           actorType: actor.type,
           actorId: actor.id,
         },
@@ -718,6 +731,18 @@ export function createSchedulesRouter() {
     const nextActor = actor ?? existingActor;
     const nextOverrides =
       connectionOverrides !== undefined ? connectionOverrides : existing.connection_overrides;
+    // FORM, on the same trigger as the dependency map above: either half of the
+    // (map, fired manifest) pair moving re-judges the whole map the row replays.
+    if (
+      (data.version_override !== undefined || data.connection_overrides !== undefined) &&
+      nextOverrides &&
+      Object.keys(nextOverrides).length > 0
+    ) {
+      assertConnectionOverrideKeysDeclared(
+        (await firedDefinition()).manifest as unknown as Record<string, unknown>,
+        nextOverrides,
+      );
+    }
     // On EVERY write: a disabled row must not store a pick that arming it later would trust.
     await assertScheduleOverridesReachable({
       spaceId: scope.spaceId,
@@ -771,33 +796,39 @@ export function createSchedulesRouter() {
       getActor(c),
       runVisibilityFilter(c),
     );
-    // Mirror schedule.created: explicit camelCase keys (dominant audit
-    // convention — see api-keys.ts, modules/webhooks/routes.ts). Only
-    // include keys the caller actually sent so the audit reflects the
-    // patch, not a snapshot of the whole row.
+    // Each field this write moves, before and after — `connectionOverrides`
+    // included when an actor change reset it without the patch naming it.
+    const auditBefore: AuditPayload = {};
     const auditAfter: AuditPayload = {};
-    if (data.name !== undefined) auditAfter.name = data.name;
-    if (data.cron_expression !== undefined) auditAfter.cronExpression = data.cron_expression;
-    if (data.timezone !== undefined) auditAfter.timezone = data.timezone;
-    if (data.input !== undefined) auditAfter.input = data.input;
-    if (data.enabled !== undefined) auditAfter.enabled = data.enabled;
-    if (data.model_id_override !== undefined) auditAfter.modelIdOverride = data.model_id_override;
-    if (generationConfigOverride !== undefined)
-      auditAfter.generationConfigOverride = generationConfigOverride;
-    if (data.proxy_id_override !== undefined) auditAfter.proxyIdOverride = data.proxy_id_override;
-    if (data.version_override !== undefined) auditAfter.versionOverride = data.version_override;
-    if (data.connection_overrides !== undefined)
-      auditAfter.connectionOverrides = data.connection_overrides;
-    if (data.dependency_overrides !== undefined)
-      auditAfter.dependencyOverrides = data.dependency_overrides;
+    const moved = (key: string, before: unknown, after: unknown) => {
+      if (after === undefined) return;
+      auditBefore[key] = before;
+      auditAfter[key] = after;
+    };
+    moved("name", existing.name, data.name);
+    moved("cronExpression", existing.cron_expression, data.cron_expression);
+    moved("timezone", existing.timezone, data.timezone);
+    moved("input", existing.input, data.input);
+    moved("enabled", existing.enabled, data.enabled);
+    moved("modelIdOverride", existing.model_id_override, data.model_id_override);
+    moved(
+      "generationConfigOverride",
+      existing.generation_config_override,
+      generationConfigOverride,
+    );
+    moved("proxyIdOverride", existing.proxy_id_override, data.proxy_id_override);
+    moved("versionOverride", existing.version_override, data.version_override);
+    moved("connectionOverrides", existing.connection_overrides, connectionOverrides);
+    moved("dependencyOverrides", existing.dependency_overrides, data.dependency_overrides);
     if (actor) {
-      auditAfter.actorType = actor.type;
-      auditAfter.actorId = actor.id;
+      moved("actorType", existingActor.type, actor.type);
+      moved("actorId", existingActor.id, actor.id);
     }
     await recordAuditFromContext(c, {
       action: "schedule.updated",
       resourceType: "schedule",
       resourceId: id,
+      before: auditBefore,
       after: auditAfter,
     });
     return c.json(schedule);

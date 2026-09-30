@@ -416,7 +416,7 @@ describe("public OAuth client is declared, not inferred", () => {
       tokenEndpointAuthMethod: "none",
     });
     const clients = await listIntegrationClients(scope, INTEGRATION, AUTH_KEY);
-    const custom = clients.find((c) => c.source === "custom");
+    const custom = clients.find((c) => c.source === "space");
     expect(custom?.token_endpoint_auth_method).toBe("none");
     // The checkbox reads the declaration; `has_client_secret` alone could not
     // distinguish this from a confidential client whose secret was not re-typed.

@@ -45,12 +45,18 @@ export const clientIdParam = {
   schema: { type: "string", format: "uuid" },
 } as const;
 
-const agentPackageIdParam = {
+export const agentPackageIdParam = {
   name: "agentPackageId",
   in: "path",
   required: true,
   description: "Agent package id (e.g. `@acme/my-agent`).",
   schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
+} as const;
+
+/** The integration as the second package of a two-package path (member pins). */
+export const integrationPackageIdParam = {
+  ...packageIdParam,
+  name: "integrationPackageId",
 } as const;
 
 /** A connection set as every write takes it and every pin or default returns it. */
@@ -102,9 +108,9 @@ const integrationSummarySchema = {
 } as const;
 
 // CASING: this connection wire shape mixes camelCase and snake_case by policy,
-// not by oversight. `id`, `packageId`, `expiresAt`, `createdAt`, `updatedAt`
-// are the universal DB-convention carve-outs (camelCase everywhere per
-// docs/CASING_CONVENTIONS.md); every other field (`auth_key`, `account_id`,
+// not by oversight. `id`, `expiresAt`, `createdAt`, `updatedAt` are the
+// universal DB-convention carve-outs (camelCase everywhere per
+// docs/CASING_CONVENTIONS.md); every other field (`integration_package_id`, `auth_key`, `account_id`,
 // `identity_claims`, `scopes_granted`, `needs_reconnection`, `owner_type`,
 // `owner_id`, `shared_with_org`, `client_ref`) is snake_case wire. Matches the
 // serializer output (spec==runtime) — do NOT normalize either way.
@@ -112,7 +118,7 @@ const integrationConnectionSchema = {
   type: "object",
   required: [
     "id",
-    "packageId",
+    "integration_package_id",
     "auth_key",
     "account_id",
     "identity_claims",
@@ -128,7 +134,7 @@ const integrationConnectionSchema = {
   ],
   properties: {
     id: { type: "string", format: "uuid" },
-    packageId: { type: "string" },
+    integration_package_id: { type: "string" },
     auth_key: { type: "string" },
     account_id: { type: "string" },
     identity_claims: { type: ["object", "null"], additionalProperties: true },
@@ -189,14 +195,14 @@ export const integrationClientsListSchema = {
           client_ref: { type: "string" },
           source: {
             type: "string",
-            enum: ["built-in", "org", "custom"],
+            enum: ["system", "org", "space"],
             description:
-              "`custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.",
+              "The tier that owns the client: `space` = the space's own client, `org` = an org-level client, `system` = a platform-provided system client.",
           },
           client_id: {
             type: "string",
             description:
-              "For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`.",
+              "For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`.",
           },
           is_default: {
             type: "boolean",
@@ -796,9 +802,9 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the OAuth clients registered for an integration auth",
       description:
-        "Returns this space's own custom (BYO-app) clients (`custom`, oldest " +
+        "Returns this space's own custom (BYO-app) clients (`space`, oldest " +
         "first) plus the ONE default it inherits — the org default (`org`), else " +
-        "the system client (`built-in`) — when that is not one of its own. Other " +
+        "the system client (`system`) — when that is not one of its own. Other " +
         "org and system clients are not listed: a space either uses its own " +
         "clients or inherits the org's choice. `is_default` marks the client new " +
         "connections use (no per-connect picker). Secrets are never returned. " +
@@ -1372,9 +1378,9 @@ export const integrationsPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: ["packageId", "display_name"],
+                      required: ["agent_package_id", "display_name"],
                       properties: {
-                        packageId: { type: "string" },
+                        agent_package_id: { type: "string" },
                         display_name: { type: "string" },
                       },
                     },

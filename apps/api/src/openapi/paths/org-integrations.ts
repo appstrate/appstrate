@@ -39,7 +39,7 @@ export const orgIntegrationsPaths = {
       summary: "List the org-level OAuth clients of an integration auth",
       description:
         "Returns the org's own clients (`org`, oldest first) plus the default it " +
-        "inherits, the platform-provided system client (`built-in`), if any. " +
+        "inherits, the platform-provided system client (`system`), if any. " +
         "`is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths " +
         "whose client is not auto-provisioned (DCR/CIMD) have an org tier; " +
         `any other auth is a 400. ${PERMISSION_NOTE}`,

@@ -21,7 +21,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace } from "../../helpers/seed.ts";
-import { eq, and } from "drizzle-orm";
+import { asc, eq, and } from "drizzle-orm";
 import {
   auditEvents,
   integrationConnections,
@@ -975,7 +975,7 @@ describe("OAuth client CRUD", () => {
 
     // List — the custom client is present and is the default.
     let clients = await listClients();
-    const custom = clients.find((c) => c.source === "custom");
+    const custom = clients.find((c) => c.source === "space");
     expect(custom).toMatchObject({ client_id: "abc", is_default: true });
 
     // Rotate the secret by id
@@ -986,7 +986,7 @@ describe("OAuth client CRUD", () => {
     });
     expect(rotate.status).toBe(200);
     clients = await listClients();
-    expect(clients.find((c) => c.source === "custom")?.client_id).toBe("abc");
+    expect(clients.find((c) => c.source === "space")?.client_id).toBe("abc");
 
     // Delete by id
     const del = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
@@ -1062,7 +1062,7 @@ describe("OAuth client CRUD", () => {
     expect(b.status).toBe(201);
 
     let clients = await listClients();
-    const customs = clients.filter((c) => c.source === "custom");
+    const customs = clients.filter((c) => c.source === "space");
     expect(customs).toHaveLength(2);
     // First registered wins the default; exactly one is default.
     expect(customs.filter((c) => c.is_default)).toHaveLength(1);
@@ -1081,7 +1081,7 @@ describe("OAuth client CRUD", () => {
     clients = await listClients();
     expect(clients.find((c) => c.is_default)?.client_ref).toBe(b.id);
     // Still exactly one default (the one-default invariant holds).
-    expect(clients.filter((c) => c.source === "custom" && c.is_default)).toHaveLength(1);
+    expect(clients.filter((c) => c.source === "space" && c.is_default)).toHaveLength(1);
   });
 
   it("rejects setting an unknown client_ref as default (400, no silent fallback)", async () => {
@@ -1138,7 +1138,7 @@ describe("OAuth client CRUD", () => {
     expect(del.status).toBe(204);
     // No auto-promotion — the remaining custom is NOT silently made default.
     const clients = await listClients();
-    const customs = clients.filter((c) => c.source === "custom");
+    const customs = clients.filter((c) => c.source === "space");
     expect(customs).toHaveLength(1);
     // With no system client and no flagged default, the list still surfaces a
     // default (first custom as connectable fallback) — but no row carries the
@@ -1669,6 +1669,43 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     expect(body.enforce).toBe(true);
   });
 
+  it("audits each default write with the set before and after", async () => {
+    const a = await seedConn(true);
+    const b = await seedConn(true);
+    const write = (method: "PUT" | "DELETE", body?: unknown) =>
+      app.request("/api/integrations/@myorg/gmail/default", {
+        method,
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+    expect((await write("PUT", { connection_ids: [a] })).status).toBe(200);
+    expect((await write("PUT", { connection_ids: [b], enforce: true })).status).toBe(200);
+    expect((await write("DELETE")).status).toBe(204);
+
+    const rows = await db
+      .select({ action: auditEvents.action, before: auditEvents.before, after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceType, "integration_org_default"))
+      .orderBy(asc(auditEvents.id));
+    expect(rows).toEqual([
+      {
+        action: "integration.org_default.upserted",
+        before: null,
+        after: { connectionIds: [a], enforce: false },
+      },
+      {
+        action: "integration.org_default.upserted",
+        before: { connectionIds: [a], enforce: false },
+        after: { connectionIds: [b], enforce: true },
+      },
+      {
+        action: "integration.org_default.deleted",
+        before: { connectionIds: [b], enforce: true },
+        after: null,
+      },
+    ]);
+  });
+
   it("refuses a connection that is not sharedWithOrg (404)", async () => {
     const connId = await seedConn(false);
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
@@ -1769,7 +1806,7 @@ describe("multi-client: list + system-client connect", () => {
     expect(body.data).toHaveLength(1);
     expect(body.data[0]).toMatchObject({
       client_ref: "gmail-system",
-      source: "built-in",
+      source: "system",
       is_default: true,
     });
     expect(JSON.stringify(body.data)).not.toContain("sys-secret");
@@ -1792,12 +1829,12 @@ describe("multi-client: list + system-client connect", () => {
       data: Array<{ client_ref: string; source: string; is_default: boolean }>;
     };
     expect(body.data).toHaveLength(2);
-    const custom = body.data.find((c) => c.source === "custom")!;
+    const custom = body.data.find((c) => c.source === "space")!;
     // The custom client_ref is the per-space row id (a UUID), not a sentinel.
     expect(custom.is_default).toBe(true);
     expect(custom.client_ref).not.toBe("gmail-system");
     expect(custom.client_ref.length).toBeGreaterThan(0);
-    expect(body.data.find((c) => c.source === "built-in")).toMatchObject({
+    expect(body.data.find((c) => c.source === "system")).toMatchObject({
       client_ref: "gmail-system",
       is_default: false,
     });

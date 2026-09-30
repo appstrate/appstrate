@@ -59,7 +59,11 @@ import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
-import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
+import {
+  resolvedConnectionMapSchema,
+  type ConnectionOverrides,
+  type ResolvedConnectionMap,
+} from "@appstrate/core/integration";
 import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import {
   modelGenerationSettingsSchema,
@@ -336,16 +340,21 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
 function projectConnectionsUsed(
   resolved: typeof runs.$inferSelect.resolvedConnections,
 ): RunConnectionUsed[] | null {
-  if (!resolved || typeof resolved !== "object") return null;
-  const used = Object.entries(resolved).flatMap(([integrationId, bound]) =>
-    bound.map((v) => ({
-      integration_id: integrationId,
-      label: v.label ?? null,
-      account_id: v.accountId ?? null,
-      source: v.source,
-    })),
+  const used = Object.entries(readResolvedConnections(resolved) ?? {}).flatMap(
+    ([integrationId, bound]) =>
+      bound.map((v) => ({
+        integration_package_id: integrationId,
+        label: v.label,
+        account_id: v.accountId,
+        source: v.source,
+      })),
   );
   return used.length > 0 ? used : null;
+}
+
+/** `runs.resolved_connections` as read back from jsonb — parsed, never trusted as typed. */
+export function readResolvedConnections(raw: unknown): ResolvedConnectionMap | null {
+  return raw === null || raw === undefined ? null : resolvedConnectionMapSchema.parse(raw);
 }
 
 function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): EnrichedRun {
@@ -1047,7 +1056,9 @@ export async function getRunAttribution(
     .from(runs)
     .where(and(eq(runs.id, runId), eq(runs.orgId, orgId)))
     .limit(1);
-  return row ?? null;
+  return row
+    ? { ...row, resolvedConnections: readResolvedConnections(row.resolvedConnections) }
+    : null;
 }
 
 /**

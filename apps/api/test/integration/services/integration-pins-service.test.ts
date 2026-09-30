@@ -278,7 +278,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       await seedConsumingAgent("@pinsorg/orphan", { homeSpaceId: elsewhere.id });
 
       const listed = await listAgentsConsumingIntegration(scope, INTEGRATION);
-      expect(listed.map((a) => a.packageId)).toEqual(["@pinsorg/runs-here"]);
+      expect(listed.map((a) => a.agent_package_id)).toEqual(["@pinsorg/runs-here"]);
     });
 
     it("a pin is refused for an agent this space does not RUN", async () => {

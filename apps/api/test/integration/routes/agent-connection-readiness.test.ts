@@ -97,7 +97,7 @@ interface ReadinessBody {
     required_auth_key?: string;
   }>;
   integrations: Array<{
-    integration_id: string;
+    integration_package_id: string;
     run_blocking: boolean;
     resolution: ReadinessResolution;
   }>;
@@ -192,7 +192,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     expect(body.errors[0]!.field).toBe(`integrations.${INTEGRATION}`);
     expect(body.errors[0]!.code).toBe("not_connected");
 
-    const integ = body.integrations.find((i) => i.integration_id === INTEGRATION);
+    const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION);
     expect(integ?.run_blocking).toBe(true);
     expect(integ?.resolution).toMatchObject({ source: null, error_code: "not_connected" });
 
@@ -207,7 +207,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     const body = (await (await getReadiness()).json()) as ReadinessBody;
     expect(body.blocks_run).toBe(false);
     expect(body.errors).toHaveLength(0);
-    const integ = body.integrations.find((i) => i.integration_id === INTEGRATION);
+    const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION);
     expect(integ).toBeDefined();
     expect(integ!.run_blocking).toBe(false);
   });
@@ -218,7 +218,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
 
     const body = (await (await getReadiness()).json()) as ReadinessBody;
     expect(body.blocks_run).toBe(true);
-    const integ = body.integrations.find((i) => i.integration_id === INTEGRATION);
+    const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION);
     expect(integ!.run_blocking).toBe(true);
 
     expect((await postRun()).status).toBe(409);
@@ -232,7 +232,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     const body = (await (await getReadiness()).json()) as ReadinessBody;
     expect(body.blocks_run).toBe(false);
     expect(body.errors).toHaveLength(0);
-    const integ = body.integrations.find((i) => i.integration_id === INTEGRATION);
+    const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION);
     expect(integ!.run_blocking).toBe(false);
     expect(integ!.resolution.resolved_connection_ids).toHaveLength(1);
   });
@@ -264,7 +264,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     // Default (draft) verdict: the integration is declared, unconnected → blocks.
     const draftBody = (await (await getReadiness()).json()) as ReadinessBody;
     expect(draftBody.blocks_run).toBe(true);
-    expect(draftBody.integrations.map((i) => i.integration_id)).toContain(INTEGRATION);
+    expect(draftBody.integrations.map((i) => i.integration_package_id)).toContain(INTEGRATION);
 
     // Pinned 1.0.0 verdict: the frozen manifest has no integrations → clean.
     const verRes = await app.request(`/api/agents/${AGENT}/connection-readiness?version=1.0.0`, {
@@ -324,7 +324,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
       code: "auth_serves_no_selected_tool",
       connection_id: ids[1],
     });
-    const integ = body.integrations.find((i) => i.integration_id === INTEGRATION);
+    const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION);
     // The precise cause and the layer that bound the set, straight from the resolver.
     expect(integ!.resolution).toMatchObject({
       source: "admin_pin",
@@ -360,7 +360,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     expect(body.errors.find((e) => e.field === `integrations.${INTEGRATION}`)!.code).toBe(
       "not_connected",
     );
-    const integ = body.integrations.find((i) => i.integration_id === INTEGRATION);
+    const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION);
     expect(integ!.resolution).toMatchObject({ source: null, error_code: "not_connected" });
     expect(integ!.resolution.resolved_connection_ids).toEqual([]);
     // Candidates carry the resolver's serving-auth filter: the `backup` row serves nothing.
@@ -389,7 +389,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
       code: "auth_key_serves_no_selected_tool",
       required_auth_key: "backup",
     });
-    const integ = body.integrations.find((i) => i.integration_id === INTEGRATION);
+    const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION);
     expect(integ!.run_blocking).toBe(true);
     expect(integ!.resolution).toMatchObject({
       source: null,

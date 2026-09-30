@@ -80,7 +80,7 @@ describe("mtls connect strategy", () => {
 
     expect(conn).toBeDefined();
     expect(conn.auth_key).toBe("primary");
-    expect(conn.packageId).toBe(INTEG);
+    expect(conn.integration_package_id).toBe(INTEG);
 
     // Defence-in-depth: verify the row in DB exists for this user + space.
     const rows = await db

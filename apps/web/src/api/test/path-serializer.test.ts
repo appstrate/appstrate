@@ -29,6 +29,15 @@ describe("pathSerializer", () => {
     ).toBe("/api/integrations/@official/gmail/pins/@acme/my%20agent");
   });
 
+  it("keeps both package ids literal on a member-pin path", () => {
+    expect(
+      pathSerializer(
+        "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}",
+        { agentPackageId: "@acme/ops", integrationPackageId: "@official/gmail" },
+      ),
+    ).toBe("/api/me/integration-pins/@acme/ops/integrations/@official/gmail");
+  });
+
   it("does not split / in values that are not scoped package ids", () => {
     expect(pathSerializer("/api/end-users/{id}", { id: "a/b" })).toBe("/api/end-users/a%2Fb");
   });

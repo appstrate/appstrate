@@ -540,7 +540,11 @@ describe("proxyCall — an X-Run-Id run is re-checked on the 401 refresh", () =>
       userId: ctx.user.id,
       status: "running",
       runOrigin: "remote",
-      resolvedConnections: { [packageId]: [{ connectionId: conn!.id, source: "member_pin" }] },
+      resolvedConnections: {
+        [packageId]: [
+          { connectionId: conn!.id, source: "member_pin", label: "conn", accountId: "acct" },
+        ],
+      },
     });
     runId = run.id;
   });

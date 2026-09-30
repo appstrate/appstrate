@@ -18,6 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
+import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { PricingStatus } from "../pricing-status.ts";
@@ -206,17 +207,8 @@ export const runs = pgTable(
     // (`ConnectionResolutionSource` in `@appstrate/core/integration`).
     // Audit trail: a run's identity in the upstream provider logs maps
     // back through this column even after pins/connections are mutated.
-    resolvedConnections: jsonb("resolved_connections").$type<
-      Record<
-        string,
-        {
-          connectionId: string;
-          source: string;
-          label?: string | null;
-          accountId?: string | null;
-        }[]
-      >
-    >(),
+    // Read back through `resolvedConnectionMapSchema` (the `$type` is an assertion).
+    resolvedConnections: jsonb("resolved_connections").$type<ResolvedConnectionMap>(),
     // Snapshot of the integration manifest VERSION resolved per declared
     // integration at run kickoff (#686). Shape:
     // { "@scope/integration": { version: "1.4.2" | null, source: "version" | "draft" | "system" } }.

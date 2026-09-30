@@ -505,6 +505,35 @@ describe("Spaces API", () => {
       expect(written?.proxyId).toBe("prx_after");
     });
 
+    it("audits each moved setting once, before and after, and a no-op write not at all", async () => {
+      await seedPackage({
+        id: "@testorg/audited-pkg",
+        orgId: ctx.orgId,
+        homeSpaceId: ctx.defaultSpaceId,
+      });
+      await seedSpacePackage(ctx.defaultSpaceId, "@testorg/audited-pkg");
+
+      expect((await putPackage("@testorg/audited-pkg", { proxyId: "prx_a" })).status).toBe(200);
+      expect((await putPackage("@testorg/audited-pkg", { proxyId: "prx_a" })).status).toBe(200);
+      expect((await putPackage("@testorg/audited-pkg", { proxyId: null })).status).toBe(200);
+
+      const rows = await db
+        .select({ before: auditEvents.before, after: auditEvents.after })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.action, "package.placement.updated"),
+            eq(auditEvents.resourceId, "@testorg/audited-pkg"),
+          ),
+        )
+        .orderBy(auditEvents.id);
+      const spaceId = ctx.defaultSpaceId;
+      expect(rows).toEqual([
+        { before: { spaceId, proxyId: null }, after: { spaceId, proxyId: "prx_a" } },
+        { before: { spaceId, proxyId: "prx_a" }, after: { spaceId, proxyId: null } },
+      ]);
+    });
+
     it("refuses an `enabled` key — activation is not a setting on this body", async () => {
       // `enabled` left this route when activation got its own pair of doors.
       // `.strict()` makes the retired field FAIL loudly rather than be dropped

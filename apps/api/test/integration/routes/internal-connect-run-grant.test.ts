@@ -182,7 +182,9 @@ describe("/internal/* — connect-run grant authorization", () => {
       .update(runs)
       .set({
         resolvedConnections: {
-          [integrationId]: [{ connectionId, source: "member_pin" as const }],
+          [integrationId]: [
+            { connectionId, source: "member_pin" as const, label: "conn", accountId: "acct" },
+          ],
         },
       })
       .where(eq(runs.id, runId));

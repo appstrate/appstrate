@@ -6,6 +6,7 @@ import type { TokenUsage } from "@appstrate/core/token-usage";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import type { ConnectionResolutionSource } from "@appstrate/core/integration";
 
 export {
   ASSIGNABLE_ORG_ROLES,
@@ -141,18 +142,18 @@ export interface RunWireDto {
 /**
  * One integration connection resolved for a run, projected from the internal
  * `runs.resolved_connections` snapshot for display — one entry per bound
- * connection, so several may share an `integration_id`. The raw `connectionId`
+ * connection, so several may share an `integration_package_id`. The raw `connectionId`
  * is deliberately omitted — only display-safe fields cross the wire.
  */
 export interface RunConnectionUsed {
   /** Integration package id (`@scope/integration`). */
-  integration_id: string;
-  /** Connection label, denormalized at kickoff. Null on pre-snapshot runs. */
-  label: string | null;
+  integration_package_id: string;
+  /** Connection label, denormalized at kickoff. */
+  label: string;
   /** Account identifier (email, sub), denormalized at kickoff. */
-  account_id: string | null;
-  /** Resolution mechanism (`admin_pin` | `run_override` | `fallback_auto` | …). */
-  source: string;
+  account_id: string;
+  /** The cascade layer that bound the connection. */
+  source: ConnectionResolutionSource;
 }
 
 /** Run with enriched display names from LEFT JOINs (dashboard user, end-user, API key, schedule). */

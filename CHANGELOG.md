@@ -10,48 +10,122 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Two additive migrations apply at boot**: `0078` adds
   `integration_connections.refresh_failures_since`; `0079` adds the
-  `notifications_type_valid` CHECK. Before the deploy, confirm no other kind
-  exists: `SELECT type, count(*) FROM notifications WHERE type NOT IN
-('run_completed', 'package_shared') GROUP BY type;` must return no row
+  `notifications_type_valid` CHECK. Before the deploy, this query must return
+  no row:
+  `SELECT type, count(*) FROM notifications WHERE type NOT IN ('run_completed', 'package_shared') GROUP BY type;`
   (#1641).
+- **Pre-flight the stored integration manifests before the deploy**:
+  `DATABASE_URL=… bun scripts/migration/0035-verify-manifest-expressions.ts`
+  lists every draft or version holding a template or runtime expression the
+  platform no longer evaluates (it would stop loading); it exits 1 while any
+  remains (#1641).
+- **Run `scripts/migration/0036-resolved-connection-labels.sql` after `0032`,
+  before the new image serves traffic**: run snapshots written before #1611
+  can hold `label: null`, and the snapshot is now parsed on read (#1641).
 
 ### Changed
 
+- **BREAKING (manifests): one template grammar per concept, and nothing
+  unrendered reaches an upstream** (#1641). `delivery.http.value` renders
+  through the same `{$credential.<field>}` renderer as `env` and `files`: a
+  `{{field}}` there is refused at import instead of substituted. Any other
+  `{$…}` (`{$outputs.token}`, …) in delivery or `authorized_uris` is refused at
+  import and throws at render. A connect output is referenced as
+  `{$credential.<name>}`, the jwt extractor's `token` included; login inputs
+  are `{{name}}`, and a `{$…}` in a `connect.login` request is refused.
 - **BREAKING (API): an integration OAuth client is updated with `PATCH`, and
-  its `client_id` can no longer change** (#1641). `PATCH
-/api/integrations/{packageId}/oauth-clients/{clientId}` and `PATCH
-/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}` replace the
-  `PUT` of each. An absent field is left unchanged (an absent `redirect_uri`
-  used to clear it; send `null`). A different `client_id` answers `409
-client_id_immutable`: the connections a client minted refresh only with the
-  `client_id` their tokens were issued to, so a new one is a new client. The
+  its `client_id` can no longer change** (#1641). `PATCH` replaces the `PUT`
+  of `/api/integrations/{packageId}/oauth-clients/{clientId}` and of
+  `/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}`. An absent
+  field is left unchanged (send `null` to clear `redirect_uri`). A different
+  `client_id` answers `409 client_id_immutable`: the connections a client
+  minted refresh only with the `client_id` their tokens were issued to. The
   audit action `integration.oauth_client.rotated` is now
   `integration.oauth_client.updated`; create/update/delete rows record the
   client before and after (never its secret).
+- **BREAKING (API): OAuth clients name their owning tier** (#1641).
+  `GET …/auths/{authKey}/clients` returns `source: "system" | "org" | "space"`
+  instead of `"built-in" | "org" | "custom"`, where `custom` meant the space.
+- **BREAKING (API): member pins are addressed by path, like admin pins**
+  (#1641). `PUT` and `DELETE`
+  `/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`
+  take both ids in the path; the PUT body is `{ connection_ids }` alone.
+  `GET /api/me/integration-pins?agent_package_id=` is unchanged.
+- **BREAKING (API): one name per role across the pin and connection family**
+  (#1641). The agent is `agent_package_id` and the integration
+  `integration_package_id` on `IntegrationPin`, `IntegrationConnection`,
+  consuming agents, connection readiness and the run's `connections_used`,
+  whose `label` and `account_id` are always strings and `source` the cascade
+  layer enum.
+- **BREAKING (API): an end-user's member-pin write is a 403, not a 401**
+  (#1641). The key is valid; `forbidden` carries no `invalid_token` challenge.
+- **BREAKING (API): the credential proxy's refusals carry stable problem
+  codes** (#1641): `unauthorized_target`, `blocked_target`,
+  `credential_exfiltration_refused` (403), `credential_not_found` (404),
+  `unresolved_placeholder` (400). An upstream that cannot be resolved or
+  reached is a 502 (`upstream_unresolvable`, `upstream_unreachable`), a
+  timeout a 504 (`upstream_timeout`); both used to be a 500.
+- **The credential and LLM proxies mark every response with RFC 9209
+  `Proxy-Status`** (#1641): `appstrate; received-status=<n>` on a relayed
+  upstream response, `appstrate; error=<type>` on the proxy's own. A relayed
+  upstream 401 no longer carries the platform's `invalid_token` challenge.
+- **The three api_call paths share one outbound implementation** (#1641).
+  The platform credential proxy, the sidecar and `appstrate run` follow
+  redirects under one rule: an origin the `authorized_uris` allowlist names
+  keeps the credential (Dropbox `api.` to `content.`), any other origin change
+  strips it. Every hop is SSRF-checked and connected to its DNS-validated
+  address, and one 30 s deadline bounds every call (`appstrate run` had none).
+  A streaming upload's redirect is returned unfollowed.
 - **BREAKING (API): the LLM proxy reports its cache outcome as RFC 9211
-  `Cache-Status`** (#1641). `x-llm-proxy-cache-status` is gone; a cached reply
-  carries `Cache-Status: appstrate-llm-proxy; hit`, a stored miss
-  `appstrate-llm-proxy; fwd=uri-miss; stored`, after any upstream member.
+  `Cache-Status`** (#1641): `appstrate-llm-proxy; hit` on a cached reply,
+  `appstrate-llm-proxy; fwd=uri-miss; stored` on a stored miss.
+  `x-llm-proxy-cache-status` is gone.
 - **BREAKING (MCP): `read_skill` returns a binary file as an embedded
-  resource** (#1641). The `content_base64` field is gone; the bytes arrive as a
-  `resource` content block with `blob`, whose `uri` is the file's REST content
-  URL.
+  resource** (#1641). The `content_base64` field is gone; the bytes arrive as
+  a `resource` content block with `blob`, whose `uri` is the file's REST
+  content URL.
 - **Platform MCP tools return structured output** (#1641). Every JSON result
   carries `structuredContent` beside its text block (MCP 2025-06-18), and the
   tools with a stable result shape declare an `outputSchema`.
 - **Notification kinds are a declared union** (#1641). `GET /api/notifications`
   items are a `oneOf` on `type` (`run_completed`, `package_shared`) with a
   typed payload each, and the database refuses any other kind.
-- **The OAuth endpoints' 429 is a standard OAuth error** (#1641).
-  `/api/auth/oauth2/*` answers `Retry-After` and `application/json
-{"error":"temporarily_unavailable","error_description":…}` (RFC 6749 §5.2)
-  instead of Better Auth's `X-Retry-After` and untyped `{message}`.
+- **The OAuth endpoints' 429 is a standard OAuth error** (#1641):
+  `/api/auth/oauth2/*` answers `Retry-After` and a JSON body with
+  `"error": "temporarily_unavailable"` (RFC 6749 §5.2) instead of Better
+  Auth's `X-Retry-After` and untyped `{message}`.
 - **`@appstrate/afps-runtime`, `@appstrate/runner-pi` and
   `@appstrate/module-chat` are private workspace packages** (#1641). None was
   ever published; the dead `publishConfig` is removed.
+- **The retired `X-Integration` header is no longer stripped** by the
+  credential proxy or the sidecar (#1641); it reaches the upstream like any
+  other header.
+
+### Added
+
+- **Credential-proxy use of another member's connection is audited** (#1641).
+  The first call of an `X-Session-Id` through a connection the caller does not
+  own writes one `integration.connection.proxied` row; the call log names the
+  connection used.
 
 ### Fixed
 
+- **A `connection_overrides` key the agent does not declare is a 400**
+  (#1641). It was dropped without a trace, and a schedule froze it onto its
+  row, so the run bound a lower cascade layer instead of the account asked
+  for. It is refused on the agent run, the inline run and `/inline/validate`,
+  and on schedule create and update.
+- **Audit rows record the whole change** (#1641). `schedule.created` records
+  every override; `schedule.updated` records before and after, including the
+  connection-override reset an actor change implies; a placement `PATCH`
+  writes `package.placement.updated` for `modelId`, `proxyId` and
+  `generationConfig`; pin and org-default writes record `before`; admin and
+  member pin rows share one `resourceId`.
+- **`connect.login` reads the regex extractor's `source`** (#1641):
+  `$response.body` or `$response.header.<name>`; it was ignored. An
+  expression, selector or criterion context the engine cannot evaluate is
+  refused at import and fails the login as `invalid_config` instead of
+  silently not matching.
 - **Isolated upstream 401s no longer disconnect an API-key connection**
   (#1641). Rejections of a credential that cannot refresh count toward
   `INTEGRATION_REFRESH_MAX_FAILURES` only within one hour of the first; a
@@ -76,9 +150,9 @@ client_id_immutable`: the connections a client minted refresh only with the
   Every manifest write and import refuses `allow_all_uris`, or an
   `authorized_uris` entry that leaves the host to the caller (`https://**`,
   `https://*.com/**`), on an auth that injects a credential over HTTP; the
-  platform proxy, the sidecar and `appstrate run` refuse the same calls.
-  BREAKING: such existing custom integrations stop reaching any host — replace
-  `allow_all_uris` with `authorized_uris` naming the hosts.
+  platform proxy, the sidecar, its MITM egress and `appstrate run` refuse the
+  same calls. BREAKING: such existing custom integrations stop reaching any
+  host — replace `allow_all_uris` with `authorized_uris` naming the hosts.
 - **OAuth client secrets and upstream session cookies no longer sit in
   plaintext in Redis** (#1641). The OAuth connect state stores only the client
   reference, re-resolved at the callback like token refresh does; the

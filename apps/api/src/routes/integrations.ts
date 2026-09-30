@@ -77,6 +77,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
+import type { AuditPayload } from "@appstrate/core/module";
 import { recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
 import { listIntegrations } from "../services/integration-service.ts";
 import {
@@ -121,6 +122,7 @@ import {
   listAgentsConsumingIntegration,
   listIntegrationPins,
   loadConnectionOwnership,
+  pinAuditResourceId,
   setBlockUserConnections,
   updateConnectionMetadata,
   upsertIntegrationPin,
@@ -535,6 +537,23 @@ async function assertConnectionBelongsToActor(
  * the provider's consent screen, where it fails as an opaque `invalid_scope`.
  * Membership (and the no-catalog carve-out) is `partitionScopesByAuthCatalog`.
  */
+/** The admin pin's set before a write, as the audit `before`. */
+async function adminPinBefore(
+  scope: SpaceScope,
+  integrationPackageId: string,
+  agentPackageId: string,
+): Promise<AuditPayload | null> {
+  const pins = await listIntegrationPins(scope, integrationPackageId);
+  const pin = pins.find((p) => p.agent_package_id === agentPackageId);
+  return pin ? { connectionIds: pin.connection_ids } : null;
+}
+
+function orgDefaultAudit(
+  def: { connection_ids: string[]; enforce: boolean } | null,
+): AuditPayload | null {
+  return def ? { connectionIds: def.connection_ids, enforce: def.enforce } : null;
+}
+
 function assertScopesInAuthCatalog(
   auth: { scope_catalog?: readonly { value: string }[] },
   authKey: string,
@@ -1324,6 +1343,7 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       const body = await readJsonBody(c, setPinSchema);
       const userId = c.get("user")?.id ?? null;
+      const before = await adminPinBefore(scope, packageId, agentPackageId);
       const pin = await upsertIntegrationPin(scope, packageId, {
         agentPackageId,
         connectionIds: body.connection_ids,
@@ -1332,7 +1352,8 @@ export function createIntegrationsRouter() {
       await recordAuditFromContext(c, {
         action: "integration.pin.upserted",
         resourceType: "integration_pin",
-        resourceId: `${packageId}#${agentPackageId}`,
+        resourceId: pinAuditResourceId(agentPackageId, packageId),
+        before,
         after: { connectionIds: pin.connection_ids },
       });
       return c.json(pin);
@@ -1346,12 +1367,14 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
+      const before = await adminPinBefore(scope, packageId, agentPackageId);
       const result = await deleteIntegrationPin(scope, packageId, agentPackageId);
       if (result.deleted) {
         await recordAuditFromContext(c, {
           action: "integration.pin.deleted",
           resourceType: "integration_pin",
-          resourceId: `${packageId}#${agentPackageId}`,
+          resourceId: pinAuditResourceId(agentPackageId, packageId),
+          before,
         });
       }
       // Idempotent delete — 204 whether the pin existed or not.
@@ -1386,6 +1409,7 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       const body = await readJsonBody(c, setOrgDefaultSchema);
       const userId = c.get("user")?.id ?? null;
+      const before = orgDefaultAudit(await getOrgDefault(scope, packageId));
       const def = await upsertOrgDefault(scope, packageId, {
         connectionIds: body.connection_ids,
         enforce: body.enforce,
@@ -1395,7 +1419,8 @@ export function createIntegrationsRouter() {
         action: "integration.org_default.upserted",
         resourceType: "integration_org_default",
         resourceId: packageId,
-        after: { connectionIds: def.connection_ids, enforce: def.enforce },
+        before,
+        after: orgDefaultAudit(def),
       });
       return c.json(def);
     },
@@ -1407,12 +1432,14 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
+      const before = orgDefaultAudit(await getOrgDefault(scope, packageId));
       const result = await deleteOrgDefault(scope, packageId);
       if (result.deleted) {
         await recordAuditFromContext(c, {
           action: "integration.org_default.deleted",
           resourceType: "integration_org_default",
           resourceId: packageId,
+          before,
         });
       }
       // Idempotent delete — 204 whether a default existed or not.

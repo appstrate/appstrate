@@ -32,8 +32,8 @@
  *   - DELETE /connections/:connectionId — destructive global credential delete
  *   - GET    /connections/:connectionId/delete-impact — the caller's pins/schedules it rewrites
  *   - GET    /integration-pins          — member-self pins for an agent
- *   - PUT    /integration-pins          — upsert a member-self pin
- *   - DELETE /integration-pins          — clear a member-self pin
+ *   - PUT    /integration-pins/:agentPackageId/integrations/:integrationPackageId — upsert a member-self pin
+ *   - DELETE /integration-pins/:agentPackageId/integrations/:integrationPackageId — clear it
  *   - GET    /context                   — the caller's working context (get_me)
  */
 
@@ -62,6 +62,7 @@ import {
   upsertMemberPin,
   deleteMemberPin,
   listMemberPinsForAgent,
+  pinAuditResourceId,
 } from "../services/integration-pins-service.ts";
 import {
   deleteIntegrationConnection,
@@ -78,7 +79,7 @@ import { listRecentForActor } from "../services/state/runs.ts";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { unauthorized, invalidRequest } from "../lib/errors.ts";
+import { forbidden, unauthorized } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
 
@@ -244,11 +245,27 @@ router.get(
  */
 export const upsertMemberPinSchema = z
   .object({
-    agent_package_id: z.string().min(1),
-    integration_package_id: z.string().min(1),
     connection_ids: connectionIdSetSchema,
   })
   .strict();
+
+/**
+ * Path-addressed like the admin pins: two package ids, each `@scope/name`, with a
+ * static segment between them — the trie router cannot split two adjacent ones.
+ */
+const MEMBER_PIN_ROUTE =
+  "/integration-pins/:agentPackageId{@[^/]+/[^/]+}/integrations/:integrationPackageId{@[^/]+/[^/]+}";
+
+/**
+ * The member a pin write acts for. An end-user holds a valid credential but no
+ * member-pin surface, so the refusal is 403 — a 401 would tell its SDK the key is dead.
+ */
+function memberPinOwner(c: Context<AppEnv>, verb: string): string {
+  if (c.get("endUser")) throw forbidden(`End-user cannot ${verb} a member-scope pin`);
+  const user = c.get("user");
+  if (!user) throw unauthorized("Authentication required");
+  return user.id;
+}
 
 router.get(
   "/integration-pins",
@@ -265,10 +282,8 @@ router.get(
     const agentPackageId = c.req.query("agent_package_id");
     // An omitted parameter is an empty list, not a 400 — the picker renders
     // before it has an agent to ask about, exactly as it does for an end-user
-    // above. The DELETE below refuses instead, because deleting nothing in
-    // particular is not a coherent request. The spec is what was wrong here:
-    // it marked the parameter `required` and documented a 400 this route has
-    // never raised.
+    // above. The spec is what was wrong here: it marked the parameter
+    // `required` and documented a 400 this route has never raised.
     if (!agentPackageId) return c.json(listResponse([]));
     const scope = getSpaceScope(c);
     const pins = await listMemberPinsForAgent(scope, agentPackageId, user.id);
@@ -276,28 +291,41 @@ router.get(
   },
 );
 
+/** The caller's current member pin set on (agent, integration), for the audit `before`. */
+async function memberPinBefore(
+  scope: SpaceScope,
+  agentPackageId: string,
+  integrationPackageId: string,
+  userId: string,
+): Promise<string[] | null> {
+  const pins = await listMemberPinsForAgent(scope, agentPackageId, userId);
+  return (
+    pins.find((p) => p.integration_package_id === integrationPackageId)?.connection_ids ?? null
+  );
+}
+
 router.put(
-  "/integration-pins",
+  MEMBER_PIN_ROUTE,
   requireCeiling("integrations", "connect"),
   requireSpaceContext(),
   async (c) => {
-    const user = c.get("user");
-    if (!user) throw unauthorized("Authentication required");
-    if (c.get("endUser")) {
-      throw unauthorized("End-user cannot set a member-scope pin");
-    }
+    const userId = memberPinOwner(c, "set");
+    const agentPackageId = c.req.param("agentPackageId")!;
+    const integrationPackageId = c.req.param("integrationPackageId")!;
     const scope = getSpaceScope(c);
     const input = await readJsonBody(c, upsertMemberPinSchema, { allowEmpty: true });
+    const before = await memberPinBefore(scope, agentPackageId, integrationPackageId, userId);
     const result = await upsertMemberPin(scope, {
-      agentPackageId: input.agent_package_id,
-      integrationId: input.integration_package_id,
+      agentPackageId,
+      integrationId: integrationPackageId,
       connectionIds: input.connection_ids,
-      userId: user.id,
+      userId,
     });
     await recordAuditFromContext(c, {
       action: "integration.member_pin.upserted",
       resourceType: "integration_pin",
-      resourceId: `${input.agent_package_id}|${input.integration_package_id}`,
+      resourceId: pinAuditResourceId(agentPackageId, integrationPackageId),
+      before: before ? { connectionIds: before } : null,
       after: { connectionIds: result.connection_ids },
     });
     return c.json(result);
@@ -305,27 +333,22 @@ router.put(
 );
 
 router.delete(
-  "/integration-pins",
+  MEMBER_PIN_ROUTE,
   requireCeiling("integrations", "connect"),
   requireSpaceContext(),
   async (c) => {
-    const user = c.get("user");
-    if (!user) throw unauthorized("Authentication required");
-    if (c.get("endUser")) {
-      throw unauthorized("End-user cannot clear a member-scope pin");
-    }
+    const userId = memberPinOwner(c, "clear");
+    const agentPackageId = c.req.param("agentPackageId")!;
+    const integrationPackageId = c.req.param("integrationPackageId")!;
     const scope = getSpaceScope(c);
-    const agentPackageId = c.req.query("agent_package_id");
-    const integrationId = c.req.query("integration_package_id");
-    if (!agentPackageId || !integrationId) {
-      throw invalidRequest("agent_package_id and integration_package_id query params are required");
-    }
-    const result = await deleteMemberPin(scope, agentPackageId, integrationId, user.id);
+    const before = await memberPinBefore(scope, agentPackageId, integrationPackageId, userId);
+    const result = await deleteMemberPin(scope, agentPackageId, integrationPackageId, userId);
     if (result.deleted) {
       await recordAuditFromContext(c, {
         action: "integration.member_pin.deleted",
         resourceType: "integration_pin",
-        resourceId: `${agentPackageId}|${integrationId}`,
+        resourceId: pinAuditResourceId(agentPackageId, integrationPackageId),
+        before: before ? { connectionIds: before } : null,
       });
     }
     return c.body(null, 204);
@@ -343,7 +366,7 @@ router.delete(
  * This is the ONLY entrypoint for that delete, and it is owner-scoped by
  * construction. Surfaced only from `/connections` (the user-owned management
  * page), so a member can't trigger a global delete from an agent context —
- * there they switch the agent's pick with `PUT /api/me/integration-pins`,
+ * there they switch the agent's pick with `PUT /api/me/integration-pins/{agent}/integrations/{integration}`,
  * which stops one agent using a connection without destroying it.
  *
  * Space context is implicit — the connection row carries `space_id`,

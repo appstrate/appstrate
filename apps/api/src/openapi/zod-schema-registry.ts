@@ -653,7 +653,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   // ─── Member integration pins (routes/me.ts) ─────────────────────────────
   {
     method: "PUT",
-    path: "/api/me/integration-pins",
+    path: "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}",
     jsonSchema: toJsonSchema(upsertMemberPinSchema),
     description: "Upsert the caller's integration connection pin",
   },

@@ -425,7 +425,6 @@ function ClientsTable({
   // use the default client, so that client's override is the one that decides.
   const effectiveRedirectUri = rows.find((c) => c.is_default)?.redirect_uri || platformRedirectUri;
   const canChooseDefault = rows.length > 1;
-  const ownSource = tier === "space" ? "custom" : "org";
   // An org row shows in both tables on the page: prefix the org table's test ids.
   const tid = (id: string) => (tier === "space" ? id : `org-${id}`);
   const hasAutoClient = rows.some((c) => c.auto_provisioned);
@@ -506,7 +505,7 @@ function ClientsTable({
             </TableHeader>
             <TableBody>
               {rows.map((client) => {
-                const deletable = client.source === ownSource;
+                const deletable = client.source === tier;
                 const editable = deletable && !client.auto_provisioned;
                 return (
                   <TableRow
@@ -517,7 +516,6 @@ function ClientsTable({
                       <SourceBadge
                         source={client.source}
                         autoProvisioned={client.auto_provisioned}
-                        customLabel="space"
                       />
                     </TableCell>
                     <TableCell className="font-mono text-xs">{client.client_id}</TableCell>
@@ -1139,7 +1137,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
 
   // Lookup helpers for the table
   const agentDisplayName = (id: string): string =>
-    consumingAgents?.find((a) => a.packageId === id)?.display_name ?? id;
+    consumingAgents?.find((a) => a.agent_package_id === id)?.display_name ?? id;
 
   const canAddPin = !!newAgent && newConnectionIds.length > 0;
 
@@ -1161,10 +1159,12 @@ function PinManagementSection({ packageId }: { packageId: string }) {
 
   // Only include agents not already pinned.
   const alreadyPinnedAgentIds = new Set(
-    (pins ?? []).filter((p) => p.integration_package_id === packageId).map((p) => p.packageId),
+    (pins ?? [])
+      .filter((p) => p.integration_package_id === packageId)
+      .map((p) => p.agent_package_id),
   );
   const pinnableAgents = (consumingAgents ?? []).filter(
-    (a) => !alreadyPinnedAgentIds.has(a.packageId),
+    (a) => !alreadyPinnedAgentIds.has(a.agent_package_id),
   );
 
   return (
@@ -1196,8 +1196,10 @@ function PinManagementSection({ packageId }: { packageId: string }) {
             </TableHeader>
             <TableBody>
               {(pins ?? []).map((p) => (
-                <TableRow key={p.packageId} data-testid={`pin-row-${p.packageId}`}>
-                  <TableCell className="px-3 py-2">{agentDisplayName(p.packageId)}</TableCell>
+                <TableRow key={p.agent_package_id} data-testid={`pin-row-${p.agent_package_id}`}>
+                  <TableCell className="px-3 py-2">
+                    {agentDisplayName(p.agent_package_id)}
+                  </TableCell>
                   <TableCell className="px-3 py-2">
                     {p.connection_ids.map((id, i) => {
                       const c = pinnableConnections.find((x) => x.id === id);
@@ -1224,7 +1226,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
                       disabled={deletePin.isPending}
                       onClick={() =>
                         deletePin.mutate({
-                          params: { path: { packageId, agentPackageId: p.packageId } },
+                          params: { path: { packageId, agentPackageId: p.agent_package_id } },
                         })
                       }
                       title={t("integration.admin.pinManagement.delete")}
@@ -1266,7 +1268,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
             >
               <option value="">—</option>
               {pinnableAgents.map((a) => (
-                <option key={a.packageId} value={a.packageId}>
+                <option key={a.agent_package_id} value={a.agent_package_id}>
                   {a.display_name}
                 </option>
               ))}

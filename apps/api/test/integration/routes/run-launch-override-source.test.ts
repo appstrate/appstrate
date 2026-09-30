@@ -154,6 +154,61 @@ describe("launch override — the bound set names the launch it came from", () =
     expect(await db.select().from(runs)).toHaveLength(0);
   });
 
+  it("refuses a connection_overrides key the agent does not declare (400) and creates no run", async () => {
+    // Before, the resolver read only declared ids, so a typo was dropped and a
+    // lower layer bound instead of the account the caller asked for.
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        connection_overrides: { [INTEGRATION]: [picked], "@launchorg/typo": [other] },
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string; param?: string; detail: string };
+    expect(body.code).toBe("invalid_request");
+    expect(body.param).toBe("connection_overrides");
+    expect(body.detail).toContain("@launchorg/typo");
+    expect(await db.select().from(runs)).toHaveLength(0);
+  });
+
+  it("refuses an undeclared connection_overrides key on the inline launch and its validator", async () => {
+    const inline = {
+      manifest: {
+        name: "@inline/override-keys",
+        display_name: "Inline",
+        version: "0.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
+        integrations_configuration: { [INTEGRATION]: { tools: ["search"] } },
+      },
+      prompt: "Search for something.",
+      connection_overrides: { "@launchorg/typo": [picked] },
+    };
+    const request = (path: string) =>
+      app.request(path, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify(inline),
+      });
+
+    const launched = await request("/api/runs/inline");
+    expect(launched.status).toBe(400);
+    expect(((await launched.json()) as { code: string }).code).toBe("invalid_request");
+    expect(await db.select().from(runs)).toHaveLength(0);
+
+    const validated = await request("/api/runs/inline/validate");
+    expect(validated.status).toBe(400);
+    const body = (await validated.json()) as {
+      code: string;
+      errors: { field: string; message: string }[];
+    };
+    expect(body.code).toBe("validation_failed");
+    const item = body.errors.find((e) => e.field === "connection_overrides");
+    expect(item?.message).toContain("@launchorg/typo");
+  });
+
   it("a schedule fire's frozen picks bind as schedule_override", async () => {
     const schedule = await seedSchedule({
       packageId: AGENT,

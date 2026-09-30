@@ -1387,11 +1387,11 @@ export async function resolveIntegrationClientById(
 interface IntegrationClientDescriptor {
   /** `client_ref` to pass back at connect time. */
   client_ref: string;
-  /** `"built-in"` (env system client), `"org"` (org-level) or `"custom"` (space). */
-  source: "built-in" | "org" | "custom";
+  /** The owning tier: `"system"` (env system client), `"org"` (org-level) or `"space"`. */
+  source: "system" | "org" | "space";
   /**
-   * For `"custom"` / `"org"` clients, the OAuth `client_id` the admin registered.
-   * For `"built-in"` (system) clients, a stable opaque FINGERPRINT (truncated
+   * For `"space"` / `"org"` clients, the OAuth `client_id` the admin registered.
+   * For `"system"` clients, a stable opaque FINGERPRINT (truncated
    * SHA-256) — never the real `SYSTEM_INTEGRATIONS` client_id, which is a
    * deployment secret and must not leak to the front. It is display-only; the
    * connect/refresh keyspace is `client_ref`, not this field.
@@ -1457,7 +1457,7 @@ function describeClient(
   if (!("isDefault" in client)) {
     return {
       client_ref: client.id,
-      source: "built-in",
+      source: "system",
       // Never expose the real system client_id (deployment secret) — only an
       // opaque, stable fingerprint for the UI to show/diff.
       client_id: fingerprintSystemClientId(client.clientId),
@@ -1473,7 +1473,7 @@ function describeClient(
   }
   return {
     client_ref: client.id,
-    source: client.spaceId === null ? "org" : "custom",
+    source: client.spaceId === null ? "org" : "space",
     client_id: client.client_id,
     is_default: isDefault,
     auto_provisioned: client.autoProvisioned,
@@ -2994,7 +2994,7 @@ export function serializeIntegrationConnection(
   }
   return {
     id: row.id,
-    packageId: row.integrationId,
+    integration_package_id: row.integrationId,
     auth_key: row.authKey,
     account_id: row.accountId,
     identity_claims: (row.identityClaims as Record<string, unknown> | null) ?? null,

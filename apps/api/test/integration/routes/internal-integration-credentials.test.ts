@@ -25,6 +25,7 @@
  * `?connection_id=` and the snapshot is the third authorization layer.
  */
 
+import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -111,11 +112,13 @@ async function bindConnectionsToRun(
   runIdToBind: string,
   bindings: Record<string, string[]>,
 ): Promise<void> {
-  const resolved: Record<string, { connectionId: string; source: "member_pin" }[]> = {};
+  const resolved: ResolvedConnectionMap = {};
   for (const [integrationId, ids] of Object.entries(bindings)) {
     resolved[integrationId] = ids.map((connectionId) => ({
       connectionId,
       source: "member_pin" as const,
+      label: connectionId,
+      accountId: connectionId,
     }));
   }
   await db.update(runs).set({ resolvedConnections: resolved }).where(eq(runs.id, runIdToBind));
@@ -469,7 +472,9 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
-      resolvedConnections: { [INTEGRATION]: [{ connectionId, source: "member_pin" }] },
+      resolvedConnections: {
+        [INTEGRATION]: [{ connectionId, source: "member_pin", label: "conn", accountId: "acct" }],
+      },
     });
 
     const res = await app.request(credentialsUrl(INTEGRATION, connectionId), {

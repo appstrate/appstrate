@@ -654,7 +654,11 @@ describe("credential-proxy integration-resolver", () => {
         userId: ctx.user.id,
         status: "running",
         runOrigin: "remote",
-        resolvedConnections: { [INTEGRATION_ID]: [{ connectionId, source: "member_pin" }] },
+        resolvedConnections: {
+          [INTEGRATION_ID]: [
+            { connectionId, source: "member_pin", label: "conn", accountId: "acct" },
+          ],
+        },
         resolvedIntegrationVersions: { [INTEGRATION_ID]: { version: "1.0.0", source: "version" } },
       });
       const actor = { type: "user" as const, id: ctx.user.id };

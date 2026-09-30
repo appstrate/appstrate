@@ -228,7 +228,7 @@ export function useIntegrationAgentResolution(
     ...options,
     enabled: options.enabled && !!integrationId,
     select: (data) =>
-      data.integrations.find((i) => i.integration_id === integrationId)?.resolution ?? null,
+      data.integrations.find((i) => i.integration_package_id === integrationId)?.resolution ?? null,
   });
 }
 
@@ -247,7 +247,8 @@ export function useIntegrationRunBlocking(
     ...options,
     enabled: options.enabled && !!integrationId,
     select: (data) =>
-      data.integrations.find((i) => i.integration_id === integrationId)?.run_blocking ?? false,
+      data.integrations.find((i) => i.integration_package_id === integrationId)?.run_blocking ??
+      false,
   });
 }
 

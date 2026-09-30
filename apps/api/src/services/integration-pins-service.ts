@@ -133,9 +133,17 @@ export async function setBlockUserConnections(
 
 // ─────────────────────────── Pin CRUD ─────────────────────────────────────────
 
+/**
+ * The audit `resourceId` of a pin — ONE format for the admin and the member
+ * rows of the same (agent, integration); the `action` tells the scopes apart.
+ */
+export function pinAuditResourceId(agentPackageId: string, integrationPackageId: string): string {
+  return `${integrationPackageId}#${agentPackageId}`;
+}
+
 function toPinSummary(pin: PinRow): PinSummary {
   return {
-    packageId: pin.packageId,
+    agent_package_id: pin.packageId,
     integration_package_id: pin.integrationId,
     connection_ids: pin.connectionIds,
     createdAt: pin.createdAt.toISOString(),
@@ -201,7 +209,7 @@ export async function listAgentsConsumingIntegration(
     .orderBy(packages.id);
 
   return rows.map((r) => ({
-    packageId: r.id,
+    agent_package_id: r.id,
     display_name: getPackageDisplayName(r),
   }));
 }
@@ -274,7 +282,7 @@ async function upsertPin(args: {
   `),
   );
   return {
-    packageId: agentPackageId,
+    agent_package_id: agentPackageId,
     integration_package_id: integrationId,
     connection_ids: integrationPins.connectionIds.mapFromDriverValue(
       row!.connection_ids,
@@ -649,7 +657,7 @@ async function resolveAgentIntegrationPick(args: {
   ]);
 
   const adminPinnedConnectionIds =
-    adminPins.find((p) => p.packageId === agentPackageId)?.connection_ids ?? [];
+    adminPins.find((p) => p.agent_package_id === agentPackageId)?.connection_ids ?? [];
   const memberPinnedConnectionIds =
     memberPins.find((p) => p.integration_package_id === integrationId)?.connection_ids ?? [];
   const orgDefaultConnectionIds = orgDefault?.connection_ids ?? [];
@@ -713,7 +721,7 @@ interface AgentConnectionReadiness {
   errors: ValidationFieldError[];
   /** Every declared integration with its management verdict (includeInert) + run-blocking flag. */
   integrations: Array<{
-    integration_id: string;
+    integration_package_id: string;
     run_blocking: boolean;
     resolution: IntegrationAgentResolution;
   }>;
@@ -858,7 +866,7 @@ export async function resolveAgentConnectionReadiness(args: {
     blocks_run: errors.length > 0,
     errors,
     integrations: declared.map((e, i) => ({
-      integration_id: e.id,
+      integration_package_id: e.id,
       run_blocking: blockingIds.has(e.id),
       resolution: resolutions[i]!,
     })),

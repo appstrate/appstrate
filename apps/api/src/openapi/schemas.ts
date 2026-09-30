@@ -11,7 +11,11 @@ import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissi
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import {
+  CONNECTION_RESOLUTION_ERROR_CODES,
+  CONNECTION_RESOLUTION_SOURCES,
+  MAX_CONNECTIONS_PER_INTEGRATION,
+} from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./paths/integrations.ts";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
@@ -139,7 +143,10 @@ export const schemas = {
     required: ["field", "code", "message"],
     properties: {
       field: { type: "string" },
-      code: { type: "string" },
+      code: {
+        type: "string",
+        description: `On a connection-resolution item (\`field: integrations.<id>\`) one of ${CONNECTION_RESOLUTION_ERROR_CODES.map((c) => `\`${c}\``).join(", ")} — the extras below are keyed on it. On any other validation item, the validator's own code.`,
+      },
       message: { type: "string" },
       title: {
         type: "string",
@@ -1304,17 +1311,22 @@ export const schemas = {
       connections_used: {
         type: ["array", "null"],
         description:
-          "Connections resolved for this run, projected from the internal snapshot for display — one entry per BOUND connection, so an integration bound to several contributes several entries sharing an `integration_id`. Null when the agent declares no integrations.",
+          "Connections resolved for this run, projected from the internal snapshot for display — one entry per BOUND connection, so an integration bound to several contributes several entries sharing an `integration_package_id`. Null when the agent declares no integrations.",
         items: {
           type: "object",
-          required: ["integration_id", "label", "account_id", "source"],
+          required: ["integration_package_id", "label", "account_id", "source"],
           properties: {
-            integration_id: { type: "string" },
-            // Nullable although the column is NOT NULL: this is a kickoff-time
-            // audit copy, and a snapshot need not carry it.
-            label: { type: ["string", "null"] },
-            account_id: { type: ["string", "null"] },
-            source: { type: "string" },
+            integration_package_id: { type: "string" },
+            label: { type: "string", description: "The connection's label, copied at kickoff." },
+            account_id: {
+              type: "string",
+              description: "Its account identifier, copied at kickoff.",
+            },
+            source: {
+              type: "string",
+              enum: [...CONNECTION_RESOLUTION_SOURCES],
+              description: "The cascade layer that bound the connection.",
+            },
           },
         },
       },
@@ -1845,34 +1857,13 @@ export const schemas = {
     properties: {
       source: {
         type: ["string", "null"],
-        enum: [
-          "admin_pin",
-          "org_default_enforced",
-          "run_override",
-          "schedule_override",
-          "member_pin",
-          "org_default",
-          "fallback_auto",
-          null,
-        ],
+        enum: [...CONNECTION_RESOLUTION_SOURCES, null],
         description:
           "The cascade layer that bound the set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside the governing set — `override_outranked`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).",
       },
       error_code: {
         type: ["string", "null"],
-        enum: [
-          "not_connected",
-          "needs_reconnection",
-          "pinned_connection_unavailable",
-          "override_connection_unavailable",
-          "override_outranked",
-          "must_choose_connection",
-          "insufficient_scopes",
-          "auth_key_mismatch",
-          "auth_serves_no_selected_tool",
-          "auth_key_serves_no_selected_tool",
-          null,
-        ],
+        enum: [...CONNECTION_RESOLUTION_ERROR_CODES, null],
         description:
           "Why a run would be refused on this integration — the same code the run-kickoff 409 carries. `null` when the set binds, and when there is no verdict.",
       },
@@ -1967,15 +1958,28 @@ export const schemas = {
         type: "array",
         description:
           'What blocks the run. The integration portion of the 409 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can\'t drift from the 409 error items.',
-        items: { $ref: "#/components/schemas/ResolutionFieldError" },
+        items: {
+          allOf: [
+            { $ref: "#/components/schemas/ResolutionFieldError" },
+            {
+              type: "object",
+              properties: {
+                code: {
+                  type: "string",
+                  enum: [...CONNECTION_RESOLUTION_ERROR_CODES, "agent_not_active"],
+                },
+              },
+            },
+          ],
+        },
       },
       integrations: {
         type: "array",
         items: {
           type: "object",
-          required: ["integration_id", "run_blocking", "resolution"],
+          required: ["integration_package_id", "run_blocking", "resolution"],
           properties: {
-            integration_id: { type: "string" },
+            integration_package_id: { type: "string" },
             run_blocking: {
               type: "boolean",
               description: "True iff this integration is one of the run-blocking `errors`.",
@@ -2043,9 +2047,15 @@ export const schemas = {
 
   IntegrationPin: {
     type: "object",
-    required: ["packageId", "integration_package_id", "connection_ids", "createdAt", "updatedAt"],
+    required: [
+      "agent_package_id",
+      "integration_package_id",
+      "connection_ids",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
-      packageId: { type: "string" },
+      agent_package_id: { type: "string" },
       integration_package_id: { type: "string" },
       connection_ids: {
         ...connectionIdSetJsonSchema,

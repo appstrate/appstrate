@@ -2,15 +2,19 @@
 
 /**
  * `connections_used` holds one entry per BOUND connection, so the panel cannot
- * key a card on `integration_id` — two entries would collide. This pins the
+ * key a card on `integration_package_id` — two entries would collide. This pins the
  * grouping, and the orders it must not disturb.
  */
 
 import { describe, it, expect } from "bun:test";
 import { groupByIntegration, type ConnectionUsed } from "../run-connections";
 
-const used = (integration_id: string, label: string, source = "member_pin"): ConnectionUsed => ({
-  integration_id,
+const used = (
+  integration_package_id: string,
+  label: string,
+  source: ConnectionUsed["source"] = "member_pin",
+): ConnectionUsed => ({
+  integration_package_id,
   label,
   account_id: `${label}@acme.com`,
   source,

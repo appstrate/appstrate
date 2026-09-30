@@ -3,8 +3,10 @@
 import { packageSourceValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import {
+  agentPackageIdParam,
   connectionIdSetJsonSchema,
   connectionSetRefusals,
+  integrationPackageIdParam,
   lockedBySchema,
 } from "./integrations.ts";
 
@@ -222,9 +224,7 @@ export const mePaths = {
           schema: { type: "string" },
           description:
             "Agent package id whose pins to list. Omitted, the list is empty — " +
-            "the picker renders before it has an agent to ask about. The DELETE " +
-            "below requires it, because deleting nothing in particular is not a " +
-            "coherent request.",
+            "the picker renders before it has an agent to ask about.",
         },
       ],
       responses: {
@@ -262,6 +262,8 @@ export const mePaths = {
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
+  },
+  "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}": {
     put: {
       operationId: "upsertMyIntegrationPin",
       tags: ["Profile"],
@@ -272,10 +274,13 @@ export const mePaths = {
         "to an admin pin, an enforced org default and the launch override (the run's or " +
         "the schedule's `connection_overrides`). " +
         "The body carries the WHOLE set and this write replaces it; `DELETE` clears it. " +
-        "Idempotent — repeated calls rewrite the same set.",
+        "Idempotent — repeated calls rewrite the same set. Path-addressed like the admin " +
+        "pins; encode each id with `encodePackageIdPath`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        agentPackageIdParam,
+        integrationPackageIdParam,
       ],
       requestBody: {
         required: true,
@@ -283,10 +288,8 @@ export const mePaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["agent_package_id", "integration_package_id", "connection_ids"],
+              required: ["connection_ids"],
               properties: {
-                agent_package_id: { type: "string", minLength: 1 },
-                integration_package_id: { type: "string", minLength: 1 },
                 connection_ids: connectionIdSetJsonSchema,
               },
               additionalProperties: false,
@@ -307,7 +310,11 @@ export const mePaths = {
           description: `Refused: ${connectionSetRefusals}.`,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The credential's scope ceiling lacks `integrations:connect`, or the caller is an end-user — end-users have no member pins (`forbidden`).",
+        },
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
@@ -325,26 +332,17 @@ export const mePaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        {
-          name: "agent_package_id",
-          in: "query",
-          required: true,
-          schema: { type: "string" },
-        },
-        {
-          name: "integration_package_id",
-          in: "query",
-          required: true,
-          schema: { type: "string" },
-        },
+        agentPackageIdParam,
+        integrationPackageIdParam,
       ],
       responses: {
         "204": { description: "Pin cleared (or never existed)" },
-        "400": {
-          description: "Missing required query param (agent_package_id or integration_package_id).",
-        },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The credential's scope ceiling lacks `integrations:connect`, or the caller is an end-user — end-users have no member pins (`forbidden`).",
+        },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -464,7 +462,7 @@ export const mePaths = {
         "(`pinned_connection_unavailable`, `override_connection_unavailable`) until they pick again — " +
         "a set never shrinks behind its owner. " +
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
-        "drop the member pin instead (see `DELETE /api/me/integration-pins`). " +
+        "drop the member pin instead (see `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`). " +
         "With a delegated or end-user credential, only connections inside its bound " +
         "organization (and space, when it pins one) can be deleted (204 with no effect otherwise).",
       parameters: [

@@ -139,7 +139,7 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  description: `Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (\`override_outranked\` otherwise, see 409). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Empty arrays and ids that are not uuids are refused here.`,
+                  description: `Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (\`override_outranked\` otherwise, see 409). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Empty arrays and ids that are not uuids are refused here, and so is a key that names no integration the fired agent declares (400 \`invalid_request\`).`,
                   additionalProperties: connectionIdSetJsonSchema,
                 },
                 dependency_overrides: {
@@ -335,7 +335,7 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: ["object", "null"],
-                  description: `Per-integration connection sets frozen on the schedule, one array of 1..${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per integration. Pass \`null\` to clear. Same array shape, same bounds and same cascade layer as on create.`,
+                  description: `Per-integration connection sets frozen on the schedule, one array of 1..${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per integration. Pass \`null\` to clear. Same array shape, same bounds and same cascade layer as on create. Its keys are judged against the definition the row fires after the patch, whenever the map or \`version_override\` moves: a key it does not declare is a 400 \`invalid_request\`.`,
                   additionalProperties: connectionIdSetJsonSchema,
                 },
                 dependency_overrides: {

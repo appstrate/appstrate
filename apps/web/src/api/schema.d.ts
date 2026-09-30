@@ -1169,6 +1169,8 @@ export interface paths {
          *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
+         *
+         *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
         get: operations["credentialProxyGet"];
         /**
@@ -1182,6 +1184,8 @@ export interface paths {
          *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
+         *
+         *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
         put: operations["credentialProxyPut"];
         /**
@@ -1195,6 +1199,8 @@ export interface paths {
          *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
+         *
+         *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
         post: operations["credentialProxyPost"];
         /**
@@ -1208,6 +1214,8 @@ export interface paths {
          *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
+         *
+         *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
         delete: operations["credentialProxyDelete"];
         options?: never;
@@ -1223,6 +1231,8 @@ export interface paths {
          *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
+         *
+         *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
         patch: operations["credentialProxyPatch"];
         trace?: never;
@@ -1514,7 +1524,7 @@ export interface paths {
         };
         /**
          * List the OAuth clients registered for an integration auth
-         * @description Returns this space's own custom (BYO-app) clients (`custom`, oldest first) plus the ONE default it inherits — the org default (`org`), else the system client (`built-in`) — when that is not one of its own. Other org and system clients are not listed: a space either uses its own clients or inherits the org's choice. `is_default` marks the client new connections use (no per-connect picker). Secrets are never returned. Org-level clients are managed on `/api/org-integrations`.
+         * @description Returns this space's own custom (BYO-app) clients (`space`, oldest first) plus the ONE default it inherits — the org default (`org`), else the system client (`system`) — when that is not one of its own. Other org and system clients are not listed: a space either uses its own clients or inherits the org's choice. `is_default` marks the client new connections use (no per-connect picker). Secrets are never returned. Org-level clients are managed on `/api/org-integrations`.
          */
         get: operations["listIntegrationClients"];
         put?: never;
@@ -1978,7 +1988,7 @@ export interface paths {
         post?: never;
         /**
          * Delete one of the caller's own connections (destructive)
-         * @description Removes the `integration_connections` row globally. Intent is destructive: 'I never want to use this credential anywhere again'. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection: those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes it from the pin(s) or default first. A member pin does not block the delete. The caller's own member pins and schedule overrides drop the connection in the same transaction — a pin it empties is removed (the cascade falls back), and a schedule override it empties drops that integration and disables the schedule (its job is removed) rather than let it fall back unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. Another member's pins and schedules keep the id, and their next run fails (`pinned_connection_unavailable`, `override_connection_unavailable`) until they pick again — a set never shrinks behind its owner. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise).
+         * @description Removes the `integration_connections` row globally. Intent is destructive: 'I never want to use this credential anywhere again'. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection: those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes it from the pin(s) or default first. A member pin does not block the delete. The caller's own member pins and schedule overrides drop the connection in the same transaction — a pin it empties is removed (the cascade falls back), and a schedule override it empties drops that integration and disables the schedule (its job is removed) rather than let it fall back unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. Another member's pins and schedules keep the id, and their next run fails (`pinned_connection_unavailable`, `override_connection_unavailable`) until they pick again — a set never shrinks behind its owner. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise).
          */
         delete: operations["deleteMyConnection"];
         options?: never;
@@ -2058,9 +2068,25 @@ export interface paths {
          * @description Returns the caller's own integration → connection-set pins for the given agent. Used by the agent-page picker to render the collapsed default row. Member-only; end-user callers receive an empty list. Requires `X-Space-Id`.
          */
         get: operations["listMyIntegrationPins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
         /**
          * Pin connections for the caller's runs of an agent
-         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it; `DELETE` clears it. Idempotent — repeated calls rewrite the same set.
+         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it; `DELETE` clears it. Idempotent — repeated calls rewrite the same set. Path-addressed like the admin pins; encode each id with `encodePackageIdPath`.
          */
         put: operations["upsertMyIntegrationPin"];
         post?: never;
@@ -2683,7 +2709,7 @@ export interface paths {
         };
         /**
          * List the org-level OAuth clients of an integration auth
-         * @description Returns the org's own clients (`org`, oldest first) plus the default it inherits, the platform-provided system client (`built-in`), if any. `is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (DCR/CIMD) have an org tier; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.
+         * @description Returns the org's own clients (`org`, oldest first) plus the default it inherits, the platform-provided system client (`system`), if any. `is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (DCR/CIMD) have an org tier; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.
          */
         get: operations["listOrgIntegrationClients"];
         put?: never;
@@ -5193,9 +5219,12 @@ export interface components {
             /** @description True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (409), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty. */
             blocks_run: boolean;
             /** @description What blocks the run. The integration portion of the 409 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can't drift from the 409 error items. */
-            errors: components["schemas"]["ResolutionFieldError"][];
+            errors: (components["schemas"]["ResolutionFieldError"] & {
+                /** @enum {string} */
+                code?: "not_connected" | "needs_reconnection" | "pinned_connection_unavailable" | "override_connection_unavailable" | "override_outranked" | "must_choose_connection" | "insufficient_scopes" | "auth_key_mismatch" | "auth_serves_no_selected_tool" | "auth_key_serves_no_selected_tool" | "agent_not_active";
+            })[];
             integrations: {
-                integration_id: string;
+                integration_package_id: string;
                 /** @description True iff this integration is one of the run-blocking `errors`. */
                 run_blocking: boolean;
                 resolution: components["schemas"]["IntegrationAgentResolution"];
@@ -5743,7 +5772,7 @@ export interface components {
             };
         };
         IntegrationPin: {
-            packageId: string;
+            agent_package_id: string;
             integration_package_id: string;
             /** @description The whole pinned set, in the order it was written. A write replaces it. */
             connection_ids: string[];
@@ -6260,6 +6289,7 @@ export interface components {
         };
         ResolutionFieldError: {
             field: string;
+            /** @description On a connection-resolution item (`field: integrations.<id>`) one of `not_connected`, `needs_reconnection`, `pinned_connection_unavailable`, `override_connection_unavailable`, `override_outranked`, `must_choose_connection`, `insufficient_scopes`, `auth_key_mismatch`, `auth_serves_no_selected_tool`, `auth_key_serves_no_selected_tool` — the extras below are keyed on it. On any other validation item, the validator's own code. */
             code: string;
             message: string;
             /** @description Human-readable title; preserved from the underlying error factory. */
@@ -6472,12 +6502,18 @@ export interface components {
             dependency_overrides: {
                 [key: string]: string;
             } | null;
-            /** @description Connections resolved for this run, projected from the internal snapshot for display — one entry per BOUND connection, so an integration bound to several contributes several entries sharing an `integration_id`. Null when the agent declares no integrations. */
+            /** @description Connections resolved for this run, projected from the internal snapshot for display — one entry per BOUND connection, so an integration bound to several contributes several entries sharing an `integration_package_id`. Null when the agent declares no integrations. */
             connections_used: {
-                integration_id: string;
-                label: string | null;
-                account_id: string | null;
-                source: string;
+                integration_package_id: string;
+                /** @description The connection's label, copied at kickoff. */
+                label: string;
+                /** @description Its account identifier, copied at kickoff. */
+                account_id: string;
+                /**
+                 * @description The cascade layer that bound the connection.
+                 * @enum {string}
+                 */
+                source: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto";
             }[] | null;
         };
         RunLog: {
@@ -8158,7 +8194,7 @@ export interface operations {
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
-                    /** @description Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`. */
+                    /** @description Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`. */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -8495,7 +8531,7 @@ export interface operations {
                     proxy_id_override?: string;
                     /** @description Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitting it is identical to `published` (latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent at THIS write — `403 draft_not_writable` otherwise — and is not re-checked at fire time, the way `connection_overrides` are frozen here too. The selected definition (manifest + prompt) is resolved at each fire — a schedule inheriting (`published`) on a never-published agent skips the fire and logs a warning until a version is published or `draft` is selected. */
                     version_override?: string;
-                    /** @description Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (`override_outranked` otherwise, see 409). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and ids that are not uuids are refused here. */
+                    /** @description Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (`override_outranked` otherwise, see 409). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and ids that are not uuids are refused here, and so is a key that names no integration the fired agent declares (400 `invalid_request`). */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -10499,9 +10535,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`. */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
                     "X-Truncated"?: "true";
                     [name: string]: unknown;
@@ -10510,18 +10548,22 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
             401: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
@@ -10530,23 +10572,33 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts (`http_request_denied`); `forbidden` — principal lacks `credential-proxy:call`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description `credential_not_found` — no credentials or connection for the requested integration, including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when the integration has no published version; `not_found` when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. `needs_reconnection` — the connection that would be bound (the run's bound one included), or a member of the org default, needs its owner to reconnect it. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10556,6 +10608,8 @@ export interface operations {
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10564,6 +10618,28 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream did not answer within the 30 s deadline (`Proxy-Status` error `http_response_timeout`). */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     credentialProxyPut: {
@@ -10603,9 +10679,11 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`. */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
                     "X-Truncated"?: "true";
                     [name: string]: unknown;
@@ -10614,18 +10692,22 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
             401: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
@@ -10634,23 +10716,33 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts (`http_request_denied`); `forbidden` — principal lacks `credential-proxy:call`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description `credential_not_found` — no credentials or connection for the requested integration, including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when the integration has no published version; `not_found` when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. `needs_reconnection` — the connection that would be bound (the run's bound one included), or a member of the org default, needs its owner to reconnect it. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10660,6 +10752,8 @@ export interface operations {
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10668,6 +10762,28 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream did not answer within the 30 s deadline (`Proxy-Status` error `http_response_timeout`). */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     credentialProxyPost: {
@@ -10707,9 +10823,11 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`. */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
                     "X-Truncated"?: "true";
                     [name: string]: unknown;
@@ -10718,18 +10836,22 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
             401: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
@@ -10738,23 +10860,33 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts (`http_request_denied`); `forbidden` — principal lacks `credential-proxy:call`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description `credential_not_found` — no credentials or connection for the requested integration, including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when the integration has no published version; `not_found` when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. `needs_reconnection` — the connection that would be bound (the run's bound one included), or a member of the org default, needs its owner to reconnect it. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10764,6 +10896,8 @@ export interface operations {
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10772,6 +10906,28 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream did not answer within the 30 s deadline (`Proxy-Status` error `http_response_timeout`). */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     credentialProxyDelete: {
@@ -10806,9 +10962,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`. */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
                     "X-Truncated"?: "true";
                     [name: string]: unknown;
@@ -10817,18 +10975,22 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
             401: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
@@ -10837,23 +10999,33 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts (`http_request_denied`); `forbidden` — principal lacks `credential-proxy:call`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description `credential_not_found` — no credentials or connection for the requested integration, including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when the integration has no published version; `not_found` when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. `needs_reconnection` — the connection that would be bound (the run's bound one included), or a member of the org default, needs its owner to reconnect it. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10863,6 +11035,8 @@ export interface operations {
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10871,6 +11045,28 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream did not answer within the 30 s deadline (`Proxy-Status` error `http_response_timeout`). */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     credentialProxyPatch: {
@@ -10910,9 +11106,11 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`. */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
                     "X-Truncated"?: "true";
                     [name: string]: unknown;
@@ -10921,18 +11119,22 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
+            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
             401: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
@@ -10941,23 +11143,33 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts (`http_request_denied`); `forbidden` — principal lacks `credential-proxy:call`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description `credential_not_found` — no credentials or connection for the requested integration, including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when the integration has no published version; `not_found` when `X-Run-Id` names no run of this space. */
             404: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. `needs_reconnection` — the connection that would be bound (the run's bound one included), or a member of the org default, needs its owner to reconnect it. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10967,6 +11179,8 @@ export interface operations {
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10975,6 +11189,28 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream did not answer within the 30 s deadline (`Proxy-Status` error `http_response_timeout`). */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     getSwaggerUI: {
@@ -11923,7 +12159,7 @@ export interface operations {
                         connection: {
                             /** Format: uuid */
                             id: string;
-                            packageId: string;
+                            integration_package_id: string;
                             auth_key: string;
                             account_id: string;
                             identity_claims: {
@@ -12043,7 +12279,7 @@ export interface operations {
                             connections: {
                                 /** Format: uuid */
                                 id: string;
-                                packageId: string;
+                                integration_package_id: string;
                                 auth_key: string;
                                 account_id: string;
                                 identity_claims: {
@@ -12147,11 +12383,11 @@ export interface operations {
                         data: {
                             client_ref: string;
                             /**
-                             * @description `custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.
+                             * @description The tier that owns the client: `space` = the space's own client, `org` = an org-level client, `system` = a platform-provided system client.
                              * @enum {string}
                              */
-                            source: "built-in" | "org" | "custom";
-                            /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            source: "system" | "org" | "space";
+                            /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
                             /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
                             is_default: boolean;
@@ -12214,7 +12450,7 @@ export interface operations {
                     "application/json": {
                         /** Format: uuid */
                         id: string;
-                        packageId: string;
+                        integration_package_id: string;
                         auth_key: string;
                         account_id: string;
                         identity_claims: {
@@ -12438,11 +12674,11 @@ export interface operations {
                         data: {
                             client_ref: string;
                             /**
-                             * @description `custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.
+                             * @description The tier that owns the client: `space` = the space's own client, `org` = an org-level client, `system` = a platform-provided system client.
                              * @enum {string}
                              */
-                            source: "built-in" | "org" | "custom";
-                            /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            source: "system" | "org" | "space";
+                            /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
                             /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
                             is_default: boolean;
@@ -12566,7 +12802,7 @@ export interface operations {
                         data: {
                             /** Format: uuid */
                             id: string;
-                            packageId: string;
+                            integration_package_id: string;
                             auth_key: string;
                             account_id: string;
                             identity_claims: {
@@ -12641,7 +12877,7 @@ export interface operations {
                     "application/json": {
                         /** Format: uuid */
                         id: string;
-                        packageId: string;
+                        integration_package_id: string;
                         auth_key: string;
                         account_id: string;
                         identity_claims: {
@@ -12718,7 +12954,7 @@ export interface operations {
                         /** @enum {string} */
                         object: "list";
                         data: {
-                            packageId: string;
+                            agent_package_id: string;
                             display_name: string;
                         }[];
                         hasMore: boolean;
@@ -13204,7 +13440,7 @@ export interface operations {
                             connections: {
                                 /** Format: uuid */
                                 id: string;
-                                packageId: string;
+                                integration_package_id: string;
                                 auth_key: string;
                                 account_id: string;
                                 identity_claims: {
@@ -13427,6 +13663,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
                     "Cache-Status"?: string;
                     [name: string]: unknown;
@@ -13438,24 +13676,46 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
             /** @description Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only). */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13465,17 +13725,25 @@ export interface operations {
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -13506,6 +13774,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
                     "Cache-Status"?: string;
                     [name: string]: unknown;
@@ -13517,24 +13787,46 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
             /** @description Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only). */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13544,17 +13836,25 @@ export interface operations {
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -13585,6 +13885,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
                     "Cache-Status"?: string;
                     [name: string]: unknown;
@@ -13596,24 +13898,46 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
             /** @description Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only). */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13623,17 +13947,25 @@ export interface operations {
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -13664,6 +13996,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
                     "Cache-Status"?: string;
                     [name: string]: unknown;
@@ -13675,24 +14009,46 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model whose upstream resolves into a blocked range carries `Proxy-Status` error `destination_ip_prohibited`. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
             /** @description Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only). */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13702,17 +14058,25 @@ export interface operations {
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -14116,7 +14480,7 @@ export interface operations {
     listMyIntegrationPins: {
         parameters: {
             query?: {
-                /** @description Agent package id whose pins to list. Omitted, the list is empty — the picker renders before it has an agent to ask about. The DELETE below requires it, because deleting nothing in particular is not a coherent request. */
+                /** @description Agent package id whose pins to list. Omitted, the list is empty — the picker renders before it has an agent to ask about. */
                 agent_package_id?: string;
             };
             header?: {
@@ -14161,14 +14525,17 @@ export interface operations {
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
-            path?: never;
+            path: {
+                /** @description Agent package id (e.g. `@acme/my-agent`). */
+                agentPackageId: string;
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                integrationPackageId: string;
+            };
             cookie?: never;
         };
         requestBody: {
             content: {
                 "application/json": {
-                    agent_package_id: string;
-                    integration_package_id: string;
                     connection_ids: string[];
                 };
             };
@@ -14191,6 +14558,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+            /** @description The credential's scope ceiling lacks `integrations:connect`, or the caller is an end-user — end-users have no member pins (`forbidden`). */
             403: components["responses"]["Forbidden"];
             /** @description A connection id that is unknown, of another integration or space, or neither owned by the caller nor shared — one answer for all, so an id cannot be probed — or the agent is not active in this space. */
             404: components["responses"]["NotFound"];
@@ -14198,17 +14566,19 @@ export interface operations {
     };
     deleteMyIntegrationPin: {
         parameters: {
-            query: {
-                agent_package_id: string;
-                integration_package_id: string;
-            };
+            query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
-            path?: never;
+            path: {
+                /** @description Agent package id (e.g. `@acme/my-agent`). */
+                agentPackageId: string;
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                integrationPackageId: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -14220,14 +14590,8 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Missing required query param (agent_package_id or integration_package_id). */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
             401: components["responses"]["Unauthorized"];
+            /** @description The credential's scope ceiling lacks `integrations:connect`, or the caller is an end-user — end-users have no member pins (`forbidden`). */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
@@ -16164,11 +16528,11 @@ export interface operations {
                         data: {
                             client_ref: string;
                             /**
-                             * @description `custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.
+                             * @description The tier that owns the client: `space` = the space's own client, `org` = an org-level client, `system` = a platform-provided system client.
                              * @enum {string}
                              */
-                            source: "built-in" | "org" | "custom";
-                            /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            source: "system" | "org" | "space";
+                            /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
                             /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
                             is_default: boolean;
@@ -16230,11 +16594,11 @@ export interface operations {
                         data: {
                             client_ref: string;
                             /**
-                             * @description `custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.
+                             * @description The tier that owns the client: `space` = the space's own client, `org` = an org-level client, `system` = a platform-provided system client.
                              * @enum {string}
                              */
-                            source: "built-in" | "org" | "custom";
-                            /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            source: "system" | "org" | "space";
+                            /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
                             /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
                             is_default: boolean;
@@ -20743,7 +21107,7 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description `appfile://file_xxx` URIs to mount read-only into the run's `files/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_files` input field for them, so they go through the same ACL, byte/count caps and `file_links` chaining as any other file input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_files` is rejected with a `400` — the name is reserved. */
                     context_files?: string[];
-                    /** @description Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`. */
+                    /** @description Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`. */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -22064,7 +22428,7 @@ export interface operations {
                     proxy_id_override?: string | null;
                     /** @description Version selector (`draft` | `published` | version spec). Pass `null` to clear (back to the latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent, but only when this patch MOVES the selector: re-sending the value the row already holds decides nothing and is never refused, so a member editing the cron of someone else's draft schedule is not asked for an authority the request does not exercise. */
                     version_override?: string | null;
-                    /** @description Per-integration connection sets frozen on the schedule, one array of 1..10 connection ids per integration. Pass `null` to clear. Same array shape, same bounds and same cascade layer as on create. */
+                    /** @description Per-integration connection sets frozen on the schedule, one array of 1..10 connection ids per integration. Pass `null` to clear. Same array shape, same bounds and same cascade layer as on create. Its keys are judged against the definition the row fires after the patch, whenever the map or `version_override` moves: a key it does not declare is a 400 `invalid_request`. */
                     connection_overrides?: {
                         [key: string]: string[];
                     } | null;
@@ -24456,6 +24820,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
                     "Cache-Status"?: string;
                     [name: string]: unknown;
@@ -24470,22 +24836,44 @@ export interface operations {
             /** @description Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
             /** @description The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             404: components["responses"]["NotFound"];
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24495,17 +24883,25 @@ export interface operations {
             /** @description Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`. */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -24528,6 +24924,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
                     "Cache-Status"?: string;
                     [name: string]: unknown;
@@ -24542,22 +24940,44 @@ export interface operations {
             /** @description Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
             /** @description The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             404: components["responses"]["NotFound"];
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24567,17 +24987,25 @@ export interface operations {
             /** @description Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`. */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -24600,6 +25028,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
                     "Cache-Status"?: string;
                     [name: string]: unknown;
@@ -24614,22 +25044,44 @@ export interface operations {
             /** @description Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
             /** @description The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             404: components["responses"]["NotFound"];
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24639,17 +25091,25 @@ export interface operations {
             /** @description Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`. */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -24672,6 +25132,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
                     "Cache-Status"?: string;
                     [name: string]: unknown;
@@ -24686,22 +25148,44 @@ export interface operations {
             /** @description Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
             /** @description The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             404: components["responses"]["NotFound"];
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24711,17 +25195,25 @@ export interface operations {
             /** @description Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`. */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
