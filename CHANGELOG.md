@@ -37,8 +37,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Pre-flight the stored integration manifests before the deploy**:
   `DATABASE_URL=… bun scripts/migration/0035-verify-manifest-expressions.ts`
   lists every draft or version holding a template or runtime expression the
-  platform no longer evaluates (it would stop loading); it exits 1 while any
-  remains (#1641).
+  platform no longer evaluates (`[expression]`: it would stop loading) and
+  every auth whose injected credential runs will now refuse as exfiltration
+  (`[exfiltration]`: `allow_all_uris`, no `authorized_uris`, or an entry that
+  does not bound the host); it exits 1 while any remains (#1641).
 - **Run `scripts/migration/0036-resolved-connection-labels.sql` after `0032`,
   before the new image serves traffic**: run snapshots written before #1611
   can hold `label: null`, and the snapshot is now parsed on read (#1641). A
@@ -169,11 +171,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - **An upstream that keeps rejecting an API key flags it; isolated 401s no
-  longer do** (#1641). A credential that cannot refresh is flagged
-  `needs_reconnection` at the `INTEGRATION_REFRESH_MAX_FAILURES`-th upstream
-  401 within one hour of the first. For an API-key integration connection
-  that replaces a count with no window; a revoked BYOK model key, never
-  flagged before, now stops inference until it is re-entered. A BYOK
+  longer do** (#1641). A credential that cannot refresh (api_key, basic,
+  custom, OAuth2 with no refresh client) is flagged `needs_reconnection` at
+  the `INTEGRATION_REFRESH_MAX_FAILURES`-th counted upstream 401; a 401 more
+  than 7 days after the previous counted one restarts the count at 1, so a
+  daily schedule is flagged on its 5th rejected run while rejections months
+  apart never add up. Every path counts: the platform credential proxy (CLI,
+  GitHub Action), which counted none before and flagged an OAuth2 connection
+  without a refresh client on its first 401, the sidecar and its MITM egress.
+  For an API-key integration connection that replaces a count with no
+  window; a revoked BYOK model key, never flagged before, is counted under
+  the same 7-day rule and stops inference until it is re-entered. A BYOK
   rejection counts only against the key the request sent; an OAuth
   subscription is never counted (its counter is its refresh streak).
 - **An OAuth client update that sends a new `client_secret` without
@@ -228,7 +236,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   it matches, grants and pins nothing, and counts as leaving the host to the
   caller. Otherwise an entry names its host only with a literal scheme, a
   non-empty host and no wildcard in its last two labels (not `https://**`,
-  `https://*.com./**`, `https://[::**/**`, `**://…`); a public suffix
+  `https://*.com./**`, `**://…`), nor anywhere in an IP literal or an
+  IPv4-shaped host, whose last label is numeric (not `https://[::**/**`,
+  `https://*.0.1/**`, which matches `https://0x2d210001/`); a public suffix
   (`https://*.co.uk/**`) is not detected. List the hosts instead.
 - **An `authorized_uris` scheme glob matches scheme characters only**
   (#1641): `**://api.example.com/**` no longer matches a URL on another host

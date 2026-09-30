@@ -26,6 +26,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+import { getEnv } from "@appstrate/env";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import {
@@ -464,12 +465,27 @@ describe("model-provider-credentials service — upstream rejections of an api k
     }
   });
 
-  it("starts a new count once the window has passed", async () => {
+  it("flags a key rejected once a day on the INTEGRATION_REFRESH_MAX_FAILURES-th day", async () => {
+    const { orgId, id } = await apiKeyCredential("mpc-reject-daily");
+    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    for (let i = 1; i < max; i++) {
+      await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+      await db
+        .update(modelProviderCredentials)
+        .set({ refreshFailuresSince: new Date(Date.now() - 86_400_000) })
+        .where(eq(modelProviderCredentials.id, id));
+    }
+    expect(await flagged(orgId, id)).toBe(false);
+    await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+    expect(await flagged(orgId, id)).toBe(true);
+  });
+
+  it("starts a new count after a gap of more than 7 days", async () => {
     const { orgId, id } = await apiKeyCredential("mpc-reject-window");
     for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
     await db
       .update(modelProviderCredentials)
-      .set({ refreshFailuresSince: new Date(Date.now() - 2 * 60 * 60 * 1000) })
+      .set({ refreshFailuresSince: new Date(Date.now() - 8 * 86_400_000) })
       .where(eq(modelProviderCredentials.id, id));
 
     await recordModelCredentialRejection(orgId, id, PLAINTEXT);

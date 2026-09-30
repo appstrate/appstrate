@@ -31,7 +31,6 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 import { scopesNotCovered } from "@appstrate/core/integration";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import { renderAuthAuthorizedUris, type AfpsManifestAuth } from "./integration-manifest-helpers.ts";
-import { getEnv } from "@appstrate/env";
 
 import { logger } from "../lib/logger.ts";
 import { notFound, gone, conflict, internalError, badGateway } from "../lib/errors.ts";
@@ -45,9 +44,10 @@ import {
   assertIntegrationActive,
   loadAccessibleConnectionById,
   markIntegrationConnectionNeedsReconnection,
-  recordIntegrationRefreshFailure,
+  recordUnrefreshableRejection,
 } from "./integration-connections.ts";
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
+import { UPSTREAM_REJECTION_GAP_DAYS } from "./upstream-rejection-window.ts";
 import {
   readIntegrationManifestForRun,
   type ResolvedIntegrationVersion,
@@ -84,7 +84,7 @@ interface ResolveLiveCredentialsOptions {
  *     surface, and stops retrying.
  *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc), or
  *     an unrefreshable auth rejected fewer times than the failure threshold
- *     within one window.
+ *     (see `countUpstreamRejection`).
  *     The cached credential may still be valid; the sidecar treats it as
  *     retry-later and the listener's `refreshOnUnauthorized` cooldown
  *     keeps a flapping upstream from hammering this endpoint.
@@ -208,13 +208,10 @@ export async function resolveLiveIntegrationCredentials(
   // A forced refresh nothing can recover (no refresh client, or not oauth2).
   // One 401 can be a transient upstream fault, or a permission error the agent
   // provoked, so it is counted: 502 until INTEGRATION_REFRESH_MAX_FAILURES
-  // rejections within one window, then terminal.
+  // rejections (see `countUpstreamRejection`), then terminal.
   const rejectUnrefreshable = async (reason: string): Promise<never> => {
-    const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
-    const { failures, needsReconnection } = await recordIntegrationRefreshFailure(
+    const { failures, maxFailures, needsReconnection } = await recordUnrefreshableRejection(
       connection.id,
-      maxFailures,
-      "upstream_rejection",
     );
     if (needsReconnection) return flagTerminalAndThrow(reason);
     logger.warn("Integration credential rejected upstream — below the reconnect threshold", {
@@ -228,7 +225,8 @@ export async function resolveLiveIntegrationCredentials(
     });
     throw badGateway(
       `Integration '${integrationId}' auth '${authKey}' was rejected upstream (${reason}); ` +
-        `${failures}/${maxFailures} upstream rejections within an hour before it is flagged`,
+        `${failures}/${maxFailures} upstream rejections before it is flagged ` +
+        `(a ${UPSTREAM_REJECTION_GAP_DAYS}-day gap restarts the count)`,
     );
   };
 

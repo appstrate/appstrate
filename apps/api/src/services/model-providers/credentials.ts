@@ -686,7 +686,7 @@ export async function recordModelCredentialRefreshFailure(
 
 /**
  * Count an upstream 401 against the api key the request sent (none once the row holds another
- * key); the `INTEGRATION_REFRESH_MAX_FAILURES`-th within one window flags it. OAuth rows are skipped.
+ * key); the `INTEGRATION_REFRESH_MAX_FAILURES`-th with no gap over 7 days flags it. OAuth rows are skipped.
  */
 export async function recordModelCredentialRejection(
   orgId: string,

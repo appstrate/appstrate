@@ -2509,7 +2509,7 @@ export async function markIntegrationConnectionNeedsReconnection(
 type RefreshFailureGate =
   /** A transient OAuth refresh failure: escalates only once the token expired `graceSeconds` ago. */
   | { graceSeconds: number }
-  /** An upstream rejection of an unrefreshable credential: counts within one rejection window. */
+  /** An upstream rejection of an unrefreshable credential: see `countUpstreamRejection`. */
   | "upstream_rejection";
 
 /**
@@ -2552,6 +2552,19 @@ export async function recordIntegrationRefreshFailure(
       needsReconnection: integrationConnections.needsReconnection,
     });
   return row ?? { failures: 0, needsReconnection: false };
+}
+
+/** Count an upstream rejection of a credential nothing can refresh toward `INTEGRATION_REFRESH_MAX_FAILURES`. */
+export async function recordUnrefreshableRejection(
+  connectionId: string,
+): Promise<{ failures: number; maxFailures: number; needsReconnection: boolean }> {
+  const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+  const counted = await recordIntegrationRefreshFailure(
+    connectionId,
+    maxFailures,
+    "upstream_rejection",
+  );
+  return { ...counted, maxFailures };
 }
 
 /**

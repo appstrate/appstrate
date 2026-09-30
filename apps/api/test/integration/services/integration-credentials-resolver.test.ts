@@ -553,41 +553,60 @@ describe("resolveLiveIntegrationCredentials", () => {
     // The count restarts from the reconnect, and the 502 says so.
     const afterReconnect = await forced();
     expect(afterReconnect?.status).toBe(502);
-    expect(afterReconnect?.message).toContain(`1/${max} upstream rejections within an hour`);
+    expect(afterReconnect?.message).toContain(`1/${max} upstream rejections before it is flagged`);
     expect(await needsReconnection(connId)).toBe(false);
   });
 
-  it("rejections of an unrefreshable auth spread beyond the window never add up", async () => {
-    await db
-      .update(packages)
-      .set({
-        draftManifest: localIntegrationManifest({
-          name: INTEGRATION_ID,
-          serverName: "@official/gmail-server",
-          auths: { primary: { type: "api_key", credentialFields: ["api_key"] } },
-        }) as unknown as Record<string, unknown>,
-      })
-      .where(eq(packages.id, INTEGRATION_ID));
-    const connId = await seedConnection({ userId: ctx.user.id });
-    const forced = () =>
-      resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
-        forceRefresh: true,
-      }).then(
-        () => undefined,
-        (err: { status?: number; message?: string }) => err,
-      );
-    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
-    for (let i = 1; i < max; i++) expect((await forced())?.status).toBe(502);
+  describe("rejections of an unrefreshable auth count while each follows the last within 7 days", () => {
+    async function apiKeyConnection() {
+      await db
+        .update(packages)
+        .set({
+          draftManifest: localIntegrationManifest({
+            name: INTEGRATION_ID,
+            serverName: "@official/gmail-server",
+            auths: { primary: { type: "api_key", credentialFields: ["api_key"] } },
+          }) as unknown as Record<string, unknown>,
+        })
+        .where(eq(packages.id, INTEGRATION_ID));
+      const connId = await seedConnection({ userId: ctx.user.id });
+      const forced = () =>
+        resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
+          forceRefresh: true,
+        }).then(
+          () => undefined,
+          (err: { status?: number; message?: string }) => err,
+        );
+      const lastRejectionDaysAgo = (days: number) =>
+        db
+          .update(integrationConnections)
+          .set({ refreshFailuresSince: new Date(Date.now() - days * 86_400_000) })
+          .where(eq(integrationConnections.id, connId));
+      return { connId, forced, lastRejectionDaysAgo };
+    }
 
-    // The window opened by the first rejection has lapsed.
-    await db
-      .update(integrationConnections)
-      .set({ refreshFailuresSince: new Date(Date.now() - 2 * 3_600_000) })
-      .where(eq(integrationConnections.id, connId));
-    const afterWindow = await forced();
-    expect(afterWindow?.status).toBe(502);
-    expect(afterWindow?.message).toContain(`1/${max} upstream rejections within an hour`);
-    expect(await needsReconnection(connId)).toBe(false);
+    it("a daily schedule's one rejection per run reaches the threshold", async () => {
+      const { connId, forced, lastRejectionDaysAgo } = await apiKeyConnection();
+      const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+      for (let i = 1; i < max; i++) {
+        expect((await forced())?.status).toBe(502);
+        await lastRejectionDaysAgo(1);
+      }
+      expect((await forced())?.status).toBe(410);
+      expect(await needsReconnection(connId)).toBe(true);
+    });
+
+    it("a gap of more than 7 days restarts the count", async () => {
+      const { connId, forced, lastRejectionDaysAgo } = await apiKeyConnection();
+      const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+      for (let i = 1; i < max; i++) expect((await forced())?.status).toBe(502);
+
+      await lastRejectionDaysAgo(8);
+      const afterGap = await forced();
+      expect(afterGap?.status).toBe(502);
+      expect(afterGap?.message).toContain(`1/${max} upstream rejections before it is flagged`);
+      expect(await needsReconnection(connId)).toBe(false);
+    });
   });
 
   it("forced refresh reaches the IdP even when the stored token is far from expiry", async () => {

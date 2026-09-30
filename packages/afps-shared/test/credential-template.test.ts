@@ -302,6 +302,8 @@ describe("isHostUnboundedUriPattern", () => {
       "https://api-*.example.com:*/v1/*",
       "https://*.example.com./**",
       "http://[::1]:8080/**",
+      "https://10.0.0.1/**",
+      "https://*.example.0xg/**",
       "https://{$credential.subdomain}.zendesk.com/**",
       "https://{$credential.host}/**",
       "{$credential.site_url}/**",
@@ -335,6 +337,11 @@ describe("isHostUnboundedUriPattern", () => {
       "https://*.com../**",
       "https://[::**/**",
       "https://[2001:db8::*]/**",
+      "https://[::ffff:*.2.3.4]/**",
+      "https://*.0.1/**",
+      "https://*.168.1.1/**",
+      "https://*.example.0x1/**",
+      "https://*.example.0x/**",
     ]) {
       expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, true]);
     }

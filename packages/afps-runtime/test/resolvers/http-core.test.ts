@@ -438,6 +438,9 @@ describe("matchesAuthorizedUriSpec", () => {
       "https://attacker.test/steal",
       "https://a.attacker.test/steal",
       "https://[::ffff:5db8:d822]/steal",
+      "https://45.33.0.1/steal",
+      "https://0x2d210001/steal",
+      "https://8.168.1.1/steal",
     ];
     for (const pattern of [
       "https://*.example.com/**",
@@ -451,6 +454,9 @@ describe("matchesAuthorizedUriSpec", () => {
       "https:///**",
       "**://api.example.com/**",
       "https://**/**",
+      "https://*.0.1/**",
+      "https://*.168.1.1/**",
+      "https://[::ffff:*.2.3.4]/**",
     ]) {
       const reaches = targets.some((t) => matchesAuthorizedUriSpec(pattern, t));
       expect([pattern, reaches && !isHostUnboundedUriPattern(pattern)]).toEqual([pattern, false]);
@@ -458,5 +464,7 @@ describe("matchesAuthorizedUriSpec", () => {
     // Control: the table does reach other hosts, through entries the rule calls unbounded.
     expect(matchesAuthorizedUriSpec("https://**/**", targets[0]!)).toBe(true);
     expect(matchesAuthorizedUriSpec("https://[::**/**", targets[2]!)).toBe(true);
+    expect(matchesAuthorizedUriSpec("https://*.0.1/**", "https://0x2d210001/steal")).toBe(true);
+    expect(matchesAuthorizedUriSpec("https://*.168.1.1/**", "https://8.168.1.1/steal")).toBe(true);
   });
 });

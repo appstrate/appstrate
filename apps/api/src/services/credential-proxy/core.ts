@@ -397,14 +397,11 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       } catch {
         // Refresh itself failed transiently (network hiccup, upstream 5xx, …)
         // — surface the original 401 as-is; the caller will
-        // handle re-authentication. `forceRefresh` flips `needsReconnection`
-        // on BOTH terminal shapes before it gets here: a revoked refresh token
-        // and an unrefreshable OAuth client. Both now return `null` rather
-        // than throwing (the dedicated error class had one throw site whose
-        // only catch was unreachable), so the flag is what separates TERMINAL
-        // from transient — not the two terminal shapes from each other.
-        // Transient failures deliberately leave the row untouched — nothing is
-        // marked, and the next call retries.
+        // handle re-authentication. `forceRefresh` returns `null` rather than
+        // throwing on every not-refreshed outcome: a revoked or missing refresh
+        // token flags `needsReconnection`, an unrefreshable credential counts
+        // the rejection toward the flag, and a transient failure leaves the
+        // row untouched so the next call retries.
       }
     }
   } finally {
@@ -421,10 +418,9 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     } catch {
       // Refresh itself failed (invalid_grant, revoked token, etc.) —
       // surface the 401 as-is; the caller will handle re-authentication.
-      // As above, both terminal shapes have already flagged
-      // `needsReconnection` on the connection by this point, so the retry the
-      // caller re-issues is not the only thing standing between the user and
-      // a reconnect prompt.
+      // As above, the connection is flagged (or the rejection counted) by
+      // this point, so the retry the caller re-issues is not the only thing
+      // standing between the user and a reconnect prompt.
     }
     return {
       connectionId,

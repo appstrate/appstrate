@@ -210,10 +210,15 @@ export function parseAuthorizedUriPattern(pattern: string): AuthorizedUriPattern
   return { kind: "url", scheme, ...parts, host: authorityHost(parts.authority) };
 }
 
+/** A last label that makes WHATWG parse the host as IPv4 (its "ends in a number" check). */
+const WHATWG_IPV4_NUMBER = /^(?:\d+|0x[0-9a-f]*)$/i;
+
 /**
  * Whether an `authorized_uris` entry lets the caller pick the host, judged on its
  * {@link parseAuthorizedUriPattern} reading: malformed, no literal `scheme://`, an empty host, or
- * a wildcard in one of its last two labels (`https://*.com./**`). `*.co.uk` is not detected.
+ * a wildcard in one of its last two labels (`https://*.com./**`) or anywhere in an IP literal or
+ * IPv4-shaped host (last label numeric: `https://*.0.1/**` matches `0x2d210001`). `*.co.uk` is not
+ * detected.
  */
 export function isHostUnboundedUriPattern(pattern: string): boolean {
   if (parseUrlFormPattern(pattern)) return false;
@@ -223,7 +228,12 @@ export function isHostUnboundedUriPattern(pattern: string): boolean {
   const host = parsed.host.replace(/\.+$/, "");
   if (!host.includes("*")) return host === "";
   const labels = host.split(".");
-  return labels.length < 3 || labels.slice(-2).some((label) => label.includes("*"));
+  return (
+    host.startsWith("[") ||
+    WHATWG_IPV4_NUMBER.test(labels[labels.length - 1]!) ||
+    labels.length < 3 ||
+    labels.slice(-2).some((label) => label.includes("*"))
+  );
 }
 
 /**

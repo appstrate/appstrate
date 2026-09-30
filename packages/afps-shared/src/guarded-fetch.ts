@@ -410,8 +410,10 @@ export async function guardedFetchChain(
         //
         // When the caller declared a `validateHop` contract the request is a
         // credential-bearing exchange by definition (that is why the caller
-        // scoped it), so belt-and-braces: ANY origin change drops the body,
-        // including the same-host scheme/port cases kept above.
+        // scoped it), so every origin change reaching this branch drops the
+        // body, the same-host scheme/port cases included. An origin
+        // `forwardCredentials` accepts never reaches it (short of a
+        // downgrade): a 307/308 there keeps the body with the credentials.
         const hasHopContract = opts?.validateHop !== undefined;
         if (
           body !== undefined &&

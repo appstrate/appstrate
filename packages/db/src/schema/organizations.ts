@@ -292,8 +292,9 @@ export const modelProviderCredentials = pgTable(
     // (`updateOAuthCredentialTokens`). Mirrors
     // `integration_connections.refresh_failure_count`.
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
-    // An api-key credential reuses the counter for upstream 401s, counted
-    // within a window that opens here (`recordModelCredentialRejection`).
+    // An api-key credential reuses the counter for upstream 401s; this holds
+    // the time of the last counted one, and a rejection more than 7 days
+    // later restarts the count (`recordModelCredentialRejection`).
     refreshFailuresSince: timestamp("refresh_failures_since", { withTimezone: true }),
     // NOTE — there is deliberately no `last_refresh_failure_at` here. There was
     // one, written beside `refresh_failure_count` on every transient refresh

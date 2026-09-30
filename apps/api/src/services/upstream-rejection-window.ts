@@ -3,17 +3,21 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
-/** Rejections of an unrefreshable credential count toward reconnection within this window. */
-const UPSTREAM_REJECTION_WINDOW_SECONDS = 60 * 60;
+/**
+ * Upstream rejections of an unrefreshable credential keep counting toward reconnection while
+ * each follows the previous one within this many days: a daily schedule (one counted rejection
+ * per run) still reaches the threshold, while rejections months apart never add up.
+ */
+export const UPSTREAM_REJECTION_GAP_DAYS = 7;
 
-/** SET expressions counting one rejection; one past the window restarts count and window. */
+/** SET expressions counting one rejection; `since` holds the last counted one, and a longer gap restarts at 1. */
 export function countUpstreamRejection(
   count: AnyPgColumn,
   since: AnyPgColumn,
 ): { failures: SQL; since: SQL } {
-  const open = sql`(${since} IS NOT NULL AND ${since} > now() - make_interval(secs => ${UPSTREAM_REJECTION_WINDOW_SECONDS}))`;
+  const recent = sql`(${since} IS NOT NULL AND ${since} > now() - make_interval(days => ${UPSTREAM_REJECTION_GAP_DAYS}))`;
   return {
-    failures: sql`CASE WHEN ${open} THEN ${count} + 1 ELSE 1 END`,
-    since: sql`CASE WHEN ${open} THEN ${since} ELSE now() END`,
+    failures: sql`CASE WHEN ${recent} THEN ${count} + 1 ELSE 1 END`,
+    since: sql`now()`,
   };
 }

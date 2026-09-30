@@ -30,6 +30,7 @@ import {
   runs,
 } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+import { getEnv } from "@appstrate/env";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
 import {
   resolveIntegrationProxyCredentials,
@@ -384,28 +385,59 @@ describe("credential-proxy integration-resolver", () => {
     expect(row!.needsReconnection).toBe(false);
   });
 
-  it("flags needsReconnection when the minting OAuth client is gone (terminal, not transient)", async () => {
-    // `buildIntegrationOAuthRefreshContext` returns null for a set of TERMINAL
-    // conditions — deleted OAuth client, missing `client_ref`, undecryptable
-    // client secret, no token endpoint and no issuer to discover one from.
-    // Nothing will ever refresh this token again. The sidecar path flags the
-    // connection here (`flagTerminalAndThrow` → 410); this path used to just
-    // `return null`, so CLI / GitHub Action / self-hosted-runner users looped
-    // on 401 forever with no reconnect prompt anywhere.
+  const flaggedConnection = async (connId: string) =>
+    (
+      await db
+        .select({ needsReconnection: integrationConnections.needsReconnection })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId))
+    )[0]!.needsReconnection;
+
+  it("counts the 401s of an OAuth connection whose minting client is gone, flagging at the threshold", async () => {
+    // Nothing will ever refresh this token, but one 401 can be a transient upstream fault: the
+    // rejection is counted exactly as on the sidecar path, and the proxy still relays the 401.
     const connId = await seedConnection({ userId: ctx.user.id });
     await db
       .delete(integrationOauthClients)
       .where(eq(integrationOauthClients.integrationId, INTEGRATION_ID));
 
-    // Still null — the proxy must relay the upstream 401 rather than
-    // substitute its own error — but the row is now marked.
+    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    for (let i = 1; i < max; i++) {
+      expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    }
+    expect(await flaggedConnection(connId)).toBe(false);
     expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await flaggedConnection(connId)).toBe(true);
+  });
 
-    const [row] = await db
-      .select({ needsReconnection: integrationConnections.needsReconnection })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, connId));
-    expect(row!.needsReconnection).toBe(true);
+  it("counts the 401s of an api_key auth, flagging at the threshold", async () => {
+    await seedPublishedVersion(INTEGRATION_ID, "1.0.1", {
+      manifest: {
+        ...gmailManifest(token.url),
+        version: "1.0.1",
+        auths: {
+          primary: {
+            type: "api_key",
+            authorized_uris: ["https://api.example.com/*"],
+            credentials: {
+              schema: { type: "object", properties: { api_key: { type: "string" } } },
+            },
+            delivery: {
+              http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" },
+            },
+          },
+        },
+      },
+    });
+    const connId = await seedConnection({ userId: ctx.user.id });
+
+    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    for (let i = 1; i < max; i++) {
+      expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    }
+    expect(await flaggedConnection(connId)).toBe(false);
+    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await flaggedConnection(connId)).toBe(true);
   });
 
   it("does NOT flag on a transient token-endpoint discovery failure", async () => {
