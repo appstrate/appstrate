@@ -80,11 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   auth exposing `api_call`: its consumers pin only the declared literal
   entries, never a rendered one. The field rules (declared and required) and
   the `connect` / `oauth2` prohibitions are unchanged. Uses
-  `parseUrlFormPattern` (`@appstrate/afps-shared/credential-template`), absent
-  from `0.9.1`: **requires the afps-shared release carrying it (with
-  `unrenderableAuthorizedUriFields`, which only the platform imports) on npm,
-  and this package's range raised from `^0.9.1` to that version (`^0.9.2`),
-  before this is published.**
+  `parseUrlFormPattern` (`@appstrate/afps-shared/credential-template`), new in
+  `@appstrate/afps-shared@0.9.2` (published 2026-09-30); the dependency range
+  moves from `^0.9.1` to `^0.9.2`.
 - **BREAKING: `ConnectionResolutionErrorCode` gains `override_outranked`**
   (`@appstrate/core/integration`) — a launch override (run or schedule) naming
   a connection outside the set an admin pin or an enforced org default binds
